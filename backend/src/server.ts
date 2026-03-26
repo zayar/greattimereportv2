@@ -1,0 +1,26 @@
+import express from "express";
+import cors from "cors";
+import routes from "./routes/index.js";
+import { env } from "./config/env.js";
+import { ensureFirebaseAdmin } from "./config/firebase.js";
+import { errorHandler } from "./middleware/error-handler.js";
+
+ensureFirebaseAdmin();
+
+const app = express();
+
+app.disable("x-powered-by");
+app.use(
+  cors({
+    origin: env.CORS_ORIGIN,
+    credentials: true,
+  }),
+);
+app.use(express.json({ limit: "1mb" }));
+
+app.use("/api", routes);
+app.use(errorHandler);
+
+app.listen(env.PORT, () => {
+  console.log(`GT_V2Report backend listening on http://localhost:${env.PORT}`);
+});
