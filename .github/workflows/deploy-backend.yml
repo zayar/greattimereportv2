@@ -34,14 +34,94 @@ jobs:
           IMAGE_URI: ${{ vars.ARTIFACT_REGISTRY_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}/${{ vars.CLOUD_RUN_SERVICE }}:${{ github.sha }}
         run: gcloud builds submit --tag "$IMAGE_URI" --file backend/Dockerfile .
 
+      - name: Generate Cloud Run env file
+        env:
+          APICORE_GRAPHQL_URL: ${{ vars.APICORE_GRAPHQL_URL }}
+          CORS_ORIGIN: ${{ vars.CORS_ORIGIN }}
+          BQ_PROJECT_ID: ${{ vars.BQ_PROJECT_ID }}
+          BQ_DATASET: ${{ vars.BQ_DATASET }}
+          BQ_LOCATION: ${{ vars.BQ_LOCATION }}
+          BQ_MAIN_DATA_VIEW: ${{ vars.BQ_MAIN_DATA_VIEW }}
+          BQ_MAIN_PAYMENT_VIEW: ${{ vars.BQ_MAIN_PAYMENT_VIEW }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+
+          const env = {
+            PORT: "8080",
+            CORS_ORIGIN: process.env.CORS_ORIGIN,
+            APICORE_GRAPHQL_URL: process.env.APICORE_GRAPHQL_URL,
+            FIREBASE_SERVICE_ACCOUNT_JSON: process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
+            BQ_PROJECT_ID: process.env.BQ_PROJECT_ID,
+            BQ_DATASET: process.env.BQ_DATASET,
+            BQ_LOCATION: process.env.BQ_LOCATION,
+            BQ_MAIN_DATA_VIEW: process.env.BQ_MAIN_DATA_VIEW,
+            BQ_MAIN_PAYMENT_VIEW: process.env.BQ_MAIN_PAYMENT_VIEW,
+          };
+
+          const missing = Object.entries(env)
+            .filter(([, value]) => !value)
+            .map(([key]) => key);
+
+          if (missing.length > 0) {
+            throw new Error(`Missing required Cloud Run deploy values: ${missing.join(", ")}`);
+          }
+
+          const yaml = Object.entries(env)
+            .map(([key, value]) => {
+              if (String(value).includes("\n")) {
+                const lines = String(value)
+                  .split("\n")
+                  .map((line) => `  ${line}`)
+                  .join("\n");
+                return `${key}: |\n${lines}`;
+              }
+
+              return `${key}: ${JSON.stringify(String(value))}`;
+            })
+            .join("\n");
+
+          fs.writeFileSync("cloudrun-env.yaml", `${yaml}\n`);
+          NODE
+
       - name: Deploy to Cloud Run
         env:
           IMAGE_URI: ${{ vars.ARTIFACT_REGISTRY_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}/${{ vars.CLOUD_RUN_SERVICE }}:${{ github.sha }}
-        run: >
-          gcloud run deploy "${{ vars.CLOUD_RUN_SERVICE }}"
-          --image "$IMAGE_URI"
-          --project "${{ vars.GCP_PROJECT_ID }}"
-          --region "${{ vars.CLOUD_RUN_REGION }}"
-          --platform managed
-          --allow-unauthenticated
-          --quiet
+          CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: ${{ vars.CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT }}
+          CLOUD_RUN_MEMORY: ${{ vars.CLOUD_RUN_MEMORY }}
+          CLOUD_RUN_CPU: ${{ vars.CLOUD_RUN_CPU }}
+          CLOUD_RUN_MIN_INSTANCES: ${{ vars.CLOUD_RUN_MIN_INSTANCES }}
+          CLOUD_RUN_MAX_INSTANCES: ${{ vars.CLOUD_RUN_MAX_INSTANCES }}
+        run: |
+          EXTRA_FLAGS=()
+
+          if [ -n "$CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT" ]; then
+            EXTRA_FLAGS+=(--service-account "$CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT")
+          fi
+
+          if [ -n "$CLOUD_RUN_MEMORY" ]; then
+            EXTRA_FLAGS+=(--memory "$CLOUD_RUN_MEMORY")
+          fi
+
+          if [ -n "$CLOUD_RUN_CPU" ]; then
+            EXTRA_FLAGS+=(--cpu "$CLOUD_RUN_CPU")
+          fi
+
+          if [ -n "$CLOUD_RUN_MIN_INSTANCES" ]; then
+            EXTRA_FLAGS+=(--min-instances "$CLOUD_RUN_MIN_INSTANCES")
+          fi
+
+          if [ -n "$CLOUD_RUN_MAX_INSTANCES" ]; then
+            EXTRA_FLAGS+=(--max-instances "$CLOUD_RUN_MAX_INSTANCES")
+          fi
+
+          gcloud run deploy "${{ vars.CLOUD_RUN_SERVICE }}" \
+            --image "$IMAGE_URI" \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --region "${{ vars.CLOUD_RUN_REGION }}" \
+            --platform managed \
+            --allow-unauthenticated \
+            --env-vars-file cloudrun-env.yaml \
+            --quiet \
+            "${EXTRA_FLAGS[@]}"
