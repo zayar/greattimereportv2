@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      VITE_API_BASE_URL: https://example-api.invalid
+      VITE_APICORE_GRAPHQL_URL: https://example-apicore.invalid/graphql
+      VITE_GOOGLE_CLIENT_ID: placeholder-google-client-id
+      VITE_FIREBASE_API_KEY: placeholder-firebase-api-key
+      VITE_FIREBASE_AUTH_DOMAIN: example.firebaseapp.com
+      VITE_FIREBASE_PROJECT_ID: example-project-id
+      VITE_FIREBASE_STORAGE_BUCKET: example.appspot.com
+      VITE_FIREBASE_MESSAGING_SENDER_ID: "1234567890"
+      VITE_FIREBASE_APP_ID: 1:1234567890:web:placeholder
+      VITE_FIREBASE_MEASUREMENT_ID: G-PLACEHOLDER
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build workspaces
+        run: npm run build

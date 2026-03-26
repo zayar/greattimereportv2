@@ -221,10 +221,22 @@ Not yet migrated in this first cut:
 - more operational modules such as therapists, check-in/out, services, products, wallets, notifications, and logs
 - server-side proxying for all operational GraphQL calls
 - automated tests
-- production deployment manifests
+- richer deployment environments beyond the first Firebase Hosting and Cloud Run pipeline
 
 ## Notes
 
 - `GT_NewReport` fallback clinic data and raw `/api/query` execution were intentionally not brought forward.
 - `gt.report` UI code was intentionally not copied; only the underlying auth/access semantics and selected operational query behavior were carried over.
 - `gauth2` was intentionally not used because `gt.report` relies on the simpler `gauth` claim shape where `clinics` is an array of clinic IDs.
+
+## Deployment
+
+Deployment setup is documented in [docs/deployment.md](/Users/zayarmin/Development/GreatTime%20Platform/GT_V2Report/docs/deployment.md).
+
+Included deployment files:
+- [firebase.json](/Users/zayarmin/Development/GreatTime%20Platform/GT_V2Report/firebase.json)
+- [.firebaserc](/Users/zayarmin/Development/GreatTime%20Platform/GT_V2Report/.firebaserc)
+- [.github/workflows/ci.yml](/Users/zayarmin/Development/GreatTime%20Platform/GT_V2Report/.github/workflows/ci.yml)
+- [.github/workflows/deploy-hosting.yml](/Users/zayarmin/Development/GreatTime%20Platform/GT_V2Report/.github/workflows/deploy-hosting.yml)
+- [.github/workflows/deploy-backend.yml](/Users/zayarmin/Development/GreatTime%20Platform/GT_V2Report/.github/workflows/deploy-backend.yml)
+- [backend/Dockerfile](/Users/zayarmin/Development/GreatTime%20Platform/GT_V2Report/backend/Dockerfile)
