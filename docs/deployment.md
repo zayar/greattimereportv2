@@ -49,6 +49,12 @@ Required GitHub repository variables:
 - `ARTIFACT_REGISTRY_REGION`
 - `ARTIFACT_REGISTRY_REPOSITORY`
 
+Recommended service account roles for `GCP_SERVICE_ACCOUNT_KEY`:
+- Cloud Run Admin
+- Service Account User
+- Cloud Build Editor
+- Artifact Registry Writer
+
 Recommended initial one-time setup in Google Cloud:
 1. Create the Artifact Registry repository if it does not exist yet.
 2. Create the Cloud Run service once or allow the workflow to create it on first deploy.
@@ -74,3 +80,7 @@ Configured file:
 - [.github/workflows/ci.yml](/Users/zayarmin/Development/GreatTime%20Platform/GT_V2Report/.github/workflows/ci.yml)
 
 This workflow uses placeholder frontend env values so type-checking and production builds can still run safely during CI without leaking production config.
+
+Reference patterns:
+- [Firebase Hosting GitHub integration](https://firebase.google.com/docs/hosting/github-integration)
+- [google-github-actions/deploy-cloudrun](https://github.com/google-github-actions/deploy-cloudrun)
