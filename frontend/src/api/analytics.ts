@@ -45,7 +45,13 @@ export async function fetchServiceBehavior(
 }
 
 export async function fetchPaymentReport(
-  params: BaseParams & { search: string; page: number; pageSize: number },
+  params: BaseParams & {
+    search: string;
+    paymentMethod: string;
+    includeZeroValues: boolean;
+    page: number;
+    pageSize: number;
+  },
 ) {
   const response = await apiClient.get<{ success: true; data: PaymentReportResponse }>(
     "/analytics/payment-report",

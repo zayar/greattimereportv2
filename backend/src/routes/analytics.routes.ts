@@ -70,6 +70,10 @@ router.get(
     const params = baseAnalyticsSchema
       .extend({
         search: z.string().default(""),
+        paymentMethod: z.string().default(""),
+        includeZeroValues: z
+          .preprocess((value) => value === true || value === "true", z.boolean())
+          .default(false),
         page: z.coerce.number().min(1).default(1),
         pageSize: z.coerce.number().min(1).max(100).default(20),
       })
@@ -80,6 +84,8 @@ router.get(
       fromDate: params.fromDate,
       toDate: params.toDate,
       search: params.search,
+      paymentMethod: params.paymentMethod,
+      includeZeroValues: params.includeZeroValues,
       limit: params.pageSize,
       offset: (params.page - 1) * params.pageSize,
     });

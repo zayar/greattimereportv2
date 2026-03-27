@@ -9,6 +9,13 @@ export function startOfCurrentYear() {
   return toInputDate(date);
 }
 
+export function startOfCurrentMonth() {
+  const date = new Date();
+  date.setUTCDate(1);
+  date.setUTCHours(0, 0, 0, 0);
+  return toInputDate(date);
+}
+
 export function daysAgo(days: number) {
   const date = new Date();
   date.setUTCDate(date.getUTCDate() - days);

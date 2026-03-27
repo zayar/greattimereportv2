@@ -16,7 +16,7 @@ export const navigationSections = [
     items: [
       { to: "/analytics/sales-report", label: "Sales report" },
       { to: "/analytics/banking-summary", label: "Banking summary" },
-      { to: "/analytics/payment-report", label: "Payment report" },
+      { to: "/analytics/payment-report", label: "Sales details" },
       { to: "/analytics/sales-by-seller", label: "Sales by seller" },
     ],
   },

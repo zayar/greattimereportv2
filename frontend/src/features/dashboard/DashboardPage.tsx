@@ -53,8 +53,8 @@ const reportOptions: ReportOption[] = [
   },
   {
     id: "payment-report",
-    label: "Payment report",
-    description: "Transaction-level payment review across the clinic.",
+    label: "Sales details",
+    description: "Detailed invoice rows, payment method tracking, and line-item review.",
     kind: "Analytics",
     route: "/analytics/payment-report",
   },
