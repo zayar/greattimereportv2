@@ -6,6 +6,10 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: deploy-backend-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -33,12 +37,36 @@ jobs:
         env:
           IMAGE_URI: ${{ vars.ARTIFACT_REGISTRY_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}/${{ vars.CLOUD_RUN_SERVICE }}:${{ github.sha }}
         run: |
-          BUILD_ID="$(gcloud builds submit \
+          BUILD_OUTPUT="$(gcloud builds submit \
             --async \
-            --format='value(metadata.build.id)' \
+            --format=json \
             --config cloudbuild.backend.yaml \
             --substitutions=_IMAGE_URI="$IMAGE_URI" \
             .)"
+
+          BUILD_ID="$(BUILD_OUTPUT="$BUILD_OUTPUT" python - <<'PY'
+          import json
+          import os
+
+          data = json.loads(os.environ["BUILD_OUTPUT"])
+          build_id = data.get("id")
+
+          if not build_id:
+            metadata = data.get("metadata") or {}
+            build = metadata.get("build") or {}
+            build_id = build.get("id")
+
+          if not build_id:
+            name = data.get("name")
+            if isinstance(name, str) and "/" in name:
+              build_id = name.rsplit("/", 1)[-1]
+
+          if not build_id:
+            raise SystemExit("Could not determine Cloud Build ID from submit output.")
+
+          print(build_id)
+          PY
+          )"
 
           echo "Started Cloud Build: $BUILD_ID"
 
