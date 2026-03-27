@@ -127,21 +127,21 @@ export async function getPaymentReport(params: {
     ),
     ExpandedItems AS (
       SELECT
-        groups.invoiceNumber,
-        groups.serviceName,
-        groups.servicePackageName,
-        groups.itemQuantity,
-        groups.itemPrice,
-        groups.itemTotal,
-        groups.subTotal,
-        groups.itemSortKey,
+        itemGroup.invoiceNumber,
+        itemGroup.serviceName,
+        itemGroup.servicePackageName,
+        itemGroup.itemQuantity,
+        itemGroup.itemPrice,
+        itemGroup.itemTotal,
+        itemGroup.subTotal,
+        itemGroup.itemSortKey,
         instanceNum
-      FROM ItemGroups AS groups
+      FROM ItemGroups AS itemGroup
       LEFT JOIN PaymentsPerInvoice AS payments USING (invoiceNumber),
       UNNEST(
         GENERATE_ARRAY(
           1,
-          GREATEST(1, CAST(ROUND(SAFE_DIVIDE(groups.rawCount, IFNULL(payments.paymentsCount, 1))) AS INT64))
+          GREATEST(1, CAST(ROUND(SAFE_DIVIDE(itemGroup.rawCount, IFNULL(payments.paymentsCount, 1))) AS INT64))
         )
       ) AS instanceNum
     ),
