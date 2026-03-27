@@ -3,7 +3,6 @@ import { fetchServiceBehavior } from "../../../api/analytics";
 import { BarChart } from "../../../components/BarChart";
 import { DataTable } from "../../../components/DataTable";
 import { DateRangeControls } from "../../../components/DateRangeControls";
-import { HorizontalBarList } from "../../../components/HorizontalBarList";
 import { Panel } from "../../../components/Panel";
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
@@ -21,6 +20,7 @@ export function ServiceBehaviorPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<ServiceBehaviorResponse | null>(null);
+  const [serviceSearch, setServiceSearch] = useState("");
   const [mixSearch, setMixSearch] = useState("");
 
   useEffect(() => {
@@ -76,15 +76,25 @@ export function ServiceBehaviorPage() {
   }, [data?.practitionerServices, mixSearch]);
 
   const summary = data?.summary;
+  const filteredTopServices = useMemo(() => {
+    if (!data?.topServices.length) {
+      return [];
+    }
+    const q = serviceSearch.trim().toLowerCase();
+    if (!q) {
+      return data.topServices;
+    }
+    return data.topServices.filter((row) => row.serviceName.toLowerCase().includes(q));
+  }, [data?.topServices, serviceSearch]);
 
   return (
-    <div className="page-stack">
+    <div className="page-stack behavior-report">
       <PageHeader
         eyebrow="Analytics"
         title="Service behavior"
-        description="Aligned with GT_NewReport’s service and practitioner breakdowns: bookings from MainDataView, aggregated by time bucket and ranked lists — all via server-side SQL."
+        description="GT_NewReport-inspired service analytics with a monthly bookings view, ranked service board, and practitioner-service mix — all served through secure backend queries."
         actions={
-          <div className="filter-row">
+          <div className="filter-row behavior-report__filters">
             <DateRangeControls fromDate={range.fromDate} toDate={range.toDate} onChange={setRange} />
             <label className="field field--compact">
               <span>Group by</span>
@@ -100,28 +110,28 @@ export function ServiceBehaviorPage() {
 
       {error ? <ErrorState label="Service behavior could not be loaded" detail={error} /> : null}
 
-      {data && summary && !loading ? (
-        <div className="report-kpi-strip">
-          <div className="report-kpi-strip__card">
-            <span className="report-kpi-strip__label">Total bookings</span>
-            <span className="report-kpi-strip__value">{summary.totalBookings.toLocaleString("en-US")}</span>
-            <span className="report-kpi-strip__hint">Service rows in the selected period</span>
+      <div className="behavior-report__workspace">
+        {data && summary && !loading ? (
+          <div className="report-kpi-strip">
+            <div className="report-kpi-strip__card">
+              <span className="report-kpi-strip__label">Total bookings</span>
+              <span className="report-kpi-strip__value">{summary.totalBookings.toLocaleString("en-US")}</span>
+              <span className="report-kpi-strip__hint">Service rows in the selected period</span>
+            </div>
+            <div className="report-kpi-strip__card">
+              <span className="report-kpi-strip__label">Distinct services</span>
+              <span className="report-kpi-strip__value">{summary.distinctServices.toLocaleString("en-US")}</span>
+              <span className="report-kpi-strip__hint">Active service names</span>
+            </div>
+            <div className="report-kpi-strip__card">
+              <span className="report-kpi-strip__label">Avg bookings / service</span>
+              <span className="report-kpi-strip__value">{summary.avgBookingsPerService.toLocaleString("en-US")}</span>
+              <span className="report-kpi-strip__hint">Demand spread across catalog</span>
+            </div>
           </div>
-          <div className="report-kpi-strip__card">
-            <span className="report-kpi-strip__label">Distinct services</span>
-            <span className="report-kpi-strip__value">{summary.distinctServices.toLocaleString("en-US")}</span>
-            <span className="report-kpi-strip__hint">Active service names</span>
-          </div>
-          <div className="report-kpi-strip__card">
-            <span className="report-kpi-strip__label">Avg bookings / service</span>
-            <span className="report-kpi-strip__value">{summary.avgBookingsPerService.toLocaleString("en-US")}</span>
-            <span className="report-kpi-strip__hint">Demand spread across catalog</span>
-          </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      <div className="panel-grid panel-grid--split">
-        <Panel className="panel--tall" title="Booking trend" subtitle="Total service bookings per time bucket.">
+        <Panel className="panel--tall behavior-report__panel" title="Monthly service bookings" subtitle="The GT_NewReport-style primary view: total service bookings per time bucket.">
           {loading ? (
             <div className="inline-note">Loading trend...</div>
           ) : !data || data.trend.length === 0 ? (
@@ -131,52 +141,79 @@ export function ServiceBehaviorPage() {
           )}
         </Panel>
 
-        <Panel className="panel--tall" title="Top services" subtitle="Most-booked services — bar length vs #1 in range.">
+        <Panel
+          className="behavior-report__panel"
+          title="Top service rankings"
+          subtitle="Search-first ranking table inspired by GT_NewReport’s service board."
+          action={
+            <label className="field field--compact field--search">
+              <span>Find</span>
+              <input
+                type="search"
+                placeholder="Search services…"
+                value={serviceSearch}
+                onChange={(event) => setServiceSearch(event.target.value)}
+                autoComplete="off"
+              />
+            </label>
+          }
+        >
           {!data || data.topServices.length === 0 ? (
             <EmptyState label="No service data found" />
+          ) : filteredTopServices.length === 0 ? (
+            <EmptyState label="No matches" detail="Try a different search." />
           ) : (
-            <HorizontalBarList
-              items={data.topServices.map((row) => ({
-                label: row.serviceName,
-                value: row.bookingCount,
-              }))}
+            <DataTable
+              rows={filteredTopServices}
+              rowKey={(row) => row.serviceName}
+              columns={[
+                {
+                  key: "rank",
+                  header: "#",
+                  render: (row) =>
+                    (data.topServices.findIndex((r) => r.serviceName === row.serviceName) + 1).toLocaleString("en-US"),
+                },
+                { key: "service", header: "Service name", render: (row) => row.serviceName },
+                { key: "bookings", header: "Bookings", render: (row) => row.bookingCount.toLocaleString("en-US") },
+              ]}
+            />
+          )}
+        </Panel>
+
+        <Panel
+          className="behavior-report__panel"
+          title="Top practitioner-service combinations"
+          subtitle="Which practitioners are driving which services in the selected period."
+          action={
+            <label className="field field--compact field--search">
+              <span>Filter</span>
+              <input
+                type="search"
+                placeholder="Practitioner or service…"
+                value={mixSearch}
+                onChange={(event) => setMixSearch(event.target.value)}
+                autoComplete="off"
+              />
+            </label>
+          }
+        >
+          {!data || data.practitionerServices.length === 0 ? (
+            <EmptyState label="No practitioner-service rows found" />
+          ) : filteredPractitionerRows.length === 0 ? (
+            <EmptyState label="No matches" detail="Try a different filter." />
+          ) : (
+            <DataTable
+              rows={filteredPractitionerRows}
+              rowKey={(row) => `${row.practitionerName}-${row.serviceName}`}
+              columns={[
+                { key: "practitioner", header: "Practitioner", render: (row) => row.practitionerName },
+                { key: "service", header: "Service", render: (row) => row.serviceName },
+                { key: "bookings", header: "Bookings", render: (row) => row.bookingCount.toLocaleString("en-US") },
+              ]}
             />
           )}
         </Panel>
       </div>
-
-      <Panel
-        title="Practitioner mix"
-        subtitle="Which practitioners are driving which services (top combinations)."
-        action={
-          <label className="field field--compact field--search">
-            <span>Filter</span>
-            <input
-              type="search"
-              placeholder="Practitioner or service…"
-              value={mixSearch}
-              onChange={(event) => setMixSearch(event.target.value)}
-              autoComplete="off"
-            />
-          </label>
-        }
-      >
-        {!data || data.practitionerServices.length === 0 ? (
-          <EmptyState label="No practitioner-service rows found" />
-        ) : filteredPractitionerRows.length === 0 ? (
-          <EmptyState label="No matches" detail="Try a different filter." />
-        ) : (
-          <DataTable
-            rows={filteredPractitionerRows}
-            rowKey={(row) => `${row.practitionerName}-${row.serviceName}`}
-            columns={[
-              { key: "practitioner", header: "Practitioner", render: (row) => row.practitionerName },
-              { key: "service", header: "Service", render: (row) => row.serviceName },
-              { key: "bookings", header: "Bookings", render: (row) => row.bookingCount.toLocaleString("en-US") },
-            ]}
-          />
-        )}
-      </Panel>
     </div>
   );
 }

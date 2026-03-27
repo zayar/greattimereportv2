@@ -73,13 +73,13 @@ export function CustomerBehaviorPage() {
   const summary = data?.summary;
 
   return (
-    <div className="page-stack">
+    <div className="page-stack behavior-report">
       <PageHeader
         eyebrow="Analytics"
         title="Customer behavior"
-        description="Matches GT_NewReport’s MainDataView customer lens (visits and unique members per month) with period-level rollups and a secure query layer."
+        description="GT_NewReport-inspired customer analytics: dark report surfaces, monthly activity trend, and ranked member activity delivered through the secured V2 analytics API."
         actions={
-          <div className="filter-row">
+          <div className="filter-row behavior-report__filters">
             <DateRangeControls fromDate={range.fromDate} toDate={range.toDate} onChange={setRange} />
             <label className="field field--compact">
               <span>Group by</span>
@@ -95,31 +95,31 @@ export function CustomerBehaviorPage() {
 
       {error ? <ErrorState label="Customer behavior could not be loaded" detail={error} /> : null}
 
-      {data && summary && !loading ? (
-        <div className="report-kpi-strip">
-          <div className="report-kpi-strip__card">
-            <span className="report-kpi-strip__label">Unique customers</span>
-            <span className="report-kpi-strip__value">{summary.uniqueCustomers.toLocaleString("en-US")}</span>
-            <span className="report-kpi-strip__hint">Distinct members with check-ins in range</span>
+      <div className="behavior-report__workspace">
+        {data && summary && !loading ? (
+          <div className="report-kpi-strip">
+            <div className="report-kpi-strip__card">
+              <span className="report-kpi-strip__label">Unique customers</span>
+              <span className="report-kpi-strip__value">{summary.uniqueCustomers.toLocaleString("en-US")}</span>
+              <span className="report-kpi-strip__hint">Distinct members with check-ins in range</span>
+            </div>
+            <div className="report-kpi-strip__card">
+              <span className="report-kpi-strip__label">Total visits</span>
+              <span className="report-kpi-strip__value">{summary.visits.toLocaleString("en-US")}</span>
+              <span className="report-kpi-strip__hint">All visits across the selected period</span>
+            </div>
+            <div className="report-kpi-strip__card">
+              <span className="report-kpi-strip__label">Avg visits / customer</span>
+              <span className="report-kpi-strip__value">{summary.avgVisitsPerCustomer.toLocaleString("en-US")}</span>
+              <span className="report-kpi-strip__hint">Activity intensity per customer</span>
+            </div>
           </div>
-          <div className="report-kpi-strip__card">
-            <span className="report-kpi-strip__label">Total visits</span>
-            <span className="report-kpi-strip__value">{summary.visits.toLocaleString("en-US")}</span>
-            <span className="report-kpi-strip__hint">All visits across the selected period</span>
-          </div>
-          <div className="report-kpi-strip__card">
-            <span className="report-kpi-strip__label">Avg visits / customer</span>
-            <span className="report-kpi-strip__value">{summary.avgVisitsPerCustomer.toLocaleString("en-US")}</span>
-            <span className="report-kpi-strip__hint">Activity intensity per customer</span>
-          </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      <div className="panel-grid panel-grid--split">
         <Panel
-          className="panel--tall"
-          title="Visit & member trend"
-          subtitle="Per bucket: unique customers (blue) and total visits (teal) — same measures as GT_NewReport’s monthly charts."
+          className="panel--tall behavior-report__panel"
+          title="Monthly customer count"
+          subtitle="Mirrors GT_NewReport’s primary customer lens: unique members and total visits per bucket, shown in a denser dark analytics stage."
         >
           {loading ? (
             <div className="inline-note">Loading trend...</div>
@@ -132,16 +132,16 @@ export function CustomerBehaviorPage() {
                 primary: row.uniqueCustomers,
                 secondary: row.visits,
               }))}
-              primaryLabel="Unique"
+              primaryLabel="Unique customers"
               secondaryLabel="Visits"
             />
           )}
         </Panel>
 
         <Panel
-          className="panel--tall"
-          title="Top customers"
-          subtitle="Ranked by visit count in the selected period."
+          className="behavior-report__panel"
+          title="Top active members"
+          subtitle="Search-first ranking board for the strongest customer activity in the selected range."
           action={
             <label className="field field--compact field--search">
               <span>Find</span>
@@ -170,7 +170,7 @@ export function CustomerBehaviorPage() {
                   render: (row) =>
                     (data.topCustomers.findIndex((r) => r.customerName === row.customerName) + 1).toLocaleString("en-US"),
                 },
-                { key: "customer", header: "Customer", render: (row) => row.customerName },
+                { key: "customer", header: "Member name", render: (row) => row.customerName },
                 { key: "visits", header: "Visits", render: (row) => row.visitCount.toLocaleString("en-US") },
                 { key: "lastVisit", header: "Last visit", render: (row) => row.lastVisitDate },
               ]}
