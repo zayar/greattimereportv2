@@ -9,11 +9,8 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const subtitle = useMemo(
-    () =>
-      "Production auth from gt.report, modern shell from GT_NewReport, and a cleaner path for both operational and BigQuery reporting.",
-    [],
-  );
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
   if (!loading && firebaseUser) {
     return <Navigate to="/dashboard" replace />;
@@ -44,71 +41,154 @@ export function LoginPage() {
     }
   };
 
+  const handleEmailLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    // Dummy handler for email login UI
+    setError("Email login is not yet configured. Please Use Google Sign-In.");
+  };
+
   return (
-    <div className="login-page">
-      <div className="login-page__backdrop">
-        <div className="backdrop-blob backdrop-blob-1" />
-        <div className="backdrop-blob backdrop-blob-2" />
-      </div>
+    <div className="al-page">
+      {/* Top Header */}
+      <header className="al-header">
+        <div className="al-brand">Aura Luxe</div>
+        <nav className="al-nav">
+          <a href="#">SUPPORT</a>
+          <a href="#">CLINIC PORTAL</a>
+        </nav>
+      </header>
 
-      <section className="login-hero animate-fade-in-up">
-        <span className="page-header__eyebrow">GreatTime Reporting</span>
-        <h1>Report V2 for real clinic access, modern insight delivery, and safer analytics.</h1>
-        <p>{subtitle}</p>
-
-        <div className="hero-grid animate-fade-in-up-delay">
-          <article className="hero-card">
-            <div className="hero-card__icon">
-              <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-              </svg>
-            </div>
-            <strong>Secure login</strong>
-            <span>Google credential exchange to Firebase custom token, exactly aligned with gt.report.</span>
-          </article>
-          <article className="hero-card">
-            <div className="hero-card__icon">
-              <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 21v-7.5a.75.75 0 01.75-.75h3a.75.75 0 01.75.75V21m-4.5 0H2.36m11.14 0H18m0 0h3.64m-1.39 0V9.349m-16.5 11.65V9.35m0 0a3.001 3.001 0 003.75-.615A2.993 2.993 0 009.75 9.75c.896 0 1.7-.393 2.25-1.016a2.993 2.993 0 002.25 1.016c.896 0 1.7-.393 2.25-1.016a3.001 3.001 0 003.75.614m-16.5 0a3.004 3.004 0 01-.621-4.72L4.318 3.44A1.5 1.5 0 015.378 3h13.243a1.5 1.5 0 011.06.44l1.19 1.189a3 3 0 01-.621 4.72m-13.5 8.65h3.75a.75.75 0 00.75-.75V13.5a.75.75 0 00-.75-.75H6.75a.75.75 0 00-.75.75v3.75c0 .415.336.75.75.75z" />
-              </svg>
-            </div>
-            <strong>Business-aware access</strong>
-            <span>Clinic and business selectors derived from the logged-in user’s exact GT permissions.</span>
-          </article>
-          <article className="hero-card">
-            <div className="hero-card__icon">
-              <svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6a7.5 7.5 0 107.5 7.5h-7.5V6z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 10.5H21A7.5 7.5 0 0013.5 3v7.5z" />
-              </svg>
-            </div>
-            <strong>Typed analytics</strong>
-            <span>BigQuery stored server-side behind explicit report endpoints instead of raw public SQL.</span>
-          </article>
-        </div>
-      </section>
-
-      <section className="login-panel animate-fade-in-scale">
-        <div className="login-panel__header">
-          <span className="page-header__eyebrow">Sign in</span>
-          <h2>Aesthetic Data Hub</h2>
-          <p>Sign in with your GreatTime account. Sessions persist securely via Firebase custom tokens.</p>
-        </div>
-
-        <div className="login-panel__body">
-          <div className="sso-wrapper">
-            <GoogleLogin onSuccess={handleSuccess} onError={() => setError("Google sign-in failed.")} theme="filled_blue" shape="pill" size="large" />
+      <div className="al-content">
+        {/* Left Column */}
+        <div className="al-left">
+          <div className="al-bg-shapes">
+            <div className="al-shape al-shape-1" />
+            <div className="al-shape al-shape-2" />
           </div>
 
-          {submitting ? (
-            <div className="auth-status">
-              <div className="auth-spinner"></div>
-              <p className="muted-copy">Authenticating with Firebase...</p>
+          <div className="al-left-content">
+            <h1 className="al-heading">
+              Smarter Insights<br />for<br />Modern Aesthetic<br />Clinics
+            </h1>
+            <p className="al-subheading">
+              Empower your business with clinic-level reporting, revenue tracking, and beautiful data visualization designed for the aesthetic professional.
+            </p>
+
+            <div className="al-feature-list">
+              <div className="al-feature">
+                <div className="al-feature-icon al-icon-orange">
+                  <svg fill="currentColor" viewBox="0 0 24 24"><path d="M16 6l2.29 2.29-4.88 4.88-4-4L2 16.59 3.41 18l6-6 4 4 6.3-6.29L22 12V6h-6z"/></svg>
+                </div>
+                <div className="al-feature-text">
+                  <strong>Revenue Growth</strong>
+                  <span>Track performance patterns in real-time.</span>
+                </div>
+              </div>
+
+              <div className="al-feature">
+                <div className="al-feature-icon al-icon-teal">
+                  <svg fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+                </div>
+                <div className="al-feature-text">
+                  <strong>Patient Retention</strong>
+                  <span>Analyze loyalty and lifetime patient value.</span>
+                </div>
+              </div>
+
+              <div className="al-feature">
+                <div className="al-feature-icon al-icon-purple">
+                  <svg fill="currentColor" viewBox="0 0 24 24"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>
+                </div>
+                <div className="al-feature-text">
+                  <strong>Treatment Analytics</strong>
+                  <span>Understand which services drive your clinic.</span>
+                </div>
+              </div>
             </div>
-          ) : null}
-          {error ? <div className="inline-error"><svg fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>{error}</div> : null}
+          </div>
         </div>
-      </section>
+
+        {/* Right Column */}
+        <div className="al-right">
+          <div className="al-login-wrapper">
+            <div className="al-login-titles">
+              <h2>GreatTime Report</h2>
+              <p>Secure access for aesthetic professionals</p>
+            </div>
+
+            <div className="al-login-card">
+              <div className="al-google-btn-wrapper">
+                <GoogleLogin
+                  onSuccess={handleSuccess}
+                  onError={() => setError("Google sign-in failed.")}
+                  theme="outline"
+                  shape="pill"
+                  size="large"
+                  text="continue_with"
+                  width="100%"
+                />
+              </div>
+
+              <div className="al-divider">
+                <span>OR LOGIN WITH EMAIL</span>
+              </div>
+
+              <form onSubmit={handleEmailLogin} className="al-email-form">
+                <div className="al-field">
+                  <label>CLINIC EMAIL</label>
+                  <input
+                    type="email"
+                    placeholder="dr.smith@clinic.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                  />
+                </div>
+
+                <div className="al-field">
+                  <div className="al-label-row">
+                    <label>PASSWORD</label>
+                    <a href="#" className="al-forgot">Forgot?</a>
+                  </div>
+                  <input
+                    type="password"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                </div>
+
+                {error && <div className="al-error">{error}</div>}
+                
+                <button type="submit" className="al-submit-btn" disabled={submitting}>
+                  {submitting ? "Authenticating..." : "Enter Dashboard"}
+                </button>
+              </form>
+
+              <div className="al-security-note">
+                <svg fill="currentColor" viewBox="0 0 24 24" className="al-lock-icon"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM9 6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg>
+                <p>
+                  <strong>Clinic-level permissions active.</strong> Access is restricted to authorized medical personnel and administrators. All activities are encrypted and logged for compliance.
+                </p>
+              </div>
+            </div>
+
+            <div className="al-inquire">
+              Don't have a dashboard yet? <a href="#">Inquire for Clinic Portal</a>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <footer className="al-footer">
+        <div className="al-footer-left">
+          © 2024 AURA LUXE SYSTEMS. ALL RIGHTS RESERVED.
+        </div>
+        <div className="al-footer-right">
+          <a href="#">PRIVACY POLICY</a>
+          <a href="#">TERMS OF SERVICE</a>
+        </div>
+      </footer>
     </div>
   );
 }
