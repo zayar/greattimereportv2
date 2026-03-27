@@ -11,6 +11,14 @@ import { getDailyTreatmentReport } from "../services/reports/daily-treatment.ser
 import { getSalesReport } from "../services/reports/sales-report.service.js";
 import { getBankingSummary } from "../services/reports/banking-summary.service.js";
 import { getCustomersBySalespersonReport } from "../services/reports/customers-by-salesperson.service.js";
+import {
+  getCustomerPortalBookings,
+  getCustomerPortalList,
+  getCustomerPortalOverview,
+  getCustomerPortalPackages,
+  getCustomerPortalPayments,
+  getCustomerPortalUsage,
+} from "../services/reports/customer-portal.service.js";
 import { asyncHandler } from "../utils/async-handler.js";
 
 const router = Router();
@@ -21,6 +29,39 @@ const baseAnalyticsSchema = z.object({
   fromDate: z.string().min(1),
   toDate: z.string().min(1),
 });
+
+const customerIdentityFields = {
+  customerName: z.string().default(""),
+  customerPhone: z.string().default(""),
+};
+
+const hasCustomerIdentity = (value: { customerName: string; customerPhone: string }) =>
+  value.customerName.trim() !== "" || value.customerPhone.trim() !== "";
+
+const customerDetailSchema = baseAnalyticsSchema.extend(customerIdentityFields).refine(hasCustomerIdentity, {
+  message: "customerName or customerPhone is required",
+});
+
+const customerPagedDetailSchema = baseAnalyticsSchema
+  .extend({
+    ...customerIdentityFields,
+    search: z.string().default(""),
+    page: z.coerce.number().min(1).default(1),
+    pageSize: z.coerce.number().min(1).max(100).default(20),
+  })
+  .refine(hasCustomerIdentity, {
+    message: "customerName or customerPhone is required",
+  });
+
+const customerUsageSchema = baseAnalyticsSchema
+  .extend({
+    ...customerIdentityFields,
+    year: z.coerce.number().min(2020).max(2100).default(new Date().getFullYear()),
+    serviceCategory: z.string().default(""),
+  })
+  .refine(hasCustomerIdentity, {
+    message: "customerName or customerPhone is required",
+  });
 
 router.use(verifyFirebaseToken);
 
@@ -45,6 +86,96 @@ router.get(
       .parse(req.query);
 
     const data = await getCustomerBehaviorReport(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/customers",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = baseAnalyticsSchema
+      .extend({
+        search: z.string().default(""),
+        status: z.string().default(""),
+        spendTier: z.string().default(""),
+        therapist: z.string().default(""),
+        serviceCategory: z.string().default(""),
+        sortBy: z.enum(["lifetimeSpend", "lastVisitDate", "visitCount", "averageSpend"]).default("lifetimeSpend"),
+        sortDirection: z.enum(["asc", "desc"]).default("desc"),
+        page: z.coerce.number().min(1).default(1),
+        pageSize: z.coerce.number().min(1).max(100).default(25),
+      })
+      .parse(req.query);
+
+    const data = await getCustomerPortalList({
+      clinicCode: params.clinicCode,
+      fromDate: params.fromDate,
+      toDate: params.toDate,
+      search: params.search,
+      status: params.status,
+      spendTier: params.spendTier,
+      therapist: params.therapist,
+      serviceCategory: params.serviceCategory,
+      sortBy: params.sortBy,
+      sortDirection: params.sortDirection,
+      limit: params.pageSize,
+      offset: (params.page - 1) * params.pageSize,
+    });
+
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/customers/detail/overview",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = customerDetailSchema.parse(req.query);
+    const data = await getCustomerPortalOverview(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/customers/detail/packages",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = customerDetailSchema.parse(req.query);
+    const data = await getCustomerPortalPackages(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/customers/detail/bookings",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = customerPagedDetailSchema.parse(req.query);
+
+    const data = await getCustomerPortalBookings(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/customers/detail/payments",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = customerPagedDetailSchema.parse(req.query);
+
+    const data = await getCustomerPortalPayments(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/customers/detail/usage",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = customerUsageSchema.parse(req.query);
+
+    const data = await getCustomerPortalUsage(params);
     res.json({ success: true, data });
   }),
 );

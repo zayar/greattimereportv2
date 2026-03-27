@@ -66,6 +66,13 @@ const reportOptions: ReportOption[] = [
     route: "/analytics/customers-by-salesperson",
   },
   {
+    id: "customer-portal",
+    label: "Customer portal",
+    description: "Customer 360 intelligence with value, retention, service usage, and history.",
+    kind: "Analytics",
+    route: "/analytics/customers",
+  },
+  {
     id: "appointments",
     label: "Appointments",
     description: "Operational booking flow and schedule visibility.",

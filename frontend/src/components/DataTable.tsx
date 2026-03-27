@@ -10,9 +10,11 @@ type Props<Row> = {
   columns: Column<Row>[];
   rows: Row[];
   rowKey: (row: Row) => string;
+  onRowClick?: (row: Row) => void;
+  rowClassName?: (row: Row) => string | undefined;
 };
 
-export function DataTable<Row>({ columns, rows, rowKey }: Props<Row>) {
+export function DataTable<Row>({ columns, rows, rowKey, onRowClick, rowClassName }: Props<Row>) {
   return (
     <div className="table-wrap">
       <table className="data-table">
@@ -25,7 +27,22 @@ export function DataTable<Row>({ columns, rows, rowKey }: Props<Row>) {
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={rowKey(row)}>
+            <tr
+              key={rowKey(row)}
+              className={`${onRowClick ? "data-table__row--interactive" : ""} ${rowClassName?.(row) ?? ""}`.trim()}
+              onClick={onRowClick ? () => onRowClick(row) : undefined}
+              onKeyDown={
+                onRowClick
+                  ? (event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        onRowClick(row);
+                      }
+                    }
+                  : undefined
+              }
+              tabIndex={onRowClick ? 0 : undefined}
+            >
               {columns.map((column) => (
                 <td key={column.key}>{column.render(row)}</td>
               ))}
@@ -36,4 +53,3 @@ export function DataTable<Row>({ columns, rows, rowKey }: Props<Row>) {
     </div>
   );
 }
-

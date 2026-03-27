@@ -19,6 +19,8 @@ import { SalesBySellerPage } from "./features/analytics/sales-by-seller/SalesByS
 import { DailyTreatmentPage } from "./features/analytics/daily-treatment/DailyTreatmentPage";
 import { BankingSummaryPage } from "./features/analytics/banking-summary/BankingSummaryPage";
 import { CustomersBySalespersonPage } from "./features/analytics/customers-by-salesperson/CustomersBySalespersonPage";
+import { CustomerPortalPage } from "./features/analytics/customer-portal/CustomerPortalPage";
+import { CustomerDetailPage } from "./features/analytics/customer-portal/CustomerDetailPage";
 
 export default function App() {
   return (
@@ -50,6 +52,8 @@ export default function App() {
                   <Route path="analytics/daily-treatment" element={<DailyTreatmentPage />} />
                   <Route path="analytics/sales-by-seller" element={<SalesBySellerPage />} />
                   <Route path="analytics/customers-by-salesperson" element={<CustomersBySalespersonPage />} />
+                  <Route path="analytics/customers" element={<CustomerPortalPage />} />
+                  <Route path="analytics/customers/:customerSlug" element={<CustomerDetailPage />} />
                 </Route>
               </Routes>
             </BrowserRouter>

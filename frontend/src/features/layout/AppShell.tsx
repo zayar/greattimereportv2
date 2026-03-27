@@ -26,9 +26,10 @@ export function AppShell() {
   const location = useLocation();
 
   const pageTitle = useMemo(() => {
-    const currentItem = navigationSections
-      .flatMap((section) => flattenNavigationItems(section.items))
-      .find((item) => item.to === location.pathname);
+    const items = navigationSections.flatMap((section) => flattenNavigationItems(section.items));
+    const currentItem =
+      items.find((item) => item.to === location.pathname) ??
+      items.find((item) => item.to && location.pathname.startsWith(`${item.to}/`));
 
     return currentItem?.label ?? "GT V2 Report";
   }, [location.pathname]);

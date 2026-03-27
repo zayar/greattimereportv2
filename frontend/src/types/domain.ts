@@ -294,3 +294,167 @@ export interface CustomersBySalespersonResponse {
   }>;
   totalCount: number;
 }
+
+export interface CustomerPortalListResponse {
+  summary: {
+    totalCustomers: number;
+    activeCustomers: number;
+    returningCustomers: number;
+    atRiskCustomers: number;
+    dormantCustomers: number;
+    totalRevenue: number;
+    averageSpend: number;
+    averageVisits: number;
+  };
+  filterOptions: {
+    therapists: string[];
+    serviceCategories: string[];
+    spendTiers: string[];
+    statuses: string[];
+  };
+  rows: Array<{
+    customerName: string;
+    phoneNumber: string;
+    memberId: string;
+    lifetimeSpend: number;
+    averageSpend: number;
+    joinedDate: string | null;
+    lastVisitDate: string | null;
+    daysSinceLastVisit: number | null;
+    visitCount: number;
+    lastService: string;
+    primaryTherapist: string;
+    lastPaymentMethod: string;
+    status: string;
+    spendTier: string;
+    packageStatus: string;
+    remainingSessions: number;
+    serviceCategory: string;
+  }>;
+  totalCount: number;
+}
+
+export interface CustomerPortalOverviewResponse {
+  customer: {
+    customerName: string;
+    phoneNumber: string;
+    memberId: string;
+    joinedDate: string | null;
+    dateOfBirth: string | null;
+    lastVisitDate: string | null;
+    lifetimeSpend: number;
+    totalVisits: number;
+    averageSpendPerVisit: number;
+    preferredService: string;
+    preferredServiceCategory: string;
+    preferredTherapist: string;
+    lastPaymentMethod: string;
+    daysSinceLastVisit: number | null;
+    remainingSessions: number;
+    recent3MonthVisits: number;
+    previous3MonthVisits: number;
+    avgVisitIntervalDays: number | null;
+    categoryBreadth: number;
+    spendTier: string;
+    status: string;
+    badges: string[];
+  };
+  trend: Array<{
+    bucket: string;
+    revenue: number;
+    visits: number;
+  }>;
+  therapistRelationship: Array<{
+    therapistName: string;
+    visitCount: number;
+    serviceValue: number;
+    latestVisitDate: string;
+  }>;
+  serviceMix: Array<{
+    serviceCategory: string;
+    visitCount: number;
+    serviceValue: number;
+  }>;
+  recentServices: Array<{
+    serviceName: string;
+    lastUsedDate: string;
+    visitCount: number;
+  }>;
+  insights: Array<{
+    id: string;
+    tone: "positive" | "attention" | "neutral";
+    title: string;
+    detail: string;
+  }>;
+  recommendedAction: string;
+  assumptions: string[];
+}
+
+export interface CustomerPortalPackagesResponse {
+  packages: Array<{
+    id: string;
+    serviceName: string;
+    packageName: string | null;
+    serviceCategory: string;
+    packageTotal: number;
+    usedCount: number;
+    remainingCount: number;
+    latestUsageDate: string;
+    latestTherapist: string;
+    status: string;
+    expiryDate: string | null;
+  }>;
+}
+
+export interface CustomerPortalBookingsResponse {
+  rows: Array<{
+    bookingId: string;
+    checkInTime: string;
+    serviceName: string;
+    therapistName: string;
+    serviceCategory: string;
+    clinicCode: string;
+    status: string;
+    notes: string | null;
+  }>;
+  totalCount: number;
+}
+
+export interface CustomerPortalPaymentsResponse {
+  summary: {
+    totalSpent: number;
+    invoiceCount: number;
+    averageInvoice: number;
+    outstandingAmount: number;
+  };
+  rows: Array<{
+    dateLabel: string;
+    invoiceNumber: string;
+    serviceName: string;
+    servicePackageName: string | null;
+    paymentMethod: string;
+    salePerson: string;
+    invoiceTotal: number;
+    discount: number;
+    netAmount: number;
+    outstandingAmount: number;
+    paymentStatus: string;
+  }>;
+  totalCount: number;
+}
+
+export interface CustomerPortalUsageResponse {
+  year: number;
+  months: string[];
+  categories: string[];
+  summary: {
+    totalUsage: number;
+    distinctServices: number;
+  };
+  services: Array<{
+    serviceName: string;
+    serviceCategory: string;
+    counts: number[];
+    totalUsage: number;
+  }>;
+}

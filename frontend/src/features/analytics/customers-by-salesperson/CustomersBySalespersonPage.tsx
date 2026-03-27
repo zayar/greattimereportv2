@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { fetchCustomersBySalesperson } from "../../../api/analytics";
 import { DateRangeControls } from "../../../components/DateRangeControls";
 import { DataTable } from "../../../components/DataTable";
@@ -9,6 +10,7 @@ import { useAccess } from "../../access/AccessProvider";
 import type { CustomersBySalespersonResponse } from "../../../types/domain";
 import { daysAgo, today } from "../../../utils/date";
 import { formatCurrency } from "../../../utils/format";
+import { buildCustomerPortalDetailPath } from "../customer-portal/customerPortalLink";
 
 const PAGE_SIZE = 25;
 
@@ -63,6 +65,7 @@ function downloadCustomersBySalesperson(
 }
 
 export function CustomersBySalespersonPage() {
+  const navigate = useNavigate();
   const { currentClinic } = useAccess();
   const [range, setRange] = useState({
     fromDate: daysAgo(30),
@@ -340,6 +343,16 @@ export function CustomersBySalespersonPage() {
             <DataTable
               rows={data.customers}
               rowKey={(row) => `${row.name}-${row.phoneNumber}-${row.lastInvoiceNumber}`}
+              onRowClick={(row) =>
+                navigate(
+                  buildCustomerPortalDetailPath({
+                    customerName: row.name,
+                    customerPhone: row.phoneNumber,
+                    fromDate: range.fromDate,
+                    toDate: range.toDate,
+                  }),
+                )
+              }
               columns={[
                 {
                   key: "name",

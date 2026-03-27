@@ -1,6 +1,12 @@
 import { apiClient } from "./http";
 import type {
   BankingSummaryResponse,
+  CustomerPortalBookingsResponse,
+  CustomerPortalListResponse,
+  CustomerPortalOverviewResponse,
+  CustomerPortalPackagesResponse,
+  CustomerPortalPaymentsResponse,
+  CustomerPortalUsageResponse,
   CustomersBySalespersonResponse,
   CustomerBehaviorResponse,
   DashboardResponse,
@@ -30,6 +36,99 @@ export async function fetchCustomerBehavior(
 ) {
   const response = await apiClient.get<{ success: true; data: CustomerBehaviorResponse }>(
     "/analytics/customer-behavior",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchCustomerPortalList(
+  params: BaseParams & {
+    search: string;
+    status: string;
+    spendTier: string;
+    therapist: string;
+    serviceCategory: string;
+    sortBy: "lifetimeSpend" | "lastVisitDate" | "visitCount" | "averageSpend";
+    sortDirection: "asc" | "desc";
+    page: number;
+    pageSize: number;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: CustomerPortalListResponse }>(
+    "/analytics/customers",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchCustomerPortalOverview(
+  params: BaseParams & {
+    customerName: string;
+    customerPhone: string;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: CustomerPortalOverviewResponse }>(
+    "/analytics/customers/detail/overview",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchCustomerPortalPackages(
+  params: BaseParams & {
+    customerName: string;
+    customerPhone: string;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: CustomerPortalPackagesResponse }>(
+    "/analytics/customers/detail/packages",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchCustomerPortalBookings(
+  params: BaseParams & {
+    customerName: string;
+    customerPhone: string;
+    search: string;
+    page: number;
+    pageSize: number;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: CustomerPortalBookingsResponse }>(
+    "/analytics/customers/detail/bookings",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchCustomerPortalPayments(
+  params: BaseParams & {
+    customerName: string;
+    customerPhone: string;
+    search: string;
+    page: number;
+    pageSize: number;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: CustomerPortalPaymentsResponse }>(
+    "/analytics/customers/detail/payments",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchCustomerPortalUsage(
+  params: BaseParams & {
+    customerName: string;
+    customerPhone: string;
+    year: number;
+    serviceCategory: string;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: CustomerPortalUsageResponse }>(
+    "/analytics/customers/detail/usage",
     { params },
   );
   return response.data.data;
