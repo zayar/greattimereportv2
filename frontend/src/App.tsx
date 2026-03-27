@@ -17,7 +17,6 @@ import { ServiceBehaviorPage } from "./features/analytics/service-behavior/Servi
 import { PaymentReportPage } from "./features/analytics/payment-report/PaymentReportPage";
 import { SalesBySellerPage } from "./features/analytics/sales-by-seller/SalesBySellerPage";
 import { DailyTreatmentPage } from "./features/analytics/daily-treatment/DailyTreatmentPage";
-import { SalesReportPage } from "./features/analytics/sales-report/SalesReportPage";
 import { BankingSummaryPage } from "./features/analytics/banking-summary/BankingSummaryPage";
 import { CustomersBySalespersonPage } from "./features/analytics/customers-by-salesperson/CustomersBySalespersonPage";
 
@@ -43,7 +42,7 @@ export default function App() {
                   <Route path="operational/appointments" element={<AppointmentsPage />} />
                   <Route path="operational/sales" element={<SalesPage />} />
                   <Route path="operational/members" element={<MembersPage />} />
-                  <Route path="analytics/sales-report" element={<SalesReportPage />} />
+                  <Route path="analytics/sales-report" element={<Navigate to="/analytics/banking-summary" replace />} />
                   <Route path="analytics/banking-summary" element={<BankingSummaryPage />} />
                   <Route path="analytics/customer-behavior" element={<CustomerBehaviorPage />} />
                   <Route path="analytics/service-behavior" element={<ServiceBehaviorPage />} />

@@ -81,7 +81,7 @@ function downloadBankingDetails(rows: BankingDetailRow[], currency: string) {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `banking-details-${today()}.csv`;
+  link.download = `payment-report-${today()}.csv`;
   document.body.append(link);
   link.click();
   link.remove();
@@ -134,7 +134,7 @@ export function BankingSummaryPage() {
       })
       .catch((loadError) => {
         if (active) {
-          setError(loadError instanceof Error ? loadError.message : "Failed to load banking details.");
+          setError(loadError instanceof Error ? loadError.message : "Failed to load payment report.");
         }
       })
       .finally(() => {
@@ -196,8 +196,8 @@ export function BankingSummaryPage() {
     <div className="page-stack page-stack--workspace analytics-report banking-details-report">
       <PageHeader
         eyebrow="Revenue"
-        title="Banking details"
-        description="Payment-method summary and transaction-level banking detail in one workspace."
+        title="Payment report"
+        description="Payment-method summary and transaction-level payment detail in one workspace."
       />
 
       <section className="sales-details-report__toolbar banking-details-report__toolbar">
@@ -293,7 +293,7 @@ export function BankingSummaryPage() {
         </div>
       </section>
 
-      {error ? <ErrorState label="Banking details could not be loaded" detail={error} /> : null}
+      {error ? <ErrorState label="Payment report could not be loaded" detail={error} /> : null}
 
       <div className="sales-details-report__summary">
         <div className="sales-details-report__summary-card">

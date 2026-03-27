@@ -25,14 +25,13 @@ export const navigationSections: NavigationSection[] = [
   {
     title: "Revenue",
     items: [
-      { to: "/analytics/banking-summary", label: "Banking details" },
       {
         label: "Sales",
         children: [
           { to: "/analytics/payment-report", label: "Sales details" },
-          { to: "/analytics/sales-report", label: "Payment report" },
+          { to: "/analytics/banking-summary", label: "Payment report" },
           { to: "/analytics/sales-by-seller", label: "Sales by sales person" },
-          { to: "/analytics/customers-by-salesperson", label: "Customer by sales person" },
+          { to: "/analytics/customers-by-salesperson", label: "Customer by salesperson" },
         ],
       },
     ],

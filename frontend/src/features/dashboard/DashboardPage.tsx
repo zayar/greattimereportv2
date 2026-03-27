@@ -24,15 +24,8 @@ type Preset = {
 
 const reportOptions: ReportOption[] = [
   {
-    id: "sales-report",
-    label: "Payment report",
-    description: "Paid invoice performance, top services, and payment-backed detail.",
-    kind: "Analytics",
-    route: "/analytics/sales-report",
-  },
-  {
     id: "banking-summary",
-    label: "Banking details",
+    label: "Payment report",
     description: "Payment-method drilldown with detailed transaction rows.",
     kind: "Analytics",
     route: "/analytics/banking-summary",
@@ -67,7 +60,7 @@ const reportOptions: ReportOption[] = [
   },
   {
     id: "customers-by-salesperson",
-    label: "Customer by sales person",
+    label: "Customer by salesperson",
     description: "Customers sourced by a selected sales person, ranked by spend.",
     kind: "Analytics",
     route: "/analytics/customers-by-salesperson",
@@ -95,7 +88,7 @@ export function DashboardPage() {
     toDate: today(),
   });
   const [selectedFilter, setSelectedFilter] = useState<ReportFilter>("All");
-  const [selectedReportId, setSelectedReportId] = useState("sales-report");
+  const [selectedReportId, setSelectedReportId] = useState("banking-summary");
 
   const selectedReport = useMemo(
     () => reportOptions.find((report) => report.id === selectedReportId) ?? reportOptions[0],
