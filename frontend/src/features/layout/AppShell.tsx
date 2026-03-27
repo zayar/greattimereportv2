@@ -20,6 +20,8 @@ export function AppShell() {
     return currentItem?.label ?? "GT V2 Report";
   }, [location.pathname]);
 
+  const isDashboardLanding = location.pathname === "/dashboard";
+
   if (loading) {
     return <ScreenLoader label="Loading your clinics and businesses..." />;
   }
@@ -109,30 +111,38 @@ export function AppShell() {
           </div>
 
           <div className="topbar__controls">
-            <label className="field field--compact">
-              <span>Business</span>
-              <select
-                value={currentBusiness.id}
-                onChange={(event) => selectBusiness(event.target.value)}
-              >
-                {businesses.map((business) => (
-                  <option key={business.id} value={business.id}>
-                    {business.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {isDashboardLanding ? (
+              <div className="topbar__workspace-note">
+                No analytics are loaded until you choose a report.
+              </div>
+            ) : (
+              <>
+                <label className="field field--compact">
+                  <span>Business</span>
+                  <select
+                    value={currentBusiness.id}
+                    onChange={(event) => selectBusiness(event.target.value)}
+                  >
+                    {businesses.map((business) => (
+                      <option key={business.id} value={business.id}>
+                        {business.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-            <label className="field field--compact">
-              <span>Clinic</span>
-              <select value={currentClinic.id} onChange={(event) => selectClinic(event.target.value)}>
-                {currentBusiness.clinics.map((clinic) => (
-                  <option key={clinic.id} value={clinic.id}>
-                    {clinic.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+                <label className="field field--compact">
+                  <span>Clinic</span>
+                  <select value={currentClinic.id} onChange={(event) => selectClinic(event.target.value)}>
+                    {currentBusiness.clinics.map((clinic) => (
+                      <option key={clinic.id} value={clinic.id}>
+                        {clinic.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </>
+            )}
           </div>
         </header>
 
@@ -143,4 +153,3 @@ export function AppShell() {
     </div>
   );
 }
-
