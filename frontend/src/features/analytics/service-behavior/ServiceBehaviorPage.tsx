@@ -75,6 +75,8 @@ export function ServiceBehaviorPage() {
     );
   }, [data?.practitionerServices, mixSearch]);
 
+  const summary = data?.summary;
+
   return (
     <div className="page-stack">
       <PageHeader
@@ -98,21 +100,21 @@ export function ServiceBehaviorPage() {
 
       {error ? <ErrorState label="Service behavior could not be loaded" detail={error} /> : null}
 
-      {data && !loading ? (
+      {data && summary && !loading ? (
         <div className="report-kpi-strip">
           <div className="report-kpi-strip__card">
             <span className="report-kpi-strip__label">Total bookings</span>
-            <span className="report-kpi-strip__value">{data.summary.totalBookings.toLocaleString("en-US")}</span>
+            <span className="report-kpi-strip__value">{summary.totalBookings.toLocaleString("en-US")}</span>
             <span className="report-kpi-strip__hint">Service rows in the selected period</span>
           </div>
           <div className="report-kpi-strip__card">
             <span className="report-kpi-strip__label">Distinct services</span>
-            <span className="report-kpi-strip__value">{data.summary.distinctServices.toLocaleString("en-US")}</span>
+            <span className="report-kpi-strip__value">{summary.distinctServices.toLocaleString("en-US")}</span>
             <span className="report-kpi-strip__hint">Active service names</span>
           </div>
           <div className="report-kpi-strip__card">
             <span className="report-kpi-strip__label">Avg bookings / service</span>
-            <span className="report-kpi-strip__value">{data.summary.avgBookingsPerService.toLocaleString("en-US")}</span>
+            <span className="report-kpi-strip__value">{summary.avgBookingsPerService.toLocaleString("en-US")}</span>
             <span className="report-kpi-strip__hint">Demand spread across catalog</span>
           </div>
         </div>

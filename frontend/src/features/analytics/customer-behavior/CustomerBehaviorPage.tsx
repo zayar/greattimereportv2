@@ -70,6 +70,8 @@ export function CustomerBehaviorPage() {
     return data.topCustomers.filter((row) => row.customerName.toLowerCase().includes(q));
   }, [data?.topCustomers, customerSearch]);
 
+  const summary = data?.summary;
+
   return (
     <div className="page-stack">
       <PageHeader
@@ -93,21 +95,21 @@ export function CustomerBehaviorPage() {
 
       {error ? <ErrorState label="Customer behavior could not be loaded" detail={error} /> : null}
 
-      {data && !loading ? (
+      {data && summary && !loading ? (
         <div className="report-kpi-strip">
           <div className="report-kpi-strip__card">
             <span className="report-kpi-strip__label">Unique customers</span>
-            <span className="report-kpi-strip__value">{data.summary.uniqueCustomers.toLocaleString("en-US")}</span>
+            <span className="report-kpi-strip__value">{summary.uniqueCustomers.toLocaleString("en-US")}</span>
             <span className="report-kpi-strip__hint">Distinct members with check-ins in range</span>
           </div>
           <div className="report-kpi-strip__card">
             <span className="report-kpi-strip__label">Total visits</span>
-            <span className="report-kpi-strip__value">{data.summary.visits.toLocaleString("en-US")}</span>
+            <span className="report-kpi-strip__value">{summary.visits.toLocaleString("en-US")}</span>
             <span className="report-kpi-strip__hint">All visits across the selected period</span>
           </div>
           <div className="report-kpi-strip__card">
             <span className="report-kpi-strip__label">Avg visits / customer</span>
-            <span className="report-kpi-strip__value">{data.summary.avgVisitsPerCustomer.toLocaleString("en-US")}</span>
+            <span className="report-kpi-strip__value">{summary.avgVisitsPerCustomer.toLocaleString("en-US")}</span>
             <span className="report-kpi-strip__hint">Activity intensity per customer</span>
           </div>
         </div>

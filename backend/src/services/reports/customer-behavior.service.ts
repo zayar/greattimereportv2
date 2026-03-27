@@ -32,7 +32,7 @@ export async function getCustomerBehaviorReport(params: {
 }) {
   const bucketExpression = getBucketExpression(params.granularity);
 
-  const [trendRows, topCustomerRows] = await Promise.all([
+  const [trendRows, topCustomerRows, summaryRows] = await Promise.all([
     runAnalyticsQuery<{
       bucket: string;
       uniqueCustomers: number;
@@ -72,9 +72,33 @@ export async function getCustomerBehaviorReport(params: {
       `,
       params,
     ),
+    runAnalyticsQuery<{
+      uniqueCustomers: number;
+      visits: number;
+    }>(
+      `
+        SELECT
+          COUNT(DISTINCT CustomerName) AS uniqueCustomers,
+          COUNT(*) AS visits
+        FROM ${analyticsTables.mainDataView}
+        WHERE DATE(CheckInTime) BETWEEN @fromDate AND @toDate
+          AND CustomerName IS NOT NULL
+          AND LOWER(ClinicCode) = LOWER(@clinicCode)
+      `,
+      params,
+    ),
   ]);
 
+  const summaryRow = summaryRows[0];
+  const uniqueCustomers = parseNumber(summaryRow?.uniqueCustomers);
+  const visits = parseNumber(summaryRow?.visits);
+
   return {
+    summary: {
+      uniqueCustomers,
+      visits,
+      avgVisitsPerCustomer: uniqueCustomers > 0 ? Number((visits / uniqueCustomers).toFixed(2)) : 0,
+    },
     trend: trendRows.map((row) => ({
       bucket: row.bucket,
       uniqueCustomers: parseNumber(row.uniqueCustomers),

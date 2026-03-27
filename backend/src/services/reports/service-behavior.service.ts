@@ -32,7 +32,7 @@ export async function getServiceBehaviorReport(params: {
 }) {
   const bucketExpression = getBucketExpression(params.granularity);
 
-  const [trendRows, topServiceRows, practitionerRows] = await Promise.all([
+  const [trendRows, topServiceRows, practitionerRows, summaryRows] = await Promise.all([
     runAnalyticsQuery<{
       bucket: string;
       totalBookings: number;
@@ -89,9 +89,33 @@ export async function getServiceBehaviorReport(params: {
       `,
       params,
     ),
+    runAnalyticsQuery<{
+      totalBookings: number;
+      distinctServices: number;
+    }>(
+      `
+        SELECT
+          COUNT(*) AS totalBookings,
+          COUNT(DISTINCT ServiceName) AS distinctServices
+        FROM ${analyticsTables.mainDataView}
+        WHERE DATE(CheckInTime) BETWEEN @fromDate AND @toDate
+          AND ServiceName IS NOT NULL
+          AND LOWER(ClinicCode) = LOWER(@clinicCode)
+      `,
+      params,
+    ),
   ]);
 
+  const summaryRow = summaryRows[0];
+  const totalBookings = parseNumber(summaryRow?.totalBookings);
+  const distinctServices = parseNumber(summaryRow?.distinctServices);
+
   return {
+    summary: {
+      totalBookings,
+      distinctServices,
+      avgBookingsPerService: distinctServices > 0 ? Number((totalBookings / distinctServices).toFixed(2)) : 0,
+    },
     trend: trendRows.map((row) => ({
       bucket: row.bucket,
       totalBookings: parseNumber(row.totalBookings),
