@@ -108,11 +108,21 @@ export interface DashboardResponse {
 }
 
 export interface CustomerBehaviorResponse {
+  summary: {
+    uniqueCustomers: number;
+    visits: number;
+    avgVisitsPerCustomer: number;
+  };
   trend: Array<{ bucket: string; uniqueCustomers: number; visits: number }>;
   topCustomers: Array<{ customerName: string; visitCount: number; lastVisitDate: string }>;
 }
 
 export interface ServiceBehaviorResponse {
+  summary: {
+    totalBookings: number;
+    distinctServices: number;
+    avgBookingsPerService: number;
+  };
   trend: Array<{ bucket: string; totalBookings: number }>;
   topServices: Array<{ serviceName: string; bookingCount: number }>;
   practitionerServices: Array<{

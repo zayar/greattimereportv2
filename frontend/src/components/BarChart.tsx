@@ -2,6 +2,8 @@ type Item = {
   label: string;
   value: number;
   meta?: string;
+  /** When set, shown instead of the raw numeric value (e.g. currency). */
+  valueLabel?: string;
 };
 
 type Props = {
@@ -24,7 +26,7 @@ export function BarChart({ items, compact = false }: Props) {
           </div>
           <div className="bar-chart__legend">
             <strong>{item.label}</strong>
-            <span>{item.value.toLocaleString("en-US")}</span>
+            <span>{item.valueLabel ?? item.value.toLocaleString("en-US")}</span>
             {item.meta ? <small>{item.meta}</small> : null}
           </div>
         </div>

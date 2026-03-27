@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { fetchDashboardOverview } from "../../api/analytics";
 import { BarChart } from "../../components/BarChart";
 import { DateRangeControls } from "../../components/DateRangeControls";
 import { DataTable } from "../../components/DataTable";
+import { HorizontalBarList } from "../../components/HorizontalBarList";
 import { Panel } from "../../components/Panel";
 import { PageHeader } from "../../components/PageHeader";
 import { StatCard } from "../../components/StatCard";
@@ -21,6 +22,15 @@ export function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<DashboardResponse | null>(null);
+
+  const currency = currentClinic?.currency || "MMK";
+
+  const paymentMixSorted = useMemo(() => {
+    if (!data?.paymentMix.length) {
+      return [];
+    }
+    return [...data.paymentMix].sort((a, b) => b.totalAmount - a.totalAmount);
+  }, [data?.paymentMix]);
 
   useEffect(() => {
     if (!currentClinic) {
@@ -63,7 +73,7 @@ export function DashboardPage() {
       <PageHeader
         eyebrow="Overview"
         title="Dashboard"
-        description="A modern default home that blends GT_NewReport’s cleaner presentation with secured server-side analytics."
+        description="Operational snapshot with the same MainDataView / payment views as GT_NewReport, delivered through parameterized BigQuery — not browser-built SQL."
         actions={<DateRangeControls fromDate={range.fromDate} toDate={range.toDate} onChange={setRange} />}
       />
 
@@ -74,7 +84,7 @@ export function DashboardPage() {
           <div className="stats-grid">
             <StatCard
               label="Revenue"
-              value={formatCurrency(data.summary.revenue, currentClinic?.currency || "MMK")}
+              value={formatCurrency(data.summary.revenue, currency)}
               change={data.summary.revenueChange}
             />
             <StatCard label="Invoices" value={data.summary.invoices.toLocaleString("en-US")} change={data.summary.invoicesChange} />
@@ -92,25 +102,36 @@ export function DashboardPage() {
           </div>
 
           <div className="panel-grid panel-grid--split">
-            <Panel title="Revenue trend" subtitle="Daily paid revenue over the selected period">
+            <Panel className="panel--tall" title="Revenue trend" subtitle="Daily paid revenue — bar height follows share of the strongest day in range.">
               {loading ? (
                 <div className="inline-note">Loading revenue trend...</div>
               ) : data.revenueTrend.length === 0 ? (
                 <EmptyState label="No paid revenue in this range" />
               ) : (
-                <BarChart items={data.revenueTrend.map((row) => ({ label: row.dateLabel.slice(5), value: row.revenue }))} />
+                <BarChart
+                  items={data.revenueTrend.map((row) => ({
+                    label: row.dateLabel.slice(5),
+                    value: row.revenue,
+                    valueLabel: formatCurrency(row.revenue, currency),
+                  }))}
+                />
               )}
             </Panel>
 
-            <Panel title="Payment mix" subtitle="Paid revenue split by payment method">
-              <div className="metric-list">
-                {data.paymentMix.map((item) => (
-                  <div className="metric-list__item" key={item.paymentMethod}>
-                    <strong>{item.paymentMethod}</strong>
-                    <span>{formatCurrency(item.totalAmount, currentClinic?.currency || "MMK")}</span>
-                  </div>
-                ))}
-              </div>
+            <Panel className="panel--tall" title="Payment mix" subtitle="Paid revenue by method — ranked with proportional bars.">
+              {loading ? (
+                <div className="inline-note">Loading payment mix...</div>
+              ) : paymentMixSorted.length === 0 ? (
+                <EmptyState label="No payment methods in this range" />
+              ) : (
+                <HorizontalBarList
+                  items={paymentMixSorted.map((item) => ({
+                    label: item.paymentMethod,
+                    value: item.totalAmount,
+                    valueDisplay: formatCurrency(item.totalAmount, currency),
+                  }))}
+                />
+              )}
             </Panel>
           </div>
 
@@ -123,7 +144,7 @@ export function DashboardPage() {
                 {
                   key: "revenue",
                   header: "Revenue",
-                  render: (row) => formatCurrency(row.revenue, currentClinic?.currency || "MMK"),
+                  render: (row) => formatCurrency(row.revenue, currency),
                 },
                 { key: "invoices", header: "Invoices", render: (row) => row.invoices.toLocaleString("en-US") },
               ]}
@@ -140,4 +161,3 @@ export function DashboardPage() {
     </div>
   );
 }
-
