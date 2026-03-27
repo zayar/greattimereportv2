@@ -32,7 +32,33 @@ jobs:
       - name: Build backend image
         env:
           IMAGE_URI: ${{ vars.ARTIFACT_REGISTRY_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}/${{ vars.CLOUD_RUN_SERVICE }}:${{ github.sha }}
-        run: gcloud builds submit --config cloudbuild.backend.yaml --substitutions=_IMAGE_URI="$IMAGE_URI" --suppress-logs .
+        run: |
+          BUILD_ID="$(gcloud builds submit \
+            --async \
+            --format='value(metadata.build.id)' \
+            --config cloudbuild.backend.yaml \
+            --substitutions=_IMAGE_URI="$IMAGE_URI" \
+            .)"
+
+          echo "Started Cloud Build: $BUILD_ID"
+
+          while true; do
+            STATUS="$(gcloud builds describe "$BUILD_ID" --format='value(status)')"
+            echo "Cloud Build status: $STATUS"
+
+            case "$STATUS" in
+              SUCCESS)
+                break
+                ;;
+              FAILURE|INTERNAL_ERROR|TIMEOUT|CANCELLED|EXPIRED)
+                echo "Cloud Build failed with status: $STATUS"
+                exit 1
+                ;;
+              *)
+                sleep 15
+                ;;
+            esac
+          done
 
       - name: Generate Cloud Run env file
         env:
