@@ -1690,6 +1690,56 @@ a {
   min-width: 1500px;
 }
 
+.payment-workspace-report,
+.sales-by-person-report {
+  gap: 18px;
+}
+
+.payment-workspace-report__service-button,
+.sales-by-person-report__summary-button {
+  all: unset;
+  cursor: pointer;
+  font-weight: 600;
+  color: #111827;
+}
+
+.payment-workspace-report__service-button:hover,
+.sales-by-person-report__summary-button:hover {
+  color: #173f36;
+}
+
+.payment-workspace-report__ledger-panel .data-table {
+  width: max-content;
+  min-width: 1120px;
+}
+
+.sales-by-person-report__summary-wrap {
+  max-height: none;
+}
+
+.sales-by-person-report__summary-table {
+  width: 100%;
+  min-width: 720px;
+}
+
+.sales-by-person-report__summary-row {
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+
+.sales-by-person-report__summary-row:hover {
+  background: rgba(248, 250, 252, 0.9);
+}
+
+.sales-by-person-report__summary-row--active {
+  background: rgba(31, 78, 69, 0.08);
+}
+
+.sales-by-person-report__ledger-panel .data-table {
+  width: max-content;
+  min-width: 1350px;
+}
+
 .behavior-report {
   gap: 20px;
 }

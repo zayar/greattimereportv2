@@ -173,8 +173,24 @@ router.get(
   "/sales-by-seller",
   requireClinicAccess("query", "clinicId"),
   asyncHandler(async (req, res) => {
-    const params = baseAnalyticsSchema.parse(req.query);
-    const data = await getSalesBySellerReport(params);
+    const params = baseAnalyticsSchema
+      .extend({
+        sellerName: z.string().default(""),
+        search: z.string().default(""),
+        page: z.coerce.number().min(1).default(1),
+        pageSize: z.coerce.number().min(1).max(100).default(25),
+      })
+      .parse(req.query);
+
+    const data = await getSalesBySellerReport({
+      clinicCode: params.clinicCode,
+      fromDate: params.fromDate,
+      toDate: params.toDate,
+      sellerName: params.sellerName,
+      search: params.search,
+      limit: params.pageSize,
+      offset: (params.page - 1) * params.pageSize,
+    });
     res.json({ success: true, data });
   }),
 );

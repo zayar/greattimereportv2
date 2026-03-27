@@ -71,7 +71,14 @@ export async function fetchSalesReport(
   return response.data.data;
 }
 
-export async function fetchSalesBySeller(params: BaseParams) {
+export async function fetchSalesBySeller(
+  params: BaseParams & {
+    sellerName: string;
+    search: string;
+    page: number;
+    pageSize: number;
+  },
+) {
   const response = await apiClient.get<{ success: true; data: SalesBySellerResponse }>(
     "/analytics/sales-by-seller",
     { params },

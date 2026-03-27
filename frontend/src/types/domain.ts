@@ -184,9 +184,13 @@ export interface SalesBySellerResponse {
     invoiceNumber: string;
     customerName: string;
     serviceName: string;
+    servicePackageName?: string | null;
     sellerName: string;
+    paymentMethod?: string;
+    paymentStatus?: string;
     totalAmount: number;
   }>;
+  totalCount: number;
 }
 
 export interface DailyTreatmentResponse {
