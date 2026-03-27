@@ -92,7 +92,7 @@ export function ServiceBehaviorPage() {
       <PageHeader
         eyebrow="Analytics"
         title="Service behavior"
-        description="GT_NewReport-inspired service analytics with a monthly bookings view, ranked service board, and practitioner-service mix — all served through secure backend queries."
+        description="Monthly service demand, top services, and practitioner mix for the selected clinic."
         actions={
           <div className="filter-row behavior-report__filters">
             <DateRangeControls fromDate={range.fromDate} toDate={range.toDate} onChange={setRange} />
@@ -131,7 +131,7 @@ export function ServiceBehaviorPage() {
           </div>
         ) : null}
 
-        <Panel className="panel--tall behavior-report__panel" title="Monthly service bookings" subtitle="The GT_NewReport-style primary view: total service bookings per time bucket.">
+        <Panel className="panel--tall behavior-report__panel" title="Monthly service bookings" subtitle="Total service bookings by period.">
           {loading ? (
             <div className="inline-note">Loading trend...</div>
           ) : !data || data.trend.length === 0 ? (
@@ -144,10 +144,10 @@ export function ServiceBehaviorPage() {
         <Panel
           className="behavior-report__panel"
           title="Top service rankings"
-          subtitle="Search-first ranking table inspired by GT_NewReport’s service board."
+          subtitle="Highest-booked services in the selected range."
           action={
             <label className="field field--compact field--search">
-              <span>Find</span>
+              <span>Search</span>
               <input
                 type="search"
                 placeholder="Search services…"
@@ -183,7 +183,7 @@ export function ServiceBehaviorPage() {
         <Panel
           className="behavior-report__panel"
           title="Top practitioner-service combinations"
-          subtitle="Which practitioners are driving which services in the selected period."
+          subtitle="Practitioner and service combinations ranked by bookings."
           action={
             <label className="field field--compact field--search">
               <span>Filter</span>

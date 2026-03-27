@@ -77,7 +77,7 @@ export function CustomerBehaviorPage() {
       <PageHeader
         eyebrow="Analytics"
         title="Customer behavior"
-        description="GT_NewReport-inspired customer analytics: dark report surfaces, monthly activity trend, and ranked member activity delivered through the secured V2 analytics API."
+        description="Monthly customer activity, unique members, and top active members for the selected clinic."
         actions={
           <div className="filter-row behavior-report__filters">
             <DateRangeControls fromDate={range.fromDate} toDate={range.toDate} onChange={setRange} />
@@ -119,7 +119,7 @@ export function CustomerBehaviorPage() {
         <Panel
           className="panel--tall behavior-report__panel"
           title="Monthly customer count"
-          subtitle="Mirrors GT_NewReport’s primary customer lens: unique members and total visits per bucket, shown in a denser dark analytics stage."
+          subtitle="Unique customers and total visits by period."
         >
           {loading ? (
             <div className="inline-note">Loading trend...</div>
@@ -141,10 +141,10 @@ export function CustomerBehaviorPage() {
         <Panel
           className="behavior-report__panel"
           title="Top active members"
-          subtitle="Search-first ranking board for the strongest customer activity in the selected range."
+          subtitle="Highest-activity members in the selected range."
           action={
             <label className="field field--compact field--search">
-              <span>Find</span>
+              <span>Search</span>
               <input
                 type="search"
                 placeholder="Search name…"
