@@ -19,8 +19,7 @@ export function Panel({ title, subtitle, action, className, children }: Props) {
           {action ? <div>{action}</div> : null}
         </header>
       )}
-      {children}
+      <div className="panel__body">{children}</div>
     </section>
   );
 }
-
