@@ -1,26 +1,31 @@
 export const navigationSections = [
   {
-    title: "Overview",
-    items: [{ to: "/dashboard", label: "Dashboard", badge: "Live" }],
+    title: "Home",
+    items: [{ to: "/dashboard", label: "Dashboard" }],
   },
   {
-    title: "Operational",
+    title: "Operations",
     items: [
-      { to: "/operational/appointments", label: "Appointments", badge: "Core" },
-      { to: "/operational/sales", label: "Sales", badge: "Core" },
-      { to: "/operational/members", label: "Members", badge: "Core" },
+      { to: "/operational/appointments", label: "Appointments" },
+      { to: "/operational/sales", label: "Sales" },
+      { to: "/operational/members", label: "Members" },
     ],
   },
   {
-    title: "Analytics",
+    title: "Revenue",
     items: [
-      { to: "/analytics/sales-report", label: "Sales Report", badge: "BQ" },
-      { to: "/analytics/banking-summary", label: "Banking Summary", badge: "BQ" },
-      { to: "/analytics/customer-behavior", label: "Customer Behavior", badge: "BQ" },
-      { to: "/analytics/service-behavior", label: "Service Behavior", badge: "BQ" },
-      { to: "/analytics/daily-treatment", label: "Daily Treatment", badge: "BQ" },
-      { to: "/analytics/payment-report", label: "Payment Report", badge: "BQ" },
-      { to: "/analytics/sales-by-seller", label: "Sales by Seller", badge: "BQ" },
+      { to: "/analytics/sales-report", label: "Sales report" },
+      { to: "/analytics/banking-summary", label: "Banking summary" },
+      { to: "/analytics/payment-report", label: "Payment report" },
+      { to: "/analytics/sales-by-seller", label: "Sales by seller" },
+    ],
+  },
+  {
+    title: "Behavior",
+    items: [
+      { to: "/analytics/customer-behavior", label: "Customer behavior" },
+      { to: "/analytics/service-behavior", label: "Service behavior" },
+      { to: "/analytics/daily-treatment", label: "Daily treatment" },
     ],
   },
 ];

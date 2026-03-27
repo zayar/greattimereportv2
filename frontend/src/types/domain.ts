@@ -133,6 +133,17 @@ export interface ServiceBehaviorResponse {
 }
 
 export interface PaymentReportResponse {
+  summary: {
+    totalAmount: number;
+    invoiceCount: number;
+    methodsCount: number;
+    averageInvoice: number;
+  };
+  methods: Array<{
+    paymentMethod: string;
+    totalAmount: number;
+    transactionCount: number;
+  }>;
   rows: Array<{
     dateLabel: string;
     invoiceNumber: string;

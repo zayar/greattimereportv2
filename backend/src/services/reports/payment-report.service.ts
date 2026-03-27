@@ -34,7 +34,41 @@ export async function getPaymentReport(params: {
       )
   `;
 
-  const [rows, totalRows] = await Promise.all([
+  const [summaryRows, methodRows, rows, totalRows] = await Promise.all([
+    runAnalyticsQuery<{
+      totalAmount: number;
+      invoiceCount: number;
+      methodsCount: number;
+      averageInvoice: number;
+    }>(
+      `
+        SELECT
+          COALESCE(SUM(CAST(NetTotal AS FLOAT64)), 0) AS totalAmount,
+          COUNT(DISTINCT InvoiceNumber) AS invoiceCount,
+          COUNT(DISTINCT COALESCE(PaymentMethod, 'Unknown')) AS methodsCount,
+          COALESCE(AVG(CAST(NetTotal AS FLOAT64)), 0) AS averageInvoice
+        FROM ${analyticsTables.mainPaymentView}
+        WHERE ${baseWhere}
+      `,
+      params,
+    ),
+    runAnalyticsQuery<{
+      paymentMethod: string;
+      totalAmount: number;
+      transactionCount: number;
+    }>(
+      `
+        SELECT
+          COALESCE(PaymentMethod, 'Unknown') AS paymentMethod,
+          COALESCE(SUM(CAST(NetTotal AS FLOAT64)), 0) AS totalAmount,
+          COUNT(*) AS transactionCount
+        FROM ${analyticsTables.mainPaymentView}
+        WHERE ${baseWhere}
+        GROUP BY paymentMethod
+        ORDER BY totalAmount DESC
+      `,
+      params,
+    ),
     runAnalyticsQuery<{
       dateLabel: string;
       invoiceNumber: string;
@@ -80,6 +114,17 @@ export async function getPaymentReport(params: {
   ]);
 
   return {
+    summary: {
+      totalAmount: parseNumber(summaryRows[0]?.totalAmount),
+      invoiceCount: parseNumber(summaryRows[0]?.invoiceCount),
+      methodsCount: parseNumber(summaryRows[0]?.methodsCount),
+      averageInvoice: parseNumber(summaryRows[0]?.averageInvoice),
+    },
+    methods: methodRows.map((row) => ({
+      paymentMethod: row.paymentMethod,
+      totalAmount: parseNumber(row.totalAmount),
+      transactionCount: parseNumber(row.transactionCount),
+    })),
     rows: rows.map((row) => ({
       dateLabel: row.dateLabel,
       invoiceNumber: row.invoiceNumber,

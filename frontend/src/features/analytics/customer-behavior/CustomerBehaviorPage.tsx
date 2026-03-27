@@ -7,14 +7,14 @@ import { Panel } from "../../../components/Panel";
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import { useAccess } from "../../access/AccessProvider";
-import { daysAgo, today } from "../../../utils/date";
+import { startOfCurrentYear, today } from "../../../utils/date";
 import type { CustomerBehaviorResponse } from "../../../types/domain";
 
 export function CustomerBehaviorPage() {
   const { currentClinic } = useAccess();
   const [granularity, setGranularity] = useState<"month" | "quarter" | "year">("month");
   const [range, setRange] = useState({
-    fromDate: daysAgo(180),
+    fromDate: startOfCurrentYear(),
     toDate: today(),
   });
   const [loading, setLoading] = useState(true);
@@ -73,11 +73,11 @@ export function CustomerBehaviorPage() {
   const summary = data?.summary;
 
   return (
-    <div className="page-stack behavior-report">
+    <div className="page-stack behavior-report analytics-report">
       <PageHeader
         eyebrow="Analytics"
         title="Customer behavior"
-        description="Monthly customer activity, unique members, and top active members for the selected clinic."
+        description="Customer activity, visit frequency, and top active members for the current year."
         actions={
           <div className="filter-row behavior-report__filters">
             <DateRangeControls fromDate={range.fromDate} toDate={range.toDate} onChange={setRange} />

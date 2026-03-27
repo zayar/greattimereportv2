@@ -7,14 +7,14 @@ import { Panel } from "../../../components/Panel";
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import { useAccess } from "../../access/AccessProvider";
-import { daysAgo, today } from "../../../utils/date";
+import { startOfCurrentYear, today } from "../../../utils/date";
 import type { ServiceBehaviorResponse } from "../../../types/domain";
 
 export function ServiceBehaviorPage() {
   const { currentClinic } = useAccess();
   const [granularity, setGranularity] = useState<"month" | "quarter" | "year">("month");
   const [range, setRange] = useState({
-    fromDate: daysAgo(180),
+    fromDate: startOfCurrentYear(),
     toDate: today(),
   });
   const [loading, setLoading] = useState(true);
@@ -88,11 +88,11 @@ export function ServiceBehaviorPage() {
   }, [data?.topServices, serviceSearch]);
 
   return (
-    <div className="page-stack behavior-report">
+    <div className="page-stack behavior-report analytics-report">
       <PageHeader
         eyebrow="Analytics"
         title="Service behavior"
-        description="Monthly service demand, top services, and practitioner mix for the selected clinic."
+        description="Service demand, rankings, and practitioner mix for the current year."
         actions={
           <div className="filter-row behavior-report__filters">
             <DateRangeControls fromDate={range.fromDate} toDate={range.toDate} onChange={setRange} />

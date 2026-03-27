@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { fetchDailyTreatment } from "../../../api/analytics";
 import { DataTable } from "../../../components/DataTable";
+import { HorizontalBarList } from "../../../components/HorizontalBarList";
 import { Panel } from "../../../components/Panel";
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
@@ -68,70 +69,75 @@ export function DailyTreatmentPage() {
   );
 
   return (
-    <div className="page-stack">
+    <div className="page-stack analytics-report">
       <PageHeader
         eyebrow="Analytics"
         title="Daily treatment"
-        description="A secured BigQuery treatment matrix by therapist and service for the selected clinic and date."
+        description="Therapist activity, service totals, and detailed treatment rows for one clinic day."
         actions={
-          <label className="field field--compact">
-            <span>Date</span>
-            <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-          </label>
+          <div className="filter-row analytics-report__filters">
+            <label className="field field--compact">
+              <span>Date</span>
+              <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+            </label>
+          </div>
         }
       />
 
       {error ? <ErrorState label="Daily treatment report could not be loaded" detail={error} /> : null}
 
-      <div className="panel-grid panel-grid--triple">
-        <Panel title="Treatments" subtitle="Total treatment rows for the selected day">
-          <strong className="panel-stat">{(data?.summary.totalTreatments ?? 0).toLocaleString("en-US")}</strong>
-        </Panel>
-        <Panel title="Therapists" subtitle="Distinct practitioners with at least one treatment">
-          <strong className="panel-stat">{(data?.summary.therapists ?? 0).toLocaleString("en-US")}</strong>
-        </Panel>
-        <Panel title="Services" subtitle="Unique services delivered on the selected day">
-          <strong className="panel-stat">{(data?.summary.uniqueServices ?? 0).toLocaleString("en-US")}</strong>
-        </Panel>
+      <div className="report-kpi-strip analytics-report__kpis">
+        <div className="report-kpi-strip__card">
+          <span className="report-kpi-strip__label">Treatments</span>
+          <span className="report-kpi-strip__value">{(data?.summary.totalTreatments ?? 0).toLocaleString("en-US")}</span>
+          <span className="report-kpi-strip__hint">Rows returned for the selected date</span>
+        </div>
+        <div className="report-kpi-strip__card">
+          <span className="report-kpi-strip__label">Therapists</span>
+          <span className="report-kpi-strip__value">{(data?.summary.therapists ?? 0).toLocaleString("en-US")}</span>
+          <span className="report-kpi-strip__hint">Practitioners with activity</span>
+        </div>
+        <div className="report-kpi-strip__card">
+          <span className="report-kpi-strip__label">Services</span>
+          <span className="report-kpi-strip__value">{(data?.summary.uniqueServices ?? 0).toLocaleString("en-US")}</span>
+          <span className="report-kpi-strip__hint">Unique services delivered</span>
+        </div>
       </div>
 
-      <div className="panel-grid panel-grid--split">
+      <div className="panel-grid panel-grid--split analytics-report__grid">
         <Panel
+          className="analytics-report__panel analytics-report__panel--tall"
           title="Treatment matrix"
-          subtitle={`Service distribution by therapist for ${currentClinic?.name ?? "the selected clinic"}`}
+          subtitle={`Service distribution by therapist for ${currentClinic?.name ?? "the selected clinic"}.`}
         >
           {loading ? <div className="inline-note">Loading treatment matrix...</div> : null}
           {!loading && !error && (!data || data.matrix.length === 0) ? (
-            <EmptyState label="No treatment data found for this date" detail="Try another day or verify that the clinic code maps to analytics data." />
+            <EmptyState label="No treatment data found for this date" detail="Try another day or verify clinic mapping." />
           ) : null}
           {data && data.matrix.length > 0 ? (
-            <DataTable
-              rows={data.matrix}
-              rowKey={(row) => row.therapistName}
-              columns={matrixColumns}
-            />
+            <DataTable rows={data.matrix} rowKey={(row) => row.therapistName} columns={matrixColumns} />
           ) : null}
         </Panel>
 
-        <Panel title="Service totals" subtitle="Total completed treatments by service">
+        <Panel className="analytics-report__panel" title="Service totals" subtitle="Completed treatments by service.">
           {loading ? (
             <div className="inline-note">Loading service totals...</div>
           ) : !data || data.serviceTotals.length === 0 ? (
             <EmptyState label="No service totals available" />
           ) : (
-            <div className="metric-list">
-              {data.serviceTotals.map((row) => (
-                <div key={row.serviceName} className="metric-list__item">
-                  <span>{row.serviceName}</span>
-                  <strong>{row.totalServices.toLocaleString("en-US")}</strong>
-                </div>
-              ))}
-            </div>
+            <HorizontalBarList
+              items={data.serviceTotals.map((row) => ({
+                label: row.serviceName,
+                value: row.totalServices,
+                valueDisplay: `${row.totalServices.toLocaleString("en-US")} treatments`,
+              }))}
+            />
           )}
         </Panel>
       </div>
 
       <Panel
+        className="analytics-report__panel"
         title="Treatment records"
         subtitle={`${(data?.records.length ?? 0).toLocaleString("en-US")} detailed rows returned from BigQuery`}
       >

@@ -60,10 +60,15 @@ export function AppShell() {
       <aside className={`shell__sidebar ${sidebarOpen ? "shell__sidebar--open" : ""}`.trim()}>
         <div className="brand">
           <div className="brand__mark">GT</div>
-          <div>
-            <strong>GT_V2Report</strong>
-            <span>Modern reporting workspace</span>
+          <div className="brand__copy">
+            <strong>GreatTime Reports</strong>
+            <span>Minimal clinic workspace</span>
           </div>
+        </div>
+
+        <div className="sidebar-context">
+          <span>{currentBusiness.name}</span>
+          <strong>{currentClinic.name}</strong>
         </div>
 
         <nav className="nav-sections">
@@ -80,7 +85,6 @@ export function AppShell() {
                   onClick={() => setSidebarOpen(false)}
                 >
                   <span>{item.label}</span>
-                  <small>{item.badge}</small>
                 </NavLink>
               ))}
             </div>
@@ -102,7 +106,7 @@ export function AppShell() {
         <header className="topbar">
           <div className="topbar__left">
             <button className="menu-toggle" onClick={() => setSidebarOpen((open) => !open)}>
-              Menu
+              Browse
             </button>
             <div>
               <span className="topbar__eyebrow">{currentBusiness.name}</span>

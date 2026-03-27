@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useDeferredValue, useEffect, useState } from "react";
 import { fetchSalesReport } from "../../../api/analytics";
 import { BarChart } from "../../../components/BarChart";
 import { DataTable } from "../../../components/DataTable";
 import { DateRangeControls } from "../../../components/DateRangeControls";
+import { HorizontalBarList } from "../../../components/HorizontalBarList";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import { Panel } from "../../../components/Panel";
 import { PageHeader } from "../../../components/PageHeader";
@@ -21,9 +22,14 @@ export function SalesReportPage() {
     fromDate: daysAgo(30),
     toDate: today(),
   });
+  const deferredSearch = useDeferredValue(search.trim());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<SalesReportResponse | null>(null);
+
+  useEffect(() => {
+    setPage(1);
+  }, [currentClinic?.id, range.fromDate, range.toDate]);
 
   useEffect(() => {
     if (!currentClinic) {
@@ -39,7 +45,7 @@ export function SalesReportPage() {
       clinicCode: currentClinic.code,
       fromDate: range.fromDate,
       toDate: range.toDate,
-      search,
+      search: deferredSearch,
       page,
       pageSize: PAGE_SIZE,
     })
@@ -62,19 +68,19 @@ export function SalesReportPage() {
     return () => {
       active = false;
     };
-  }, [currentClinic, page, range.fromDate, range.toDate, search]);
+  }, [currentClinic, deferredSearch, page, range.fromDate, range.toDate]);
 
   const totalPages = Math.max(1, Math.ceil((data?.totalCount ?? 0) / PAGE_SIZE));
   const currency = currentClinic?.currency || "MMK";
 
   return (
-    <div className="page-stack">
+    <div className="page-stack analytics-report">
       <PageHeader
         eyebrow="Analytics"
         title="Sales report"
-        description="A dedicated BigQuery sales workspace with paid revenue summary, daily trend, top services, and searchable invoice rows."
+        description="Paid sales, service rankings, and invoice detail for the selected clinic."
         actions={
-          <div className="filter-row">
+          <div className="filter-row analytics-report__filters">
             <DateRangeControls fromDate={range.fromDate} toDate={range.toDate} onChange={setRange} />
             <label className="field field--compact field--search">
               <span>Search</span>
@@ -94,23 +100,35 @@ export function SalesReportPage() {
 
       {error ? <ErrorState label="Sales report could not be loaded" detail={error} /> : null}
 
-      <div className="panel-grid panel-grid--quad">
-        <Panel title="Revenue" subtitle="Paid revenue in the selected range">
-          <strong className="panel-stat">{formatCurrency(data?.summary.totalRevenue ?? 0, currency)}</strong>
-        </Panel>
-        <Panel title="Invoices" subtitle="Distinct paid invoice count">
-          <strong className="panel-stat">{(data?.summary.invoiceCount ?? 0).toLocaleString("en-US")}</strong>
-        </Panel>
-        <Panel title="Customers" subtitle="Distinct paying customers">
-          <strong className="panel-stat">{(data?.summary.customerCount ?? 0).toLocaleString("en-US")}</strong>
-        </Panel>
-        <Panel title="Average ticket" subtitle="Average net total per paid invoice">
-          <strong className="panel-stat">{formatCurrency(data?.summary.averageInvoice ?? 0, currency)}</strong>
-        </Panel>
+      <div className="report-kpi-strip analytics-report__kpis">
+        <div className="report-kpi-strip__card">
+          <span className="report-kpi-strip__label">Revenue</span>
+          <span className="report-kpi-strip__value">{formatCurrency(data?.summary.totalRevenue ?? 0, currency)}</span>
+          <span className="report-kpi-strip__hint">Paid revenue in range</span>
+        </div>
+        <div className="report-kpi-strip__card">
+          <span className="report-kpi-strip__label">Invoices</span>
+          <span className="report-kpi-strip__value">{(data?.summary.invoiceCount ?? 0).toLocaleString("en-US")}</span>
+          <span className="report-kpi-strip__hint">Distinct paid invoices</span>
+        </div>
+        <div className="report-kpi-strip__card">
+          <span className="report-kpi-strip__label">Customers</span>
+          <span className="report-kpi-strip__value">{(data?.summary.customerCount ?? 0).toLocaleString("en-US")}</span>
+          <span className="report-kpi-strip__hint">Paying customers</span>
+        </div>
+        <div className="report-kpi-strip__card">
+          <span className="report-kpi-strip__label">Average ticket</span>
+          <span className="report-kpi-strip__value">{formatCurrency(data?.summary.averageInvoice ?? 0, currency)}</span>
+          <span className="report-kpi-strip__hint">Average invoice value</span>
+        </div>
       </div>
 
-      <div className="panel-grid panel-grid--split">
-        <Panel title="Daily revenue trend" subtitle="Paid sales grouped by day">
+      <div className="panel-grid panel-grid--split analytics-report__grid">
+        <Panel
+          className="analytics-report__panel analytics-report__panel--tall"
+          title="Revenue trend"
+          subtitle="Daily paid revenue for the selected range."
+        >
           {loading ? (
             <div className="inline-note">Loading revenue trend...</div>
           ) : !data || data.trend.length === 0 ? (
@@ -120,36 +138,36 @@ export function SalesReportPage() {
               items={data.trend.map((row) => ({
                 label: row.dateLabel.slice(5),
                 value: row.totalRevenue,
+                valueLabel: formatCurrency(row.totalRevenue, currency),
                 meta: `${row.invoiceCount.toLocaleString("en-US")} invoices`,
               }))}
             />
           )}
         </Panel>
 
-        <Panel title="Top services" subtitle="Highest-revenue services in the same window">
+        <Panel
+          className="analytics-report__panel"
+          title="Top services"
+          subtitle="Highest-value services in the same window."
+        >
           {loading ? (
             <div className="inline-note">Loading top services...</div>
           ) : !data || data.topServices.length === 0 ? (
             <EmptyState label="No sales services found" />
           ) : (
-            <DataTable
-              rows={data.topServices}
-              rowKey={(row) => row.serviceName}
-              columns={[
-                { key: "service", header: "Service", render: (row) => row.serviceName },
-                { key: "invoices", header: "Invoices", render: (row) => row.invoiceCount.toLocaleString("en-US") },
-                {
-                  key: "revenue",
-                  header: "Revenue",
-                  render: (row) => formatCurrency(row.totalRevenue, currency),
-                },
-              ]}
+            <HorizontalBarList
+              items={data.topServices.map((row) => ({
+                label: row.serviceName,
+                value: row.totalRevenue,
+                valueDisplay: `${formatCurrency(row.totalRevenue, currency)} · ${row.invoiceCount.toLocaleString("en-US")} invoices`,
+              }))}
             />
           )}
         </Panel>
       </div>
 
       <Panel
+        className="analytics-report__panel"
         title={`${currentClinic?.name ?? "Clinic"} sales rows`}
         subtitle={`${(data?.totalCount ?? 0).toLocaleString("en-US")} paid rows matched the current filters`}
         action={
