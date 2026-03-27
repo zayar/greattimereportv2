@@ -103,7 +103,6 @@ jobs:
           const fs = require("node:fs");
 
           const env = {
-            PORT: "8080",
             CORS_ORIGIN: process.env.CORS_ORIGIN,
             APICORE_GRAPHQL_URL: process.env.APICORE_GRAPHQL_URL,
             FIREBASE_SERVICE_ACCOUNT_JSON: process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
