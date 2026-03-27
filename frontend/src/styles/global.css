@@ -1740,6 +1740,98 @@ a {
   min-width: 1350px;
 }
 
+.customer-salesperson-report {
+  gap: 18px;
+}
+
+.customer-salesperson-report__selector-panel .panel__body,
+.customer-salesperson-report__results-panel .panel__body {
+  gap: 18px;
+}
+
+.customer-salesperson-report__selector-row {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(220px, 1fr) auto;
+  gap: 14px;
+  align-items: end;
+}
+
+.customer-salesperson-report__selector-field {
+  min-width: 0;
+}
+
+.customer-salesperson-report__selector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  min-height: 44px;
+}
+
+.customer-salesperson-report__selector-note {
+  color: #6b7280;
+  font-size: 0.92rem;
+}
+
+.customer-salesperson-report__active-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(31, 78, 69, 0.08);
+  color: #173f36;
+  border: 1px solid rgba(31, 78, 69, 0.12);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.customer-salesperson-report__table-actions {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.customer-salesperson-report__search {
+  min-width: 300px;
+}
+
+.customer-salesperson-report__results-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  color: #6b7280;
+  font-size: 0.9rem;
+}
+
+.customer-salesperson-report__results-panel .table-wrap {
+  max-height: calc(100vh - 430px);
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.customer-salesperson-report__results-panel .data-table {
+  width: max-content;
+  min-width: 1100px;
+}
+
+.customer-salesperson-report__name {
+  font-weight: 600;
+  color: #111827;
+}
+
+.customer-salesperson-report__amount {
+  font-weight: 700;
+  color: #17594e;
+}
+
+.customer-salesperson-report__pagination {
+  margin-top: 2px;
+  justify-content: center;
+}
+
 .behavior-report {
   gap: 20px;
 }
@@ -2118,6 +2210,21 @@ a {
 
   .banking-details-report__wallet-options {
     width: 100%;
+  }
+
+  .customer-salesperson-report__selector-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .customer-salesperson-report__table-actions,
+  .customer-salesperson-report__results-meta {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .customer-salesperson-report__search {
+    min-width: 100%;
   }
 
   .dashboard-home__intro,

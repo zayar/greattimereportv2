@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useState } from "react";
 import { fetchCustomersBySalesperson } from "../../../api/analytics";
 import { DateRangeControls } from "../../../components/DateRangeControls";
 import { DataTable } from "../../../components/DataTable";
@@ -181,6 +181,8 @@ export function CustomersBySalespersonPage() {
   const currency = currentClinic?.currency || "MMK";
   const totalPages = Math.max(1, Math.ceil((data?.totalCount ?? 0) / PAGE_SIZE));
   const summary = data?.summary ?? { customerCount: 0, totalSpend: 0, averageSpend: 0 };
+  const visibleCustomerCount = data?.customers.length ?? 0;
+  const hasLoadedResults = activeSellerName !== "";
 
   return (
     <div className="page-stack page-stack--workspace analytics-report customer-salesperson-report">
@@ -206,7 +208,7 @@ export function CustomersBySalespersonPage() {
       <Panel
         className="analytics-report__panel customer-salesperson-report__selector-panel"
         title="Select salesperson"
-        subtitle="Choose a salesperson first, then load the customer list when you are ready."
+        subtitle="Choose a salesperson first, then load the customer list only when you want to view it."
       >
         <div className="customer-salesperson-report__selector-row">
           <label className="field field--compact customer-salesperson-report__selector-field">
@@ -224,6 +226,24 @@ export function CustomersBySalespersonPage() {
               ))}
             </select>
           </label>
+
+          <div className="customer-salesperson-report__selector-actions">
+            {hasLoadedResults ? (
+              <span className="customer-salesperson-report__active-chip">
+                Viewing {activeSellerName}
+              </span>
+            ) : null}
+
+            {loadingSellers ? (
+              <span className="customer-salesperson-report__selector-note">Loading sales people...</span>
+            ) : null}
+
+            {selectedSellerName && !loadingSellers ? (
+              <span className="customer-salesperson-report__selector-note">
+                Ready to load customers for {selectedSellerName}
+              </span>
+            ) : null}
+          </div>
 
           <button
             className="button"
@@ -262,10 +282,10 @@ export function CustomersBySalespersonPage() {
 
       <Panel
         className="analytics-report__panel customer-salesperson-report__results-panel"
-        title={activeSellerName ? `${activeSellerName} customers` : "Customer list"}
+        title={activeSellerName ? "Detailed customer list" : "Customer list"}
         subtitle={
           activeSellerName
-            ? `Showing ${(data?.totalCount ?? 0).toLocaleString("en-US")} customers attributed to ${activeSellerName}.`
+            ? `Customers attributed to ${activeSellerName}, with spend and most recent invoice context.`
             : "Load a salesperson first to view the customer table."
         }
         action={
@@ -309,18 +329,30 @@ export function CustomersBySalespersonPage() {
         ) : null}
         {data && data.customers.length > 0 ? (
           <>
+            <div className="customer-salesperson-report__results-meta">
+              <span>
+                Showing {visibleCustomerCount.toLocaleString("en-US")} of{" "}
+                {(data.totalCount ?? 0).toLocaleString("en-US")} customers for {activeSellerName}
+              </span>
+              <span>Search by name, phone, or member ID</span>
+            </div>
+
             <DataTable
               rows={data.customers}
               rowKey={(row) => `${row.name}-${row.phoneNumber}-${row.lastInvoiceNumber}`}
               columns={[
-                { key: "name", header: "Customer Name", render: (row) => row.name },
+                {
+                  key: "name",
+                  header: "Customer Name",
+                  render: (row) => <span className="customer-salesperson-report__name">{row.name}</span>,
+                },
                 { key: "phone", header: "Phone Number", render: (row) => row.phoneNumber || "—" },
                 { key: "member", header: "Member ID", render: (row) => row.memberId || "—" },
                 {
                   key: "spend",
                   header: "Total Amount Spent",
                   render: (row) => (
-                    <span className="sales-details-report__strong">{formatCurrency(row.totalSpend, currency)}</span>
+                    <span className="customer-salesperson-report__amount">{formatCurrency(row.totalSpend, currency)}</span>
                   ),
                 },
                 { key: "date", header: "Last Purchase Date", render: (row) => row.lastPurchaseDate || "—" },
