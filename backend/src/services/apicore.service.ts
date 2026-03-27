@@ -2,8 +2,10 @@ import { env } from "../config/env.js";
 import { HttpError } from "../utils/http-error.js";
 
 const GAUTH_MUTATION = `
-  mutation Gauth($token: String!) {
-    gauth(token: $token)
+  mutation Gauth2($token: String!) {
+    gauth2(token: $token) {
+      token
+    }
   }
 `;
 
@@ -24,7 +26,7 @@ export async function exchangeGoogleCredentialForCustomToken(credential: string)
   }
 
   const payload = (await response.json()) as {
-    data?: { gauth?: string | null };
+    data?: { gauth2?: { token?: string | null } | null };
     errors?: Array<{ message?: string }>;
   };
 
@@ -32,11 +34,10 @@ export async function exchangeGoogleCredentialForCustomToken(credential: string)
     throw new HttpError(401, payload.errors[0]?.message || "Google sign-in failed.");
   }
 
-  const customToken = payload.data?.gauth;
+  const customToken = payload.data?.gauth2?.token;
   if (!customToken) {
     throw new HttpError(401, "gt.apicore did not return a Firebase custom token.");
   }
 
   return customToken;
 }
-
