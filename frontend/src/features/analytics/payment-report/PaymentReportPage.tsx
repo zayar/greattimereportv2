@@ -230,7 +230,7 @@ export function PaymentReportPage() {
   }
 
   return (
-    <div className="page-stack analytics-report sales-details-report">
+    <div className="page-stack page-stack--workspace analytics-report sales-details-report">
       <PageHeader
         eyebrow="Revenue"
         title="Sales details"

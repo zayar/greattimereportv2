@@ -694,6 +694,10 @@ a {
   margin: 0 auto;
 }
 
+.page-content > .page-stack--workspace {
+  max-width: none;
+}
+
 .page-stack {
   display: grid;
   gap: 24px;
