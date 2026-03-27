@@ -566,6 +566,32 @@ a {
   gap: 6px;
 }
 
+.nav-group {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.nav-group__label {
+  padding: 0 12px;
+  color: #525866;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.nav-group--active .nav-group__label {
+  color: #1f2937;
+}
+
+.nav-group__children {
+  display: grid;
+  gap: 6px;
+  margin-left: 10px;
+  padding-left: 10px;
+  border-left: 1px solid rgba(24, 29, 37, 0.08);
+  min-width: 0;
+}
+
 .nav-section:not(:first-child) {
   padding-top: 12px;
   border-top: 1px solid rgba(24, 29, 37, 0.06);
@@ -604,6 +630,12 @@ a {
 .nav-link--active {
   border-color: rgba(23, 63, 54, 0.12);
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+}
+
+.nav-link--nested {
+  padding: 10px 12px;
+  border-radius: 14px;
+  font-size: 0.94rem;
 }
 
 .sidebar-footer {
@@ -1591,6 +1623,73 @@ a {
   color: #c0c7d4;
 }
 
+.banking-details-report {
+  gap: 18px;
+}
+
+.banking-details-report__wallet-filter {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.banking-details-report__wallet-filter > span {
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+
+.banking-details-report__wallet-options {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.banking-details-report__wallet-button--active {
+  background: rgba(31, 78, 69, 0.1);
+  border-color: rgba(31, 78, 69, 0.18);
+  color: #173f36;
+}
+
+.banking-details-report__methods-wrap {
+  max-height: none;
+}
+
+.banking-details-report__methods-table {
+  width: 100%;
+  min-width: 720px;
+}
+
+.banking-details-report__methods-table thead th {
+  background: #f8fafc;
+}
+
+.banking-details-report__method-row {
+  cursor: pointer;
+  transition: background-color 140ms ease;
+}
+
+.banking-details-report__method-row:hover {
+  background: rgba(248, 250, 252, 0.9);
+}
+
+.banking-details-report__method-row--active {
+  background: rgba(31, 78, 69, 0.08);
+}
+
+.banking-details-report__method-button {
+  all: unset;
+  cursor: pointer;
+  font-weight: 600;
+  color: #111827;
+}
+
+.banking-details-report__panel .data-table {
+  width: max-content;
+  min-width: 1500px;
+}
+
 .behavior-report {
   gap: 20px;
 }
@@ -1965,6 +2064,10 @@ a {
   .sales-details-report__search,
   .sales-details-report__method {
     min-width: 100%;
+  }
+
+  .banking-details-report__wallet-options {
+    width: 100%;
   }
 
   .dashboard-home__intro,

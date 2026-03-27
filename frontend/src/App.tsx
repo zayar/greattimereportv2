@@ -19,6 +19,7 @@ import { SalesBySellerPage } from "./features/analytics/sales-by-seller/SalesByS
 import { DailyTreatmentPage } from "./features/analytics/daily-treatment/DailyTreatmentPage";
 import { SalesReportPage } from "./features/analytics/sales-report/SalesReportPage";
 import { BankingSummaryPage } from "./features/analytics/banking-summary/BankingSummaryPage";
+import { CustomersBySalespersonPage } from "./features/analytics/customers-by-salesperson/CustomersBySalespersonPage";
 
 export default function App() {
   return (
@@ -49,6 +50,7 @@ export default function App() {
                   <Route path="analytics/payment-report" element={<PaymentReportPage />} />
                   <Route path="analytics/daily-treatment" element={<DailyTreatmentPage />} />
                   <Route path="analytics/sales-by-seller" element={<SalesBySellerPage />} />
+                  <Route path="analytics/customers-by-salesperson" element={<CustomersBySalespersonPage />} />
                 </Route>
               </Routes>
             </BrowserRouter>

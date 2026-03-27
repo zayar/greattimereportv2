@@ -257,17 +257,36 @@ export interface BankingSummaryResponse {
     transactionCount: number;
     averageTicket: number;
   }>;
-  dailyCollections: Array<{
-    dateLabel: string;
-    totalAmount: number;
-    transactionCount: number;
-  }>;
-  recentRows: Array<{
+  rows: Array<{
     dateLabel: string;
     invoiceNumber: string;
     customerName: string;
+    memberId: string;
     salePerson: string;
+    serviceName: string;
+    servicePackageName?: string | null;
     paymentMethod: string;
-    totalAmount: number;
+    paymentStatus: string;
+    walletTopUp?: string | number | null;
+    invoiceNetTotal: number;
   }>;
+  totalCount: number;
+}
+
+export interface CustomersBySalespersonResponse {
+  sellers: string[];
+  summary: {
+    customerCount: number;
+    totalSpend: number;
+    averageSpend: number;
+  };
+  customers: Array<{
+    name: string;
+    phoneNumber: string;
+    memberId: string;
+    totalSpend: number;
+    lastInvoiceNumber: string;
+    lastPurchaseDate: string;
+  }>;
+  totalCount: number;
 }

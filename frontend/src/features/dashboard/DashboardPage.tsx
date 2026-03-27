@@ -25,15 +25,15 @@ type Preset = {
 const reportOptions: ReportOption[] = [
   {
     id: "sales-report",
-    label: "Revenue overview",
-    description: "Sales totals, top services, and invoice detail.",
+    label: "Payment report",
+    description: "Paid invoice performance, top services, and payment-backed detail.",
     kind: "Analytics",
     route: "/analytics/sales-report",
   },
   {
     id: "banking-summary",
-    label: "Banking summary",
-    description: "Collections by payment type and daily banking flow.",
+    label: "Banking details",
+    description: "Payment-method drilldown with detailed transaction rows.",
     kind: "Analytics",
     route: "/analytics/banking-summary",
   },
@@ -59,6 +59,20 @@ const reportOptions: ReportOption[] = [
     route: "/analytics/payment-report",
   },
   {
+    id: "sales-by-seller",
+    label: "Sales by sales person",
+    description: "Attributed revenue ranking and recent invoice flow by seller.",
+    kind: "Analytics",
+    route: "/analytics/sales-by-seller",
+  },
+  {
+    id: "customers-by-salesperson",
+    label: "Customer by sales person",
+    description: "Customers sourced by a selected sales person, ranked by spend.",
+    kind: "Analytics",
+    route: "/analytics/customers-by-salesperson",
+  },
+  {
     id: "appointments",
     label: "Appointments",
     description: "Operational booking flow and schedule visibility.",
@@ -68,7 +82,7 @@ const reportOptions: ReportOption[] = [
 ];
 
 const presets: Preset[] = [
-  { id: "preset-30", label: "Last 30 days", reportId: "sales-report", days: 30 },
+  { id: "preset-30", label: "Last 30 days", reportId: "payment-report", days: 30 },
   { id: "preset-90", label: "Last 90 days", reportId: "customer-behavior", days: 90 },
   { id: "preset-180", label: "Last 180 days", reportId: "service-behavior", days: 180 },
 ];

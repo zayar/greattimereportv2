@@ -76,9 +76,9 @@ export function SalesBySellerPage() {
   return (
     <div className="page-stack analytics-report">
       <PageHeader
-        eyebrow="Analytics"
-        title="Sales by seller"
-        description="Seller performance, revenue ranking, and recent invoice rows."
+        eyebrow="Revenue"
+        title="Sales by sales person"
+        description="Sales-person ranking, attributed revenue, and recent invoice rows."
         actions={
           <div className="filter-row analytics-report__filters">
             <DateRangeControls fromDate={range.fromDate} toDate={range.toDate} onChange={setRange} />
@@ -86,7 +86,7 @@ export function SalesBySellerPage() {
         }
       />
 
-      {error ? <ErrorState label="Seller analytics could not be loaded" detail={error} /> : null}
+      {error ? <ErrorState label="Sales by sales person could not be loaded" detail={error} /> : null}
 
       <div className="report-kpi-strip analytics-report__kpis">
         <div className="report-kpi-strip__card">

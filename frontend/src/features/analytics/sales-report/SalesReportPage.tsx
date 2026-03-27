@@ -56,7 +56,7 @@ export function SalesReportPage() {
       })
       .catch((loadError) => {
         if (active) {
-          setError(loadError instanceof Error ? loadError.message : "Failed to load sales report.");
+          setError(loadError instanceof Error ? loadError.message : "Failed to load payment report.");
         }
       })
       .finally(() => {
@@ -76,9 +76,9 @@ export function SalesReportPage() {
   return (
     <div className="page-stack analytics-report">
       <PageHeader
-        eyebrow="Analytics"
-        title="Sales report"
-        description="Paid sales, service rankings, and invoice detail for the selected clinic."
+        eyebrow="Revenue"
+        title="Payment report"
+        description="Paid invoice performance, service rankings, and invoice-level payment review."
         actions={
           <div className="filter-row analytics-report__filters">
             <DateRangeControls fromDate={range.fromDate} toDate={range.toDate} onChange={setRange} />
@@ -98,7 +98,7 @@ export function SalesReportPage() {
         }
       />
 
-      {error ? <ErrorState label="Sales report could not be loaded" detail={error} /> : null}
+      {error ? <ErrorState label="Payment report could not be loaded" detail={error} /> : null}
 
       <div className="report-kpi-strip analytics-report__kpis">
         <div className="report-kpi-strip__card">

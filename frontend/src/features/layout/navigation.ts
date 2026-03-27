@@ -1,4 +1,15 @@
-export const navigationSections = [
+export type NavigationItem = {
+  label: string;
+  to?: string;
+  children?: NavigationItem[];
+};
+
+export type NavigationSection = {
+  title: string;
+  items: NavigationItem[];
+};
+
+export const navigationSections: NavigationSection[] = [
   {
     title: "Home",
     items: [{ to: "/dashboard", label: "Dashboard" }],
@@ -14,10 +25,16 @@ export const navigationSections = [
   {
     title: "Revenue",
     items: [
-      { to: "/analytics/sales-report", label: "Sales report" },
-      { to: "/analytics/banking-summary", label: "Banking summary" },
-      { to: "/analytics/payment-report", label: "Sales details" },
-      { to: "/analytics/sales-by-seller", label: "Sales by seller" },
+      { to: "/analytics/banking-summary", label: "Banking details" },
+      {
+        label: "Sales",
+        children: [
+          { to: "/analytics/payment-report", label: "Sales details" },
+          { to: "/analytics/sales-report", label: "Payment report" },
+          { to: "/analytics/sales-by-seller", label: "Sales by sales person" },
+          { to: "/analytics/customers-by-salesperson", label: "Customer by sales person" },
+        ],
+      },
     ],
   },
   {

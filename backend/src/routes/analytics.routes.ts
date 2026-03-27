@@ -10,6 +10,7 @@ import { getSalesBySellerReport } from "../services/reports/sales-by-seller.serv
 import { getDailyTreatmentReport } from "../services/reports/daily-treatment.service.js";
 import { getSalesReport } from "../services/reports/sales-report.service.js";
 import { getBankingSummary } from "../services/reports/banking-summary.service.js";
+import { getCustomersBySalespersonReport } from "../services/reports/customers-by-salesperson.service.js";
 import { asyncHandler } from "../utils/async-handler.js";
 
 const router = Router();
@@ -144,8 +145,26 @@ router.get(
   "/banking-summary",
   requireClinicAccess("query", "clinicId"),
   asyncHandler(async (req, res) => {
-    const params = baseAnalyticsSchema.parse(req.query);
-    const data = await getBankingSummary(params);
+    const params = baseAnalyticsSchema
+      .extend({
+        search: z.string().default(""),
+        paymentMethod: z.string().default(""),
+        walletTopupFilter: z.enum(["all", "hide", "only"]).default("all"),
+        page: z.coerce.number().min(1).default(1),
+        pageSize: z.coerce.number().min(1).max(100).default(50),
+      })
+      .parse(req.query);
+
+    const data = await getBankingSummary({
+      clinicCode: params.clinicCode,
+      fromDate: params.fromDate,
+      toDate: params.toDate,
+      search: params.search,
+      paymentMethod: params.paymentMethod,
+      walletTopupFilter: params.walletTopupFilter,
+      limit: params.pageSize,
+      offset: (params.page - 1) * params.pageSize,
+    });
     res.json({ success: true, data });
   }),
 );
@@ -156,6 +175,33 @@ router.get(
   asyncHandler(async (req, res) => {
     const params = baseAnalyticsSchema.parse(req.query);
     const data = await getSalesBySellerReport(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/customers-by-salesperson",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = baseAnalyticsSchema
+      .extend({
+        sellerName: z.string().default(""),
+        search: z.string().default(""),
+        page: z.coerce.number().min(1).default(1),
+        pageSize: z.coerce.number().min(1).max(100).default(25),
+      })
+      .parse(req.query);
+
+    const data = await getCustomersBySalespersonReport({
+      clinicCode: params.clinicCode,
+      fromDate: params.fromDate,
+      toDate: params.toDate,
+      sellerName: params.sellerName,
+      search: params.search,
+      limit: params.pageSize,
+      offset: (params.page - 1) * params.pageSize,
+    });
+
     res.json({ success: true, data });
   }),
 );

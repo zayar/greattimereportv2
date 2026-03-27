@@ -1,9 +1,22 @@
+import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { navigationSections } from "./navigation";
+import { navigationSections, type NavigationItem } from "./navigation";
 import { useAccess } from "../access/AccessProvider";
 import { useSession } from "../auth/SessionProvider";
 import { EmptyState, ErrorState, ScreenLoader } from "../../components/StatusViews";
+
+function flattenNavigationItems(items: NavigationItem[]): NavigationItem[] {
+  return items.flatMap((item) => (item.children ? flattenNavigationItems(item.children) : [item]));
+}
+
+function isNavigationItemActive(item: NavigationItem, pathname: string): boolean {
+  if (item.to) {
+    return item.to === pathname;
+  }
+
+  return item.children?.some((child) => isNavigationItemActive(child, pathname)) ?? false;
+}
 
 export function AppShell() {
   const { loading, error, businesses, currentBusiness, currentClinic, selectBusiness, selectClinic } =
@@ -14,7 +27,7 @@ export function AppShell() {
 
   const pageTitle = useMemo(() => {
     const currentItem = navigationSections
-      .flatMap((section) => section.items)
+      .flatMap((section) => flattenNavigationItems(section.items))
       .find((item) => item.to === location.pathname);
 
     return currentItem?.label ?? "GT V2 Report";
@@ -55,6 +68,37 @@ export function AppShell() {
     );
   }
 
+  function renderNavigationItems(items: NavigationItem[], depth = 0): ReactNode {
+    return items.map((item) => {
+      if (item.children?.length) {
+        const active = isNavigationItemActive(item, location.pathname);
+
+        return (
+          <div
+            key={`${item.label}-${depth}`}
+            className={`nav-group ${active ? "nav-group--active" : ""}`.trim()}
+          >
+            <div className="nav-group__label">{item.label}</div>
+            <div className="nav-group__children">{renderNavigationItems(item.children, depth + 1)}</div>
+          </div>
+        );
+      }
+
+      return (
+        <NavLink
+          key={item.to}
+          to={item.to!}
+          className={({ isActive }) =>
+            `nav-link ${depth > 0 ? "nav-link--nested" : ""} ${isActive ? "nav-link--active" : ""}`.trim()
+          }
+          onClick={() => setSidebarOpen(false)}
+        >
+          <span>{item.label}</span>
+        </NavLink>
+      );
+    });
+  }
+
   return (
     <div className="shell">
       <aside className={`shell__sidebar ${sidebarOpen ? "shell__sidebar--open" : ""}`.trim()}>
@@ -75,18 +119,7 @@ export function AppShell() {
           {navigationSections.map((section) => (
             <div key={section.title} className="nav-section">
               <span className="nav-section__title">{section.title}</span>
-              {section.items.map((item) => (
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  className={({ isActive }) =>
-                    `nav-link ${isActive ? "nav-link--active" : ""}`.trim()
-                  }
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <span>{item.label}</span>
-                </NavLink>
-              ))}
+              {renderNavigationItems(section.items)}
             </div>
           ))}
         </nav>

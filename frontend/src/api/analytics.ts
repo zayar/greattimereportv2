@@ -1,6 +1,7 @@
 import { apiClient } from "./http";
 import type {
   BankingSummaryResponse,
+  CustomersBySalespersonResponse,
   CustomerBehaviorResponse,
   DashboardResponse,
   DailyTreatmentResponse,
@@ -81,6 +82,37 @@ export async function fetchSalesBySeller(params: BaseParams) {
 export async function fetchBankingSummary(params: BaseParams) {
   const response = await apiClient.get<{ success: true; data: BankingSummaryResponse }>(
     "/analytics/banking-summary",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchBankingDetails(
+  params: BaseParams & {
+    search: string;
+    paymentMethod: string;
+    walletTopupFilter: "all" | "hide" | "only";
+    page: number;
+    pageSize: number;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: BankingSummaryResponse }>(
+    "/analytics/banking-summary",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchCustomersBySalesperson(
+  params: BaseParams & {
+    sellerName: string;
+    search: string;
+    page: number;
+    pageSize: number;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: CustomersBySalespersonResponse }>(
+    "/analytics/customers-by-salesperson",
     { params },
   );
   return response.data.data;
