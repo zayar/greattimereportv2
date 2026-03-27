@@ -6,8 +6,26 @@ function readEnv(key: keyof ImportMetaEnv) {
   return value;
 }
 
+function normalizeApiBaseUrl(value: string) {
+  const parsed = new URL(value);
+  const path = parsed.pathname.replace(/\/+$/, "");
+
+  if (path === "" || path === "/") {
+    parsed.pathname = "/api";
+    return parsed.toString().replace(/\/+$/, "");
+  }
+
+  if (path.endsWith("/api")) {
+    parsed.pathname = path;
+    return parsed.toString().replace(/\/+$/, "");
+  }
+
+  parsed.pathname = path;
+  return parsed.toString().replace(/\/+$/, "");
+}
+
 export const env = {
-  apiBaseUrl: readEnv("VITE_API_BASE_URL"),
+  apiBaseUrl: normalizeApiBaseUrl(readEnv("VITE_API_BASE_URL")),
   apicoreGraphqlUrl: readEnv("VITE_APICORE_GRAPHQL_URL"),
   googleClientId: readEnv("VITE_GOOGLE_CLIENT_ID"),
   firebase: {
@@ -20,4 +38,3 @@ export const env = {
     measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
   },
 };
-
