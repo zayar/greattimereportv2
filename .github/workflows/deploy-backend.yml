@@ -32,7 +32,7 @@ jobs:
       - name: Build backend image
         env:
           IMAGE_URI: ${{ vars.ARTIFACT_REGISTRY_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/${{ vars.ARTIFACT_REGISTRY_REPOSITORY }}/${{ vars.CLOUD_RUN_SERVICE }}:${{ github.sha }}
-        run: gcloud builds submit --tag "$IMAGE_URI" --file backend/Dockerfile .
+        run: gcloud builds submit --config cloudbuild.backend.yaml --substitutions=_IMAGE_URI="$IMAGE_URI" .
 
       - name: Generate Cloud Run env file
         env:
