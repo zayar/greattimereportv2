@@ -23,6 +23,7 @@ type SalesResponse = {
 };
 
 const PAGE_SIZE = 20;
+const ZERO_DECIMAL = "0";
 
 function buildOrderWhere(params: {
   clinicId: string;
@@ -46,7 +47,7 @@ function buildOrderWhere(params: {
     andClauses.push({
       net_total: {
         not: {
-          equals: 0,
+          equals: ZERO_DECIMAL,
         },
       },
     });
