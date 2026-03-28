@@ -10,6 +10,9 @@ import {
   type SalesDocumentConfig,
   type SalesDocumentDensity,
   type SalesDocumentHeaderLayout,
+  type SalesDocumentMarginPreset,
+  type SalesDocumentOrientation,
+  type SalesDocumentPaperSize,
   type SalesDocumentPaperTone,
 } from "../../operational/sales/salesDocumentConfig";
 import { buildSampleSalesDocumentModel } from "../../operational/sales/salesDocumentModel";
@@ -23,7 +26,7 @@ type ToggleKey =
   | "showClinicLogo"
   | "showClinicContact"
   | "showMemberPhone"
-  | "showSeller"
+  | "showItemsTable"
   | "showPaymentDetails"
   | "showNotes"
   | "showFooterNote";
@@ -149,64 +152,137 @@ export function SalesDocumentSettingsPage() {
           subtitle="Tune the paper presentation while keeping the underlying sales data and storage contract unchanged."
         >
           <div className="sales-document-settings__control-stack">
-            <label className="field">
-              <span>Document title</span>
-              <input
-                type="text"
-                value={draftConfig.documentTitle}
-                onChange={(event) => updateConfig("documentTitle", event.target.value)}
-              />
-            </label>
+            <section className="sales-document-settings__section">
+              <div className="sales-document-settings__section-heading">
+                <strong>Document</strong>
+                <span>Set the invoice heading and overall paper rhythm.</span>
+              </div>
 
-            <label className="field">
-              <span>Document subtitle</span>
-              <textarea
-                className="sales-document-settings__textarea"
-                value={draftConfig.documentSubtitle}
-                onChange={(event) => updateConfig("documentSubtitle", event.target.value)}
-                rows={3}
-              />
-            </label>
-
-            <div className="sales-document-settings__two-up">
               <label className="field">
-                <span>Accent color</span>
-                <div className="sales-document-settings__color-field">
-                  <input
-                    className="sales-document-settings__color-picker"
-                    type="color"
-                    value={colorPickerValue}
-                    onChange={(event) => updateConfig("accentColor", event.target.value)}
-                  />
-                  <input
-                    type="text"
-                    value={draftConfig.accentColor}
-                    onChange={(event) => updateConfig("accentColor", event.target.value)}
-                  />
-                </div>
+                <span>Document title</span>
+                <input
+                  type="text"
+                  value={draftConfig.documentTitle}
+                  onChange={(event) => updateConfig("documentTitle", event.target.value)}
+                />
               </label>
 
-              <label className="field">
-                <span>Header text color</span>
-                <div className="sales-document-settings__color-field">
-                  <input
-                    className="sales-document-settings__color-picker"
-                    type="color"
-                    value={headerTextColorPickerValue}
-                    onChange={(event) => updateConfig("headerTextColor", event.target.value)}
-                  />
-                  <input
-                    type="text"
-                    value={draftConfig.headerTextColor}
-                    onChange={(event) => updateConfig("headerTextColor", event.target.value)}
-                  />
-                </div>
-              </label>
-            </div>
+              <div className="sales-document-settings__two-up">
+                <label className="field">
+                  <span>Paper size</span>
+                  <select
+                    value={draftConfig.paperSize}
+                    onChange={(event) => updateConfig("paperSize", event.target.value as SalesDocumentPaperSize)}
+                  >
+                    <option value="A4">A4</option>
+                    <option value="Letter">Letter</option>
+                  </select>
+                </label>
 
-            <div className="sales-document-settings__two-up">
+                <label className="field">
+                  <span>Orientation</span>
+                  <select
+                    value={draftConfig.orientation}
+                    onChange={(event) => updateConfig("orientation", event.target.value as SalesDocumentOrientation)}
+                  >
+                    <option value="portrait">Portrait</option>
+                    <option value="landscape">Landscape</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="sales-document-settings__three-up">
+                <label className="field">
+                  <span>Margins</span>
+                  <select
+                    value={draftConfig.marginPreset}
+                    onChange={(event) => updateConfig("marginPreset", event.target.value as SalesDocumentMarginPreset)}
+                  >
+                    <option value="narrow">Narrow</option>
+                    <option value="normal">Normal</option>
+                    <option value="wide">Wide</option>
+                  </select>
+                </label>
+
+                <label className="field">
+                  <span>Header layout</span>
+                  <select
+                    value={draftConfig.headerLayout}
+                    onChange={(event) => updateConfig("headerLayout", event.target.value as SalesDocumentHeaderLayout)}
+                  >
+                    <option value="split">Split</option>
+                    <option value="stacked">Stacked</option>
+                  </select>
+                </label>
+
+                <label className="field">
+                  <span>Density</span>
+                  <select
+                    value={draftConfig.density}
+                    onChange={(event) => updateConfig("density", event.target.value as SalesDocumentDensity)}
+                  >
+                    <option value="comfortable">Comfortable</option>
+                    <option value="compact">Compact</option>
+                  </select>
+                </label>
+              </div>
+
               <label className="field">
-                <span>Items list color</span>
+                <span>Paper tone</span>
+                <select
+                  value={draftConfig.paperTone}
+                  onChange={(event) => updateConfig("paperTone", event.target.value as SalesDocumentPaperTone)}
+                >
+                  <option value="ivory">Ivory</option>
+                  <option value="white">White</option>
+                </select>
+              </label>
+            </section>
+
+            <section className="sales-document-settings__section">
+              <div className="sales-document-settings__section-heading">
+                <strong>Colors</strong>
+                <span>Use color sparingly for the header, table, and fine accents.</span>
+              </div>
+
+              <div className="sales-document-settings__two-up">
+                <label className="field">
+                  <span>Primary accent</span>
+                  <div className="sales-document-settings__color-field">
+                    <input
+                      className="sales-document-settings__color-picker"
+                      type="color"
+                      value={colorPickerValue}
+                      onChange={(event) => updateConfig("accentColor", event.target.value)}
+                    />
+                    <input
+                      type="text"
+                      value={draftConfig.accentColor}
+                      onChange={(event) => updateConfig("accentColor", event.target.value)}
+                    />
+                  </div>
+                </label>
+
+                <label className="field">
+                  <span>Header text</span>
+                  <div className="sales-document-settings__color-field">
+                    <input
+                      className="sales-document-settings__color-picker"
+                      type="color"
+                      value={headerTextColorPickerValue}
+                      onChange={(event) => updateConfig("headerTextColor", event.target.value)}
+                    />
+                    <input
+                      type="text"
+                      value={draftConfig.headerTextColor}
+                      onChange={(event) => updateConfig("headerTextColor", event.target.value)}
+                    />
+                  </div>
+                </label>
+              </div>
+
+              <label className="field">
+                <span>Items table accent</span>
                 <div className="sales-document-settings__color-field">
                   <input
                     className="sales-document-settings__color-picker"
@@ -221,111 +297,89 @@ export function SalesDocumentSettingsPage() {
                   />
                 </div>
               </label>
-            </div>
+            </section>
 
-            <div className="sales-document-settings__two-up">
+            <section className="sales-document-settings__section">
+              <div className="sales-document-settings__section-heading">
+                <strong>Visible sections</strong>
+                <span>Keep the paper simple and only show the pieces you need.</span>
+              </div>
+
+              <div className="sales-document-settings__toggle-group">
+                <label className="sales-document-settings__toggle">
+                  <input type="checkbox" checked={draftConfig.showClinicLogo} onChange={() => toggleConfig("showClinicLogo")} />
+                  <div>
+                    <strong>Clinic logo</strong>
+                    <span>Display clinic branding in the header.</span>
+                  </div>
+                </label>
+
+                <label className="sales-document-settings__toggle">
+                  <input type="checkbox" checked={draftConfig.showClinicContact} onChange={() => toggleConfig("showClinicContact")} />
+                  <div>
+                    <strong>Clinic contact block</strong>
+                    <span>Show address and phone with the clinic details.</span>
+                  </div>
+                </label>
+
+                <label className="sales-document-settings__toggle">
+                  <input type="checkbox" checked={draftConfig.showMemberPhone} onChange={() => toggleConfig("showMemberPhone")} />
+                  <div>
+                    <strong>Customer / member phone</strong>
+                    <span>Include the member phone number in the Bill To section.</span>
+                  </div>
+                </label>
+
+                <label className="sales-document-settings__toggle">
+                  <input type="checkbox" checked={draftConfig.showItemsTable} onChange={() => toggleConfig("showItemsTable")} />
+                  <div>
+                    <strong>Items table</strong>
+                    <span>Render the line-item table as the center of the invoice.</span>
+                  </div>
+                </label>
+
+                <label className="sales-document-settings__toggle">
+                  <input type="checkbox" checked={draftConfig.showNotes} onChange={() => toggleConfig("showNotes")} />
+                  <div>
+                    <strong>Notes block</strong>
+                    <span>Show notes or aftercare instructions beneath the items table.</span>
+                  </div>
+                </label>
+
+                <label className="sales-document-settings__toggle">
+                  <input type="checkbox" checked={draftConfig.showPaymentDetails} onChange={() => toggleConfig("showPaymentDetails")} />
+                  <div>
+                    <strong>Payments block</strong>
+                    <span>List recorded payments in a subtle section beneath the totals.</span>
+                  </div>
+                </label>
+
+                <label className="sales-document-settings__toggle">
+                  <input type="checkbox" checked={draftConfig.showFooterNote} onChange={() => toggleConfig("showFooterNote")} />
+                  <div>
+                    <strong>Footer note</strong>
+                    <span>Add a quiet footer message below the invoice body.</span>
+                  </div>
+                </label>
+              </div>
+            </section>
+
+            <section className="sales-document-settings__section">
+              <div className="sales-document-settings__section-heading">
+                <strong>Footer</strong>
+                <span>Keep the ending note light and print-friendly.</span>
+              </div>
+
               <label className="field">
-                <span>Paper tone</span>
-                <select
-                  value={draftConfig.paperTone}
-                  onChange={(event) => updateConfig("paperTone", event.target.value as SalesDocumentPaperTone)}
-                >
-                  <option value="ivory">Ivory</option>
-                  <option value="white">White</option>
-                </select>
+                <span>Footer note</span>
+                <textarea
+                  className="sales-document-settings__textarea"
+                  value={draftConfig.footerNote}
+                  onChange={(event) => updateConfig("footerNote", event.target.value)}
+                  rows={4}
+                />
               </label>
-              <label className="field">
-                <span>Header layout</span>
-                <select
-                  value={draftConfig.headerLayout}
-                  onChange={(event) => updateConfig("headerLayout", event.target.value as SalesDocumentHeaderLayout)}
-                >
-                  <option value="split">Split</option>
-                  <option value="stacked">Stacked</option>
-                </select>
-              </label>
-            </div>
-
-            <label className="field">
-              <span>Density</span>
-              <select
-                value={draftConfig.density}
-                onChange={(event) => updateConfig("density", event.target.value as SalesDocumentDensity)}
-              >
-                <option value="comfortable">Comfortable</option>
-                <option value="compact">Compact</option>
-              </select>
-            </label>
-
-            <div className="sales-document-settings__toggle-group">
-              <span className="sales-document-settings__group-label">Visible sections</span>
-
-              <label className="sales-document-settings__toggle">
-                <input type="checkbox" checked={draftConfig.showClinicLogo} onChange={() => toggleConfig("showClinicLogo")} />
-                <div>
-                  <strong>Clinic logo</strong>
-                  <span>Display clinic branding in the header.</span>
-                </div>
-              </label>
-
-              <label className="sales-document-settings__toggle">
-                <input type="checkbox" checked={draftConfig.showClinicContact} onChange={() => toggleConfig("showClinicContact")} />
-                <div>
-                  <strong>Clinic contact block</strong>
-                  <span>Show address and phone beneath the clinic name.</span>
-                </div>
-              </label>
-
-              <label className="sales-document-settings__toggle">
-                <input type="checkbox" checked={draftConfig.showMemberPhone} onChange={() => toggleConfig("showMemberPhone")} />
-                <div>
-                  <strong>Member phone</strong>
-                  <span>Include phone number in the customer section when present.</span>
-                </div>
-              </label>
-
-              <label className="sales-document-settings__toggle">
-                <input type="checkbox" checked={draftConfig.showSeller} onChange={() => toggleConfig("showSeller")} />
-                <div>
-                  <strong>Seller section</strong>
-                  <span>Show seller, sold-by, and payment method details.</span>
-                </div>
-              </label>
-
-              <label className="sales-document-settings__toggle">
-                <input type="checkbox" checked={draftConfig.showPaymentDetails} onChange={() => toggleConfig("showPaymentDetails")} />
-                <div>
-                  <strong>Payment breakdown</strong>
-                  <span>List split or recorded payments under the totals panel.</span>
-                </div>
-              </label>
-
-              <label className="sales-document-settings__toggle">
-                <input type="checkbox" checked={draftConfig.showNotes} onChange={() => toggleConfig("showNotes")} />
-                <div>
-                  <strong>Notes block</strong>
-                  <span>Render merchant notes or aftercare instructions when available.</span>
-                </div>
-              </label>
-
-              <label className="sales-document-settings__toggle">
-                <input type="checkbox" checked={draftConfig.showFooterNote} onChange={() => toggleConfig("showFooterNote")} />
-                <div>
-                  <strong>Footer note</strong>
-                  <span>Add a quiet review/print note at the bottom of the document.</span>
-                </div>
-              </label>
-            </div>
-
-            <label className="field">
-              <span>Footer note</span>
-              <textarea
-                className="sales-document-settings__textarea"
-                value={draftConfig.footerNote}
-                onChange={(event) => updateConfig("footerNote", event.target.value)}
-                rows={4}
-              />
-            </label>
+            </section>
           </div>
         </Panel>
 

@@ -1,6 +1,9 @@
 export type SalesDocumentPaperTone = "ivory" | "white";
 export type SalesDocumentDensity = "comfortable" | "compact";
 export type SalesDocumentHeaderLayout = "split" | "stacked";
+export type SalesDocumentPaperSize = "A4" | "Letter";
+export type SalesDocumentOrientation = "portrait" | "landscape";
+export type SalesDocumentMarginPreset = "narrow" | "normal" | "wide";
 
 export interface SalesDocumentConfig {
   version: 1;
@@ -10,11 +13,15 @@ export interface SalesDocumentConfig {
   headerTextColor: string;
   itemsAccentColor: string;
   paperTone: SalesDocumentPaperTone;
+  paperSize: SalesDocumentPaperSize;
+  orientation: SalesDocumentOrientation;
+  marginPreset: SalesDocumentMarginPreset;
   density: SalesDocumentDensity;
   headerLayout: SalesDocumentHeaderLayout;
   showClinicLogo: boolean;
   showClinicContact: boolean;
   showMemberPhone: boolean;
+  showItemsTable: boolean;
   showSeller: boolean;
   showPaymentDetails: boolean;
   showNotes: boolean;
@@ -25,16 +32,20 @@ export interface SalesDocumentConfig {
 export const defaultSalesDocumentConfig: SalesDocumentConfig = {
   version: 1,
   documentTitle: "Sales Invoice",
-  documentSubtitle: "A clean document preview for invoice, member, line-item, and payment review.",
+  documentSubtitle: "",
   accentColor: "#1e4b4d",
   headerTextColor: "#24180d",
   itemsAccentColor: "#b38a4b",
   paperTone: "white",
+  paperSize: "A4",
+  orientation: "portrait",
+  marginPreset: "normal",
   density: "comfortable",
   headerLayout: "split",
   showClinicLogo: true,
   showClinicContact: true,
   showMemberPhone: true,
+  showItemsTable: true,
   showSeller: true,
   showPaymentDetails: true,
   showNotes: true,
@@ -75,11 +86,15 @@ export function normalizeSalesDocumentConfig(value: unknown): SalesDocumentConfi
     headerTextColor: normalizeAccentColor(value.headerTextColor, defaultSalesDocumentConfig.headerTextColor),
     itemsAccentColor: normalizeAccentColor(value.itemsAccentColor, defaultSalesDocumentConfig.itemsAccentColor),
     paperTone: normalizeOption(value.paperTone, ["ivory", "white"], defaultSalesDocumentConfig.paperTone),
+    paperSize: normalizeOption(value.paperSize, ["A4", "Letter"], defaultSalesDocumentConfig.paperSize),
+    orientation: normalizeOption(value.orientation, ["portrait", "landscape"], defaultSalesDocumentConfig.orientation),
+    marginPreset: normalizeOption(value.marginPreset, ["narrow", "normal", "wide"], defaultSalesDocumentConfig.marginPreset),
     density: normalizeOption(value.density, ["comfortable", "compact"], defaultSalesDocumentConfig.density),
     headerLayout: normalizeOption(value.headerLayout, ["split", "stacked"], defaultSalesDocumentConfig.headerLayout),
     showClinicLogo: normalizeBoolean(value.showClinicLogo, defaultSalesDocumentConfig.showClinicLogo),
     showClinicContact: normalizeBoolean(value.showClinicContact, defaultSalesDocumentConfig.showClinicContact),
     showMemberPhone: normalizeBoolean(value.showMemberPhone, defaultSalesDocumentConfig.showMemberPhone),
+    showItemsTable: normalizeBoolean(value.showItemsTable, defaultSalesDocumentConfig.showItemsTable),
     showSeller: normalizeBoolean(value.showSeller, defaultSalesDocumentConfig.showSeller),
     showPaymentDetails: normalizeBoolean(value.showPaymentDetails, defaultSalesDocumentConfig.showPaymentDetails),
     showNotes: normalizeBoolean(value.showNotes, defaultSalesDocumentConfig.showNotes),

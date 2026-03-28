@@ -32,6 +32,22 @@ async function waitForPrintAssets(printWindow: Window) {
   );
 }
 
+function getPrintPageSize(paperSize: string, orientation: string) {
+  return `${paperSize} ${orientation}`;
+}
+
+function getPrintMargin(marginPreset: string) {
+  if (marginPreset === "narrow") {
+    return "6mm";
+  }
+
+  if (marginPreset === "wide") {
+    return "14mm";
+  }
+
+  return "10mm";
+}
+
 export function SalesDetailPage() {
   const navigate = useNavigate();
   const previewRef = useRef<HTMLDivElement | null>(null);
@@ -107,6 +123,11 @@ export function SalesDetailPage() {
     <title>${order.order_id}</title>
     ${styleMarkup}
     <style>
+      @page {
+        size: ${getPrintPageSize(config.paperSize, config.orientation)};
+        margin: ${getPrintMargin(config.marginPreset)};
+      }
+
       html, body {
         margin: 0;
         background: #ffffff;
@@ -117,8 +138,7 @@ export function SalesDetailPage() {
       }
 
       .sales-print-window {
-        display: grid;
-        place-items: start center;
+        display: block;
         background: #ffffff;
       }
     </style>

@@ -4664,6 +4664,364 @@ a {
   margin-bottom: 28px;
 }
 
+.sales-document-page__context-bar,
+.sales-document-settings__status {
+  border-radius: 18px;
+  border: 1px solid rgba(98, 77, 47, 0.1);
+  box-shadow:
+    0 18px 40px rgba(15, 23, 42, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.84);
+}
+
+.sales-document-page__preview-stage,
+.sales-document-settings__preview-stage {
+  padding: 24px;
+  background:
+    radial-gradient(circle at top, rgba(191, 168, 130, 0.09), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.99) 0%, rgba(249, 247, 243, 0.98) 100%);
+  border: 1px solid rgba(98, 77, 47, 0.08);
+}
+
+.sales-document-settings__layout {
+  grid-template-columns: minmax(320px, 440px) minmax(0, 1fr);
+}
+
+.sales-document-settings__three-up {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.sales-document-settings__section {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(98, 77, 47, 0.1);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(250, 248, 244, 0.96) 100%);
+}
+
+.sales-document-settings__section-heading {
+  display: grid;
+  gap: 4px;
+}
+
+.sales-document-settings__section-heading strong {
+  color: #24180d;
+  font-size: 0.98rem;
+}
+
+.sales-document-settings__section-heading span {
+  color: #726556;
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.sales-document-settings__toggle {
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(98, 77, 47, 0.12);
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-top: none;
+  background: transparent;
+}
+
+.sales-document-settings__toggle:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.sales-paper {
+  width: min(100%, var(--sales-paper-width, 880px));
+  border-radius: 10px;
+  border: 1px solid rgba(98, 77, 47, 0.14);
+  box-shadow: 0 24px 54px rgba(56, 42, 20, 0.12);
+}
+
+.sales-paper__topbar {
+  height: 5px;
+  background: var(--sales-document-accent);
+}
+
+.sales-paper__header {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(240px, 0.85fr);
+  gap: 28px;
+  padding: var(--sales-paper-padding-y, 32px) var(--sales-paper-padding-x, 38px) 20px;
+  border-bottom: 1px solid rgba(98, 77, 47, 0.12);
+}
+
+.sales-paper--stacked .sales-paper__header {
+  grid-template-columns: 1fr;
+}
+
+.sales-paper__brand,
+.sales-paper__brand-copy,
+.sales-paper__document-head,
+.sales-paper__meta-list,
+.sales-paper__billto-body,
+.sales-paper__item-main,
+.sales-paper__summary-panel,
+.sales-paper__payments,
+.sales-paper__note-block,
+.sales-paper__payment-row > div {
+  display: grid;
+}
+
+.sales-paper__brand {
+  gap: 12px;
+  align-content: start;
+}
+
+.sales-paper__brand-copy {
+  gap: 4px;
+}
+
+.sales-paper__logo-wrap {
+  min-height: 62px;
+}
+
+.sales-paper__eyebrow,
+.sales-paper__section-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+}
+
+.sales-paper__eyebrow {
+  margin-bottom: 2px;
+}
+
+.sales-paper__clinic-name {
+  color: color-mix(in srgb, var(--sales-header-text) 90%, #201910 10%);
+  font-size: 1rem;
+}
+
+.sales-paper__brand-copy > span:not(.sales-paper__eyebrow) {
+  color: #726556;
+  line-height: 1.48;
+}
+
+.sales-paper__document-head {
+  gap: 14px;
+  justify-items: end;
+  text-align: right;
+}
+
+.sales-paper--stacked .sales-paper__document-head {
+  justify-items: start;
+  text-align: left;
+}
+
+.sales-paper__document-title {
+  margin: 0;
+  font-family: "Cormorant Garamond", "Iowan Old Style", "Times New Roman", serif;
+  font-size: clamp(2.1rem, 4vw, 3rem);
+  font-weight: 600;
+  line-height: 0.92;
+  letter-spacing: 0.01em;
+  color: var(--sales-header-text);
+}
+
+.sales-paper__logo {
+  height: 76px;
+}
+
+.sales-paper__meta-list {
+  gap: 10px;
+  width: min(100%, 270px);
+}
+
+.sales-paper__meta-item {
+  display: grid;
+  grid-template-columns: minmax(90px, auto) minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(98, 77, 47, 0.12);
+}
+
+.sales-paper__meta-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.sales-paper__meta-item dt,
+.sales-paper__meta-item dd {
+  margin: 0;
+}
+
+.sales-paper__meta-item dt {
+  color: #726556;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sales-paper__meta-item dd {
+  color: #201910;
+  font-weight: 700;
+  justify-self: end;
+  text-align: right;
+}
+
+.sales-paper__party-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px;
+  align-items: end;
+  padding: 18px var(--sales-paper-padding-x, 38px);
+  border-bottom: 1px solid rgba(98, 77, 47, 0.1);
+}
+
+.sales-paper__billto {
+  display: grid;
+  gap: 10px;
+}
+
+.sales-paper__billto-body {
+  gap: 4px;
+}
+
+.sales-paper__billto-body strong {
+  color: #201910;
+  font-size: 1rem;
+}
+
+.sales-paper__billto-body span,
+.sales-paper__support-meta {
+  color: #6f6254;
+  line-height: 1.5;
+}
+
+.sales-paper__support-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  justify-content: flex-end;
+  text-align: right;
+  font-size: 0.92rem;
+}
+
+.sales-paper__items-section {
+  padding: 20px var(--sales-paper-padding-x, 38px) 22px;
+}
+
+.sales-paper__table-header {
+  padding-bottom: 12px;
+}
+
+.sales-paper__table-header strong {
+  font-size: 0.92rem;
+}
+
+.sales-paper__table {
+  border-top: 2px solid var(--sales-items-accent);
+  border-bottom: 1px solid rgba(98, 77, 47, 0.12);
+}
+
+.sales-paper__table thead tr {
+  background: color-mix(in srgb, var(--sales-items-accent) 8%, #ffffff 92%);
+}
+
+.sales-paper__table tbody tr:nth-child(odd) {
+  background: transparent;
+}
+
+.sales-paper__table th,
+.sales-paper__table td {
+  padding: 12px 10px;
+  border-bottom: 1px solid rgba(98, 77, 47, 0.08);
+}
+
+.sales-paper__table th {
+  font-size: 0.72rem;
+}
+
+.sales-paper__table th:not(:first-child),
+.sales-paper__table td:not(:first-child) {
+  text-align: right;
+}
+
+.sales-paper__bottom {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+  gap: 28px;
+  padding: 0 var(--sales-paper-padding-x, 38px) 18px;
+  align-items: start;
+}
+
+.sales-paper__bottom--totals-only {
+  grid-template-columns: 1fr;
+}
+
+.sales-paper__bottom--totals-only .sales-paper__summary-panel {
+  margin-left: auto;
+}
+
+.sales-paper__summary-panel {
+  gap: 10px;
+  width: 100%;
+  max-width: 320px;
+}
+
+.sales-paper__summary-row--total {
+  padding: 12px 0;
+  border-top: 1px solid rgba(122, 99, 68, 0.18);
+  border-bottom: 1px solid rgba(122, 99, 68, 0.18);
+}
+
+.sales-paper__payments {
+  margin-top: 6px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(122, 99, 68, 0.12);
+}
+
+.sales-paper__note-block {
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.sales-paper__note-spacer {
+  min-height: 1px;
+}
+
+.sales-paper__footer {
+  margin: 0 var(--sales-paper-padding-x, 38px) var(--sales-paper-padding-y, 32px);
+  padding-top: 14px;
+  border-top: 1px solid rgba(98, 77, 47, 0.12);
+  border-radius: 0;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  background: transparent;
+}
+
+.sales-paper--compact .sales-paper__header {
+  gap: 22px;
+  padding-bottom: 16px;
+}
+
+.sales-paper--compact .sales-paper__party-row,
+.sales-paper--compact .sales-paper__items-section,
+.sales-paper--compact .sales-paper__bottom {
+  padding-top: 16px;
+  padding-bottom: 16px;
+}
+
+.sales-paper--compact .sales-paper__items-section {
+  padding-top: 18px;
+}
+
+.sales-paper--compact .sales-paper__summary-row {
+  padding: 6px 0;
+}
+
+.sales-paper--compact .sales-paper__footer {
+  padding-top: 12px;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -5240,5 +5598,231 @@ a {
   .sales-paper__footer {
     break-inside: avoid;
     page-break-inside: avoid;
+  }
+}
+
+@media (max-width: 960px) {
+  .sales-document-settings__layout,
+  .sales-document-settings__three-up,
+  .sales-paper__header,
+  .sales-paper__party-row,
+  .sales-paper__bottom {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-paper__document-head,
+  .sales-paper__support-meta,
+  .sales-paper__meta-item dd {
+    justify-items: start;
+    justify-content: flex-start;
+    text-align: left;
+  }
+
+  .sales-paper__summary-panel,
+  .sales-paper__bottom--totals-only .sales-paper__summary-panel {
+    margin-left: 0;
+    max-width: none;
+  }
+
+  .sales-paper__header,
+  .sales-paper__party-row,
+  .sales-paper__items-section,
+  .sales-paper__bottom {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+
+  .sales-paper__footer {
+    margin-left: 24px;
+    margin-right: 24px;
+  }
+}
+
+@media (max-width: 760px) {
+  .sales-document-settings__three-up,
+  .sales-document-settings__two-up {
+    grid-template-columns: 1fr;
+  }
+
+  .sales-paper {
+    border-radius: 8px;
+  }
+
+  .sales-paper__header,
+  .sales-paper__party-row,
+  .sales-paper__items-section,
+  .sales-paper__bottom {
+    gap: 14px;
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .sales-paper__header {
+    padding-top: 24px;
+    padding-bottom: 16px;
+  }
+
+  .sales-paper__document-title {
+    font-size: clamp(1.9rem, 9vw, 2.4rem);
+  }
+
+  .sales-paper__meta-item {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .sales-paper__meta-item dd {
+    justify-self: start;
+  }
+
+  .sales-paper__table th,
+  .sales-paper__table td {
+    padding: 10px 8px;
+  }
+
+  .sales-paper__footer {
+    margin-left: 18px;
+    margin-right: 18px;
+    margin-bottom: 22px;
+  }
+}
+
+@media print {
+  .sales-paper,
+  .sales-paper * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  .sales-paper {
+    width: auto !important;
+    max-width: none !important;
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+  }
+
+  .sales-paper__topbar {
+    height: 4px !important;
+  }
+
+  .sales-paper__header {
+    grid-template-columns: minmax(0, 1.1fr) minmax(220px, 0.85fr) !important;
+    gap: 18px !important;
+    padding: 20px 20px 14px !important;
+  }
+
+  .sales-paper__logo {
+    max-width: 180px !important;
+    height: 64px !important;
+  }
+
+  .sales-paper__document-title {
+    font-size: 2.1rem !important;
+  }
+
+  .sales-paper__meta-list {
+    gap: 8px !important;
+    width: min(100%, 250px) !important;
+  }
+
+  .sales-paper__meta-item {
+    gap: 10px !important;
+    padding-bottom: 8px !important;
+  }
+
+  .sales-paper__meta-item dt,
+  .sales-paper__meta-item dd,
+  .sales-paper__billto-body span,
+  .sales-paper__support-meta,
+  .sales-paper__payments span,
+  .sales-paper__footer p,
+  .sales-paper__note-block p {
+    font-size: 0.76rem !important;
+  }
+
+  .sales-paper__party-row {
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    gap: 14px !important;
+    padding: 14px 20px !important;
+  }
+
+  .sales-paper__billto-body strong {
+    font-size: 0.94rem !important;
+  }
+
+  .sales-paper__items-section {
+    padding: 16px 20px 18px !important;
+  }
+
+  .sales-paper__table-header {
+    padding-bottom: 10px !important;
+  }
+
+  .sales-paper__table th,
+  .sales-paper__table td {
+    padding: 8px 8px !important;
+  }
+
+  .sales-paper__table th {
+    font-size: 0.64rem !important;
+  }
+
+  .sales-paper__table td,
+  .sales-paper__item-main strong,
+  .sales-paper__summary-row span,
+  .sales-paper__summary-row strong {
+    font-size: 0.78rem !important;
+  }
+
+  .sales-paper__item-main span {
+    font-size: 0.7rem !important;
+    line-height: 1.3 !important;
+  }
+
+  .sales-paper__bottom {
+    grid-template-columns: minmax(0, 1fr) 280px !important;
+    gap: 20px !important;
+    padding: 0 20px 14px !important;
+  }
+
+  .sales-paper__summary-panel {
+    gap: 8px !important;
+    max-width: 280px !important;
+  }
+
+  .sales-paper__summary-row {
+    padding: 6px 0 !important;
+  }
+
+  .sales-paper__summary-row--total {
+    padding: 10px 0 !important;
+  }
+
+  .sales-paper__payments {
+    gap: 6px !important;
+    margin-top: 4px !important;
+    padding-top: 8px !important;
+  }
+
+  .sales-paper__payment-row {
+    gap: 8px !important;
+    padding: 6px 0 !important;
+  }
+
+  .sales-paper__footer {
+    margin: 0 20px 18px !important;
+    padding-top: 10px !important;
+  }
+
+  .sales-paper__party-row,
+  .sales-paper__items-section,
+  .sales-paper__note-block,
+  .sales-paper__summary-panel,
+  .sales-paper__footer {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
   }
 }
