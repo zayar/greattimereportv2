@@ -24,6 +24,38 @@
   --radius-xl: 28px;
   --radius-lg: 20px;
   --radius-md: 14px;
+  --luxe-surface:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.4)),
+    radial-gradient(circle at top right, rgba(249, 197, 180, 0.12), transparent 44%),
+    radial-gradient(circle at bottom left, rgba(139, 186, 166, 0.08), transparent 40%);
+  --luxe-surface-strong:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.5)),
+    radial-gradient(circle at top right, rgba(249, 197, 180, 0.14), transparent 44%),
+    radial-gradient(circle at bottom left, rgba(230, 199, 235, 0.08), transparent 42%);
+  --luxe-surface-soft:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.48), rgba(255, 255, 255, 0.28)),
+    radial-gradient(circle at top right, rgba(249, 197, 180, 0.08), transparent 44%),
+    radial-gradient(circle at bottom left, rgba(139, 186, 166, 0.06), transparent 40%);
+  --luxe-surface-muted:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.22)),
+    radial-gradient(circle at top right, rgba(230, 199, 235, 0.08), transparent 48%);
+  --luxe-border: rgba(17, 24, 39, 0.055);
+  --luxe-border-strong: rgba(17, 24, 39, 0.07);
+  --luxe-shadow:
+    0 16px 34px rgba(15, 23, 42, 0.03),
+    inset 0 1px 0 rgba(255, 255, 255, 0.56);
+  --luxe-shadow-soft:
+    0 12px 28px rgba(15, 23, 42, 0.024),
+    inset 0 1px 0 rgba(255, 255, 255, 0.48);
+  --luxe-input-bg: rgba(255, 255, 255, 0.62);
+  --luxe-table:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.36), rgba(255, 255, 255, 0.2)),
+    radial-gradient(circle at top right, rgba(139, 186, 166, 0.06), transparent 52%);
+  --luxe-table-head: rgba(248, 246, 241, 0.62);
+  --luxe-row-odd: rgba(255, 255, 255, 0.12);
+  --luxe-row-even: rgba(249, 246, 241, 0.18);
+  --luxe-row-hover: rgba(246, 241, 236, 0.46);
+  --luxe-divider: rgba(17, 24, 39, 0.048);
 }
 
 * {
@@ -1762,10 +1794,11 @@ a {
 .executive-dashboard__header-status {
   padding: 10px 14px;
   border-radius: 999px;
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--report-border);
+  background: rgba(255, 255, 255, 0.62);
   color: var(--ink-muted);
   font-size: 0.86rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42);
 }
 
 .executive-dashboard__control-bar {
@@ -1773,9 +1806,10 @@ a {
   gap: 16px;
   padding: 20px 22px;
   border-radius: 28px;
-  background: rgba(255, 255, 255, 0.86);
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: 0 16px 40px rgba(15, 23, 42, 0.05);
+  background: var(--report-surface-strong);
+  border: 1px solid var(--report-border);
+  box-shadow: var(--report-shadow);
+  backdrop-filter: blur(14px);
 }
 
 .executive-dashboard__control-top,
@@ -1842,9 +1876,10 @@ a {
   gap: 8px;
   padding: 20px;
   border-radius: 22px;
-  background: rgba(255, 255, 255, 0.86);
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.04);
+  background: var(--report-surface);
+  border: 1px solid var(--report-border);
+  box-shadow: var(--report-shadow-soft);
+  backdrop-filter: blur(12px);
 }
 
 .executive-dashboard__metric-label,
@@ -1902,9 +1937,10 @@ a {
   gap: 8px;
   padding: 20px;
   border-radius: 24px;
-  background: rgba(255, 255, 255, 0.82);
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.04);
+  background: var(--report-surface-soft);
+  border: 1px solid var(--report-border);
+  box-shadow: var(--report-shadow-soft);
+  backdrop-filter: blur(12px);
 }
 
 .executive-dashboard__lower-grid {
@@ -1932,8 +1968,9 @@ a {
   gap: 6px;
   padding: 16px 18px;
   border-radius: 18px;
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  background: #fff;
+  border: 1px solid var(--report-border);
+  background: var(--report-surface-muted);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38);
 }
 
 .executive-dashboard__insight strong {
@@ -1947,13 +1984,17 @@ a {
 }
 
 .executive-dashboard__insight--positive {
-  background: rgba(245, 250, 247, 0.92);
-  border-color: rgba(31, 138, 97, 0.14);
+  background:
+    linear-gradient(180deg, rgba(244, 250, 247, 0.8), rgba(255, 255, 255, 0.44)),
+    radial-gradient(circle at top right, rgba(13, 122, 82, 0.08), transparent 52%);
+  border-color: rgba(31, 138, 97, 0.12);
 }
 
 .executive-dashboard__insight--watch {
-  background: rgba(255, 249, 244, 0.95);
-  border-color: rgba(186, 112, 66, 0.14);
+  background:
+    linear-gradient(180deg, rgba(255, 249, 244, 0.84), rgba(255, 255, 255, 0.46)),
+    radial-gradient(circle at top right, rgba(186, 112, 66, 0.1), transparent 52%);
+  border-color: rgba(186, 112, 66, 0.12);
 }
 
 .trend-chart {
@@ -2059,8 +2100,11 @@ a {
   position: absolute;
   inset: 18%;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.95);
-  box-shadow: inset 0 0 0 1px rgba(17, 24, 39, 0.05);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow:
+    inset 0 0 0 1px rgba(17, 24, 39, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.48);
+  backdrop-filter: blur(10px);
 }
 
 .donut-chart__center {
@@ -2459,7 +2503,37 @@ a {
 }
 
 .analytics-report {
+  --report-surface: var(--luxe-surface);
+  --report-surface-strong: var(--luxe-surface-strong);
+  --report-surface-soft: var(--luxe-surface-soft);
+  --report-surface-muted: var(--luxe-surface-muted);
+  --report-border: var(--luxe-border);
+  --report-border-strong: var(--luxe-border-strong);
+  --report-shadow: var(--luxe-shadow);
+  --report-shadow-soft: var(--luxe-shadow-soft);
+  --report-input-bg: var(--luxe-input-bg);
+  --report-table-bg: var(--luxe-table);
+  --report-table-head: var(--luxe-table-head);
+  --report-row-odd: var(--luxe-row-odd);
+  --report-row-even: var(--luxe-row-even);
+  --report-row-hover: var(--luxe-row-hover);
+  --report-divider: var(--luxe-divider);
   gap: 20px;
+  position: relative;
+  isolation: isolate;
+}
+
+.analytics-report::before {
+  content: "";
+  position: absolute;
+  inset: -8px -8px 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 10% 14%, rgba(249, 197, 180, 0.16), transparent 24%),
+    radial-gradient(circle at 88% 18%, rgba(139, 186, 166, 0.1), transparent 22%),
+    radial-gradient(circle at 62% 100%, rgba(230, 199, 235, 0.1), transparent 26%);
+  opacity: 0.9;
 }
 
 .internal-workspace {
@@ -2607,38 +2681,60 @@ a {
 
 .appointments-report--luxe .panel {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.58), rgba(255, 255, 255, 0.42)),
-    radial-gradient(circle at top right, rgba(249, 197, 180, 0.1), transparent 44%);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.46), rgba(255, 255, 255, 0.28)),
+    radial-gradient(circle at top right, rgba(249, 197, 180, 0.08), transparent 46%),
+    radial-gradient(circle at bottom left, rgba(139, 186, 166, 0.06), transparent 44%);
   border: 1px solid rgba(17, 24, 39, 0.05);
   box-shadow:
-    0 18px 36px rgba(15, 23, 42, 0.03),
-    inset 0 1px 0 rgba(255, 255, 255, 0.56);
+    0 16px 32px rgba(15, 23, 42, 0.024),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
   backdrop-filter: blur(14px);
 }
 
 .appointments-report--luxe .table-wrap {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.48), rgba(255, 255, 255, 0.34)),
-    radial-gradient(circle at top right, rgba(139, 186, 166, 0.08), transparent 50%);
-  border-color: rgba(17, 24, 39, 0.05);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0.2)),
+    radial-gradient(circle at top right, rgba(139, 186, 166, 0.06), transparent 52%);
+  border-color: rgba(17, 24, 39, 0.04);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.44),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(12px);
 }
 
 .appointments-report--luxe .data-table thead th {
-  background: rgba(249, 248, 245, 0.76);
+  background: rgba(248, 246, 241, 0.54);
   backdrop-filter: blur(8px);
+  border-bottom-color: rgba(17, 24, 39, 0.05);
 }
 
 .appointments-report--luxe .data-table tbody tr:nth-child(odd) {
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .appointments-report--luxe .data-table tbody tr:nth-child(even) {
-  background: rgba(251, 250, 247, 0.42);
+  background: rgba(250, 248, 244, 0.18);
 }
 
 .appointments-report--luxe .data-table tbody tr:hover {
-  background: rgba(245, 244, 240, 0.72);
+  background: rgba(245, 242, 236, 0.46);
+}
+
+.appointments-report--luxe .data-table td {
+  border-bottom-color: rgba(17, 24, 39, 0.045);
+}
+
+.appointments-report--luxe .panel__header {
+  margin-bottom: 16px;
+}
+
+.appointments-report--luxe .pagination-controls .button--secondary {
+  background: rgba(255, 255, 255, 0.38);
+  border-color: rgba(17, 24, 39, 0.05);
+}
+
+.appointments-report--luxe .pagination-controls .button--secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.52);
 }
 
 .analytics-report__filters {
@@ -2646,9 +2742,10 @@ a {
   justify-content: flex-end;
   padding: 14px;
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+  background: var(--report-surface-soft);
+  border: 1px solid var(--report-border);
+  box-shadow: var(--report-shadow-soft);
+  backdrop-filter: blur(12px);
 }
 
 .analytics-report__filters .field span,
@@ -2660,16 +2757,18 @@ a {
 .analytics-report__filters .field select,
 .analytics-report .field input,
 .analytics-report .field select {
-  background: #ffffff;
-  border-color: rgba(15, 23, 42, 0.08);
+  background: var(--report-input-bg);
+  border-color: var(--report-border-strong);
   color: #111827;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.48);
 }
 
 .analytics-report .panel,
 .analytics-report .report-kpi-strip__card {
-  background: rgba(255, 255, 255, 0.86);
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
+  background: var(--report-surface);
+  border: 1px solid var(--report-border);
+  box-shadow: var(--report-shadow);
+  backdrop-filter: blur(12px);
 }
 
 .analytics-report .panel__header h3,
@@ -2727,33 +2826,68 @@ a {
   max-height: 560px;
   overflow: auto;
   border-radius: 18px;
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  background: #ffffff;
+  border: 1px solid var(--report-border);
+  background: var(--report-table-bg);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.44),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(12px);
 }
 
 .analytics-report .data-table thead th {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #f8fafc;
+  background: var(--report-table-head);
   color: #6b7280;
-  border-bottom-color: rgba(17, 24, 39, 0.08);
+  border-bottom-color: var(--report-divider);
+  backdrop-filter: blur(8px);
 }
 
 .analytics-report .data-table tbody tr:nth-child(odd) {
-  background: #ffffff;
+  background: var(--report-row-odd);
 }
 
 .analytics-report .data-table tbody tr:nth-child(even) {
-  background: #fbfcfe;
+  background: var(--report-row-even);
 }
 
 .analytics-report .data-table tbody tr:hover {
-  background: #f3f6fb;
+  background: var(--report-row-hover);
 }
 
 .analytics-report .data-table td {
-  border-bottom-color: rgba(17, 24, 39, 0.06);
+  border-bottom-color: var(--report-divider);
+}
+
+.analytics-report .chip {
+  background: rgba(7, 65, 66, 0.08);
+  border: 1px solid rgba(7, 65, 66, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.36);
+}
+
+.analytics-report .status-pill {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.analytics-report .button--secondary,
+.analytics-report .button--ghost {
+  background: rgba(255, 255, 255, 0.46);
+  border-color: var(--report-border);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34);
+}
+
+.analytics-report .button--secondary:hover:not(:disabled),
+.analytics-report .button--ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.62);
+  border-color: rgba(7, 65, 66, 0.12);
+}
+
+.analytics-report .empty-state {
+  padding: 18px 20px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.22);
+  border: 1px dashed rgba(17, 24, 39, 0.06);
 }
 
 .analytics-report__grid {
@@ -2774,9 +2908,10 @@ a {
   gap: 14px;
   padding: 18px 20px;
   border-radius: 24px;
-  background: rgba(255, 255, 255, 0.88);
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
+  background: var(--report-surface-strong);
+  border: 1px solid var(--report-border);
+  box-shadow: var(--report-shadow);
+  backdrop-filter: blur(14px);
   min-width: 0;
 }
 
@@ -2824,10 +2959,11 @@ a {
   height: 44px;
   padding: 0 14px;
   border-radius: 14px;
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  background: #ffffff;
+  border: 1px solid var(--report-border);
+  background: rgba(255, 255, 255, 0.52);
   color: #4b5563;
   font-size: 0.92rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.38);
 }
 
 .sales-details-report__toggle input {
@@ -2846,9 +2982,10 @@ a {
   gap: 6px;
   padding: 18px 20px;
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.84);
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.03);
+  background: var(--report-surface-soft);
+  border: 1px solid var(--report-border);
+  box-shadow: var(--report-shadow-soft);
+  backdrop-filter: blur(12px);
 }
 
 .sales-details-report__summary-card strong {
@@ -2885,7 +3022,7 @@ a {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #f8fafc;
+  background: var(--report-table-head);
 }
 
 .sales-details-report__panel .data-table td,
@@ -2941,7 +3078,7 @@ a {
 }
 
 .banking-details-report__methods-table thead th {
-  background: #f8fafc;
+  background: var(--report-table-head);
 }
 
 .banking-details-report__method-row {
@@ -2950,11 +3087,11 @@ a {
 }
 
 .banking-details-report__method-row:hover {
-  background: rgba(248, 250, 252, 0.9);
+  background: var(--report-row-hover);
 }
 
 .banking-details-report__method-row--active {
-  background: rgba(31, 78, 69, 0.08);
+  background: rgba(31, 78, 69, 0.1);
 }
 
 .banking-details-report__method-button {
@@ -3007,11 +3144,11 @@ a {
 }
 
 .sales-by-person-report__summary-row:hover {
-  background: rgba(248, 250, 252, 0.9);
+  background: var(--report-row-hover);
 }
 
 .sales-by-person-report__summary-row--active {
-  background: rgba(31, 78, 69, 0.08);
+  background: rgba(31, 78, 69, 0.1);
 }
 
 .sales-by-person-report__ledger-panel .data-table {
@@ -3055,7 +3192,7 @@ a {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #f8fafc;
+  background: var(--report-table-head);
 }
 
 .core-catalog-page__positive {
@@ -3109,9 +3246,10 @@ a {
   border-radius: 999px;
   background: rgba(31, 78, 69, 0.08);
   color: var(--brand);
-  border: 1px solid rgba(31, 78, 69, 0.12);
+  border: 1px solid rgba(31, 78, 69, 0.1);
   font-size: 0.88rem;
   font-weight: 600;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34);
 }
 
 .customer-salesperson-report__table-actions {
@@ -3169,9 +3307,10 @@ a {
   justify-content: flex-end;
   padding: 14px;
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+  background: var(--report-surface-soft);
+  border: 1px solid var(--report-border);
+  box-shadow: var(--report-shadow-soft);
+  backdrop-filter: blur(12px);
 }
 
 .behavior-report__filters .field span {
@@ -3180,9 +3319,10 @@ a {
 
 .behavior-report__filters .field input,
 .behavior-report__filters .field select {
-  background: #ffffff;
-  border-color: rgba(15, 23, 42, 0.08);
+  background: var(--report-input-bg);
+  border-color: var(--report-border-strong);
   color: #111827;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.48);
 }
 
 .behavior-report__workspace {
@@ -3193,10 +3333,10 @@ a {
 
 .behavior-report__workspace .report-kpi-strip__card,
 .behavior-report__workspace .panel {
-  background: rgba(255, 255, 255, 0.86);
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.04);
-  backdrop-filter: none;
+  background: var(--report-surface);
+  border: 1px solid var(--report-border);
+  box-shadow: var(--report-shadow);
+  backdrop-filter: blur(12px);
 }
 
 .behavior-report__workspace .panel__header h3,
@@ -3226,9 +3366,10 @@ a {
 
 .behavior-report__workspace .field input,
 .behavior-report__workspace .field select {
-  background: #ffffff;
-  border-color: rgba(15, 23, 42, 0.08);
+  background: var(--report-input-bg);
+  border-color: var(--report-border-strong);
   color: #111827;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.48);
 }
 
 .behavior-report__workspace .field input::placeholder {
@@ -3269,8 +3410,12 @@ a {
   max-height: 560px;
   overflow: auto;
   border-radius: 18px;
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  background: #ffffff;
+  border: 1px solid var(--report-border);
+  background: var(--report-table-bg);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.44),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(12px);
 }
 
 .behavior-report__workspace .data-table {
@@ -3281,25 +3426,26 @@ a {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #f8fafc;
+  background: var(--report-table-head);
   color: #6b7280;
-  border-bottom-color: rgba(17, 24, 39, 0.08);
+  border-bottom-color: var(--report-divider);
+  backdrop-filter: blur(8px);
 }
 
 .behavior-report__workspace .data-table tbody tr:nth-child(odd) {
-  background: #ffffff;
+  background: var(--report-row-odd);
 }
 
 .behavior-report__workspace .data-table tbody tr:nth-child(even) {
-  background: #fbfcfe;
+  background: var(--report-row-even);
 }
 
 .behavior-report__workspace .data-table tbody tr:hover {
-  background: #f3f6fb;
+  background: var(--report-row-hover);
 }
 
 .behavior-report__workspace .data-table td {
-  border-bottom-color: rgba(17, 24, 39, 0.06);
+  border-bottom-color: var(--report-divider);
 }
 
 .panel--tall {
@@ -3497,8 +3643,12 @@ a {
 .customer-portal__list-panel .table-wrap {
   max-height: calc(100vh - 360px);
   border-radius: 18px;
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  background: #ffffff;
+  border: 1px solid var(--report-border);
+  background: var(--report-table-bg);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.44),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(12px);
 }
 
 .customer-portal__list-panel .data-table {
@@ -3509,7 +3659,8 @@ a {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #f7f7f4;
+  background: var(--report-table-head);
+  backdrop-filter: blur(8px);
 }
 
 .customer-portal__row--vip td {
@@ -3572,9 +3723,10 @@ a {
 .customer-detail__action-card {
   padding: 24px 26px;
   border-radius: 26px;
-  background: rgba(255, 255, 255, 0.84);
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  box-shadow: 0 14px 40px rgba(15, 23, 42, 0.05);
+  background: var(--report-surface-strong);
+  border: 1px solid var(--report-border);
+  box-shadow: var(--report-shadow);
+  backdrop-filter: blur(14px);
 }
 
 .customer-detail__identity-card {
@@ -3651,14 +3803,15 @@ a {
   min-height: 42px;
   padding: 0 16px;
   border-radius: 999px;
-  border: 1px solid rgba(24, 29, 37, 0.08);
-  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--report-border);
+  background: rgba(255, 255, 255, 0.52);
   color: #4b5563;
   display: inline-flex;
   align-items: center;
   gap: 8px;
   cursor: pointer;
   transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34);
 }
 
 .customer-detail__tab small {
@@ -3697,7 +3850,8 @@ a {
   padding: 16px 18px;
   display: grid;
   gap: 6px;
-  border: 1px solid rgba(17, 24, 39, 0.06);
+  border: 1px solid var(--report-border);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34);
 }
 
 .customer-detail__insight strong {
@@ -3712,15 +3866,21 @@ a {
 }
 
 .customer-detail__insight--positive {
-  background: rgba(13, 122, 82, 0.06);
+  background:
+    linear-gradient(180deg, rgba(244, 250, 247, 0.82), rgba(255, 255, 255, 0.4)),
+    radial-gradient(circle at top right, rgba(13, 122, 82, 0.08), transparent 54%);
 }
 
 .customer-detail__insight--attention {
-  background: rgba(178, 71, 45, 0.06);
+  background:
+    linear-gradient(180deg, rgba(255, 248, 244, 0.84), rgba(255, 255, 255, 0.4)),
+    radial-gradient(circle at top right, rgba(178, 71, 45, 0.08), transparent 54%);
 }
 
 .customer-detail__insight--neutral {
-  background: rgba(95, 101, 112, 0.06);
+  background:
+    linear-gradient(180deg, rgba(248, 249, 250, 0.84), rgba(255, 255, 255, 0.4)),
+    radial-gradient(circle at top right, rgba(95, 101, 112, 0.06), transparent 54%);
 }
 
 .customer-detail__recent-services {
@@ -3732,10 +3892,11 @@ a {
 .customer-detail__recent-card {
   padding: 18px;
   border-radius: 20px;
-  background: rgba(248, 250, 252, 0.88);
-  border: 1px solid rgba(17, 24, 39, 0.06);
+  background: var(--report-surface-muted);
+  border: 1px solid var(--report-border);
   display: grid;
   gap: 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.36);
 }
 
 .customer-detail__recent-card span,
@@ -3752,10 +3913,11 @@ a {
 .customer-detail__mini-stat {
   padding: 16px 18px;
   border-radius: 18px;
-  border: 1px solid rgba(17, 24, 39, 0.06);
-  background: rgba(248, 250, 252, 0.88);
+  border: 1px solid var(--report-border);
+  background: var(--report-surface-muted);
   display: grid;
   gap: 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34);
 }
 
 .customer-detail__mini-stat span {
@@ -3791,9 +3953,13 @@ a {
 
 .customer-detail__panel .table-wrap {
   border-radius: 18px;
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  background: #ffffff;
+  border: 1px solid var(--report-border);
+  background: var(--report-table-bg);
   max-height: 620px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.44),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(12px);
 }
 
 .customer-detail__panel .data-table {
@@ -3804,7 +3970,8 @@ a {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: #f8fafc;
+  background: var(--report-table-head);
+  backdrop-filter: blur(8px);
 }
 
 .customer-detail__usage-heatmap {
