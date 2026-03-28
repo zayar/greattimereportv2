@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@apollo/client";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../../../components/PageHeader";
@@ -15,8 +15,26 @@ type SalesDetailResponse = {
   orders: RawSalesOrder[];
 };
 
+async function waitForPrintAssets(printWindow: Window) {
+  const images = Array.from(printWindow.document.images);
+
+  await Promise.all(
+    images.map((image) => {
+      if (image.complete) {
+        return Promise.resolve();
+      }
+
+      return new Promise<void>((resolve) => {
+        image.addEventListener("load", () => resolve(), { once: true });
+        image.addEventListener("error", () => resolve(), { once: true });
+      });
+    }),
+  );
+}
+
 export function SalesDetailPage() {
   const navigate = useNavigate();
+  const previewRef = useRef<HTMLDivElement | null>(null);
   const { saleId = "" } = useParams();
   const [searchParams] = useSearchParams();
   const { currentClinic } = useAccess();
@@ -65,6 +83,63 @@ export function SalesDetailPage() {
     };
   }, [order?.order_id]);
 
+  async function handlePrint() {
+    if (!order || !previewRef.current) {
+      return;
+    }
+
+    const printWindow = window.open("", "_blank", "noopener,noreferrer,width=960,height=1320");
+
+    if (!printWindow) {
+      window.print();
+      return;
+    }
+
+    const styleMarkup = Array.from(document.querySelectorAll('link[rel="stylesheet"], style'))
+      .map((node) => node.outerHTML)
+      .join("\n");
+
+    printWindow.document.write(`<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${order.order_id}</title>
+    ${styleMarkup}
+    <style>
+      html, body {
+        margin: 0;
+        background: #ffffff;
+      }
+
+      body {
+        min-height: 100vh;
+      }
+
+      .sales-print-window {
+        display: grid;
+        place-items: start center;
+        background: #ffffff;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="sales-print-window">${previewRef.current.innerHTML}</div>
+  </body>
+</html>`);
+    printWindow.document.close();
+
+    await waitForPrintAssets(printWindow);
+
+    const closeWindow = () => {
+      printWindow.close();
+    };
+
+    printWindow.addEventListener("afterprint", closeWindow, { once: true });
+    printWindow.focus();
+    printWindow.print();
+  }
+
   return (
     <div className="page-stack page-stack--workspace analytics-report sales-document-page">
       <PageHeader
@@ -78,7 +153,7 @@ export function SalesDetailPage() {
             <button className="button button--ghost" onClick={() => navigate("/settings/sales-document")}>
               Customize layout
             </button>
-            <button className="button button--ghost" onClick={() => window.print()} disabled={!order}>
+            <button className="button button--ghost" onClick={() => void handlePrint()} disabled={!order}>
               Print
             </button>
           </div>
@@ -110,7 +185,7 @@ export function SalesDetailPage() {
           title="Document preview"
           subtitle="A paper-first layout built for on-screen review now and future print/export support."
         >
-          <div className="sales-document-page__preview-stage">
+          <div ref={previewRef} className="sales-document-page__preview-stage">
             <SalesDocumentPreview model={documentModel} config={config} />
           </div>
         </Panel>
