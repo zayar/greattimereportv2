@@ -4302,6 +4302,10 @@ a {
   color: #8d7861;
 }
 
+.sales-paper__eyebrow {
+  color: color-mix(in srgb, var(--sales-header-text) 72%, #8d7861 28%);
+}
+
 .sales-paper__identity h2 {
   margin: 0;
   font-family: "Cormorant Garamond", "Iowan Old Style", "Times New Roman", serif;
@@ -4309,13 +4313,13 @@ a {
   font-weight: 600;
   line-height: 0.95;
   letter-spacing: 0.01em;
-  color: #22180e;
+  color: var(--sales-header-text);
 }
 
 .sales-paper__identity > p {
   margin: 0;
   max-width: 52ch;
-  color: #6b5e4f;
+  color: color-mix(in srgb, var(--sales-header-text) 66%, #6b5e4f 34%);
   line-height: 1.6;
 }
 
@@ -4333,7 +4337,7 @@ a {
 
 .sales-paper__brand-lockup strong {
   font-size: 1rem;
-  color: #201910;
+  color: color-mix(in srgb, var(--sales-header-text) 85%, #201910 15%);
 }
 
 .sales-paper__brand-lockup span {

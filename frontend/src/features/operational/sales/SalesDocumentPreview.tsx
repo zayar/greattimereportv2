@@ -33,6 +33,7 @@ export function SalesDocumentPreview({ model, config, previewLabel = "Paper prev
   const visibleStatuses = [model.status, model.paymentStatus].filter(shouldShowStatus);
   const accentStyle = {
     ["--sales-document-accent" as const]: config.accentColor,
+    ["--sales-header-text" as const]: config.headerTextColor,
     ["--sales-items-accent" as const]: config.itemsAccentColor,
   } as CSSProperties;
 

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@apollo/client";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { DateRangeControls } from "../../../components/DateRangeControls";
 import { DataTable } from "../../../components/DataTable";
 import { Panel } from "../../../components/Panel";
@@ -29,6 +29,8 @@ function buildOrderWhere(params: {
   fromDate: string;
   toDate: string;
   search: string;
+  showZeroValue: boolean;
+  showCoOrders: boolean;
 }) {
   const search = params.search.trim();
   const where: Record<string, unknown> = {
@@ -38,42 +40,81 @@ function buildOrderWhere(params: {
       lte: new Date(`${params.toDate}T23:59:59.999Z`).toISOString(),
     },
   };
+  const andClauses: Record<string, unknown>[] = [];
+
+  if (!params.showZeroValue) {
+    andClauses.push({
+      net_total: {
+        not: {
+          equals: 0,
+        },
+      },
+    });
+  }
+
+  if (!params.showCoOrders) {
+    andClauses.push({
+      order_id: {
+        not: {
+          startsWith: "CO-",
+        },
+      },
+    });
+  }
 
   if (search) {
-    where.OR = [
-      {
-        member: {
-          is: {
-            OR: [{ name: { contains: search } }, { phonenumber: { contains: search } }],
+    andClauses.push({
+      OR: [
+        {
+          member: {
+            is: {
+              OR: [{ name: { contains: search } }, { phonenumber: { contains: search } }],
+            },
           },
         },
-      },
-      {
-        user: {
-          is: {
-            name: { contains: search },
+        {
+          user: {
+            is: {
+              name: { contains: search },
+            },
           },
         },
-      },
-      {
-        order_id: {
-          contains: search,
+        {
+          order_id: {
+            contains: search,
+          },
         },
-      },
-    ];
+      ],
+    });
+  }
+
+  if (andClauses.length > 0) {
+    where.AND = andClauses;
   }
 
   return where;
 }
 
+function parseBooleanSearchParam(value: string | null) {
+  return value === "1" || value === "true";
+}
+
+function parsePositivePage(value: string | null) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+}
+
 export function SalesPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { currentClinic } = useAccess();
-  const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState(() => searchParams.get("search") ?? "");
+  const [page, setPage] = useState(() => parsePositivePage(searchParams.get("page")));
+  const [showZeroValue, setShowZeroValue] = useState(() => parseBooleanSearchParam(searchParams.get("showZeroValue")));
+  const [showCoOrders, setShowCoOrders] = useState(() => parseBooleanSearchParam(searchParams.get("showCoOrders")));
   const [range, setRange] = useState({
-    fromDate: daysAgo(30),
-    toDate: today(),
+    fromDate: searchParams.get("fromDate") ?? daysAgo(30),
+    toDate: searchParams.get("toDate") ?? today(),
   });
 
   const where = useMemo(() => {
@@ -86,8 +127,10 @@ export function SalesPage() {
       fromDate: range.fromDate,
       toDate: range.toDate,
       search,
+      showZeroValue,
+      showCoOrders,
     });
-  }, [currentClinic?.id, range.fromDate, range.toDate, search]);
+  }, [currentClinic?.id, range.fromDate, range.toDate, search, showCoOrders, showZeroValue]);
 
   const { data, loading, error } = useQuery<SalesResponse>(GET_SALES, {
     variables: {
@@ -145,6 +188,28 @@ export function SalesPage() {
                 }}
               />
             </label>
+            <label className="sales-details-report__toggle">
+              <input
+                type="checkbox"
+                checked={showZeroValue}
+                onChange={(event) => {
+                  setPage(1);
+                  setShowZeroValue(event.target.checked);
+                }}
+              />
+              <span>Show 0 value</span>
+            </label>
+            <label className="sales-details-report__toggle">
+              <input
+                type="checkbox"
+                checked={showCoOrders}
+                onChange={(event) => {
+                  setPage(1);
+                  setShowCoOrders(event.target.checked);
+                }}
+              />
+              <span>Show CO orders</span>
+            </label>
           </div>
         }
       />
@@ -153,7 +218,9 @@ export function SalesPage() {
         <article className="report-kpi-strip__card">
           <span className="report-kpi-strip__label">Matching orders</span>
           <strong className="report-kpi-strip__value">{totalCount.toLocaleString("en-US")}</strong>
-          <span className="report-kpi-strip__hint">Orders matched to the clinic, date range, and search filters.</span>
+          <span className="report-kpi-strip__hint">
+            Orders matched to the clinic, date range, search, and visibility filters.
+          </span>
         </article>
         <article className="report-kpi-strip__card">
           <span className="report-kpi-strip__label">Loaded revenue</span>
@@ -172,7 +239,7 @@ export function SalesPage() {
       <Panel
         className="internal-workspace__panel"
         title="Sales ledger"
-        subtitle={`${totalCount.toLocaleString("en-US")} orders matched the current filters`}
+        subtitle={`${totalCount.toLocaleString("en-US")} orders matched the current filters${!showZeroValue || !showCoOrders ? " · Default cleanup filters are active" : ""}`}
         action={
           <div className="pagination-controls">
             <button className="button button--secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
@@ -194,7 +261,10 @@ export function SalesPage() {
         {loading ? <div className="inline-note">Loading orders...</div> : null}
         {error ? <ErrorState label="Sales could not be loaded" detail={error.message} /> : null}
         {!loading && !error && rows.length === 0 ? (
-          <EmptyState label="No orders found" detail="Try a broader date range or clear the search text." />
+          <EmptyState
+            label="No orders found"
+            detail="Try a broader date range, clear the search text, or turn on Show 0 value / Show CO orders."
+          />
         ) : null}
         {!error && rows.length > 0 ? (
           <DataTable
@@ -208,6 +278,8 @@ export function SalesPage() {
                   toDate: range.toDate,
                   search,
                   page,
+                  showZeroValue,
+                  showCoOrders,
                 }),
               )
             }

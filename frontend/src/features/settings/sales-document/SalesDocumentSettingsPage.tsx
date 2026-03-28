@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { PageHeader } from "../../../components/PageHeader";
 import { Panel } from "../../../components/Panel";
 import { EmptyState } from "../../../components/StatusViews";
@@ -28,6 +29,7 @@ type ToggleKey =
   | "showFooterNote";
 
 export function SalesDocumentSettingsPage() {
+  const navigate = useNavigate();
   const { currentClinic } = useAccess();
   const { config, loading, saving, errorMessage, hasSavedConfig, saveConfig } = useSalesDocumentConfig(currentClinic?.id);
   const [draftConfig, setDraftConfig] = useState<SalesDocumentConfig>(defaultSalesDocumentConfig);
@@ -35,6 +37,9 @@ export function SalesDocumentSettingsPage() {
   const colorPickerValue = /^#[0-9a-fA-F]{6}$/.test(draftConfig.accentColor)
     ? draftConfig.accentColor
     : defaultSalesDocumentConfig.accentColor;
+  const headerTextColorPickerValue = /^#[0-9a-fA-F]{6}$/.test(draftConfig.headerTextColor)
+    ? draftConfig.headerTextColor
+    : defaultSalesDocumentConfig.headerTextColor;
   const itemsColorPickerValue = /^#[0-9a-fA-F]{6}$/.test(draftConfig.itemsAccentColor)
     ? draftConfig.itemsAccentColor
     : defaultSalesDocumentConfig.itemsAccentColor;
@@ -83,6 +88,15 @@ export function SalesDocumentSettingsPage() {
     }
   }
 
+  function handleBackToSales() {
+    if (window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+
+    navigate("/operational/sales");
+  }
+
   return (
     <div className="page-stack page-stack--workspace analytics-report sales-document-settings">
       <PageHeader
@@ -90,6 +104,9 @@ export function SalesDocumentSettingsPage() {
         hideContext
         actions={
           <div className="sales-document-settings__actions">
+            <button className="button button--ghost" onClick={handleBackToSales}>
+              Back to sales
+            </button>
             <button
               className="button button--secondary"
               onClick={() => {
@@ -169,6 +186,25 @@ export function SalesDocumentSettingsPage() {
                 </div>
               </label>
 
+              <label className="field">
+                <span>Header text color</span>
+                <div className="sales-document-settings__color-field">
+                  <input
+                    className="sales-document-settings__color-picker"
+                    type="color"
+                    value={headerTextColorPickerValue}
+                    onChange={(event) => updateConfig("headerTextColor", event.target.value)}
+                  />
+                  <input
+                    type="text"
+                    value={draftConfig.headerTextColor}
+                    onChange={(event) => updateConfig("headerTextColor", event.target.value)}
+                  />
+                </div>
+              </label>
+            </div>
+
+            <div className="sales-document-settings__two-up">
               <label className="field">
                 <span>Items list color</span>
                 <div className="sales-document-settings__color-field">

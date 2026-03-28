@@ -6,6 +6,8 @@ type SalesDetailIdentity = {
   toDate?: string;
   search?: string;
   page?: number | string;
+  showZeroValue?: boolean;
+  showCoOrders?: boolean;
 };
 
 type SalesListIdentity = Omit<SalesDetailIdentity, "saleId">;
@@ -17,6 +19,8 @@ function buildQueryString(params: SalesListIdentity) {
       toDate: params.toDate ?? "",
       search: params.search ?? "",
       page: params.page ? String(params.page) : "",
+      showZeroValue: params.showZeroValue ? "1" : "",
+      showCoOrders: params.showCoOrders ? "1" : "",
     }).filter(([, value]) => value !== ""),
   );
 

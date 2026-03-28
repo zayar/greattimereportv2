@@ -49,6 +49,8 @@ export function SalesDetailPage() {
     toDate: searchParams.get("toDate") ?? "",
     search: searchParams.get("search") ?? "",
     page: searchParams.get("page") ?? "",
+    showZeroValue: searchParams.get("showZeroValue") === "1",
+    showCoOrders: searchParams.get("showCoOrders") === "1",
   });
 
   return (
