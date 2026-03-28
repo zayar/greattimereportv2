@@ -3,18 +3,19 @@ import type { ReactNode } from "react";
 type Props = {
   eyebrow?: string;
   title: string;
-  description: string;
+  description?: string;
   actions?: ReactNode;
+  hideContext?: boolean;
 };
 
-export function PageHeader({ eyebrow, title, description, actions }: Props) {
+export function PageHeader({ title, actions, hideContext = false }: Props) {
   return (
-    <div className="page-header">
-      <div>
-        {eyebrow ? <span className="page-header__eyebrow">{eyebrow}</span> : null}
-        <h1>{title}</h1>
-        <p>{description}</p>
-      </div>
+    <div className={`page-header ${hideContext ? "page-header--contextless" : ""}`.trim()}>
+      {!hideContext ? (
+        <div className="page-header__context">
+          <span className="page-header__title">{title}</span>
+        </div>
+      ) : null}
       {actions ? <div className="page-header__actions">{actions}</div> : null}
     </div>
   );

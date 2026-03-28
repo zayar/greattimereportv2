@@ -571,6 +571,7 @@ export function CustomerDetailPage() {
         eyebrow="Customers"
         title="Customer 360"
         description="A focused customer intelligence workspace for value, retention, service usage, and next-action signals."
+        hideContext
         actions={
           <div className="customer-detail__header-actions">
             <button
