@@ -73,6 +73,7 @@ export const navigationSections: NavigationSection[] = [
     title: "Behavior",
     items: [
       { to: "/analytics/customers", label: "Customer portal" },
+      { to: "/analytics/services", label: "Service portal" },
       { to: "/analytics/customer-behavior", label: "Customer behavior" },
       { to: "/analytics/service-behavior", label: "Service behavior" },
       { to: "/analytics/daily-treatment", label: "Daily treatment" },

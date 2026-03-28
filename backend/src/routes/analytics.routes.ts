@@ -5,6 +5,12 @@ import { verifyFirebaseToken } from "../middleware/auth.js";
 import { getDashboardOverview } from "../services/reports/dashboard.service.js";
 import { getCustomerBehaviorReport } from "../services/reports/customer-behavior.service.js";
 import { getServiceBehaviorReport } from "../services/reports/service-behavior.service.js";
+import {
+  getServicePortalCustomers,
+  getServicePortalList,
+  getServicePortalOverview,
+  getServicePortalPayments,
+} from "../services/reports/service-portal.service.js";
 import { getPaymentReport } from "../services/reports/payment-report.service.js";
 import { getSalesBySellerReport } from "../services/reports/sales-by-seller.service.js";
 import { getDailyTreatmentReport } from "../services/reports/daily-treatment.service.js";
@@ -62,6 +68,17 @@ const customerUsageSchema = baseAnalyticsSchema
   .refine(hasCustomerIdentity, {
     message: "customerName or customerPhone is required",
   });
+
+const serviceDetailSchema = baseAnalyticsSchema.extend({
+  serviceName: z.string().min(1),
+});
+
+const servicePagedDetailSchema = baseAnalyticsSchema.extend({
+  serviceName: z.string().min(1),
+  search: z.string().default(""),
+  page: z.coerce.number().min(1).default(1),
+  pageSize: z.coerce.number().min(1).max(100).default(20),
+});
 
 router.use(verifyFirebaseToken);
 
@@ -191,6 +208,63 @@ router.get(
       .parse(req.query);
 
     const data = await getServiceBehaviorReport(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/services",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = baseAnalyticsSchema
+      .extend({
+        search: z.string().default(""),
+        serviceCategory: z.string().default(""),
+        sortBy: z
+          .enum([
+            "totalRevenue",
+            "bookingCount",
+            "customerCount",
+            "averageSellingPrice",
+            "repeatPurchaseRate",
+            "growthRate",
+          ])
+          .default("totalRevenue"),
+        sortDirection: z.enum(["asc", "desc"]).default("desc"),
+      })
+      .parse(req.query);
+
+    const data = await getServicePortalList(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/services/detail/overview",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = serviceDetailSchema.parse(req.query);
+    const data = await getServicePortalOverview(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/services/detail/customers",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = servicePagedDetailSchema.parse(req.query);
+    const data = await getServicePortalCustomers(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/services/detail/payments",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = servicePagedDetailSchema.parse(req.query);
+    const data = await getServicePortalPayments(params);
     res.json({ success: true, data });
   }),
 );

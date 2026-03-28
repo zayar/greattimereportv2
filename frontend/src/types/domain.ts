@@ -322,6 +322,157 @@ export interface ServiceBehaviorResponse {
   }>;
 }
 
+export interface ServicePortalListResponse {
+  summary: {
+    serviceCount: number;
+    totalRevenue: number;
+    totalBookings: number;
+    totalCustomers: number;
+    averageRepeatRate: number;
+    averagePrice: number;
+    packageRevenueShare: number;
+  };
+  filterOptions: {
+    serviceCategories: string[];
+  };
+  rows: Array<{
+    serviceName: string;
+    serviceCategory: string;
+    totalRevenue: number;
+    bookingCount: number;
+    customerCount: number;
+    averageSellingPrice: number;
+    repeatPurchaseRate: number;
+    lastBookedDate: string | null;
+    topTherapist: string;
+    packageMixPct: number;
+    oneOffMixPct: number;
+    growthRate: number;
+    highValueCustomers: number;
+  }>;
+}
+
+export interface ServicePortalOverviewResponse {
+  service: {
+    serviceName: string;
+    serviceCategory: string;
+    totalRevenue: number;
+    bookingCount: number;
+    customerCount: number;
+    averageSellingPrice: number;
+    repeatPurchaseRate: number;
+    lastBookedDate: string | null;
+    topTherapist: string;
+    topTherapistShare: number;
+    packageMixPct: number;
+    oneOffMixPct: number;
+    growthRate: number;
+    averageDiscountRate: number;
+    packageRemainingUsage: number;
+    revenuePerCustomer: number;
+    status: string;
+  };
+  trend: Array<{
+    bucket: string;
+    revenue: number;
+    bookings: number;
+    customers: number;
+    averagePrice: number;
+    discountRate: number;
+  }>;
+  therapistPerformance: Array<{
+    therapistName: string;
+    bookingCount: number;
+    customerCount: number;
+    revenue: number;
+    averagePrice: number;
+    latestVisitDate: string | null;
+  }>;
+  paymentMix: Array<{
+    paymentMethod: string;
+    totalAmount: number;
+    transactionCount: number;
+    contributionPct: number;
+  }>;
+  topCustomers: Array<{
+    customerName: string;
+    phoneNumber: string;
+    memberId: string;
+    totalRevenue: number;
+    visitCount: number;
+    lastVisitDate: string | null;
+    relationship: string;
+    rank: number;
+  }>;
+  relatedServices: Array<{
+    serviceName: string;
+    serviceCategory: string;
+    sharedCustomerCount: number;
+    pairCount: number;
+  }>;
+  peakPeriods: {
+    weekdays: Array<{
+      label: string;
+      bookingCount: number;
+    }>;
+    hours: Array<{
+      label: string;
+      bookingCount: number;
+    }>;
+  };
+  insights: Array<{
+    id: string;
+    tone: "positive" | "attention" | "neutral";
+    title: string;
+    detail: string;
+  }>;
+  recommendedAction: string;
+  assumptions: string[];
+}
+
+export interface ServicePortalCustomersResponse {
+  summary: {
+    customerCount: number;
+    repeatCustomers: number;
+    averageRevenuePerCustomer: number;
+  };
+  rows: Array<{
+    customerName: string;
+    phoneNumber: string;
+    memberId: string;
+    totalRevenue: number;
+    visitCount: number;
+    lastVisitDate: string | null;
+    relationship: string;
+  }>;
+  totalCount: number;
+}
+
+export interface ServicePortalPaymentsResponse {
+  summary: {
+    totalRevenue: number;
+    invoiceCount: number;
+    averageLineValue: number;
+    averageDiscountRate: number;
+  };
+  rows: Array<{
+    dateLabel: string;
+    invoiceNumber: string;
+    customerName: string;
+    phoneNumber: string;
+    memberId: string;
+    servicePackageName: string | null;
+    paymentMethod: string;
+    salePerson: string;
+    itemQuantity: number;
+    unitPrice: number;
+    lineTotal: number;
+    discountAmount: number;
+    outstandingAmount: number;
+  }>;
+  totalCount: number;
+}
+
 export interface PaymentReportResponse {
   summary: {
     totalAmount: number;

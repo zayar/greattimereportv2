@@ -15,6 +15,10 @@ import type {
   SalesReportResponse,
   SalesBySellerResponse,
   ServiceBehaviorResponse,
+  ServicePortalCustomersResponse,
+  ServicePortalListResponse,
+  ServicePortalOverviewResponse,
+  ServicePortalPaymentsResponse,
 } from "../types/domain";
 
 type BaseParams = {
@@ -139,6 +143,69 @@ export async function fetchServiceBehavior(
 ) {
   const response = await apiClient.get<{ success: true; data: ServiceBehaviorResponse }>(
     "/analytics/service-behavior",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchServicePortalList(
+  params: BaseParams & {
+    search: string;
+    serviceCategory: string;
+    sortBy:
+      | "totalRevenue"
+      | "bookingCount"
+      | "customerCount"
+      | "averageSellingPrice"
+      | "repeatPurchaseRate"
+      | "growthRate";
+    sortDirection: "asc" | "desc";
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: ServicePortalListResponse }>(
+    "/analytics/services",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchServicePortalOverview(
+  params: BaseParams & {
+    serviceName: string;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: ServicePortalOverviewResponse }>(
+    "/analytics/services/detail/overview",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchServicePortalCustomers(
+  params: BaseParams & {
+    serviceName: string;
+    search: string;
+    page: number;
+    pageSize: number;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: ServicePortalCustomersResponse }>(
+    "/analytics/services/detail/customers",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchServicePortalPayments(
+  params: BaseParams & {
+    serviceName: string;
+    search: string;
+    page: number;
+    pageSize: number;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: ServicePortalPaymentsResponse }>(
+    "/analytics/services/detail/payments",
     { params },
   );
   return response.data.data;

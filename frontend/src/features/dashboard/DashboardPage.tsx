@@ -144,6 +144,14 @@ const reportCardsConfig: HomeCardConfig[] = [
 
 const intelligenceCardsConfig: HomeCardConfig[] = [
   {
+    id: "service-portal",
+    title: "Service Portal",
+    description: "Service-level intelligence, pricing quality, and growth signals",
+    eyebrow: "",
+    tone: "neutral",
+    cta: "",
+  },
+  {
     id: "customer-behavior",
     title: "Customer Behavior",
     description: "Retention and churn analysis",

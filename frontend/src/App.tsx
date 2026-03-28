@@ -23,6 +23,8 @@ import { BankingSummaryPage } from "./features/analytics/banking-summary/Banking
 import { CustomersBySalespersonPage } from "./features/analytics/customers-by-salesperson/CustomersBySalespersonPage";
 import { CustomerPortalPage } from "./features/analytics/customer-portal/CustomerPortalPage";
 import { CustomerDetailPage } from "./features/analytics/customer-portal/CustomerDetailPage";
+import { ServicePortalPage } from "./features/analytics/service-portal/ServicePortalPage";
+import { ServiceDetailPage } from "./features/analytics/service-portal/ServiceDetailPage";
 import { ServiceListPage } from "./features/core/services/ServiceListPage";
 import { ServicePackagesPage } from "./features/core/services/ServicePackagesPage";
 import { ServiceCategoriesPage } from "./features/core/services/ServiceCategoriesPage";
@@ -73,6 +75,8 @@ export default function App() {
                   <Route path="analytics/banking-summary" element={<BankingSummaryPage />} />
                   <Route path="analytics/customer-behavior" element={<CustomerBehaviorPage />} />
                   <Route path="analytics/service-behavior" element={<ServiceBehaviorPage />} />
+                  <Route path="analytics/services" element={<ServicePortalPage />} />
+                  <Route path="analytics/services/:serviceSlug" element={<ServiceDetailPage />} />
                   <Route path="analytics/payment-report" element={<PaymentReportPage />} />
                   <Route path="analytics/daily-treatment" element={<DailyTreatmentPage />} />
                   <Route path="analytics/sales-by-seller" element={<SalesBySellerPage />} />

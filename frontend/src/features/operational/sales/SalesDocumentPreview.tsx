@@ -85,6 +85,7 @@ export function SalesDocumentPreview({ model, config, previewLabel }: Props) {
       secondary: secondary || null,
     };
   });
+  const hasBottomMeta = (config.showPaymentDetails && paymentSummaries.length > 0) || (config.showNotes && Boolean(model.notes));
   const padding = getMarginPadding(config.marginPreset);
   const accentStyle = {
     ["--sales-document-accent" as const]: config.accentColor,
@@ -201,6 +202,31 @@ export function SalesDocumentPreview({ model, config, previewLabel }: Props) {
       ) : null}
 
       <section className="sales-paper__bottom">
+        {hasBottomMeta ? (
+          <div className="sales-paper__bottom-meta">
+            {config.showPaymentDetails && paymentSummaries.length > 0 ? (
+              <div className="sales-paper__payment-note">
+                <span className="sales-paper__section-label">Payment note</span>
+                {paymentSummaries.map((payment) => (
+                  <div key={payment.id} className="sales-paper__payment-note-item">
+                    <strong>{payment.primary}</strong>
+                    {payment.secondary ? <span>{payment.secondary}</span> : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {config.showNotes && model.notes ? (
+              <section className="sales-paper__note-block">
+                <span className="sales-paper__section-label">Notes / Instructions</span>
+                <p>{model.notes}</p>
+              </section>
+            ) : null}
+          </div>
+        ) : (
+          <div className="sales-paper__bottom-meta sales-paper__bottom-meta--empty" />
+        )}
+
         <div className="sales-paper__summary-wrap">
           <aside className="sales-paper__summary-panel">
             <span className="sales-paper__section-label">Totals</span>
@@ -229,27 +255,8 @@ export function SalesDocumentPreview({ model, config, previewLabel }: Props) {
               <span>Outstanding</span>
               <strong>{formatCurrency(model.summary.balanceDue, model.currency)}</strong>
             </div>
-
-            {config.showPaymentDetails && paymentSummaries.length > 0 ? (
-              <div className="sales-paper__payment-note">
-                <span className="sales-paper__section-label">Payment note</span>
-                {paymentSummaries.map((payment) => (
-                  <div key={payment.id} className="sales-paper__payment-note-item">
-                    <strong>{payment.primary}</strong>
-                    {payment.secondary ? <span>{payment.secondary}</span> : null}
-                  </div>
-                ))}
-              </div>
-            ) : null}
           </aside>
         </div>
-
-        {config.showNotes && model.notes ? (
-          <section className="sales-paper__note-block">
-            <span className="sales-paper__section-label">Notes / Instructions</span>
-            <p>{model.notes}</p>
-          </section>
-        ) : null}
       </section>
 
       {config.showFooterNote && config.footerNote.trim() !== "" ? (

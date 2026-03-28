@@ -4069,6 +4069,185 @@ a {
   border: 1px solid rgba(29, 110, 242, 0.08);
 }
 
+.service-portal {
+  gap: 18px;
+}
+
+.service-portal__filter-panel .panel__body,
+.service-portal__list-panel .panel__body {
+  display: grid;
+  gap: 18px;
+}
+
+.service-portal__filter-grid {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(220px, 1.3fr) minmax(260px, 1.6fr) repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  align-items: end;
+}
+
+.service-portal__filter-grid > * {
+  min-width: 0;
+}
+
+.service-portal__search {
+  min-width: 0;
+}
+
+.service-portal__kpis {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.service-portal__list-panel .table-wrap {
+  max-height: calc(100vh - 360px);
+  border-radius: 18px;
+  border: 1px solid var(--report-border);
+  background: var(--report-table-bg);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.44),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(12px);
+}
+
+.service-portal__list-panel .data-table {
+  min-width: 1320px;
+}
+
+.service-portal__list-panel .data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--report-table-head);
+  backdrop-filter: blur(8px);
+}
+
+.service-portal__row--attention td {
+  background: rgba(255, 247, 244, 0.72);
+}
+
+.service-portal__row--inactive td {
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.service-portal__service-cell,
+.service-portal__metric-cell {
+  display: grid;
+  gap: 4px;
+}
+
+.service-portal__service-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.service-portal__service-cell strong {
+  color: #141923;
+}
+
+.service-portal__service-cell span,
+.service-portal__metric-cell span {
+  color: #667085;
+  font-size: 0.87rem;
+}
+
+.service-detail {
+  gap: 20px;
+}
+
+.service-detail__hero .customer-detail__identity-card,
+.service-detail__hero .customer-detail__action-card {
+  min-height: 100%;
+}
+
+.service-detail__kpis {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.service-detail__peak-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.service-detail__peak-card,
+.service-detail__customer-card {
+  border-radius: 20px;
+  border: 1px solid var(--report-border);
+  background: var(--report-surface-muted);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34);
+}
+
+.service-detail__peak-card {
+  padding: 16px 18px;
+  display: grid;
+  gap: 10px;
+}
+
+.service-detail__peak-card > span {
+  color: #667085;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.service-detail__peak-card p {
+  margin: 0;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #667085;
+}
+
+.service-detail__peak-card strong {
+  color: #141923;
+}
+
+.service-detail__customer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.service-detail__customer-card {
+  width: 100%;
+  padding: 16px 18px;
+  display: grid;
+  gap: 8px;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 140ms ease, border-color 140ms ease, background-color 140ms ease;
+}
+
+.service-detail__customer-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(29, 110, 242, 0.16);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.service-detail__customer-card > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.service-detail__customer-card strong {
+  color: #141923;
+}
+
+.service-detail__customer-card span,
+.service-detail__customer-card small {
+  color: #667085;
+}
+
+.service-detail__customer-card p {
+  margin: 0;
+  color: #141923;
+  font-weight: 700;
+}
+
 .menu-toggle {
   display: none;
   height: 40px;
@@ -4966,14 +5145,29 @@ a {
 
 .sales-paper__bottom {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 336px);
   gap: 18px;
   padding: 0 var(--sales-paper-padding-x, 38px) 18px;
   align-items: start;
 }
 
+.sales-paper__bottom-meta {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  padding-top: 12px;
+  border-top: 1px solid rgba(98, 77, 47, 0.1);
+}
+
+.sales-paper__bottom-meta--empty {
+  padding-top: 0;
+  border-top: none;
+}
+
 .sales-paper__summary-wrap {
   display: flex;
   justify-content: flex-end;
+  grid-column: 2;
 }
 
 .sales-paper__summary-panel {
@@ -5017,9 +5211,7 @@ a {
 .sales-paper__payment-note {
   display: grid;
   gap: 8px;
-  margin-top: 6px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(122, 99, 68, 0.12);
+  max-width: 44ch;
 }
 
 .sales-paper__payment-note-item {
@@ -5044,7 +5236,6 @@ a {
   max-width: 62ch;
   padding-top: 0;
   border: none;
-  border-top: 1px solid rgba(98, 77, 47, 0.1);
   border-radius: 0;
   background: transparent;
   box-shadow: none;
@@ -5149,7 +5340,9 @@ a {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .customer-portal__kpis {
+  .customer-portal__kpis,
+  .service-portal__kpis,
+  .service-detail__kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -5165,9 +5358,12 @@ a {
   }
 
   .customer-portal__filter-grid,
+  .service-portal__filter-grid,
   .customer-detail__hero,
   .customer-detail__recent-services,
-  .customer-detail__mini-stats {
+  .customer-detail__mini-stats,
+  .service-detail__peak-grid,
+  .service-detail__customer-grid {
     grid-template-columns: 1fr;
   }
 
@@ -5298,7 +5494,9 @@ a {
     margin-right: 24px;
   }
 
-  .customer-portal__kpis {
+  .customer-portal__kpis,
+  .service-portal__kpis,
+  .service-detail__kpis {
     grid-template-columns: 1fr;
   }
 
@@ -5685,6 +5883,11 @@ a {
     text-align: left;
   }
 
+  .sales-paper__bottom-meta,
+  .sales-paper__summary-wrap {
+    grid-column: 1;
+  }
+
   .sales-paper__summary-wrap {
     justify-content: flex-start;
   }
@@ -5864,6 +6067,11 @@ a {
     padding: 0 20px 14px !important;
   }
 
+  .sales-paper__bottom-meta {
+    gap: 10px !important;
+    padding-top: 8px !important;
+  }
+
   .sales-paper__summary-wrap {
     justify-content: flex-end !important;
   }
@@ -5897,8 +6105,6 @@ a {
 
   .sales-paper__payment-note {
     gap: 6px !important;
-    margin-top: 4px !important;
-    padding-top: 8px !important;
   }
 
   .sales-paper__payment-note-item strong,
@@ -5909,9 +6115,8 @@ a {
 
   .sales-paper__note-block {
     margin: 0 !important;
-    padding: 12px 0 0 !important;
+    padding: 0 !important;
     border: none !important;
-    border-top: 1px solid rgba(98, 77, 47, 0.1) !important;
     border-radius: 0 !important;
     background: transparent !important;
   }

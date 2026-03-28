@@ -38,6 +38,16 @@ export const directoryItems: DirectoryItem[] = [
     featured: true,
   },
   {
+    id: "service-portal",
+    title: "Service portal",
+    description: "Service intelligence for revenue, bookings, repeat depth, and therapist dependence.",
+    route: "/analytics/services",
+    group: "Featured",
+    eyebrow: "Services",
+    window: "year",
+    featured: true,
+  },
+  {
     id: "payment-report",
     title: "Payment report",
     description: "Payment-method drilldown and detailed banking transactions.",
