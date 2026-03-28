@@ -4,7 +4,7 @@ import { HttpError } from "../utils/http-error.js";
 
 export function errorHandler(
   error: unknown,
-  _req: Request,
+  req: Request,
   res: Response,
   _next: NextFunction,
 ) {
@@ -27,9 +27,9 @@ export function errorHandler(
   }
 
   const message = error instanceof Error ? error.message : "Unexpected server error.";
+  console.error(`[GT_V2Report] ${req.method} ${req.originalUrl}`, error);
   res.status(500).json({
     success: false,
     error: message,
   });
 }
-

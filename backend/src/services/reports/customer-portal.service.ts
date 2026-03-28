@@ -104,7 +104,7 @@ function buildInvoiceLevelPaymentsCte(extraWhere = "1 = 1") {
         CustomerPhoneNumber AS phoneNumber,
         InvoiceNumber AS invoiceNumber,
         MAX(OrderCreatedDate) AS orderCreatedDate,
-        MAX(COALESCE(MemberId, '')) AS memberId,
+        CAST('' AS STRING) AS memberId,
         MAX(COALESCE(PaymentMethod, 'Unknown')) AS paymentMethod,
         MAX(COALESCE(PaymentStatus, '')) AS paymentStatus,
         MAX(COALESCE(SellerName, 'Unknown')) AS salePerson,
