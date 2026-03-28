@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useQuery } from "@apollo/client";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { PageHeader } from "../../../components/PageHeader";
@@ -52,6 +52,18 @@ export function SalesDetailPage() {
     showZeroValue: searchParams.get("showZeroValue") === "1",
     showCoOrders: searchParams.get("showCoOrders") === "1",
   });
+
+  useEffect(() => {
+    const previousTitle = document.title;
+
+    if (order?.order_id) {
+      document.title = order.order_id;
+    }
+
+    return () => {
+      document.title = previousTitle;
+    };
+  }, [order?.order_id]);
 
   return (
     <div className="page-stack page-stack--workspace analytics-report sales-document-page">

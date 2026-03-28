@@ -4978,8 +4978,19 @@ a {
 }
 
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+
   body {
     background: #ffffff;
+  }
+
+  .sales-paper,
+  .sales-paper * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
   .shell__sidebar,
@@ -5006,15 +5017,36 @@ a {
     border: none !important;
   }
 
+  .sales-document-page__panel .panel__header {
+    display: none !important;
+  }
+
+  .sales-document-page__preview-stage {
+    place-items: start center !important;
+  }
+
   .sales-paper {
-    width: 100%;
-    border: none;
-    border-radius: 0;
-    box-shadow: none;
-    background: #ffffff;
+    width: 186mm !important;
+    max-width: 100% !important;
+    margin: 0 auto !important;
+    border: 1px solid rgba(17, 24, 39, 0.08) !important;
+    border-radius: 22px !important;
+    overflow: hidden !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
   }
 
   .sales-paper__topbar {
     height: 6px;
+  }
+
+  .sales-paper__meta-card,
+  .sales-paper__info-card,
+  .sales-paper__table-block,
+  .sales-paper__summary-panel,
+  .sales-paper__note-block,
+  .sales-paper__footer {
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 }
