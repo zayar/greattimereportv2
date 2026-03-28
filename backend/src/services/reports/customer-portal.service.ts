@@ -1081,10 +1081,10 @@ export async function getCustomerPortalOverview(params: DetailBaseParams) {
 }
 
 export async function getCustomerPortalPackages(params: DetailBaseParams) {
-  const scoped = buildCustomerScopedCtes(params);
   const queryParams = {
     clinicCode: params.clinicCode,
-    ...scoped.queryParams,
+    customerName: params.customerName.trim(),
+    customerPhoneDigits: normalizePhoneDigits(params.customerPhone),
   };
 
   const rows = await runAnalyticsQuery<{
@@ -1098,21 +1098,29 @@ export async function getCustomerPortalPackages(params: DetailBaseParams) {
     latestTherapist: string;
   }>(
     `
-      ${scoped.ctes}
       SELECT
-        COALESCE(serviceName, '') AS serviceName,
-        servicePackageName,
-        COALESCE(serviceCategory, 'Other') AS serviceCategory,
-        MAX(packageCount) AS packageTotal,
-        GREATEST(MAX(packageCount) - MAX(remainingPackageCount), 0) AS usedCount,
-        GREATEST(MAX(remainingPackageCount), 0) AS remainingCount,
-        FORMAT_DATE('%Y-%m-%d', MAX(DATE(checkInTime))) AS latestUsageDate,
-        ARRAY_AGG(COALESCE(practitionerName, 'Unknown') ORDER BY checkInTime DESC LIMIT 1)[SAFE_OFFSET(0)] AS latestTherapist
-      FROM DistinctVisits
-      WHERE COALESCE(servicePackageName, '') != ''
-         OR packageCount > 0
-         OR remainingPackageCount > 0
-      GROUP BY serviceName, servicePackageName, serviceCategory
+        COALESCE(ServiceName, '') AS serviceName,
+        CAST(NULL AS STRING) AS servicePackageName,
+        ${buildServiceCategoryExpression("ServiceName", "CAST(NULL AS STRING)")} AS serviceCategory,
+        MAX(CAST(COALESCE(PackageCount, 0) AS INT64)) AS packageTotal,
+        GREATEST(
+          MAX(CAST(COALESCE(PackageCount, 0) AS INT64)) - MAX(CAST(COALESCE(RemainingPackageCount, 0) AS INT64)),
+          0
+        ) AS usedCount,
+        GREATEST(MAX(CAST(COALESCE(RemainingPackageCount, 0) AS INT64)), 0) AS remainingCount,
+        FORMAT_DATE('%Y-%m-%d', MAX(DATE(CheckInTime))) AS latestUsageDate,
+        ARRAY_AGG(COALESCE(PractitionerName, 'Unknown') ORDER BY CheckInTime DESC LIMIT 1)[SAFE_OFFSET(0)] AS latestTherapist
+      FROM ${analyticsTables.mainDataView}
+      WHERE LOWER(ClinicCode) = LOWER(@clinicCode)
+        AND CustomerName IS NOT NULL
+        AND CustomerPhoneNumber IS NOT NULL
+        AND CheckInTime IS NOT NULL
+        AND ${buildCustomerIdentityCondition("CustomerPhoneNumber", "CustomerName")}
+        AND (
+          CAST(COALESCE(PackageCount, 0) AS INT64) > 0
+          OR CAST(COALESCE(RemainingPackageCount, 0) AS INT64) > 0
+        )
+      GROUP BY serviceName, serviceCategory
       ORDER BY remainingCount DESC, latestUsageDate DESC, serviceName ASC
     `,
     queryParams,
