@@ -362,8 +362,6 @@ export function CustomerDetailPage() {
     customerName,
     customerPhone,
     hasIdentity,
-    packagesState.data,
-    packagesState.loading,
     range.fromDate,
     range.toDate,
   ]);
