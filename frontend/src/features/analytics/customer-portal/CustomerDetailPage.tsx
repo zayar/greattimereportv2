@@ -109,6 +109,36 @@ function initialsFor(name: string) {
     .join("");
 }
 
+function displayText(value: unknown, fallback = ""): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value == null) {
+    return fallback;
+  }
+
+  if (typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  if (typeof value === "object") {
+    if ("value" in value) {
+      return displayText((value as { value: unknown }).value, fallback);
+    }
+
+    if ("preferredService" in value) {
+      return displayText((value as { preferredService: unknown }).preferredService, fallback);
+    }
+
+    if ("preferredTherapist" in value) {
+      return displayText((value as { preferredTherapist: unknown }).preferredTherapist, fallback);
+    }
+  }
+
+  return fallback;
+}
+
 function toneClass(tone: "positive" | "attention" | "neutral") {
   if (tone === "positive") {
     return "positive";
@@ -519,8 +549,11 @@ export function CustomerDetailPage() {
       valueDisplay: `${service.totalUsage.toLocaleString("en-US")} uses`,
     }));
   }, [usageState.data]);
-  const displayName = customer?.customerName || customerName || customerPhone || "Customer";
-  const displayPhone = customer?.phoneNumber || customerPhone || "Phone unavailable";
+  const displayName = displayText(customer?.customerName, customerName || customerPhone || "Customer");
+  const displayPhone = displayText(customer?.phoneNumber, customerPhone || "Phone unavailable");
+  const displayMemberId = displayText(customer?.memberId);
+  const preferredServiceLabel = displayText(customer?.preferredService, "No clear favorite yet");
+  const preferredTherapistLabel = displayText(customer?.preferredTherapist, "Unknown");
   const displayInitials = initialsFor(displayName || "C");
 
   if (!hasIdentity) {
@@ -567,7 +600,7 @@ export function CustomerDetailPage() {
             <h2>{displayName}</h2>
             <p>
               {displayPhone}
-              {customer?.memberId ? ` • Member ${customer.memberId}` : ""}
+              {displayMemberId ? ` • Member ${displayMemberId}` : ""}
               {customer?.joinedDate ? ` • Joined ${formatDate(customer.joinedDate)}` : ""}
             </p>
             <div className="customer-detail__badges">
@@ -619,12 +652,12 @@ export function CustomerDetailPage() {
         </div>
         <div className="report-kpi-strip__card">
           <span className="report-kpi-strip__label">Preferred service</span>
-          <span className="report-kpi-strip__value">{customer?.preferredService || "No clear favorite yet"}</span>
+          <span className="report-kpi-strip__value">{preferredServiceLabel}</span>
           <span className="report-kpi-strip__hint">{customer?.preferredServiceCategory || "Other"}</span>
         </div>
         <div className="report-kpi-strip__card">
           <span className="report-kpi-strip__label">Preferred therapist</span>
-          <span className="report-kpi-strip__value">{customer?.preferredTherapist || "Unknown"}</span>
+          <span className="report-kpi-strip__value">{preferredTherapistLabel}</span>
           <span className="report-kpi-strip__hint">
             {customer?.remainingSessions ? `${customer.remainingSessions} sessions remaining` : "No active package balance"}
           </span>

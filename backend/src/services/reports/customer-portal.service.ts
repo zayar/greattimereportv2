@@ -43,6 +43,40 @@ function parseNumber(value: unknown) {
   return Number(value ?? 0);
 }
 
+function parseText(value: unknown, fallback = ""): string {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value == null) {
+    return fallback;
+  }
+
+  if (typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  if (typeof value === "object") {
+    if ("value" in value) {
+      return parseText((value as { value: unknown }).value, fallback);
+    }
+
+    if ("preferredService" in value) {
+      return parseText((value as { preferredService: unknown }).preferredService, fallback);
+    }
+
+    if ("preferredTherapist" in value) {
+      return parseText((value as { preferredTherapist: unknown }).preferredTherapist, fallback);
+    }
+
+    if ("preferredServiceCategory" in value) {
+      return parseText((value as { preferredServiceCategory: unknown }).preferredServiceCategory, fallback);
+    }
+  }
+
+  return fallback;
+}
+
 function normalizePhoneDigits(value: string) {
   return value.replace(/\D/g, "");
 }
@@ -789,9 +823,9 @@ export async function getCustomerPortalOverview(params: DetailBaseParams) {
           FORMAT_DATE('%Y-%m-%d', (SELECT lastVisitDate FROM VisitSummary)) AS lastVisitDate,
           COALESCE((SELECT lifetimeSpend FROM InvoiceSummary), 0) AS lifetimeSpend,
           COALESCE((SELECT totalVisits FROM VisitSummary), 0) AS totalVisits,
-          (SELECT preferredService FROM PreferredService) AS preferredService,
-          (SELECT preferredServiceCategory FROM PreferredService) AS preferredServiceCategory,
-          (SELECT preferredTherapist FROM PreferredTherapist) AS preferredTherapist,
+          (SELECT ps.preferredService FROM PreferredService ps LIMIT 1) AS preferredService,
+          (SELECT ps.preferredServiceCategory FROM PreferredService ps LIMIT 1) AS preferredServiceCategory,
+          (SELECT pt.preferredTherapist FROM PreferredTherapist pt LIMIT 1) AS preferredTherapist,
           COALESCE((SELECT lastPaymentMethod FROM InvoiceSummary), 'Unknown') AS lastPaymentMethod,
           CASE
             WHEN (SELECT lastVisitDate FROM VisitSummary) IS NULL THEN NULL
@@ -938,6 +972,9 @@ export async function getCustomerPortalOverview(params: DetailBaseParams) {
 
   const summary = summaryRows[0];
   const spendTier = spendTierRows[0]?.spendTier ?? "Emerging";
+  const preferredService = parseText(summary?.preferredService);
+  const preferredServiceCategory = parseText(summary?.preferredServiceCategory, "Other");
+  const preferredTherapist = parseText(summary?.preferredTherapist, "Unknown");
   const daysSinceLastVisit =
     summary?.daysSinceLastVisit == null ? null : parseNumber(summary.daysSinceLastVisit);
   const lifetimeSpend = parseNumber(summary?.lifetimeSpend);
@@ -962,10 +999,10 @@ export async function getCustomerPortalOverview(params: DetailBaseParams) {
     lifetimeSpend,
     totalVisits,
     daysSinceLastVisit,
-    preferredService: summary?.preferredService ?? "",
-    preferredServiceCategory: summary?.preferredServiceCategory ?? "Other",
-    preferredTherapist: summary?.preferredTherapist ?? "Unknown",
-    lastPaymentMethod: summary?.lastPaymentMethod ?? "Unknown",
+    preferredService,
+    preferredServiceCategory,
+    preferredTherapist,
+    lastPaymentMethod: parseText(summary?.lastPaymentMethod, "Unknown"),
     averageSpendPerVisit,
     remainingSessions: parseNumber(summary?.remainingSessions),
     recent3MonthVisits: parseNumber(summary?.recent3MonthVisits),
@@ -984,17 +1021,17 @@ export async function getCustomerPortalOverview(params: DetailBaseParams) {
     customer: {
       customerName: summary?.customerName ?? params.customerName,
       phoneNumber: summary?.phoneNumber ?? params.customerPhone,
-      memberId: summary?.memberId ?? "",
+      memberId: parseText(summary?.memberId),
       joinedDate: summary?.joinedDate ?? null,
-      dateOfBirth: summary?.dateOfBirth ?? null,
+      dateOfBirth: parseText(summary?.dateOfBirth) || null,
       lastVisitDate: summary?.lastVisitDate ?? null,
       lifetimeSpend,
       totalVisits,
       averageSpendPerVisit,
-      preferredService: summary?.preferredService ?? "",
-      preferredServiceCategory: summary?.preferredServiceCategory ?? "Other",
-      preferredTherapist: summary?.preferredTherapist ?? "Unknown",
-      lastPaymentMethod: summary?.lastPaymentMethod ?? "Unknown",
+      preferredService,
+      preferredServiceCategory,
+      preferredTherapist,
+      lastPaymentMethod: parseText(summary?.lastPaymentMethod, "Unknown"),
       daysSinceLastVisit,
       remainingSessions: parseNumber(summary?.remainingSessions),
       recent3MonthVisits: parseNumber(summary?.recent3MonthVisits),
@@ -1032,7 +1069,7 @@ export async function getCustomerPortalOverview(params: DetailBaseParams) {
       spendTier,
       daysSinceLastVisit,
       remainingSessions: parseNumber(summary?.remainingSessions),
-      preferredServiceCategory: summary?.preferredServiceCategory ?? "Other",
+      preferredServiceCategory,
       recent3MonthVisits: parseNumber(summary?.recent3MonthVisits),
       previous3MonthVisits: parseNumber(summary?.previous3MonthVisits),
     }),
