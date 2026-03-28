@@ -78,7 +78,7 @@ export function ServiceConsentFormsPage() {
       </div>
 
       <Panel
-        className="core-catalog-page__panel core-catalog-page__wide-table"
+        className="core-catalog-page__panel"
         title="Consent form library"
         subtitle="Read-only visibility into consent templates, media readiness, and signature alignment."
       >

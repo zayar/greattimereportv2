@@ -82,7 +82,7 @@ export function ServiceListPage() {
       </div>
 
       <Panel
-        className="core-catalog-page__panel core-catalog-page__wide-table"
+        className="core-catalog-page__panel"
         title={`${currentClinic?.name ?? "Clinic"} services`}
         subtitle="Service catalog, pricing, cadence, and status from the core service table."
       >

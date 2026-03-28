@@ -70,7 +70,7 @@ export function ServicePackagesPage() {
       </div>
 
       <Panel
-        className="core-catalog-page__panel core-catalog-page__wide-table"
+        className="core-catalog-page__panel"
         title={`${currentClinic?.name ?? "Clinic"} packages`}
         subtitle="Package pricing, expiry day, and publishing state."
       >

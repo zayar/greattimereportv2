@@ -70,7 +70,7 @@ export function ProductStockItemsPage() {
       </div>
 
       <Panel
-        className="core-catalog-page__panel core-catalog-page__wide-table"
+        className="core-catalog-page__panel"
         title="Stock item registry"
         subtitle="Operational view of SKU-level stock items and their linked product definitions."
       >

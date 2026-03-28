@@ -70,7 +70,7 @@ export function ProductListPage() {
       </div>
 
       <Panel
-        className="core-catalog-page__panel core-catalog-page__wide-table"
+        className="core-catalog-page__panel"
         title="Product catalog"
         subtitle="Read-only operational view of products, measurement amounts, and brand mapping."
       >

@@ -1744,6 +1744,10 @@ a {
   gap: 18px;
 }
 
+.core-catalog-page .report-kpi-strip {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
 .core-catalog-page__filters {
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -1763,11 +1767,12 @@ a {
 }
 
 .core-catalog-page__panel .data-table {
-  width: max-content;
+  width: 100%;
   min-width: 100%;
 }
 
 .core-catalog-page__wide-table .data-table {
+  width: max-content;
   min-width: 1020px;
 }
 

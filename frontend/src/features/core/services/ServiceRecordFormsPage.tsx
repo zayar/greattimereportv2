@@ -79,7 +79,7 @@ export function ServiceRecordFormsPage() {
       </div>
 
       <Panel
-        className="core-catalog-page__panel core-catalog-page__wide-table"
+        className="core-catalog-page__panel"
         title="Record form library"
         subtitle="A read-only operational audit of record forms, their term blocks, and their current publishing state."
       >
