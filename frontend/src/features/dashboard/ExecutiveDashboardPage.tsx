@@ -66,7 +66,6 @@ function formatTrendLabel(value: string, granularity: DashboardResponse["trend"]
 }
 
 const metricCards = [
-  { key: "revenue", label: "Total revenue", hint: "Collected revenue in the selected period." },
   { key: "invoices", label: "Invoices", hint: "Unique paid invoices in range." },
   { key: "customers", label: "Customers", hint: "Customers with activity in the selected period." },
   { key: "appointments", label: "Appointments", hint: "Distinct booking records captured in care flow." },
@@ -75,7 +74,7 @@ const metricCards = [
 ] as const;
 
 export function ExecutiveDashboardPage() {
-  const { businesses, currentBusiness, currentClinic, selectBusiness, selectClinic } = useAccess();
+  const { currentBusiness, currentClinic, selectClinic } = useAccess();
   const [searchParams, setSearchParams] = useSearchParams();
   const appliedQuery = useMemo(() => readDashboardQuery(searchParams), [searchParams]);
   const [range, setRange] = useState(getDefaultRange());
@@ -93,6 +92,23 @@ export function ExecutiveDashboardPage() {
       });
     }
   }, [appliedQuery?.fromDate, appliedQuery?.toDate]);
+
+  useEffect(() => {
+    if (appliedQuery || !currentClinic) {
+      return;
+    }
+
+    const defaultRange = getDefaultRange();
+    setSearchParams(
+      createSearchParams({
+        clinicId: currentClinic.id,
+        clinicCode: currentClinic.code,
+        fromDate: defaultRange.fromDate,
+        toDate: defaultRange.toDate,
+      }),
+      { replace: true },
+    );
+  }, [appliedQuery, currentClinic, setSearchParams]);
 
   useEffect(() => {
     if (!appliedQuery) {
@@ -187,6 +203,29 @@ export function ExecutiveDashboardPage() {
     [data],
   );
 
+  const monthRange = useMemo(() => getDefaultRange(), []);
+  const currentDay = useMemo(() => today(), []);
+
+  const activePreset = useMemo(() => {
+    if (range.fromDate === currentDay && range.toDate === currentDay) {
+      return "today";
+    }
+
+    if (range.fromDate === daysAgo(6) && range.toDate === currentDay) {
+      return "7d";
+    }
+
+    if (range.fromDate === daysAgo(29) && range.toDate === currentDay) {
+      return "30d";
+    }
+
+    if (range.fromDate === monthRange.fromDate && range.toDate === monthRange.toDate) {
+      return "month";
+    }
+
+    return null;
+  }, [currentDay, monthRange.fromDate, monthRange.toDate, range.fromDate, range.toDate]);
+
   return (
     <div className="page-stack page-stack--workspace executive-dashboard analytics-report">
       <PageHeader
@@ -204,7 +243,7 @@ export function ExecutiveDashboardPage() {
         <div className="executive-dashboard__control-top">
           <div className="executive-dashboard__control-copy">
             <span className="executive-dashboard__eyebrow">Filters</span>
-            <strong>Choose clinic and period</strong>
+            <strong>This month by default</strong>
           </div>
 
           <div className="executive-dashboard__control-actions">
@@ -224,17 +263,6 @@ export function ExecutiveDashboardPage() {
         </div>
 
         <div className="executive-dashboard__control-grid">
-          <label className="field field--compact">
-            <span>Business</span>
-            <select value={currentBusiness?.id ?? ""} onChange={(event) => selectBusiness(event.target.value)}>
-              {businesses.map((business) => (
-                <option key={business.id} value={business.id}>
-                  {business.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
           <label className="field field--compact">
             <span>Clinic</span>
             <select value={currentClinic?.id ?? ""} onChange={(event) => selectClinic(event.target.value)}>
@@ -260,7 +288,9 @@ export function ExecutiveDashboardPage() {
           ].map((preset) => (
             <button
               key={preset.id}
-              className="dashboard-home__preset-chip"
+              className={`dashboard-home__preset-chip ${
+                activePreset === preset.id ? "dashboard-home__preset-chip--active" : ""
+              }`.trim()}
               onClick={() => applyRange(preset.id as "today" | "7d" | "30d" | "month")}
             >
               {preset.label}
@@ -290,7 +320,7 @@ export function ExecutiveDashboardPage() {
                 <article key={card.key} className="executive-dashboard__metric-card">
                   <span className="executive-dashboard__metric-label">{card.label}</span>
                   <strong>
-                    {card.key === "revenue" || card.key === "averageInvoice"
+                    {card.key === "averageInvoice"
                       ? formatCurrency(metric.value, currentClinic?.currency || "MMK")
                       : metric.value.toLocaleString("en-US")}
                   </strong>
