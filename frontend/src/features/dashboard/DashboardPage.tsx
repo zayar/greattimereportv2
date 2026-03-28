@@ -244,7 +244,7 @@ export function DashboardPage() {
         <div className="home-directory__hero-copy">
           <span className="home-directory__welcome-kicker">Welcome back, Administrator</span>
           <h1 className="home-directory__welcome-heading">
-            {currentBusiness?.name ?? "Aura Luxe"} Clinic{" "}
+            {currentBusiness?.name ?? "Great Time App"} Clinic{" "}
             <span className="home-directory__welcome-accent">Hub</span>
           </h1>
           <p className="home-directory__welcome-subtitle">

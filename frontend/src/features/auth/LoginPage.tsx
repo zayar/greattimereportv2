@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { GoogleLogin, type CredentialResponse } from "@react-oauth/google";
 import { isAxiosError } from "axios";
 import { Navigate } from "react-router-dom";
@@ -8,9 +8,6 @@ export function LoginPage() {
   const { firebaseUser, loading, signInWithGoogleCredential } = useSession();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
 
   if (!loading && firebaseUser) {
     return <Navigate to="/dashboard" replace />;
@@ -41,17 +38,10 @@ export function LoginPage() {
     }
   };
 
-  const handleEmailLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    // Dummy handler for email login UI
-    setError("Email login is not yet configured. Please Use Google Sign-In.");
-  };
-
   return (
     <div className="al-page">
-      {/* Top Header */}
       <header className="al-header">
-        <div className="al-brand">Aura Luxe</div>
+        <div className="al-brand">Great Time App</div>
         <nav className="al-nav">
           <a href="#">SUPPORT</a>
           <a href="#">CLINIC PORTAL</a>
@@ -59,7 +49,6 @@ export function LoginPage() {
       </header>
 
       <div className="al-content">
-        {/* Left Column */}
         <div className="al-left">
           <div className="al-bg-shapes">
             <div className="al-shape al-shape-1" />
@@ -67,11 +56,16 @@ export function LoginPage() {
           </div>
 
           <div className="al-left-content">
+            <span className="al-kicker">Great Time App Analytics</span>
             <h1 className="al-heading">
-              Smarter Insights<br />for<br />Modern Aesthetic<br />Clinics
+              A calmer analytics
+              <br />
+              workspace for
+              <br />
+              aesthetic clinics
             </h1>
             <p className="al-subheading">
-              Empower your business with clinic-level reporting, revenue tracking, and beautiful data visualization designed for the aesthetic professional.
+              Open your clinic intelligence workspace with one secure Google sign-in. Revenue, customers, services, and operations stay connected in one premium reporting experience.
             </p>
 
             <div className="al-feature-list">
@@ -80,8 +74,8 @@ export function LoginPage() {
                   <svg fill="currentColor" viewBox="0 0 24 24"><path d="M16 6l2.29 2.29-4.88 4.88-4-4L2 16.59 3.41 18l6-6 4 4 6.3-6.29L22 12V6h-6z"/></svg>
                 </div>
                 <div className="al-feature-text">
-                  <strong>Revenue Growth</strong>
-                  <span>Track performance patterns in real-time.</span>
+                  <strong>Executive visibility</strong>
+                  <span>Track revenue, growth, and clinic momentum in one place.</span>
                 </div>
               </div>
 
@@ -90,8 +84,8 @@ export function LoginPage() {
                   <svg fill="currentColor" viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
                 </div>
                 <div className="al-feature-text">
-                  <strong>Patient Retention</strong>
-                  <span>Analyze loyalty and lifetime patient value.</span>
+                  <strong>Customer and service intelligence</strong>
+                  <span>Understand retention, demand, and performance without leaving the workspace.</span>
                 </div>
               </div>
 
@@ -100,23 +94,45 @@ export function LoginPage() {
                   <svg fill="currentColor" viewBox="0 0 24 24"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>
                 </div>
                 <div className="al-feature-text">
-                  <strong>Treatment Analytics</strong>
-                  <span>Understand which services drive your clinic.</span>
+                  <strong>Access by clinic permissions</strong>
+                  <span>Authorized team members sign in with Google and land directly in the right clinic context.</span>
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Right Column */}
         <div className="al-right">
           <div className="al-login-wrapper">
             <div className="al-login-titles">
-              <h2>GreatTime Report</h2>
-              <p>Secure access for aesthetic professionals</p>
+              <span className="al-login-eyebrow">Google sign-in only</span>
+              <h2>Welcome to Great Time App</h2>
+              <p>Use your authorized Google account to open the clinic analytics workspace.</p>
             </div>
 
             <div className="al-login-card">
+              <div className="al-login-copy">
+                <strong>One secure entry point for your clinic team</strong>
+                <p>
+                  Email and password login is not used here. Access is granted after Google verification and clinic-level permission checks.
+                </p>
+              </div>
+
+              <div className="al-login-bullets">
+                <div className="al-login-bullet">
+                  <span>01</span>
+                  <p>Sign in with your Google account</p>
+                </div>
+                <div className="al-login-bullet">
+                  <span>02</span>
+                  <p>We verify your clinic permissions</p>
+                </div>
+                <div className="al-login-bullet">
+                  <span>03</span>
+                  <p>You enter the reporting workspace immediately</p>
+                </div>
+              </div>
+
               <div className="al-google-btn-wrapper">
                 <GoogleLogin
                   onSuccess={handleSuccess}
@@ -129,40 +145,8 @@ export function LoginPage() {
                 />
               </div>
 
-              <div className="al-divider">
-                <span>OR LOGIN WITH EMAIL</span>
-              </div>
-
-              <form onSubmit={handleEmailLogin} className="al-email-form">
-                <div className="al-field">
-                  <label>CLINIC EMAIL</label>
-                  <input
-                    type="email"
-                    placeholder="dr.smith@clinic.com"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                  />
-                </div>
-
-                <div className="al-field">
-                  <div className="al-label-row">
-                    <label>PASSWORD</label>
-                    <a href="#" className="al-forgot">Forgot?</a>
-                  </div>
-                  <input
-                    type="password"
-                    placeholder="••••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                  />
-                </div>
-
-                {error && <div className="al-error">{error}</div>}
-                
-                <button type="submit" className="al-submit-btn" disabled={submitting}>
-                  {submitting ? "Authenticating..." : "Enter Dashboard"}
-                </button>
-              </form>
+              {submitting ? <div className="al-auth-note">Verifying your access and opening the dashboard...</div> : null}
+              {error ? <div className="al-error">{error}</div> : null}
 
               <div className="al-security-note">
                 <svg fill="currentColor" viewBox="0 0 24 24" className="al-lock-icon"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM9 6c0-1.66 1.34-3 3-3s3 1.34 3 3v2H9V6zm9 14H6V10h12v10zm-6-3c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2z"/></svg>
@@ -173,16 +157,15 @@ export function LoginPage() {
             </div>
 
             <div className="al-inquire">
-              Don't have a dashboard yet? <a href="#">Inquire for Clinic Portal</a>
+              Need access for a clinic team? <a href="#">Contact Great Time App support</a>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Footer */}
       <footer className="al-footer">
         <div className="al-footer-left">
-          © 2024 AURA LUXE SYSTEMS. ALL RIGHTS RESERVED.
+          © GREAT TIME APP. ALL RIGHTS RESERVED.
         </div>
         <div className="al-footer-right">
           <a href="#">PRIVACY POLICY</a>

@@ -102,14 +102,18 @@ a {
   text-decoration: none;
 }
 
-/* --- AURA LUXE LOGIN PAGE STYLES --- */
+/* --- GREAT TIME APP LOGIN PAGE STYLES --- */
 .al-page {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #fafafa;
+  background:
+    radial-gradient(circle at top left, rgba(249, 197, 180, 0.18), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(7, 65, 66, 0.08), transparent 30%),
+    linear-gradient(180deg, #fbfbfa 0%, #f5f5f2 100%);
   position: relative;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  overflow: hidden;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 .al-header {
@@ -120,54 +124,52 @@ a {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 32px 56px;
+  padding: 28px 48px;
   z-index: 10;
 }
 
 .al-brand {
-  font-family: inherit;
-  font-size: 1.4rem;
-  font-weight: 600;
-  font-style: italic;
-  color: #1e3932;
-  letter-spacing: -0.01em;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #173534;
+  letter-spacing: -0.03em;
 }
 
 .al-nav {
   display: flex;
-  gap: 32px;
+  gap: 24px;
 }
 
 .al-nav a {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   font-weight: 700;
-  color: #7a8b84;
-  text-decoration: none;
+  color: #7d8b86;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   transition: color 0.2s;
 }
 
 .al-nav a:hover {
-  color: #1e3932;
+  color: #173534;
 }
 
 .al-content {
   display: grid;
-  grid-template-columns: 55% 45%;
+  grid-template-columns: minmax(0, 1.15fr) minmax(380px, 0.85fr);
   flex: 1;
   min-height: 100vh;
 }
 
-/* Left Column */
 .al-left {
   position: relative;
   overflow: hidden;
-  background: linear-gradient(145deg, #ffffff 0%, #f4f5f5 100%);
+  background:
+    radial-gradient(circle at 18% 18%, rgba(255, 255, 255, 0.92), transparent 30%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.94) 0%, rgba(245, 247, 245, 0.96) 100%);
   display: flex;
   flex-direction: column;
   justify-content: center;
-  padding: 80px 10% 80px 15%;
+  padding: 96px 9% 80px 13%;
 }
 
 .al-bg-shapes {
@@ -180,71 +182,95 @@ a {
 .al-shape {
   position: absolute;
   border-radius: 50%;
-  filter: blur(40px);
-  background: linear-gradient(135deg, rgba(200, 205, 203, 0.4), rgba(230, 233, 232, 0.2));
+  filter: blur(48px);
+  background: linear-gradient(135deg, rgba(205, 214, 211, 0.42), rgba(238, 240, 237, 0.16));
 }
 
 .al-shape-1 {
-  width: 600px;
-  height: 600px;
-  right: -100px;
-  bottom: -150px;
-  box-shadow: inset 0 0 100px rgba(255,255,255,1);
+  width: 540px;
+  height: 540px;
+  right: -90px;
+  bottom: -110px;
+  box-shadow: inset 0 0 100px rgba(255, 255, 255, 0.84);
 }
 
 .al-shape-2 {
-  width: 300px;
-  height: 300px;
-  right: 200px;
-  bottom: 100px;
-  background: rgba(255, 255, 255, 0.8);
-  filter: blur(60px);
+  width: 320px;
+  height: 320px;
+  right: 140px;
+  top: 120px;
+  background: rgba(255, 255, 255, 0.76);
+  filter: blur(72px);
 }
 
 .al-left-content {
   position: relative;
   z-index: 1;
-  max-width: 520px;
+  max-width: 620px;
+  display: grid;
+  gap: 20px;
+}
+
+.al-kicker {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(23, 53, 52, 0.08);
+  color: #4c5f5c;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  box-shadow: 0 10px 24px rgba(17, 24, 39, 0.04);
 }
 
 .al-heading {
-  font-family: "Georgia", "Times New Roman", serif;
-  font-size: 3.8rem;
-  line-height: 1.1;
-  color: #1e3932;
-  margin-bottom: 24px;
-  letter-spacing: -0.02em;
+  margin: 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-size: clamp(3.3rem, 5vw, 5.3rem);
+  line-height: 0.98;
+  color: #203634;
+  letter-spacing: -0.05em;
 }
 
 .al-subheading {
-  font-size: 1.05rem;
-  line-height: 1.6;
-  color: #556661;
-  margin-bottom: 48px;
-  max-width: 440px;
+  margin: 0;
+  font-size: 1.03rem;
+  line-height: 1.72;
+  color: #586865;
+  max-width: 500px;
 }
 
 .al-feature-list {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
 }
 
 .al-feature {
   display: flex;
-  align-items: center;
-  gap: 20px;
-  background: #ffffff;
-  padding: 16px 24px;
-  border-radius: 100px;
-  box-shadow: 0 8px 24px rgba(30, 57, 50, 0.04);
-  max-width: 440px;
+  align-items: flex-start;
+  gap: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.82)),
+    radial-gradient(circle at top right, rgba(249, 197, 180, 0.1), transparent 55%);
+  padding: 18px 20px;
+  border-radius: 22px;
+  border: 1px solid rgba(17, 24, 39, 0.04);
+  box-shadow:
+    0 16px 40px rgba(17, 24, 39, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.84);
+  max-width: 520px;
 }
 
 .al-feature-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
+  width: 46px;
+  height: 46px;
+  border-radius: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -257,80 +283,149 @@ a {
 }
 
 .al-icon-orange {
-  background: #ffded4;
-  color: #d8684a;
+  background: linear-gradient(180deg, #fde3da 0%, #fff1ec 100%);
+  color: #b96449;
 }
 .al-icon-teal {
-  background: #d4f2f0;
-  color: #2b7a76;
+  background: linear-gradient(180deg, #dff4ef 0%, #effaf7 100%);
+  color: #2a7770;
 }
 .al-icon-purple {
-  background: #ebdcf9;
-  color: #814bc7;
+  background: linear-gradient(180deg, #ecdef8 0%, #f7effd 100%);
+  color: #7850b2;
 }
 
 .al-feature-text {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .al-feature-text strong {
   font-size: 0.95rem;
-  color: #1e3932;
+  color: #203634;
   font-weight: 700;
 }
 
 .al-feature-text span {
-  font-size: 0.85rem;
-  color: #6e7c78;
+  font-size: 0.88rem;
+  color: #6a7975;
+  line-height: 1.5;
 }
 
-/* Right Column */
 .al-right {
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  padding: 40px;
+  padding: 56px 48px 40px;
 }
 
 .al-login-wrapper {
   width: 100%;
-  max-width: 440px;
+  max-width: 460px;
   display: flex;
   flex-direction: column;
 }
 
 .al-login-titles {
-  margin-bottom: 24px;
+  margin-bottom: 20px;
   text-align: left;
+  display: grid;
+  gap: 8px;
+}
+
+.al-login-eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+  color: #7a8c88;
+  font-weight: 700;
 }
 
 .al-login-titles h2 {
-  font-family: "Georgia", "Times New Roman", serif;
-  font-size: 2rem;
-  color: #1e3932;
-  margin: 0 0 8px;
+  margin: 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-size: 2.2rem;
+  color: #203634;
+  letter-spacing: -0.04em;
 }
 
 .al-login-titles p {
-  color: #556661;
-  font-size: 0.95rem;
   margin: 0;
+  color: #5c6e69;
+  font-size: 0.96rem;
+  line-height: 1.65;
 }
 
 .al-login-card {
-  background: #ffffff;
-  border-radius: 32px;
-  padding: 40px;
-  box-shadow: 0 16px 48px rgba(30, 57, 50, 0.05);
-  display: flex;
-  flex-direction: column;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.84)),
+    radial-gradient(circle at top right, rgba(249, 197, 180, 0.12), transparent 56%);
+  border-radius: 30px;
+  padding: 32px;
+  border: 1px solid rgba(17, 24, 39, 0.05);
+  box-shadow:
+    0 30px 70px rgba(17, 24, 39, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.88);
+  display: grid;
+  gap: 18px;
+}
+
+.al-login-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.al-login-copy strong {
+  font-size: 1.05rem;
+  color: #203634;
+}
+
+.al-login-copy p {
+  margin: 0;
+  color: #667774;
+  font-size: 0.94rem;
+  line-height: 1.65;
+}
+
+.al-login-bullets {
+  display: grid;
+  gap: 10px;
+}
+
+.al-login-bullet {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(248, 249, 247, 0.82);
+  border: 1px solid rgba(17, 24, 39, 0.04);
+}
+
+.al-login-bullet span {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  background: rgba(23, 53, 52, 0.08);
+  color: #284745;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+.al-login-bullet p {
+  margin: 0;
+  color: #4f615e;
+  font-size: 0.9rem;
+  line-height: 1.45;
 }
 
 .al-google-btn-wrapper {
-  margin-bottom: 24px;
   display: flex;
   justify-content: center;
 }
@@ -340,124 +435,34 @@ a {
   width: 100% !important;
 }
 
-.al-divider {
-  display: flex;
-  align-items: center;
-  text-align: center;
-  margin-bottom: 24px;
-}
-
-.al-divider::before,
-.al-divider::after {
-  content: '';
-  flex: 1;
-  border-bottom: 1px solid #ebf0ee;
-}
-
-.al-divider span {
-  padding: 0 16px;
-  color: #9aa8a4;
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.al-email-form {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.al-field {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.al-field label {
-  font-size: 0.7rem;
-  font-weight: 700;
-  color: #1e3932;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.al-label-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.al-forgot {
-  font-size: 0.75rem;
-  color: #a84227;
-  text-decoration: none;
-  font-weight: 500;
-}
-
-.al-field input {
-  height: 52px;
-  border-radius: 12px;
-  background: #f7f9f8;
-  border: 1px solid transparent;
-  padding: 0 16px;
-  font-size: 0.95rem;
-  color: #1e3932;
-  transition: border-color 0.2s, background-color 0.2s;
-}
-
-.al-field input:focus {
-  outline: none;
-  border-color: #d1dad7;
-  background: #ffffff;
-}
-
-.al-field input::placeholder {
-  color: #a0ada9;
-}
-
 .al-error {
-  font-size: 0.85rem;
+  font-size: 0.86rem;
   color: #a84227;
   background: #fff3ef;
-  padding: 12px;
-  border-radius: 8px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(168, 66, 39, 0.1);
   text-align: center;
 }
 
-.al-submit-btn {
-  height: 52px;
-  border-radius: 26px;
-  background: #024138;
-  color: #ffffff;
-  font-size: 0.95rem;
-  font-weight: 600;
-  border: none;
-  cursor: pointer;
-  margin-top: 8px;
-  transition: transform 0.2s, background-color 0.2s;
-}
-
-.al-submit-btn:hover {
-  background: #012a24;
-  transform: translateY(-1px);
-}
-
-.al-submit-btn:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
-  transform: none;
+.al-auth-note {
+  font-size: 0.86rem;
+  color: #275e57;
+  background: rgba(223, 244, 239, 0.82);
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(42, 119, 112, 0.08);
+  text-align: center;
 }
 
 .al-security-note {
-  margin-top: 24px;
-  background: #fdf3f0;
-  border-radius: 12px;
+  background: linear-gradient(180deg, #fdf4f1 0%, #fff9f7 100%);
+  border-radius: 18px;
   padding: 16px;
   display: flex;
   gap: 12px;
   align-items: flex-start;
+  border: 1px solid rgba(140, 86, 67, 0.08);
 }
 
 .al-lock-icon {
@@ -481,15 +486,15 @@ a {
 
 .al-inquire {
   text-align: center;
-  margin-top: 32px;
-  font-size: 0.85rem;
+  margin-top: 24px;
+  font-size: 0.88rem;
   color: #556661;
+  line-height: 1.6;
 }
 
 .al-inquire a {
-  color: #1e3932;
+  color: #173534;
   font-weight: 700;
-  text-decoration: none;
 }
 
 .al-footer {
@@ -499,7 +504,7 @@ a {
   width: 100%;
   display: flex;
   justify-content: space-between;
-  padding: 24px 56px;
+  padding: 22px 48px;
   pointer-events: none;
   z-index: 10;
 }
@@ -518,6 +523,97 @@ a {
 .al-footer-right {
   display: flex;
   gap: 24px;
+}
+
+@media (max-width: 1180px) {
+  .al-content {
+    grid-template-columns: 1fr;
+  }
+
+  .al-left,
+  .al-right {
+    padding-left: 48px;
+    padding-right: 48px;
+  }
+
+  .al-left {
+    min-height: 58vh;
+    padding-top: 120px;
+    padding-bottom: 56px;
+  }
+
+  .al-right {
+    padding-top: 0;
+    padding-bottom: 96px;
+  }
+
+  .al-login-wrapper {
+    max-width: 560px;
+  }
+
+  .al-footer {
+    position: static;
+    padding-top: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .al-header {
+    padding: 22px 20px;
+  }
+
+  .al-nav {
+    gap: 14px;
+  }
+
+  .al-nav a {
+    font-size: 0.66rem;
+  }
+
+  .al-left,
+  .al-right {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+
+  .al-left {
+    padding-top: 96px;
+    padding-bottom: 40px;
+  }
+
+  .al-right {
+    padding-bottom: 40px;
+  }
+
+  .al-login-card {
+    padding: 24px;
+  }
+
+  .al-feature,
+  .al-login-bullet {
+    grid-template-columns: 1fr;
+  }
+
+  .al-feature {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .al-login-bullet span {
+    width: 32px;
+    height: 32px;
+  }
+
+  .al-footer {
+    flex-direction: column;
+    gap: 12px;
+    padding: 0 20px 22px;
+  }
+
+  .al-footer-right {
+    gap: 14px;
+    flex-wrap: wrap;
+  }
 }
 
 
@@ -3694,6 +3790,7 @@ a {
 }
 
 .customer-portal__list-panel .data-table {
+  width: 100%;
   min-width: 1280px;
 }
 
@@ -4111,6 +4208,7 @@ a {
 }
 
 .service-portal__list-panel .data-table {
+  width: 100%;
   min-width: 1320px;
 }
 
