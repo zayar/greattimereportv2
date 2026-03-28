@@ -108,7 +108,7 @@ export function AppShell() {
           <div className="brand__mark">GT</div>
           <div className="brand__copy">
             <strong>GreatTime Reports</strong>
-            <span>Minimal clinic workspace</span>
+            <span>Premium clinic systems</span>
           </div>
         </div>
 

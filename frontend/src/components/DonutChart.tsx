@@ -10,7 +10,16 @@ type Props = {
   centerLabel?: string;
 };
 
-const palette = ["#5b67f3", "#8ea7ff", "#7ab7aa", "#f0b353", "#d78bb6", "#8cc1d9", "#c5d7a0", "#9f8cf2"];
+const palette = [
+  "#074142",
+  "#2d6969",
+  "#8f6559",
+  "#f9c5b4",
+  "#e6c7eb",
+  "#5f8c88",
+  "#b79f8c",
+  "#8b6d92",
+];
 
 export function DonutChart({ items, totalLabel = "Total", centerLabel }: Props) {
   if (items.length === 0) {

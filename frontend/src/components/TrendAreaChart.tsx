@@ -93,8 +93,8 @@ export function TrendAreaChart({ points, valueFormatter, showComparison = true }
       <svg className="trend-chart__svg" viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`} preserveAspectRatio="none">
         <defs>
           <linearGradient id="trend-area-fill" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="rgba(89, 108, 247, 0.28)" />
-            <stop offset="100%" stopColor="rgba(89, 108, 247, 0.02)" />
+            <stop offset="0%" stopColor="var(--brand)" stopOpacity="0.22" />
+            <stop offset="100%" stopColor="var(--brand)" stopOpacity="0.02" />
           </linearGradient>
         </defs>
 
