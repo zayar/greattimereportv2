@@ -22,9 +22,9 @@ type AccessContextValue = {
 };
 
 const STORAGE_KEY = "gt_v2report.access";
-const PREFERRED_BUSINESS_NAME = "alifestyle";
+const PREFERRED_BUSINESS_KEY = "alifestyle";
 const BUSINESS_DISPLAY_NAME_MAP: Record<string, string> = {
-  alifestyle: "LifeStyle",
+  [PREFERRED_BUSINESS_KEY]: "LifeStyle",
 };
 
 const AccessContext = createContext<AccessContextValue | null>(null);
@@ -80,9 +80,15 @@ function getBusinessDisplayName(value: string | null | undefined) {
   return BUSINESS_DISPLAY_NAME_MAP[normalized] ?? value ?? "";
 }
 
+function isPreferredBusinessName(value: string | null | undefined) {
+  const normalized = normalizeBusinessName(value);
+  const displayNormalized = normalizeBusinessName(BUSINESS_DISPLAY_NAME_MAP[PREFERRED_BUSINESS_KEY]);
+  return normalized === PREFERRED_BUSINESS_KEY || normalized === displayNormalized;
+}
+
 function getPreferredBusiness(businesses: Business[]) {
   return (
-    businesses.find((business) => normalizeBusinessName(business.name) === PREFERRED_BUSINESS_NAME) ??
+    businesses.find((business) => isPreferredBusinessName(business.name)) ??
     businesses[0] ??
     null
   );
