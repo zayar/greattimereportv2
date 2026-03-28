@@ -73,6 +73,18 @@ export function SalesDocumentPreview({ model, config, previewLabel }: Props) {
         model.paymentMethod ? `Payment: ${model.paymentMethod}` : null,
       ].filter(Boolean)
     : [];
+  const paymentSummaries = model.payments.map((payment) => {
+    const primary = [payment.label ? `Paid via ${payment.label}` : "Payment recorded", formatCurrency(payment.amount, model.currency)].join(
+      " · ",
+    );
+    const secondary = [payment.date ? formatDate(payment.date) : null, payment.note].filter(Boolean).join(" · ");
+
+    return {
+      id: payment.id,
+      primary,
+      secondary: secondary || null,
+    };
+  });
   const padding = getMarginPadding(config.marginPreset);
   const accentStyle = {
     ["--sales-document-accent" as const]: config.accentColor,
@@ -188,60 +200,56 @@ export function SalesDocumentPreview({ model, config, previewLabel }: Props) {
         </section>
       ) : null}
 
-      <section className={`sales-paper__bottom ${config.showNotes && model.notes ? "" : "sales-paper__bottom--totals-only"}`.trim()}>
+      <section className="sales-paper__bottom">
+        <div className="sales-paper__summary-wrap">
+          <aside className="sales-paper__summary-panel">
+            <span className="sales-paper__section-label">Totals</span>
+
+            <div className="sales-paper__summary-row">
+              <span>Subtotal</span>
+              <strong>{formatCurrency(model.summary.subtotal, model.currency)}</strong>
+            </div>
+            <div className="sales-paper__summary-row">
+              <span>Discount</span>
+              <strong>{formatCurrency(model.summary.discount, model.currency)}</strong>
+            </div>
+            <div className="sales-paper__summary-row">
+              <span>Tax</span>
+              <strong>{formatCurrency(model.summary.tax, model.currency)}</strong>
+            </div>
+            <div className="sales-paper__summary-row sales-paper__summary-row--total">
+              <span>Total</span>
+              <strong>{formatCurrency(model.summary.netTotal, model.currency)}</strong>
+            </div>
+            <div className="sales-paper__summary-row">
+              <span>Paid</span>
+              <strong>{formatCurrency(model.summary.paidAmount, model.currency)}</strong>
+            </div>
+            <div className="sales-paper__summary-row sales-paper__summary-row--outstanding">
+              <span>Outstanding</span>
+              <strong>{formatCurrency(model.summary.balanceDue, model.currency)}</strong>
+            </div>
+
+            {config.showPaymentDetails && paymentSummaries.length > 0 ? (
+              <div className="sales-paper__payment-note">
+                <span className="sales-paper__section-label">Payment note</span>
+                {paymentSummaries.map((payment) => (
+                  <div key={payment.id} className="sales-paper__payment-note-item">
+                    <strong>{payment.primary}</strong>
+                    {payment.secondary ? <span>{payment.secondary}</span> : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </aside>
+        </div>
+
         {config.showNotes && model.notes ? (
           <section className="sales-paper__note-block">
             <span className="sales-paper__section-label">Notes / Instructions</span>
             <p>{model.notes}</p>
           </section>
-        ) : (
-          <div className="sales-paper__note-spacer" />
-        )}
-
-        <aside className="sales-paper__summary-panel">
-          <span className="sales-paper__section-label">Totals</span>
-
-          <div className="sales-paper__summary-row">
-            <span>Subtotal</span>
-            <strong>{formatCurrency(model.summary.subtotal, model.currency)}</strong>
-          </div>
-          <div className="sales-paper__summary-row">
-            <span>Discount</span>
-            <strong>{formatCurrency(model.summary.discount, model.currency)}</strong>
-          </div>
-          <div className="sales-paper__summary-row">
-            <span>Tax</span>
-            <strong>{formatCurrency(model.summary.tax, model.currency)}</strong>
-          </div>
-          <div className="sales-paper__summary-row sales-paper__summary-row--total">
-            <span>Total</span>
-            <strong>{formatCurrency(model.summary.netTotal, model.currency)}</strong>
-          </div>
-          <div className="sales-paper__summary-row">
-            <span>Paid</span>
-            <strong>{formatCurrency(model.summary.paidAmount, model.currency)}</strong>
-          </div>
-          <div className="sales-paper__summary-row">
-            <span>Outstanding</span>
-            <strong>{formatCurrency(model.summary.balanceDue, model.currency)}</strong>
-          </div>
-
-          {config.showPaymentDetails && model.payments.length > 0 ? (
-            <div className="sales-paper__payments">
-              <span className="sales-paper__section-label">Payments</span>
-              {model.payments.map((payment) => (
-                <div key={payment.id} className="sales-paper__payment-row">
-                  <div>
-                    <strong>{payment.label}</strong>
-                    {payment.date ? <span>{formatDate(payment.date)}</span> : null}
-                    {payment.note ? <span>{payment.note}</span> : null}
-                  </div>
-                  <strong>{formatCurrency(payment.amount, model.currency)}</strong>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </aside>
+        ) : null}
       </section>
 
       {config.showFooterNote && config.footerNote.trim() !== "" ? (
