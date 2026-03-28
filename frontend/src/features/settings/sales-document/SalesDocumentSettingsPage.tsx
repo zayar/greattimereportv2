@@ -35,6 +35,9 @@ export function SalesDocumentSettingsPage() {
   const colorPickerValue = /^#[0-9a-fA-F]{6}$/.test(draftConfig.accentColor)
     ? draftConfig.accentColor
     : defaultSalesDocumentConfig.accentColor;
+  const itemsColorPickerValue = /^#[0-9a-fA-F]{6}$/.test(draftConfig.itemsAccentColor)
+    ? draftConfig.itemsAccentColor
+    : defaultSalesDocumentConfig.itemsAccentColor;
 
   useEffect(() => {
     setDraftConfig(config);
@@ -167,6 +170,25 @@ export function SalesDocumentSettingsPage() {
               </label>
 
               <label className="field">
+                <span>Items list color</span>
+                <div className="sales-document-settings__color-field">
+                  <input
+                    className="sales-document-settings__color-picker"
+                    type="color"
+                    value={itemsColorPickerValue}
+                    onChange={(event) => updateConfig("itemsAccentColor", event.target.value)}
+                  />
+                  <input
+                    type="text"
+                    value={draftConfig.itemsAccentColor}
+                    onChange={(event) => updateConfig("itemsAccentColor", event.target.value)}
+                  />
+                </div>
+              </label>
+            </div>
+
+            <div className="sales-document-settings__two-up">
+              <label className="field">
                 <span>Paper tone</span>
                 <select
                   value={draftConfig.paperTone}
@@ -176,9 +198,6 @@ export function SalesDocumentSettingsPage() {
                   <option value="white">White</option>
                 </select>
               </label>
-            </div>
-
-            <div className="sales-document-settings__two-up">
               <label className="field">
                 <span>Header layout</span>
                 <select
@@ -189,18 +208,18 @@ export function SalesDocumentSettingsPage() {
                   <option value="stacked">Stacked</option>
                 </select>
               </label>
-
-              <label className="field">
-                <span>Density</span>
-                <select
-                  value={draftConfig.density}
-                  onChange={(event) => updateConfig("density", event.target.value as SalesDocumentDensity)}
-                >
-                  <option value="comfortable">Comfortable</option>
-                  <option value="compact">Compact</option>
-                </select>
-              </label>
             </div>
+
+            <label className="field">
+              <span>Density</span>
+              <select
+                value={draftConfig.density}
+                onChange={(event) => updateConfig("density", event.target.value as SalesDocumentDensity)}
+              >
+                <option value="comfortable">Comfortable</option>
+                <option value="compact">Compact</option>
+              </select>
+            </label>
 
             <div className="sales-document-settings__toggle-group">
               <span className="sales-document-settings__group-label">Visible sections</span>

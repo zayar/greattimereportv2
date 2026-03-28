@@ -23,10 +23,17 @@ function buildStatusClass(value: string | null | undefined) {
   return "sales-paper__status sales-paper__status--neutral";
 }
 
+function shouldShowStatus(value: string | null | undefined) {
+  const normalized = (value ?? "").toUpperCase();
+  return normalized !== "" && normalized !== "ACTIVE" && normalized !== "PAID";
+}
+
 export function SalesDocumentPreview({ model, config, previewLabel = "Paper preview" }: Props) {
   const showAdjustmentColumn = model.items.some((item) => item.adjustmentLabel);
+  const visibleStatuses = [model.status, model.paymentStatus].filter(shouldShowStatus);
   const accentStyle = {
     ["--sales-document-accent" as const]: config.accentColor,
+    ["--sales-items-accent" as const]: config.itemsAccentColor,
   } as CSSProperties;
 
   return (
@@ -38,17 +45,18 @@ export function SalesDocumentPreview({ model, config, previewLabel = "Paper prev
 
       <header className="sales-paper__header">
         <div className="sales-paper__identity">
+          {config.showClinicLogo && model.clinic.logoUrl ? (
+            <div className="sales-paper__logo-wrap">
+              <img className="sales-paper__logo" src={model.clinic.logoUrl} alt={`${model.clinic.name} logo`} />
+            </div>
+          ) : null}
           <span className="sales-paper__eyebrow">{previewLabel}</span>
           <h2>{config.documentTitle}</h2>
           <p>{config.documentSubtitle}</p>
 
           <div className="sales-paper__brand-lockup">
-            {config.showClinicLogo && model.clinic.logoUrl ? (
-              <img className="sales-paper__logo" src={model.clinic.logoUrl} alt={`${model.clinic.name} logo`} />
-            ) : null}
             <div>
               <strong>{model.clinic.name}</strong>
-              {model.clinic.description ? <span>{model.clinic.description}</span> : null}
               {config.showClinicContact ? (
                 <>
                   {model.clinic.address ? <span>{model.clinic.address}</span> : null}
@@ -68,12 +76,15 @@ export function SalesDocumentPreview({ model, config, previewLabel = "Paper prev
             <span>Issued At</span>
             <strong>{formatDateTime(model.createdAt)}</strong>
           </div>
-          <div className="sales-paper__meta-statuses">
-            <span className={buildStatusClass(model.status)}>{model.status}</span>
-            {model.paymentStatus ? (
-              <span className={buildStatusClass(model.paymentStatus)}>{model.paymentStatus.split("_").join(" ")}</span>
-            ) : null}
-          </div>
+          {visibleStatuses.length > 0 ? (
+            <div className="sales-paper__meta-statuses">
+              {visibleStatuses.map((status) => (
+                <span key={status} className={buildStatusClass(status)}>
+                  {status?.split("_").join(" ")}
+                </span>
+              ))}
+            </div>
+          ) : null}
         </div>
       </header>
 

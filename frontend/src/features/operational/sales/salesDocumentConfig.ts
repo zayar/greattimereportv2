@@ -7,6 +7,7 @@ export interface SalesDocumentConfig {
   documentTitle: string;
   documentSubtitle: string;
   accentColor: string;
+  itemsAccentColor: string;
   paperTone: SalesDocumentPaperTone;
   density: SalesDocumentDensity;
   headerLayout: SalesDocumentHeaderLayout;
@@ -25,7 +26,8 @@ export const defaultSalesDocumentConfig: SalesDocumentConfig = {
   documentTitle: "Sales Invoice",
   documentSubtitle: "A clean document preview for invoice, member, line-item, and payment review.",
   accentColor: "#1e4b4d",
-  paperTone: "ivory",
+  itemsAccentColor: "#b38a4b",
+  paperTone: "white",
   density: "comfortable",
   headerLayout: "split",
   showClinicLogo: true,
@@ -68,6 +70,7 @@ export function normalizeSalesDocumentConfig(value: unknown): SalesDocumentConfi
     documentTitle: normalizeString(value.documentTitle, defaultSalesDocumentConfig.documentTitle),
     documentSubtitle: normalizeString(value.documentSubtitle, defaultSalesDocumentConfig.documentSubtitle),
     accentColor: normalizeAccentColor(value.accentColor, defaultSalesDocumentConfig.accentColor),
+    itemsAccentColor: normalizeAccentColor(value.itemsAccentColor, defaultSalesDocumentConfig.itemsAccentColor),
     paperTone: normalizeOption(value.paperTone, ["ivory", "white"], defaultSalesDocumentConfig.paperTone),
     density: normalizeOption(value.density, ["comfortable", "compact"], defaultSalesDocumentConfig.density),
     headerLayout: normalizeOption(value.headerLayout, ["split", "stacked"], defaultSalesDocumentConfig.headerLayout),
