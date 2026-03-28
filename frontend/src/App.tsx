@@ -12,6 +12,7 @@ import { DashboardPage } from "./features/dashboard/DashboardPage";
 import { ExecutiveDashboardPage } from "./features/dashboard/ExecutiveDashboardPage";
 import { AppointmentsPage } from "./features/operational/appointments/AppointmentsPage";
 import { SalesPage } from "./features/operational/sales/SalesPage";
+import { SalesDetailPage } from "./features/operational/sales/SalesDetailPage";
 import { MembersPage } from "./features/operational/members/MembersPage";
 import { CustomerBehaviorPage } from "./features/analytics/customer-behavior/CustomerBehaviorPage";
 import { ServiceBehaviorPage } from "./features/analytics/service-behavior/ServiceBehaviorPage";
@@ -32,6 +33,7 @@ import { ProductStockItemsPage } from "./features/core/products/ProductStockItem
 import { InventoryHistoryPage } from "./features/core/inventory/InventoryHistoryPage";
 import { InventoryReportPage } from "./features/core/inventory/InventoryReportPage";
 import { StockSummaryPage } from "./features/core/inventory/StockSummaryPage";
+import { SalesDocumentSettingsPage } from "./features/settings/sales-document/SalesDocumentSettingsPage";
 
 export default function App() {
   return (
@@ -55,6 +57,7 @@ export default function App() {
                   <Route path="dashboard/overview" element={<ExecutiveDashboardPage />} />
                   <Route path="operational/appointments" element={<AppointmentsPage />} />
                   <Route path="operational/sales" element={<SalesPage />} />
+                  <Route path="operational/sales/:saleId" element={<SalesDetailPage />} />
                   <Route path="operational/members" element={<MembersPage />} />
                   <Route path="core/services/list" element={<ServiceListPage />} />
                   <Route path="core/services/packages" element={<ServicePackagesPage />} />
@@ -76,6 +79,7 @@ export default function App() {
                   <Route path="analytics/customers-by-salesperson" element={<CustomersBySalespersonPage />} />
                   <Route path="analytics/customers" element={<CustomerPortalPage />} />
                   <Route path="analytics/customers/:customerSlug" element={<CustomerDetailPage />} />
+                  <Route path="settings/sales-document" element={<SalesDocumentSettingsPage />} />
                 </Route>
               </Routes>
             </BrowserRouter>

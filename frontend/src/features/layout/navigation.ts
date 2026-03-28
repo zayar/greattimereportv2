@@ -78,4 +78,8 @@ export const navigationSections: NavigationSection[] = [
       { to: "/analytics/daily-treatment", label: "Daily treatment" },
     ],
   },
+  {
+    title: "Settings",
+    items: [{ to: "/settings/sales-document", label: "Sales document designer" }],
+  },
 ];

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@apollo/client";
+import { useNavigate } from "react-router-dom";
 import { DateRangeControls } from "../../../components/DateRangeControls";
 import { DataTable } from "../../../components/DataTable";
 import { Panel } from "../../../components/Panel";
@@ -10,6 +11,7 @@ import { daysAgo, today } from "../../../utils/date";
 import { formatCurrency, formatDate } from "../../../utils/format";
 import type { OrderRow } from "../../../types/domain";
 import { GET_SALES } from "./queries";
+import { buildSalesDetailPath } from "./salesDetailLink";
 
 type SalesResponse = {
   orders: OrderRow[];
@@ -65,6 +67,7 @@ function buildOrderWhere(params: {
 }
 
 export function SalesPage() {
+  const navigate = useNavigate();
   const { currentClinic } = useAccess();
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -197,6 +200,17 @@ export function SalesPage() {
           <DataTable
             rows={rows}
             rowKey={(row) => row.id}
+            onRowClick={(row) =>
+              navigate(
+                buildSalesDetailPath({
+                  saleId: row.id,
+                  fromDate: range.fromDate,
+                  toDate: range.toDate,
+                  search,
+                  page,
+                }),
+              )
+            }
             columns={[
               { key: "date", header: "Date", render: (row) => formatDate(row.created_at) },
               { key: "order", header: "Order", render: (row) => row.order_id },
