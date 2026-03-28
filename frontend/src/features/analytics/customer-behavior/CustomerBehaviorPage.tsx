@@ -73,7 +73,7 @@ export function CustomerBehaviorPage() {
   const summary = data?.summary;
 
   return (
-    <div className="page-stack behavior-report analytics-report">
+    <div className="page-stack page-stack--workspace behavior-report analytics-report">
       <PageHeader
         eyebrow="Analytics"
         title="Customer behavior"

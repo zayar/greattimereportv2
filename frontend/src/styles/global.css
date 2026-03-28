@@ -1862,15 +1862,19 @@ a {
 
 .executive-dashboard__control-grid {
   display: grid;
-  grid-template-columns: 220px minmax(320px, 1fr);
+  grid-template-columns: minmax(360px, 440px);
   gap: 14px;
   align-items: end;
 }
 
+.executive-dashboard__range {
+  min-width: 0;
+}
+
 .executive-dashboard__range .filter-group {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(160px, 1fr));
+  gap: 14px;
 }
 
 .executive-dashboard__preset-row {
@@ -3649,9 +3653,25 @@ a {
 
 .customer-portal__filter-grid {
   display: grid;
-  grid-template-columns: minmax(220px, 1.1fr) repeat(2, minmax(220px, 0.95fr)) repeat(4, minmax(160px, 0.75fr));
+  width: 100%;
+  grid-template-columns: minmax(220px, 1.35fr) minmax(260px, 1.65fr) repeat(6, minmax(0, 1fr));
   gap: 14px;
   align-items: end;
+}
+
+.customer-portal__filter-grid > * {
+  min-width: 0;
+}
+
+.customer-portal__filter-grid > .filter-group {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 14px;
+  min-width: 0;
+}
+
+.customer-portal__filter-grid > .filter-group .field {
+  min-width: 0;
 }
 
 .customer-portal__search {

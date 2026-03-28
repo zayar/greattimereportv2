@@ -69,7 +69,7 @@ export function DailyTreatmentPage() {
   );
 
   return (
-    <div className="page-stack analytics-report">
+    <div className="page-stack page-stack--workspace analytics-report">
       <PageHeader
         eyebrow="Analytics"
         title="Daily treatment"

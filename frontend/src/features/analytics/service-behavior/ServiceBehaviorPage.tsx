@@ -88,7 +88,7 @@ export function ServiceBehaviorPage() {
   }, [data?.topServices, serviceSearch]);
 
   return (
-    <div className="page-stack behavior-report analytics-report">
+    <div className="page-stack page-stack--workspace behavior-report analytics-report">
       <PageHeader
         eyebrow="Analytics"
         title="Service behavior"
