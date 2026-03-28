@@ -51,7 +51,7 @@ export function AppointmentsPage() {
   const noShowCount = useMemo(() => rows.filter((row) => row.status === "NO_SHOW").length, [rows]);
 
   return (
-    <div className="page-stack page-stack--workspace analytics-report internal-workspace">
+    <div className="page-stack page-stack--workspace analytics-report internal-workspace internal-workspace--soft">
       <PageHeader
         eyebrow="Operational"
         title="Appointments"
