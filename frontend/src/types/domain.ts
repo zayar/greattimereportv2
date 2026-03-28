@@ -87,6 +87,162 @@ export interface MemberRow {
   created_at: string;
 }
 
+export interface ServiceRow {
+  id: string;
+  image?: string | null;
+  clinic_id: string;
+  name: string;
+  original_price?: number | string | null;
+  price?: number | string | null;
+  description?: string | null;
+  status: string;
+  created_at: string;
+  sort_order?: number | null;
+  tax?: number | string | null;
+  duration?: number | null;
+  interval_day?: number | null;
+  max_duration_count?: number | null;
+}
+
+export interface ServicePackageRow {
+  id: string;
+  image?: string | null;
+  name: string;
+  price?: number | string | null;
+  original_price?: number | string | null;
+  status: string;
+  sort_order?: number | null;
+  tax?: number | string | null;
+  description?: string | null;
+  clinic_id: string;
+  expiry_day?: number | null;
+  created_at: string;
+  isLock?: boolean | null;
+}
+
+export interface ServiceTypeCategoryRow {
+  id: string;
+  is_private?: boolean | null;
+  name: string;
+  image?: string | null;
+  status: string;
+  created_at: string;
+  description?: string | null;
+  order?: number | null;
+  sale_channel?: string | null;
+}
+
+export interface ServiceFormTerm {
+  id: string;
+  term: string;
+  status?: string | null;
+  type: string;
+}
+
+export interface ServiceFormRow {
+  id: string;
+  name: string;
+  legal_desc?: string | null;
+  form_type: string;
+  description?: string | null;
+  status: string;
+  consent_image?: string | null;
+  consent_sign_align?: string | null;
+  terms?: ServiceFormTerm[];
+}
+
+export interface ProductRow {
+  id: string;
+  name: string;
+  sort_order?: number | null;
+  status: string;
+  description?: string | null;
+  created_at: string;
+  clinic_id: string;
+  measurement?: {
+    id: string;
+    name: string;
+    description?: string | null;
+  } | null;
+  images: Array<{
+    image?: string | null;
+  }>;
+  measurement_amount?: number | string | null;
+  measurement_id?: string | null;
+  brand_id?: string | null;
+  brand?: {
+    image?: string | null;
+    name: string;
+    id: string;
+  } | null;
+}
+
+export interface ProductStockItemRow {
+  id: string;
+  name: string;
+  price?: number | string | null;
+  sku?: string | null;
+  sort_order?: number | null;
+  status: string;
+  stock?: number | null;
+  stock_control_unit?: string | null;
+  supply_price?: number | string | null;
+  tax?: number | string | null;
+  service_stock?: number | null;
+  clinic_id: string;
+  created_at: string;
+  original_price?: number | string | null;
+  images: Array<{
+    image?: string | null;
+  }>;
+  product_id?: string | null;
+  product?: {
+    name: string;
+    id: string;
+  } | null;
+}
+
+export interface InventoryHistoryRow {
+  id: string;
+  qty: number;
+  closing_qty: number;
+  stock_date: string;
+  transaction_type?: string | null;
+  description?: string | null;
+  ref_id?: string | null;
+  ref_type?: string | null;
+  ref_detail_id?: string | null;
+  stock_id: string;
+  created_at: string;
+  stock: {
+    id: string;
+    name: string;
+    product?: {
+      id: string;
+      name: string;
+    } | null;
+  };
+}
+
+export interface InventoryReportRow {
+  id: string;
+  name: string;
+  current_qty: number;
+  received_qty: number;
+  sale_qty: number;
+  adjustment_in_qty: number;
+  adjustment_out_qty: number;
+}
+
+export interface StockSummaryRow {
+  id: string;
+  name: string;
+  opening_qty: number;
+  in_qty: number;
+  out_qty: number;
+  closing_qty: number;
+}
+
 export interface DashboardSummary {
   revenue: number;
   revenueChange: number;

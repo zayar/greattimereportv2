@@ -1740,6 +1740,54 @@ a {
   min-width: 1350px;
 }
 
+.core-catalog-page {
+  gap: 18px;
+}
+
+.core-catalog-page__filters {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.core-catalog-page__filters .field--search {
+  min-width: 260px;
+}
+
+.core-catalog-page__panel .table-wrap {
+  max-height: 640px;
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: auto;
+  overscroll-behavior-x: contain;
+}
+
+.core-catalog-page__panel .data-table {
+  width: max-content;
+  min-width: 100%;
+}
+
+.core-catalog-page__wide-table .data-table {
+  min-width: 1020px;
+}
+
+.core-catalog-page__panel .data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f8fafc;
+}
+
+.core-catalog-page__positive {
+  color: #0f8a4b;
+  font-weight: 600;
+}
+
+.core-catalog-page__negative {
+  color: #c2410c;
+  font-weight: 600;
+}
+
 .customer-salesperson-report {
   gap: 18px;
 }

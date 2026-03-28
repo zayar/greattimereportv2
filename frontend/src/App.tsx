@@ -21,6 +21,16 @@ import { BankingSummaryPage } from "./features/analytics/banking-summary/Banking
 import { CustomersBySalespersonPage } from "./features/analytics/customers-by-salesperson/CustomersBySalespersonPage";
 import { CustomerPortalPage } from "./features/analytics/customer-portal/CustomerPortalPage";
 import { CustomerDetailPage } from "./features/analytics/customer-portal/CustomerDetailPage";
+import { ServiceListPage } from "./features/core/services/ServiceListPage";
+import { ServicePackagesPage } from "./features/core/services/ServicePackagesPage";
+import { ServiceCategoriesPage } from "./features/core/services/ServiceCategoriesPage";
+import { ServiceRecordFormsPage } from "./features/core/services/ServiceRecordFormsPage";
+import { ServiceConsentFormsPage } from "./features/core/services/ServiceConsentFormsPage";
+import { ProductListPage } from "./features/core/products/ProductListPage";
+import { ProductStockItemsPage } from "./features/core/products/ProductStockItemsPage";
+import { InventoryHistoryPage } from "./features/core/inventory/InventoryHistoryPage";
+import { InventoryReportPage } from "./features/core/inventory/InventoryReportPage";
+import { StockSummaryPage } from "./features/core/inventory/StockSummaryPage";
 
 export default function App() {
   return (
@@ -44,6 +54,16 @@ export default function App() {
                   <Route path="operational/appointments" element={<AppointmentsPage />} />
                   <Route path="operational/sales" element={<SalesPage />} />
                   <Route path="operational/members" element={<MembersPage />} />
+                  <Route path="core/services/list" element={<ServiceListPage />} />
+                  <Route path="core/services/packages" element={<ServicePackagesPage />} />
+                  <Route path="core/services/categories" element={<ServiceCategoriesPage />} />
+                  <Route path="core/services/record-forms" element={<ServiceRecordFormsPage />} />
+                  <Route path="core/services/consent-forms" element={<ServiceConsentFormsPage />} />
+                  <Route path="core/products/list" element={<ProductListPage />} />
+                  <Route path="core/products/stock-items" element={<ProductStockItemsPage />} />
+                  <Route path="core/inventory/history" element={<InventoryHistoryPage />} />
+                  <Route path="core/inventory/report" element={<InventoryReportPage />} />
+                  <Route path="core/inventory/stock-summary" element={<StockSummaryPage />} />
                   <Route path="analytics/sales-report" element={<Navigate to="/analytics/banking-summary" replace />} />
                   <Route path="analytics/banking-summary" element={<BankingSummaryPage />} />
                   <Route path="analytics/customer-behavior" element={<CustomerBehaviorPage />} />

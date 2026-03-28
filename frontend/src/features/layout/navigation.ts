@@ -23,6 +23,36 @@ export const navigationSections: NavigationSection[] = [
     ],
   },
   {
+    title: "Core",
+    items: [
+      {
+        label: "Services",
+        children: [
+          { to: "/core/services/list", label: "Service List" },
+          { to: "/core/services/packages", label: "Service Packages" },
+          { to: "/core/services/categories", label: "Service Type Category" },
+          { to: "/core/services/record-forms", label: "Service Record Form" },
+          { to: "/core/services/consent-forms", label: "Service Consent Form" },
+        ],
+      },
+      {
+        label: "Products",
+        children: [
+          { to: "/core/products/list", label: "Product List" },
+          { to: "/core/products/stock-items", label: "Product Stock Items" },
+        ],
+      },
+      {
+        label: "Inventory",
+        children: [
+          { to: "/core/inventory/history", label: "Inventory History" },
+          { to: "/core/inventory/report", label: "Inventory Report" },
+          { to: "/core/inventory/stock-summary", label: "Stock Summary" },
+        ],
+      },
+    ],
+  },
+  {
     title: "Revenue",
     items: [
       {
