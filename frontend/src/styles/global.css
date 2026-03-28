@@ -2547,6 +2547,100 @@ a {
   border-color: rgba(7, 65, 66, 0.12);
 }
 
+.appointments-report--luxe {
+  position: relative;
+  isolation: isolate;
+}
+
+.appointments-report--luxe::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 12% 16%, rgba(249, 197, 180, 0.22), transparent 26%),
+    radial-gradient(circle at 88% 22%, rgba(139, 186, 166, 0.16), transparent 24%),
+    radial-gradient(circle at 55% 100%, rgba(230, 199, 235, 0.12), transparent 26%);
+  opacity: 0.9;
+}
+
+.appointments-report--luxe .page-header__description {
+  color: #73807b;
+}
+
+.appointments-report__filters {
+  padding: 14px;
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.52), rgba(255, 255, 255, 0.34)),
+    radial-gradient(circle at top right, rgba(249, 197, 180, 0.14), transparent 44%);
+  border: 1px solid rgba(17, 24, 39, 0.05);
+  box-shadow:
+    0 12px 28px rgba(15, 23, 42, 0.028),
+    inset 0 1px 0 rgba(255, 255, 255, 0.52);
+  backdrop-filter: blur(12px);
+}
+
+.appointments-report--luxe .report-kpi-strip__card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(255, 255, 255, 0.38)),
+    radial-gradient(circle at top right, rgba(249, 197, 180, 0.12), transparent 46%);
+  border-color: rgba(17, 24, 39, 0.05);
+  box-shadow:
+    0 14px 28px rgba(15, 23, 42, 0.028),
+    inset 0 1px 0 rgba(255, 255, 255, 0.56);
+  backdrop-filter: blur(12px);
+}
+
+.appointments-report--luxe .report-kpi-strip__card:nth-child(2) {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(250, 248, 244, 0.38)),
+    radial-gradient(circle at top right, rgba(139, 186, 166, 0.12), transparent 46%);
+}
+
+.appointments-report--luxe .report-kpi-strip__card:nth-child(3) {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(251, 245, 248, 0.36)),
+    radial-gradient(circle at top right, rgba(230, 199, 235, 0.12), transparent 46%);
+}
+
+.appointments-report--luxe .panel {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.58), rgba(255, 255, 255, 0.42)),
+    radial-gradient(circle at top right, rgba(249, 197, 180, 0.1), transparent 44%);
+  border: 1px solid rgba(17, 24, 39, 0.05);
+  box-shadow:
+    0 18px 36px rgba(15, 23, 42, 0.03),
+    inset 0 1px 0 rgba(255, 255, 255, 0.56);
+  backdrop-filter: blur(14px);
+}
+
+.appointments-report--luxe .table-wrap {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.48), rgba(255, 255, 255, 0.34)),
+    radial-gradient(circle at top right, rgba(139, 186, 166, 0.08), transparent 50%);
+  border-color: rgba(17, 24, 39, 0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.appointments-report--luxe .data-table thead th {
+  background: rgba(249, 248, 245, 0.76);
+  backdrop-filter: blur(8px);
+}
+
+.appointments-report--luxe .data-table tbody tr:nth-child(odd) {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.appointments-report--luxe .data-table tbody tr:nth-child(even) {
+  background: rgba(251, 250, 247, 0.42);
+}
+
+.appointments-report--luxe .data-table tbody tr:hover {
+  background: rgba(245, 244, 240, 0.72);
+}
+
 .analytics-report__filters {
   flex-wrap: wrap;
   justify-content: flex-end;

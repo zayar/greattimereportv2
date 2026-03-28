@@ -51,13 +51,13 @@ export function AppointmentsPage() {
   const noShowCount = useMemo(() => rows.filter((row) => row.status === "NO_SHOW").length, [rows]);
 
   return (
-    <div className="page-stack page-stack--workspace analytics-report internal-workspace internal-workspace--soft">
+    <div className="page-stack page-stack--workspace analytics-report internal-workspace internal-workspace--soft appointments-report appointments-report--luxe">
       <PageHeader
         eyebrow="Operational"
         title="Appointments"
         description="Operational booking visibility for the currently selected clinic, rebuilt into the shared V2 workspace layout."
         actions={
-          <div className="filter-row internal-workspace__filters">
+          <div className="filter-row internal-workspace__filters appointments-report__filters">
             <DateRangeControls
               fromDate={range.fromDate}
               toDate={range.toDate}

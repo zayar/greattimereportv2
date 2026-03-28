@@ -23,6 +23,9 @@ type AccessContextValue = {
 
 const STORAGE_KEY = "gt_v2report.access";
 const PREFERRED_BUSINESS_NAME = "alifestyle";
+const BUSINESS_DISPLAY_NAME_MAP: Record<string, string> = {
+  alifestyle: "LifeStyle",
+};
 
 const AccessContext = createContext<AccessContextValue | null>(null);
 
@@ -48,7 +51,7 @@ function buildBusinesses(clinics: Clinic[]): Business[] {
 
     map.set(clinic.company_id, {
       id: clinic.company_id,
-      name: clinic.company.name,
+      name: getBusinessDisplayName(clinic.company.name),
       clinics: [clinic],
     });
   });
@@ -70,6 +73,11 @@ function readPersistedSelection() {
 
 function normalizeBusinessName(value: string | null | undefined) {
   return (value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function getBusinessDisplayName(value: string | null | undefined) {
+  const normalized = normalizeBusinessName(value);
+  return BUSINESS_DISPLAY_NAME_MAP[normalized] ?? value ?? "";
 }
 
 function getPreferredBusiness(businesses: Business[]) {
