@@ -243,24 +243,58 @@ export interface StockSummaryRow {
   closing_qty: number;
 }
 
-export interface DashboardSummary {
-  revenue: number;
-  revenueChange: number;
-  invoices: number;
-  invoicesChange: number;
-  customers: number;
-  customersChange: number;
-  appointments: number;
-  appointmentsChange: number;
-  activeServices: number;
-  activeServicesChange: number;
+export interface DashboardMetricValue {
+  value: number;
+  previousValue: number;
+  change: number;
 }
 
 export interface DashboardResponse {
-  summary: DashboardSummary;
-  revenueTrend: Array<{ dateLabel: string; revenue: number }>;
-  paymentMix: Array<{ paymentMethod: string; totalAmount: number }>;
-  topServices: Array<{ serviceName: string; revenue: number; invoices: number }>;
+  summary: {
+    revenue: DashboardMetricValue;
+    invoices: DashboardMetricValue;
+    customers: DashboardMetricValue;
+    appointments: DashboardMetricValue;
+    servicesDelivered: DashboardMetricValue;
+    averageInvoice: DashboardMetricValue;
+  };
+  trend: {
+    granularity: "day" | "week" | "month";
+    points: Array<{
+      bucketLabel: string;
+      revenue: number;
+      previousRevenue: number;
+    }>;
+  };
+  spotlights: Array<{
+    title: string;
+    value: number;
+    change: number;
+    detail: string;
+  }>;
+  topServices: Array<{
+    serviceName: string;
+    revenue: number;
+    bookings: number;
+    contributionPct: number;
+  }>;
+  paymentMix: Array<{
+    paymentMethod: string;
+    totalAmount: number;
+    transactionCount: number;
+    contributionPct: number;
+  }>;
+  topTherapists: Array<{
+    therapistName: string;
+    completedServices: number;
+    serviceValue: number;
+    lastVisitDate: string;
+  }>;
+  insights: Array<{
+    title: string;
+    detail: string;
+    tone: "positive" | "watch" | "neutral";
+  }>;
 }
 
 export interface CustomerBehaviorResponse {

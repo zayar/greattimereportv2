@@ -12,7 +12,10 @@ export type NavigationSection = {
 export const navigationSections: NavigationSection[] = [
   {
     title: "Home",
-    items: [{ to: "/dashboard", label: "Dashboard" }],
+    items: [
+      { to: "/dashboard", label: "Home" },
+      { to: "/dashboard/overview", label: "Executive dashboard" },
+    ],
   },
   {
     title: "Operations",

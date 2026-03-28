@@ -9,6 +9,7 @@ import { LoginPage } from "./features/auth/LoginPage";
 import { AccessProvider } from "./features/access/AccessProvider";
 import { AppShell } from "./features/layout/AppShell";
 import { DashboardPage } from "./features/dashboard/DashboardPage";
+import { ExecutiveDashboardPage } from "./features/dashboard/ExecutiveDashboardPage";
 import { AppointmentsPage } from "./features/operational/appointments/AppointmentsPage";
 import { SalesPage } from "./features/operational/sales/SalesPage";
 import { MembersPage } from "./features/operational/members/MembersPage";
@@ -51,6 +52,7 @@ export default function App() {
                 >
                   <Route index element={<Navigate to="/dashboard" replace />} />
                   <Route path="dashboard" element={<DashboardPage />} />
+                  <Route path="dashboard/overview" element={<ExecutiveDashboardPage />} />
                   <Route path="operational/appointments" element={<AppointmentsPage />} />
                   <Route path="operational/sales" element={<SalesPage />} />
                   <Route path="operational/members" element={<MembersPage />} />

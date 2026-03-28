@@ -34,7 +34,8 @@ export function AppShell() {
     return currentItem?.label ?? "GT V2 Report";
   }, [location.pathname]);
 
-  const isDashboardLanding = location.pathname === "/dashboard";
+  const hidesShellSelectors =
+    location.pathname === "/dashboard" || location.pathname === "/dashboard/overview";
 
   if (loading) {
     return <ScreenLoader label="Loading your clinics and businesses..." />;
@@ -148,7 +149,7 @@ export function AppShell() {
             </div>
           </div>
 
-          {!isDashboardLanding ? (
+          {!hidesShellSelectors ? (
             <div className="topbar__controls">
               <label className="field field--compact">
                 <span>Business</span>
