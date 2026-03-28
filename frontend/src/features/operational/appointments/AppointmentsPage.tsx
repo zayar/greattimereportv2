@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@apollo/client";
 import { DateRangeControls } from "../../../components/DateRangeControls";
 import { DataTable } from "../../../components/DataTable";
@@ -44,15 +44,20 @@ export function AppointmentsPage() {
   const rows = data?.getBookingDetails.data ?? [];
   const totalCount = data?.getBookingDetails.totalCount ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const checkedOutCount = useMemo(
+    () => rows.filter((row) => row.status === "CHECKOUT" || row.status === "CHECKED_OUT").length,
+    [rows],
+  );
+  const noShowCount = useMemo(() => rows.filter((row) => row.status === "NO_SHOW").length, [rows]);
 
   return (
-    <div className="page-stack">
+    <div className="page-stack page-stack--workspace analytics-report internal-workspace">
       <PageHeader
         eyebrow="Operational"
         title="Appointments"
-        description="The initial V2 appointments page keeps the existing gt.report booking-detail behavior but puts it into the new shell."
+        description="Operational booking visibility for the currently selected clinic, rebuilt into the shared V2 workspace layout."
         actions={
-          <div className="filter-row">
+          <div className="filter-row internal-workspace__filters">
             <DateRangeControls
               fromDate={range.fromDate}
               toDate={range.toDate}
@@ -82,8 +87,27 @@ export function AppointmentsPage() {
         }
       />
 
+      <div className="report-kpi-strip">
+        <article className="report-kpi-strip__card">
+          <span className="report-kpi-strip__label">Appointments in range</span>
+          <strong className="report-kpi-strip__value">{totalCount.toLocaleString("en-US")}</strong>
+          <span className="report-kpi-strip__hint">Booking records matched to the current clinic and date window.</span>
+        </article>
+        <article className="report-kpi-strip__card">
+          <span className="report-kpi-strip__label">Checked out on page</span>
+          <strong className="report-kpi-strip__value">{checkedOutCount.toLocaleString("en-US")}</strong>
+          <span className="report-kpi-strip__hint">Visible rows already completed in the current result set.</span>
+        </article>
+        <article className="report-kpi-strip__card">
+          <span className="report-kpi-strip__label">No-shows on page</span>
+          <strong className="report-kpi-strip__value">{noShowCount.toLocaleString("en-US")}</strong>
+          <span className="report-kpi-strip__hint">Visible bookings that were marked as missed.</span>
+        </article>
+      </div>
+
       <Panel
-        title={`${currentClinic?.name ?? "Clinic"} appointments`}
+        className="internal-workspace__panel"
+        title="Appointment ledger"
         subtitle={`${totalCount.toLocaleString("en-US")} records in the selected date window`}
         action={
           <div className="pagination-controls">
@@ -127,4 +151,3 @@ export function AppointmentsPage() {
     </div>
   );
 }
-

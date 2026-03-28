@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@apollo/client";
 import { DataTable } from "../../../components/DataTable";
 import { Panel } from "../../../components/Panel";
@@ -33,15 +33,17 @@ export function MembersPage() {
 
   const rows = data?.getMembers ?? [];
   const hasNextPage = rows.length === PAGE_SIZE;
+  const activeCount = useMemo(() => rows.filter((row) => row.status === "ACTIVE").length, [rows]);
+  const withMemberIdCount = useMemo(() => rows.filter((row) => row.member_id).length, [rows]);
 
   return (
-    <div className="page-stack">
+    <div className="page-stack page-stack--workspace analytics-report internal-workspace">
       <PageHeader
         eyebrow="Operational"
         title="Members"
-        description="This page uses the newer gt.apicore member resolver path so clinic-specific member names and search behavior remain aligned with the GT domain model."
+        description="Clinic member browsing built on the GT resolver path, now aligned to the shared V2 internal workspace system."
         actions={
-          <label className="field field--compact field--search">
+          <label className="field field--compact field--search internal-workspace__search-field">
             <span>Search</span>
             <input
               type="text"
@@ -56,8 +58,27 @@ export function MembersPage() {
         }
       />
 
+      <div className="report-kpi-strip">
+        <article className="report-kpi-strip__card">
+          <span className="report-kpi-strip__label">Visible members</span>
+          <strong className="report-kpi-strip__value">{rows.length.toLocaleString("en-US")}</strong>
+          <span className="report-kpi-strip__hint">Rows currently loaded into the member directory.</span>
+        </article>
+        <article className="report-kpi-strip__card">
+          <span className="report-kpi-strip__label">Active on page</span>
+          <strong className="report-kpi-strip__value">{activeCount.toLocaleString("en-US")}</strong>
+          <span className="report-kpi-strip__hint">Visible members marked as active in the current page.</span>
+        </article>
+        <article className="report-kpi-strip__card">
+          <span className="report-kpi-strip__label">With member ID</span>
+          <strong className="report-kpi-strip__value">{withMemberIdCount.toLocaleString("en-US")}</strong>
+          <span className="report-kpi-strip__hint">Visible rows that already have an assigned member identifier.</span>
+        </article>
+      </div>
+
       <Panel
-        title={`${currentClinic?.name ?? "Clinic"} members`}
+        className="internal-workspace__panel"
+        title="Member directory"
         subtitle="Operational member browsing built on the GT resolver rather than fallback local data."
         action={
           <div className="pagination-controls">
@@ -97,4 +118,3 @@ export function MembersPage() {
     </div>
   );
 }
-

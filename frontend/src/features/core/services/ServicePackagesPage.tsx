@@ -28,13 +28,13 @@ export function ServicePackagesPage() {
   const lockedCount = useMemo(() => rows.filter((row) => row.isLock).length, [rows]);
 
   return (
-    <div className="page-stack page-stack--workspace analytics-report core-catalog-page">
+    <div className="page-stack page-stack--workspace analytics-report internal-workspace core-catalog-page">
       <PageHeader
         eyebrow="Core"
         title="Service packages"
         description="Package catalog from core with pricing, expiry, and locking state."
         actions={
-          <div className="filter-row core-catalog-page__filters">
+          <div className="filter-row internal-workspace__filters core-catalog-page__filters">
             <label className="field field--compact field--search">
               <span>Search</span>
               <input
@@ -70,8 +70,8 @@ export function ServicePackagesPage() {
       </div>
 
       <Panel
-        className="core-catalog-page__panel"
-        title={`${currentClinic?.name ?? "Clinic"} packages`}
+        className="internal-workspace__panel core-catalog-page__panel"
+        title="Package catalog"
         subtitle="Package pricing, expiry day, and publishing state."
       >
         {loading ? <div className="inline-note">Loading service packages...</div> : null}

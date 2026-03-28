@@ -28,13 +28,13 @@ export function ProductListPage() {
   const withBrandCount = useMemo(() => rows.filter((row) => row.brand?.name).length, [rows]);
 
   return (
-    <div className="page-stack page-stack--workspace analytics-report core-catalog-page">
+    <div className="page-stack page-stack--workspace analytics-report internal-workspace core-catalog-page">
       <PageHeader
         eyebrow="Core"
         title="Product list"
         description="Clinic product catalog from core, including measurement and brand data."
         actions={
-          <div className="filter-row core-catalog-page__filters">
+          <div className="filter-row internal-workspace__filters core-catalog-page__filters">
             <label className="field field--compact field--search">
               <span>Search</span>
               <input
@@ -70,7 +70,7 @@ export function ProductListPage() {
       </div>
 
       <Panel
-        className="core-catalog-page__panel"
+        className="internal-workspace__panel core-catalog-page__panel"
         title="Product catalog"
         subtitle="Read-only operational view of products, measurement amounts, and brand mapping."
       >

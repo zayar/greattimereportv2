@@ -54,13 +54,13 @@ export function ServiceCategoriesPage() {
   const privateCount = useMemo(() => rows.filter((row) => row.is_private).length, [rows]);
 
   return (
-    <div className="page-stack page-stack--workspace analytics-report core-catalog-page">
+    <div className="page-stack page-stack--workspace analytics-report internal-workspace core-catalog-page">
       <PageHeader
         eyebrow="Core"
         title="Service type category"
         description="Service category definitions, privacy state, and sale-channel mapping from core."
         actions={
-          <div className="filter-row core-catalog-page__filters">
+          <div className="filter-row internal-workspace__filters core-catalog-page__filters">
             <label className="field field--compact field--search">
               <span>Search</span>
               <input
@@ -88,7 +88,7 @@ export function ServiceCategoriesPage() {
       </div>
 
       <Panel
-        className="core-catalog-page__panel"
+        className="internal-workspace__panel core-catalog-page__panel"
         title="Service category registry"
         subtitle="Use this view to audit category visibility, ordering, and linked sale channels."
       >

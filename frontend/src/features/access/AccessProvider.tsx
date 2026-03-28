@@ -14,15 +14,15 @@ import { GET_ALLOWED_CLINICS } from "./queries";
 type AccessContextValue = {
   loading: boolean;
   error: string | null;
-  businesses: Business[];
   clinics: Clinic[];
+  canSwitchClinics: boolean;
   currentBusiness: Business | null;
   currentClinic: Clinic | null;
-  selectBusiness: (businessId: string) => void;
   selectClinic: (clinicId: string) => void;
 };
 
 const STORAGE_KEY = "gt_v2report.access";
+const PREFERRED_BUSINESS_NAME = "alifestyle";
 
 const AccessContext = createContext<AccessContextValue | null>(null);
 
@@ -68,6 +68,42 @@ function readPersistedSelection() {
   }
 }
 
+function normalizeBusinessName(value: string | null | undefined) {
+  return (value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function getPreferredBusiness(businesses: Business[]) {
+  return (
+    businesses.find((business) => normalizeBusinessName(business.name) === PREFERRED_BUSINESS_NAME) ??
+    businesses[0] ??
+    null
+  );
+}
+
+function getInitialSelection(clinics: Clinic[], businesses: Business[]) {
+  const persisted = readPersistedSelection();
+  const preferredBusiness =
+    getPreferredBusiness(businesses) ??
+    (persisted?.businessId
+      ? businesses.find((business) => business.id === persisted.businessId) ?? null
+      : null);
+  const persistedClinic = clinics.find((clinic) => clinic.id === persisted?.clinicId) ?? null;
+
+  if (persistedClinic && persistedClinic.company_id === preferredBusiness?.id) {
+    return {
+      business: preferredBusiness,
+      clinic: persistedClinic,
+    };
+  }
+
+  const preferredClinic = preferredBusiness?.clinics[0] ?? clinics[0] ?? null;
+
+  return {
+    business: preferredBusiness,
+    clinic: preferredClinic,
+  };
+}
+
 function writePersistedSelection(businessId: string | undefined, clinicId: string | undefined) {
   localStorage.setItem(
     STORAGE_KEY,
@@ -84,14 +120,12 @@ export function AccessProvider({ children }: PropsWithChildren) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [clinics, setClinics] = useState<Clinic[]>([]);
-  const [currentBusinessId, setCurrentBusinessId] = useState<string | null>(null);
   const [currentClinicId, setCurrentClinicId] = useState<string | null>(null);
 
   useEffect(() => {
     const loadClinics = async () => {
       if (!firebaseUser || !gtUser) {
         setClinics([]);
-        setCurrentBusinessId(null);
         setCurrentClinicId(null);
         setError(null);
         setLoading(false);
@@ -100,7 +134,6 @@ export function AccessProvider({ children }: PropsWithChildren) {
 
       if (gtUser.clinics.length === 0) {
         setClinics([]);
-        setCurrentBusinessId(null);
         setCurrentClinicId(null);
         setError("This account does not have any clinic access.");
         setLoading(false);
@@ -125,21 +158,9 @@ export function AccessProvider({ children }: PropsWithChildren) {
 
         const nextClinics = sortClinics(result.data.clinics ?? []);
         const businesses = buildBusinesses(nextClinics);
-        const persisted = readPersistedSelection();
-
-        let nextClinic = nextClinics.find((clinic) => clinic.id === persisted?.clinicId) ?? nextClinics[0] ?? null;
-        let nextBusiness =
-          businesses.find((business) => business.id === persisted?.businessId) ??
-          (nextClinic
-            ? businesses.find((business) => business.id === nextClinic.company_id)
-            : businesses[0] ?? null);
-
-        if (nextBusiness && nextClinic && nextClinic.company_id !== nextBusiness.id) {
-          nextClinic = nextBusiness.clinics[0] ?? null;
-        }
+        const { business: nextBusiness, clinic: nextClinic } = getInitialSelection(nextClinics, businesses);
 
         setClinics(nextClinics);
-        setCurrentBusinessId(nextBusiness?.id ?? null);
         setCurrentClinicId(nextClinic?.id ?? null);
         writePersistedSelection(nextBusiness?.id, nextClinic?.id);
       } catch (loadError) {
@@ -153,9 +174,17 @@ export function AccessProvider({ children }: PropsWithChildren) {
   }, [client, firebaseUser, gtUser]);
 
   const businesses = useMemo(() => buildBusinesses(clinics), [clinics]);
+  const preferredBusiness = useMemo(() => getPreferredBusiness(businesses), [businesses]);
   const currentBusiness = useMemo(
-    () => businesses.find((business) => business.id === currentBusinessId) ?? null,
-    [businesses, currentBusinessId],
+    () => {
+      const selectedClinic = clinics.find((clinic) => clinic.id === currentClinicId) ?? null;
+      if (selectedClinic) {
+        return businesses.find((business) => business.id === selectedClinic.company_id) ?? null;
+      }
+
+      return preferredBusiness;
+    },
+    [businesses, clinics, currentClinicId, preferredBusiness],
   );
   const currentClinic = useMemo(
     () => clinics.find((clinic) => clinic.id === currentClinicId) ?? null,
@@ -166,25 +195,10 @@ export function AccessProvider({ children }: PropsWithChildren) {
     () => ({
       loading,
       error,
-      businesses,
       clinics,
+      canSwitchClinics: (currentBusiness?.clinics.length ?? 0) > 1,
       currentBusiness,
       currentClinic,
-      selectBusiness: (businessId: string) => {
-        const nextBusiness = businesses.find((business) => business.id === businessId);
-        if (!nextBusiness) {
-          return;
-        }
-
-        const clinicInBusiness =
-          nextBusiness.clinics.find((clinic) => clinic.id === currentClinicId) ??
-          nextBusiness.clinics[0] ??
-          null;
-
-        setCurrentBusinessId(nextBusiness.id);
-        setCurrentClinicId(clinicInBusiness?.id ?? null);
-        writePersistedSelection(nextBusiness.id, clinicInBusiness?.id);
-      },
       selectClinic: (clinicId: string) => {
         const nextClinic = clinics.find((clinic) => clinic.id === clinicId);
         if (!nextClinic) {
@@ -192,11 +206,10 @@ export function AccessProvider({ children }: PropsWithChildren) {
         }
 
         setCurrentClinicId(nextClinic.id);
-        setCurrentBusinessId(nextClinic.company_id);
         writePersistedSelection(nextClinic.company_id, nextClinic.id);
       },
     }),
-    [loading, error, businesses, clinics, currentBusiness, currentClinic, currentClinicId],
+    [loading, error, clinics, currentBusiness, currentClinic],
   );
 
   return <AccessContext.Provider value={value}>{children}</AccessContext.Provider>;
@@ -209,4 +222,3 @@ export function useAccess() {
   }
   return value;
 }
-

@@ -19,8 +19,7 @@ function isNavigationItemActive(item: NavigationItem, pathname: string): boolean
 }
 
 export function AppShell() {
-  const { loading, error, businesses, currentBusiness, currentClinic, selectBusiness, selectClinic } =
-    useAccess();
+  const { loading, error, canSwitchClinics, currentBusiness, currentClinic, selectClinic } = useAccess();
   const { gtUser, logout } = useSession();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
@@ -34,11 +33,8 @@ export function AppShell() {
     return currentItem?.label ?? "GT V2 Report";
   }, [location.pathname]);
 
-  const hidesShellSelectors =
-    location.pathname === "/dashboard" || location.pathname === "/dashboard/overview";
-
   if (loading) {
-    return <ScreenLoader label="Loading your clinics and businesses..." />;
+    return <ScreenLoader label="Loading your clinic access..." />;
   }
 
   if (error && !currentClinic) {
@@ -149,23 +145,9 @@ export function AppShell() {
             </div>
           </div>
 
-          {!hidesShellSelectors ? (
-            <div className="topbar__controls">
-              <label className="field field--compact">
-                <span>Business</span>
-                <select
-                  value={currentBusiness.id}
-                  onChange={(event) => selectBusiness(event.target.value)}
-                >
-                  {businesses.map((business) => (
-                    <option key={business.id} value={business.id}>
-                      {business.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="field field--compact">
+          <div className="topbar__controls">
+            {canSwitchClinics ? (
+              <label className="field field--compact topbar__clinic-field">
                 <span>Clinic</span>
                 <select value={currentClinic.id} onChange={(event) => selectClinic(event.target.value)}>
                   {currentBusiness.clinics.map((clinic) => (
@@ -175,8 +157,13 @@ export function AppShell() {
                   ))}
                 </select>
               </label>
-            </div>
-          ) : null}
+            ) : (
+              <div className="topbar__context-pill">
+                <span>Clinic</span>
+                <strong>{currentClinic.name}</strong>
+              </div>
+            )}
+          </div>
         </header>
 
         <main className="page-content">

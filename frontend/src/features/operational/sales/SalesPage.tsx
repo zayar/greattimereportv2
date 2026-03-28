@@ -100,15 +100,28 @@ export function SalesPage() {
   const rows = data?.orders ?? [];
   const totalCount = data?.aggregateOrder?._count.id ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const loadedRevenue = useMemo(
+    () => rows.reduce((total, row) => total + Number(row.net_total ?? 0), 0),
+    [rows],
+  );
+  const visibleSellers = useMemo(
+    () =>
+      new Set(
+        rows
+          .map((row) => row.seller?.display_name || row.user?.name || "")
+          .filter(Boolean),
+      ).size,
+    [rows],
+  );
 
   return (
-    <div className="page-stack">
+    <div className="page-stack page-stack--workspace analytics-report internal-workspace">
       <PageHeader
         eyebrow="Operational"
         title="Sales"
-        description="Orders are pulled from the existing gt.report GraphQL model, but the page itself is rebuilt with cleaner layout, filters, and pagination."
+        description="Operational sales activity for the current clinic, using the shared V2 report layout and existing GT order model."
         actions={
-          <div className="filter-row">
+          <div className="filter-row internal-workspace__filters">
             <DateRangeControls
               fromDate={range.fromDate}
               toDate={range.toDate}
@@ -133,8 +146,29 @@ export function SalesPage() {
         }
       />
 
+      <div className="report-kpi-strip">
+        <article className="report-kpi-strip__card">
+          <span className="report-kpi-strip__label">Matching orders</span>
+          <strong className="report-kpi-strip__value">{totalCount.toLocaleString("en-US")}</strong>
+          <span className="report-kpi-strip__hint">Orders matched to the clinic, date range, and search filters.</span>
+        </article>
+        <article className="report-kpi-strip__card">
+          <span className="report-kpi-strip__label">Loaded revenue</span>
+          <strong className="report-kpi-strip__value">
+            {formatCurrency(loadedRevenue, currentClinic?.currency || "MMK")}
+          </strong>
+          <span className="report-kpi-strip__hint">Net total across the visible result page.</span>
+        </article>
+        <article className="report-kpi-strip__card">
+          <span className="report-kpi-strip__label">Visible sellers</span>
+          <strong className="report-kpi-strip__value">{visibleSellers.toLocaleString("en-US")}</strong>
+          <span className="report-kpi-strip__hint">Distinct sellers represented in the current page.</span>
+        </article>
+      </div>
+
       <Panel
-        title={`${currentClinic?.name ?? "Clinic"} sales`}
+        className="internal-workspace__panel"
+        title="Sales ledger"
         subtitle={`${totalCount.toLocaleString("en-US")} orders matched the current filters`}
         action={
           <div className="pagination-controls">
@@ -189,4 +223,3 @@ export function SalesPage() {
     </div>
   );
 }
-

@@ -44,13 +44,13 @@ export function ServiceConsentFormsPage() {
   const imageCount = useMemo(() => rows.filter((row) => row.consent_image).length, [rows]);
 
   return (
-    <div className="page-stack page-stack--workspace analytics-report core-catalog-page">
+    <div className="page-stack page-stack--workspace analytics-report internal-workspace core-catalog-page">
       <PageHeader
         eyebrow="Core"
         title="Service consent form"
         description="Consent-form templates, legal copy, and signing assets from core."
         actions={
-          <div className="filter-row core-catalog-page__filters">
+          <div className="filter-row internal-workspace__filters core-catalog-page__filters">
             <label className="field field--compact field--search">
               <span>Search</span>
               <input
@@ -78,7 +78,7 @@ export function ServiceConsentFormsPage() {
       </div>
 
       <Panel
-        className="core-catalog-page__panel"
+        className="internal-workspace__panel core-catalog-page__panel"
         title="Consent form library"
         subtitle="Read-only visibility into consent templates, media readiness, and signature alignment."
       >

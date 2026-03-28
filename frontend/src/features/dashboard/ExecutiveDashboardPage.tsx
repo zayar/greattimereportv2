@@ -74,7 +74,7 @@ const metricCards = [
 ] as const;
 
 export function ExecutiveDashboardPage() {
-  const { currentBusiness, currentClinic, selectClinic } = useAccess();
+  const { currentClinic } = useAccess();
   const [searchParams, setSearchParams] = useSearchParams();
   const appliedQuery = useMemo(() => readDashboardQuery(searchParams), [searchParams]);
   const [range, setRange] = useState(getDefaultRange());
@@ -243,7 +243,7 @@ export function ExecutiveDashboardPage() {
         <div className="executive-dashboard__control-top">
           <div className="executive-dashboard__control-copy">
             <span className="executive-dashboard__eyebrow">Filters</span>
-            <strong>This month by default</strong>
+            <strong>Clinic is managed from the global header</strong>
           </div>
 
           <div className="executive-dashboard__control-actions">
@@ -263,17 +263,6 @@ export function ExecutiveDashboardPage() {
         </div>
 
         <div className="executive-dashboard__control-grid">
-          <label className="field field--compact">
-            <span>Clinic</span>
-            <select value={currentClinic?.id ?? ""} onChange={(event) => selectClinic(event.target.value)}>
-              {(currentBusiness?.clinics ?? []).map((clinic) => (
-                <option key={clinic.id} value={clinic.id}>
-                  {clinic.name}
-                </option>
-              ))}
-            </select>
-          </label>
-
           <div className="executive-dashboard__range">
             <DateRangeControls fromDate={range.fromDate} toDate={range.toDate} onChange={setRange} />
           </div>

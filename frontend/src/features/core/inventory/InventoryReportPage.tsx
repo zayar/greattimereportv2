@@ -63,13 +63,13 @@ export function InventoryReportPage() {
   const zeroStockCount = useMemo(() => rows.filter((row) => row.current_qty <= 0).length, [rows]);
 
   return (
-    <div className="page-stack page-stack--workspace analytics-report core-catalog-page">
+    <div className="page-stack page-stack--workspace analytics-report internal-workspace core-catalog-page">
       <PageHeader
         eyebrow="Core"
         title="Inventory report"
         description="As-of stock position from core, including receipts, sales, and adjustments."
         actions={
-          <div className="filter-row core-catalog-page__filters">
+          <div className="filter-row internal-workspace__filters core-catalog-page__filters">
             <label className="field field--compact">
               <span>Report date</span>
               <input
@@ -111,7 +111,7 @@ export function InventoryReportPage() {
       </div>
 
       <Panel
-        className="core-catalog-page__panel core-catalog-page__wide-table"
+        className="internal-workspace__panel core-catalog-page__panel core-catalog-page__wide-table"
         title="As-of stock report"
         subtitle={`Inventory position as of ${reportDate}`}
         action={

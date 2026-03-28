@@ -35,13 +35,13 @@ export function ServiceListPage() {
   }, [rows]);
 
   return (
-    <div className="page-stack page-stack--workspace analytics-report core-catalog-page">
+    <div className="page-stack page-stack--workspace analytics-report internal-workspace core-catalog-page">
       <PageHeader
         eyebrow="Core"
         title="Service list"
         description="Live service catalog from core, scoped to the selected clinic."
         actions={
-          <div className="filter-row core-catalog-page__filters">
+          <div className="filter-row internal-workspace__filters core-catalog-page__filters">
             <label className="field field--compact field--search">
               <span>Search</span>
               <input
@@ -82,8 +82,8 @@ export function ServiceListPage() {
       </div>
 
       <Panel
-        className="core-catalog-page__panel"
-        title={`${currentClinic?.name ?? "Clinic"} services`}
+        className="internal-workspace__panel core-catalog-page__panel"
+        title="Service catalog"
         subtitle="Service catalog, pricing, cadence, and status from the core service table."
       >
         {loading ? <div className="inline-note">Loading service catalog...</div> : null}

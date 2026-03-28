@@ -74,13 +74,13 @@ export function StockSummaryPage() {
   const lowStockCount = useMemo(() => rows.filter((row) => row.closing_qty <= 10).length, [rows]);
 
   return (
-    <div className="page-stack page-stack--workspace analytics-report core-catalog-page">
+    <div className="page-stack page-stack--workspace analytics-report internal-workspace core-catalog-page">
       <PageHeader
         eyebrow="Core"
         title="Stock summary"
         description="Opening, in, out, and closing stock movement summary for the selected window."
         actions={
-          <div className="filter-row core-catalog-page__filters">
+          <div className="filter-row internal-workspace__filters core-catalog-page__filters">
             <DateRangeControls
               fromDate={range.fromDate}
               toDate={range.toDate}
@@ -119,7 +119,7 @@ export function StockSummaryPage() {
       </div>
 
       <Panel
-        className="core-catalog-page__panel core-catalog-page__wide-table"
+        className="internal-workspace__panel core-catalog-page__panel core-catalog-page__wide-table"
         title="Stock summary table"
         subtitle="A compact audit view of opening, incoming, outgoing, and closing stock."
         action={

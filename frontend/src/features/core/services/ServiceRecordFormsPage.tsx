@@ -45,13 +45,13 @@ export function ServiceRecordFormsPage() {
   const activeCount = useMemo(() => rows.filter((row) => row.status === "ACTIVE").length, [rows]);
 
   return (
-    <div className="page-stack page-stack--workspace analytics-report core-catalog-page">
+    <div className="page-stack page-stack--workspace analytics-report internal-workspace core-catalog-page">
       <PageHeader
         eyebrow="Core"
         title="Service record form"
         description="Record-form templates from core, including legal text and dynamic term sets."
         actions={
-          <div className="filter-row core-catalog-page__filters">
+          <div className="filter-row internal-workspace__filters core-catalog-page__filters">
             <label className="field field--compact field--search">
               <span>Search</span>
               <input
@@ -79,7 +79,7 @@ export function ServiceRecordFormsPage() {
       </div>
 
       <Panel
-        className="core-catalog-page__panel"
+        className="internal-workspace__panel core-catalog-page__panel"
         title="Record form library"
         subtitle="A read-only operational audit of record forms, their term blocks, and their current publishing state."
       >

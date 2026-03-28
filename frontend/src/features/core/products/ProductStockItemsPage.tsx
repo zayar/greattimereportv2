@@ -28,13 +28,13 @@ export function ProductStockItemsPage() {
   const lowStockCount = useMemo(() => rows.filter((row) => Number(row.stock ?? 0) <= 10).length, [rows]);
 
   return (
-    <div className="page-stack page-stack--workspace analytics-report core-catalog-page">
+    <div className="page-stack page-stack--workspace analytics-report internal-workspace core-catalog-page">
       <PageHeader
         eyebrow="Core"
         title="Product stock items"
         description="Sellable stock-unit records from core, including SKU, stock quantity, and pricing."
         actions={
-          <div className="filter-row core-catalog-page__filters">
+          <div className="filter-row internal-workspace__filters core-catalog-page__filters">
             <label className="field field--compact field--search">
               <span>Search</span>
               <input
@@ -70,7 +70,7 @@ export function ProductStockItemsPage() {
       </div>
 
       <Panel
-        className="core-catalog-page__panel"
+        className="internal-workspace__panel core-catalog-page__panel"
         title="Stock item registry"
         subtitle="Operational view of SKU-level stock items and their linked product definitions."
       >

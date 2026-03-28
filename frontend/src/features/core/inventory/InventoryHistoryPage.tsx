@@ -84,13 +84,13 @@ export function InventoryHistoryPage() {
   const adjustmentCount = useMemo(() => rows.filter((row) => row.ref_type === "adjustment").length, [rows]);
 
   return (
-    <div className="page-stack page-stack--workspace analytics-report core-catalog-page">
+    <div className="page-stack page-stack--workspace analytics-report internal-workspace core-catalog-page">
       <PageHeader
         eyebrow="Core"
         title="Inventory history"
         description="Stock movement history from core with searchable event trails."
         actions={
-          <div className="filter-row core-catalog-page__filters">
+          <div className="filter-row internal-workspace__filters core-catalog-page__filters">
             <DateRangeControls
               fromDate={range.fromDate}
               toDate={range.toDate}
@@ -146,7 +146,7 @@ export function InventoryHistoryPage() {
       </div>
 
       <Panel
-        className="core-catalog-page__panel core-catalog-page__wide-table"
+        className="internal-workspace__panel core-catalog-page__panel core-catalog-page__wide-table"
         title="Stock movement trail"
         subtitle="Use this page to trace stock changes by event type and closing quantity."
         action={
