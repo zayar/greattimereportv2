@@ -104,7 +104,7 @@ function buildInvoiceLevelPaymentsCte(extraWhere = "1 = 1") {
         CustomerPhoneNumber AS phoneNumber,
         InvoiceNumber AS invoiceNumber,
         MAX(OrderCreatedDate) AS orderCreatedDate,
-        CAST('' AS STRING) AS memberId,
+        MAX(COALESCE(MemberID, '')) AS memberId,
         MAX(COALESCE(PaymentMethod, 'Unknown')) AS paymentMethod,
         MAX(COALESCE(PaymentStatus, '')) AS paymentStatus,
         MAX(COALESCE(SellerName, 'Unknown')) AS salePerson,
@@ -146,16 +146,16 @@ function buildDistinctVisitsCte(extraWhere = "1 = 1") {
         ) AS visitKey,
         MAX(CheckInTime) AS checkInTime,
         MAX(CheckOutTime) AS checkOutTime,
-        MAX(COALESCE(MemberId, '')) AS memberId,
+        MAX(COALESCE(CustomerID, '')) AS memberId,
         MAX(DateOfBirth) AS dateOfBirth,
         ARRAY_AGG(COALESCE(ServiceName, '') IGNORE NULLS ORDER BY CheckInTime DESC LIMIT 1)[SAFE_OFFSET(0)] AS serviceName,
-        ARRAY_AGG(ServicePackageName IGNORE NULLS ORDER BY CheckInTime DESC LIMIT 1)[SAFE_OFFSET(0)] AS servicePackageName,
+        CAST(NULL AS STRING) AS servicePackageName,
         ARRAY_AGG(COALESCE(PractitionerName, 'Unknown') IGNORE NULLS ORDER BY CheckInTime DESC LIMIT 1)[SAFE_OFFSET(0)] AS practitionerName,
         MAX(CAST(COALESCE(Price, 0) AS FLOAT64)) AS price,
         MAX(CAST(COALESCE(PackageCount, 0) AS INT64)) AS packageCount,
         MAX(CAST(COALESCE(RemainingPackageCount, 0) AS INT64)) AS remainingPackageCount,
         ARRAY_AGG(
-          ${buildServiceCategoryExpression("ServiceName", "ServicePackageName")}
+          ${buildServiceCategoryExpression("ServiceName", "CAST(NULL AS STRING)")}
           ORDER BY CheckInTime DESC
           LIMIT 1
         )[SAFE_OFFSET(0)] AS serviceCategory
