@@ -106,6 +106,7 @@ export function ServiceDetailPage() {
   const deferredCustomersSearch = useDeferredValue(customersSearch.trim());
   const deferredPaymentsSearch = useDeferredValue(paymentsSearch.trim());
   const [aiInsight, setAiInsight] = useState<AiServiceInsightResponse | null>(null);
+  const [aiRequested, setAiRequested] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
@@ -139,7 +140,18 @@ export function ServiceDetailPage() {
     setPaymentsSearch("");
     setCustomersPage(1);
     setPaymentsPage(1);
+    setAiInsight(null);
+    setAiRequested(false);
+    setAiLoading(false);
+    setAiError(null);
   }, [currentClinic?.id, serviceName, range.fromDate, range.toDate]);
+
+  useEffect(() => {
+    setAiInsight(null);
+    setAiRequested(false);
+    setAiLoading(false);
+    setAiError(null);
+  }, [aiLanguage]);
 
   function loadAiInsight() {
     if (!currentClinic || !serviceName.trim() || !overviewState.data) {
@@ -147,6 +159,7 @@ export function ServiceDetailPage() {
     }
 
     let active = true;
+    setAiRequested(true);
     setAiLoading(true);
     setAiError(null);
 
@@ -217,14 +230,6 @@ export function ServiceDetailPage() {
       active = false;
     };
   }, [currentClinic, range.fromDate, range.toDate, serviceName]);
-
-  useEffect(() => {
-    if (!currentClinic || !serviceName.trim() || !overviewState.data) {
-      return;
-    }
-
-    return loadAiInsight();
-  }, [aiLanguage, currentClinic, overviewState.data, range.fromDate, range.toDate, serviceName]);
 
   useEffect(() => {
     if (!currentClinic || !serviceName.trim() || activeTab !== "customers") {
@@ -467,12 +472,31 @@ export function ServiceDetailPage() {
         action={
           <div className="ai-panel__header-actions">
             <span className="ai-panel__language-chip">{formatAiLanguageLabel(aiLanguage)}</span>
-            <button className="button button--secondary" onClick={() => void loadAiInsight()} disabled={aiLoading}>
-              {aiLoading ? "Refreshing..." : "Refresh AI"}
+            <button
+              className="button button--secondary"
+              onClick={() => void loadAiInsight()}
+              disabled={aiLoading || !overviewState.data}
+            >
+              {aiLoading ? (aiInsight ? "Refreshing..." : "Generating...") : aiInsight ? "Refresh AI" : "Generate AI"}
             </button>
           </div>
         }
       >
+        {!aiRequested && !aiInsight && !aiLoading ? (
+          <div className="ai-panel__prompt">
+            <EmptyState
+              label="AI summary is off by default"
+              detail="Generate it only when you want a short owner-facing summary for this service."
+            />
+            <button
+              className="button button--secondary"
+              onClick={() => void loadAiInsight()}
+              disabled={!overviewState.data}
+            >
+              Generate AI summary
+            </button>
+          </div>
+        ) : null}
         {aiError && !aiInsight ? <ErrorState label="AI service insight could not be loaded" detail={aiError} /> : null}
         {!aiInsight && aiLoading ? <div className="inline-note">Generating AI service insight...</div> : null}
         {aiInsight ? (

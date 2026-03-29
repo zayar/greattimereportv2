@@ -2173,6 +2173,16 @@ a {
   gap: 16px;
 }
 
+.ai-panel__prompt {
+  display: grid;
+  gap: 14px;
+  justify-items: start;
+}
+
+.ai-panel__prompt .empty-state {
+  padding: 0;
+}
+
 .ai-panel__summary {
   display: grid;
   gap: 10px;

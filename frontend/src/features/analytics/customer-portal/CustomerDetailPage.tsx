@@ -487,6 +487,7 @@ export function CustomerDetailPage() {
   const deferredBookingsSearch = useDeferredValue(bookingsSearch.trim());
   const deferredPaymentsSearch = useDeferredValue(paymentsSearch.trim());
   const [aiInsight, setAiInsight] = useState<AiCustomerInsightResponse | null>(null);
+  const [aiRequested, setAiRequested] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
@@ -511,7 +512,18 @@ export function CustomerDetailPage() {
     setPaymentsPage(1);
     setUsageCategory("");
     setUsageYear(Number(range.toDate.slice(0, 4)));
+    setAiInsight(null);
+    setAiRequested(false);
+    setAiLoading(false);
+    setAiError(null);
   }, [currentClinic?.id, customerName, customerPhone, range.fromDate, range.toDate]);
+
+  useEffect(() => {
+    setAiInsight(null);
+    setAiRequested(false);
+    setAiLoading(false);
+    setAiError(null);
+  }, [aiLanguage]);
 
   function loadAiInsight() {
     if (!currentClinic || !hasIdentity || !overviewState.data) {
@@ -519,6 +531,7 @@ export function CustomerDetailPage() {
     }
 
     let active = true;
+    setAiRequested(true);
     setAiLoading(true);
     setAiError(null);
 
@@ -598,14 +611,6 @@ export function CustomerDetailPage() {
       active = false;
     };
   }, [currentClinic, customerName, customerPhone, hasIdentity, range.fromDate, range.toDate]);
-
-  useEffect(() => {
-    if (!currentClinic || !hasIdentity || !overviewState.data) {
-      return;
-    }
-
-    return loadAiInsight();
-  }, [aiLanguage, currentClinic, customerName, customerPhone, hasIdentity, overviewState.data, range.fromDate, range.toDate]);
 
   useEffect(() => {
     if (!currentClinic || !hasIdentity || activeTab !== "packages" || packagesState.data || packagesState.loading) {
@@ -961,12 +966,31 @@ export function CustomerDetailPage() {
         action={
           <div className="ai-panel__header-actions">
             <span className="ai-panel__language-chip">{formatAiLanguageLabel(aiLanguage)}</span>
-            <button className="button button--secondary" onClick={() => void loadAiInsight()} disabled={aiLoading}>
-              {aiLoading ? "Refreshing..." : "Refresh AI"}
+            <button
+              className="button button--secondary"
+              onClick={() => void loadAiInsight()}
+              disabled={aiLoading || !overviewState.data}
+            >
+              {aiLoading ? (aiInsight ? "Refreshing..." : "Generating...") : aiInsight ? "Refresh AI" : "Generate AI"}
             </button>
           </div>
         }
       >
+        {!aiRequested && !aiInsight && !aiLoading ? (
+          <div className="ai-panel__prompt">
+            <EmptyState
+              label="AI summary is off by default"
+              detail="Generate it only when you want a short owner-facing summary for this customer."
+            />
+            <button
+              className="button button--secondary"
+              onClick={() => void loadAiInsight()}
+              disabled={!overviewState.data}
+            >
+              Generate AI summary
+            </button>
+          </div>
+        ) : null}
         {aiError && !aiInsight ? <ErrorState label="AI customer summary could not be loaded" detail={aiError} /> : null}
         {!aiInsight && aiLoading ? <div className="inline-note">Generating AI customer summary...</div> : null}
         {aiInsight ? (

@@ -88,6 +88,7 @@ export function ExecutiveDashboardPage() {
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [loadedState, setLoadedState] = useState<DashboardQueryState | null>(appliedQuery);
   const [aiSummary, setAiSummary] = useState<AiExecutiveSummaryResponse | null>(null);
+  const [aiRequested, setAiRequested] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
 
@@ -156,6 +157,7 @@ export function ExecutiveDashboardPage() {
     }
 
     let active = true;
+    setAiRequested(true);
     setAiLoading(true);
     setAiError(null);
 
@@ -188,12 +190,11 @@ export function ExecutiveDashboardPage() {
   }
 
   useEffect(() => {
-    if (!currentClinic || !appliedQuery || !data) {
-      return;
-    }
-
-    return loadAiSummary();
-  }, [aiLanguage, appliedQuery, currentClinic, data]);
+    setAiSummary(null);
+    setAiRequested(false);
+    setAiLoading(false);
+    setAiError(null);
+  }, [aiLanguage, appliedQuery?.clinicId, appliedQuery?.fromDate, appliedQuery?.toDate]);
 
   const isDirty =
     !loadedState ||
@@ -389,12 +390,23 @@ export function ExecutiveDashboardPage() {
             action={
               <div className="ai-panel__header-actions">
                 <span className="ai-panel__language-chip">{formatAiLanguageLabel(aiLanguage)}</span>
-                <button className="button button--secondary" onClick={() => void loadAiSummary()} disabled={aiLoading}>
-                  {aiLoading ? "Refreshing..." : "Refresh AI"}
+                <button className="button button--secondary" onClick={() => void loadAiSummary()} disabled={aiLoading || !data}>
+                  {aiLoading ? (aiSummary ? "Refreshing..." : "Generating...") : aiSummary ? "Refresh AI" : "Generate AI"}
                 </button>
               </div>
             }
           >
+            {!aiRequested && !aiSummary && !aiLoading ? (
+              <div className="ai-panel__prompt">
+                <EmptyState
+                  label="AI summary is off by default"
+                  detail="Generate it only when you want a quick owner-ready recap for this dashboard."
+                />
+                <button className="button button--secondary" onClick={() => void loadAiSummary()} disabled={!data}>
+                  Generate AI summary
+                </button>
+              </div>
+            ) : null}
             {aiError && !aiSummary ? <ErrorState label="AI summary could not be loaded" detail={aiError} /> : null}
             {!aiSummary && aiLoading ? <div className="inline-note">Generating AI executive summary...</div> : null}
             {aiSummary ? (
