@@ -1868,8 +1868,12 @@ a {
 .home-directory__activity-card {
   padding: 22px;
   border-radius: 28px;
-  background: linear-gradient(135deg, #32213e 0%, #1c1023 100%);
-  min-height: 160px;
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.08), transparent 28%),
+    linear-gradient(135deg, #2d2338 0%, #17101f 100%);
+  min-height: 172px;
+  display: grid;
+  gap: 14px;
   align-content: start;
   position: relative;
   overflow: hidden;
@@ -1883,20 +1887,36 @@ a {
   font-weight: 600;
 }
 
-.home-directory__activity-card strong {
-  color: #ffffff;
-  font-style: italic;
-  font-weight: 500;
-  font-family: "Cormorant Garamond", "Georgia", serif;
-  font-size: 1.2rem;
+.home-directory__activity-copy {
+  display: grid;
+  gap: 10px;
+  max-width: 520px;
+}
+
+.home-directory__activity-title {
+  color: #fffaf8;
+  font-style: normal;
+  font-weight: 700;
+  font-family: "Space Grotesk", "Noto Sans Myanmar", "Avenir Next", "Segoe UI", sans-serif;
+  font-size: clamp(1.42rem, 2vw, 1.7rem);
+  line-height: 1.04;
+  letter-spacing: -0.03em;
+}
+
+.home-directory__activity-description {
+  color: #c8bdcd;
+  font-size: 0.98rem;
+  line-height: 1.6;
 }
 
 .home-directory__activity-subline {
   font-style: normal;
-  font-size: 0.9rem;
-  color: #a69ba8;
-  font-family: "Instrument Sans", "Avenir Next", "Segoe UI", sans-serif;
-  font-weight: 400;
+  font-size: 0.84rem;
+  color: #a99db0;
+  font-family: "Instrument Sans", "Noto Sans Myanmar", "Avenir Next", "Segoe UI", sans-serif;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .home-directory__activity-mesh {
@@ -2224,6 +2244,10 @@ a {
   gap: 14px;
 }
 
+.ai-panel__metric-grid--customer {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .ai-panel__metric {
   display: grid;
   gap: 8px;
@@ -2248,6 +2272,10 @@ a {
 .ai-panel__metric strong {
   font-size: 1.3rem;
   color: #141923;
+}
+
+.ai-panel__metric small {
+  line-height: 1.55;
 }
 
 .ai-panel__metric-pill {

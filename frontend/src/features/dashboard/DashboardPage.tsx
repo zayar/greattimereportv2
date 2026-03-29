@@ -167,6 +167,14 @@ const intelligenceCardsConfig: HomeCardConfig[] = [
     tone: "neutral",
     cta: "",
   },
+  {
+    id: "customer-portal",
+    title: "Customer Portal",
+    description: "Customer 360, retention signals, and rebooking follow-up",
+    eyebrow: "",
+    tone: "neutral",
+    cta: "",
+  },
 ];
 
 const operationsCardsConfig: HomeCardConfig[] = [
@@ -305,36 +313,40 @@ export function DashboardPage() {
         <div className="home-directory__section home-directory__section--compact">
           <h2 className="home-directory__title">Intelligence &amp; Insights</h2>
           <div className="home-directory__insight-grid">
-            {intelligenceCards.map((item, i) => (
-              <button
-                key={item.id}
-                className={`home-directory__insight-card home-directory__insight-card--${i === 0 ? "sage" : "blush"}`.trim()}
-                onClick={() => openRoute(item.route, item.window)}
-              >
-                <strong>{item.title}</strong>
-                <p>{item.description}</p>
-                <div className={`home-directory__mini-bars home-directory__mini-bars--${i === 0 ? "sage" : "blush"}`.trim()}>
-                  {i === 0 ? (
-                    <>
-                      <span className="home-directory__mini-bar home-directory__mini-bar--short" />
-                      <span className="home-directory__mini-bar home-directory__mini-bar--medium" />
-                      <span className="home-directory__mini-bar home-directory__mini-bar--small" />
-                      <span className="home-directory__mini-bar home-directory__mini-bar--tall" />
-                      <span className="home-directory__mini-bar home-directory__mini-bar--large" />
-                    </>
-                  ) : (
-                    <>
-                      <span className="home-directory__mini-bar home-directory__mini-bar--mid-short" />
-                      <span className="home-directory__mini-bar home-directory__mini-bar--very-tall" />
-                      <span className="home-directory__mini-bar home-directory__mini-bar--small" />
-                      <span className="home-directory__mini-bar home-directory__mini-bar--medium-large" />
-                      <span className="home-directory__mini-bar home-directory__mini-bar--medium" />
-                    </>
-                  )}
-                </div>
-                <div className="home-directory__insight-glow" aria-hidden />
-              </button>
-            ))}
+            {intelligenceCards.map((item, i) => {
+                const toneVariant = i % 2 === 0 ? "sage" : "blush";
+
+                return (
+                  <button
+                    key={item.id}
+                    className={`home-directory__insight-card home-directory__insight-card--${toneVariant}`.trim()}
+                    onClick={() => openRoute(item.route, item.window)}
+                  >
+                    <strong>{item.title}</strong>
+                    <p>{item.description}</p>
+                    <div className={`home-directory__mini-bars home-directory__mini-bars--${toneVariant}`.trim()}>
+                      {toneVariant === "sage" ? (
+                        <>
+                          <span className="home-directory__mini-bar home-directory__mini-bar--short" />
+                          <span className="home-directory__mini-bar home-directory__mini-bar--medium" />
+                          <span className="home-directory__mini-bar home-directory__mini-bar--small" />
+                          <span className="home-directory__mini-bar home-directory__mini-bar--tall" />
+                          <span className="home-directory__mini-bar home-directory__mini-bar--large" />
+                        </>
+                      ) : (
+                        <>
+                          <span className="home-directory__mini-bar home-directory__mini-bar--mid-short" />
+                          <span className="home-directory__mini-bar home-directory__mini-bar--very-tall" />
+                          <span className="home-directory__mini-bar home-directory__mini-bar--small" />
+                          <span className="home-directory__mini-bar home-directory__mini-bar--medium-large" />
+                          <span className="home-directory__mini-bar home-directory__mini-bar--medium" />
+                        </>
+                      )}
+                    </div>
+                    <div className="home-directory__insight-glow" aria-hidden />
+                  </button>
+                );
+              })}
           </div>
         </div>
 
@@ -359,14 +371,16 @@ export function DashboardPage() {
 
             <button
               className="home-directory__activity-card"
-              onClick={() => openRoute("/core/services/list")}
+              onClick={() => openRoute("/operational/appointments", "today")}
             >
-              <span className="home-directory__card-eyebrow">Next Activity</span>
-              <strong>
-                VIP Consultation: Sarah J.
-                <br />
-                <span className="home-directory__activity-subline">Room 4 • 14:30 PM</span>
-              </strong>
+              <span className="home-directory__card-eyebrow">Daily Queue</span>
+              <div className="home-directory__activity-copy">
+                <strong className="home-directory__activity-title">Today Appoint List</strong>
+                <p className="home-directory__activity-description">
+                  Open today&apos;s appointment board for arrivals, room flow, and live schedule changes.
+                </p>
+                <span className="home-directory__activity-subline">Front desk and clinic team quick view</span>
+              </div>
               <div className="home-directory__activity-mesh" aria-hidden />
             </button>
           </div>

@@ -125,31 +125,54 @@ export function buildCustomerInsightFallback(params: {
 }): CustomerInsightCore {
   const { aiLanguage, overview, riskSignals } = params;
   const customer = overview.customer;
+  const serviceLabel = customer.preferredService || (isMyanmarLanguage(aiLanguage) ? "ဤ customer ၏ အဓိက service pattern" : "this customer's main service pattern");
+  const therapistLabel =
+    customer.preferredTherapist && customer.preferredTherapist !== "Unknown"
+      ? customer.preferredTherapist
+      : null;
+  const hasHealthyPackage = customer.remainingSessions > 3;
+  const hasLowPackageBalance = customer.remainingSessions > 0 && customer.remainingSessions <= 3;
+  const recentActivityLine =
+    riskSignals.daysSinceLastVisit == null
+      ? null
+      : riskSignals.daysSinceLastVisit <= 14
+        ? isMyanmarLanguage(aiLanguage)
+          ? "မကြာသေးမီက လာရောက်ထားသဖြင့် customer relationship သည် လက်ရှိတက်ကြွနေဆဲဖြစ်ပါသည်။"
+          : "The customer visited recently, so the relationship still looks active."
+        : riskSignals.daysSinceLastVisit <= 45
+          ? isMyanmarLanguage(aiLanguage)
+            ? `နောက်ဆုံးလာရောက်ပြီး ${riskSignals.daysSinceLastVisit} ရက်ရှိထားသဖြင့် follow-up timing ကို စီမံနိုင်သေးပါသည်။`
+            : `It has been ${riskSignals.daysSinceLastVisit} days since the last visit, so follow-up timing is still manageable.`
+          : isMyanmarLanguage(aiLanguage)
+            ? `နောက်ဆုံးလာရောက်မှုမှ ${riskSignals.daysSinceLastVisit} ရက်ကျော်သွားသဖြင့် relationship ကို ပြန်နိုးဆော်ရန်လိုပါသည်။`
+            : `It has been ${riskSignals.daysSinceLastVisit} days since the last visit, so the relationship needs a stronger follow-up push.`;
 
   if (isMyanmarLanguage(aiLanguage)) {
     return {
       nextBestAction:
         riskSignals.rebookingStatus === "overdue"
-          ? "Rebooking follow-up ကို ချက်ချင်းစတင်ပြီး နောက်တစ်ကြိမ် slot ကို အမြန်ပေးပါ။"
+          ? "ပြန်လည်လာရောက်မှုကို အမြန်ပြန်ချိတ်ပြီး အချိန်ရွေးချယ်နိုင်သော slot ကို ချက်ချင်းပေးပါ။"
           : riskSignals.rebookingStatus === "dueSoon"
-            ? "ပြန်လာသင့်သောအချိန်မတိုင်မီ reminder ပို့ရန် ပြင်ဆင်ပါ။"
-            : riskSignals.frequencyTrend === "declining"
-              ? "လာရောက်မှုကျဆင်းနေသည့်အတွက် retention check-in တစ်ခုလုပ်ပါ။"
-              : "ပုံမှန် retention cadence အတွင်း ဆက်လက်ထိန်းသိမ်းပါ။",
+            ? "ပုံမှန်ပြန်လာချိန်မကျော်မီ reminder ပို့ပြီး နောက်တစ်ကြိမ် booking ကို စီစဉ်ပါ။"
+            : hasHealthyPackage
+              ? "Package usage ဆက်လက်လှုပ်ရှားနေစေရန် continuity follow-up လုပ်ပြီး renewal timing ကို စောင့်ကြည့်ပါ။"
+              : hasLowPackageBalance
+                ? "Package လက်ကျန်နည်းနေသောကြောင့် နောက်တစ်ကြိမ်လာရောက်ချိန်နှင့် renewal conversation ကို ပြင်ဆင်ပါ။"
+                : therapistLabel
+                  ? `${therapistLabel} နှင့် continuity ကို ထိန်းသိမ်းပြီး နောက်လာရောက်မှုအတွက် light check-in လုပ်ပါ။`
+                  : "ပုံမှန် customer relationship check-in တစ်ခုလုပ်ပြီး နောက်လာရောက်နိုင်မည့် service ကို သေချာအတည်ပြုပါ။",
       shortExplanation: [
-        riskSignals.daysSinceLastVisit != null
-          ? `နောက်ဆုံးလာရောက်ပြီး ${riskSignals.daysSinceLastVisit} ရက်ရှိထားပါသည်။`
-          : "နောက်ဆုံးလာရောက်သည့်ရက် မရှင်းလင်းသေးပါ။",
-        riskSignals.avgVisitGapDays != null
-          ? `ပုံမှန်လာရောက်ကြားကာလမှာ ${riskSignals.avgVisitGapDays} ရက်ဝန်းကျင်ဖြစ်ပါသည်။`
-          : null,
-        riskSignals.frequencyTrend === "declining"
-          ? `မကြာသေးခင် 3 လအတွင်းလာရောက်မှုသည် ယခင်ကာလထက် နည်းလာပါသည်။`
-          : riskSignals.packageRisk === "lowBalance"
-            ? `Package လက်ကျန်နည်းနေသောကြောင့် follow-up timing ကောင်းပါသည်။`
-            : riskSignals.packageRisk === "healthy"
-              ? `Package လက်ကျန်ရှိနေသေးသောကြောင့် rebooking trigger ကောင်းပါသည်။`
-              : `${customer.preferredService || "အဓိက service"} ကို အခြေခံပြီး retention လုပ်ရန်လိုပါသည်။`,
+        recentActivityLine,
+        hasHealthyPackage
+          ? `Package လက်ကျန် ${customer.remainingSessions.toLocaleString("en-US")} ခုရှိနေသေးသောကြောင့် ဆက်လက်အသုံးပြုမှုနှင့် continuity ကို ထိန်းနိုင်ပါသည်။`
+          : hasLowPackageBalance
+            ? `Package လက်ကျန် ${customer.remainingSessions.toLocaleString("en-US")} ခုသာကျန်သဖြင့် renewal timing ကို စတင်ကြည့်သင့်ပါသည်။`
+            : `${serviceLabel} ကို အဓိကထားအသုံးပြုနေသဖြင့် နောက်တစ်ကြိမ်ပြန်လာမှုကို business follow-up ဖြင့်ထိန်းသိမ်းသင့်ပါသည်။`,
+        therapistLabel
+          ? `${therapistLabel} နှင့် relationship သည် continuity အတွက် အားသာချက်တစ်ခုဖြစ်ပါသည်။`
+          : riskSignals.frequencyTrend === "declining"
+            ? "မကြာသေးမီလာရောက်မှု အင်အား လျော့နေသောကြောင့် owner review ထဲတွင် ထည့်သွင်းစောင့်ကြည့်သင့်ပါသည်။"
+            : null,
       ]
         .filter(Boolean)
         .join(" "),
@@ -160,26 +183,28 @@ export function buildCustomerInsightFallback(params: {
   return {
     nextBestAction:
       riskSignals.rebookingStatus === "overdue"
-        ? "Start a rebooking follow-up now and offer the next available slot."
+        ? "Reconnect now and offer a clear next-visit slot while the relationship is still warm."
         : riskSignals.rebookingStatus === "dueSoon"
-          ? "Prepare a reminder before the expected return window closes."
-          : riskSignals.frequencyTrend === "declining"
-            ? "Run a retention check-in because visit frequency is slipping."
-            : "Keep the customer in the normal retention cadence.",
+          ? "Send a reminder before the usual return window closes and guide the next booking."
+          : hasHealthyPackage
+            ? "Keep package usage moving and watch for the right renewal timing."
+            : hasLowPackageBalance
+              ? "Prepare the next visit and start a soft renewal conversation because package balance is getting low."
+              : therapistLabel
+                ? `Protect continuity with ${therapistLabel} and keep a light relationship check-in.`
+                : "Keep the customer in a light follow-up cadence and confirm the next likely service.",
     shortExplanation: [
-      riskSignals.daysSinceLastVisit != null
-        ? `The customer has been away for ${riskSignals.daysSinceLastVisit} days.`
-        : "The latest visit date is not clearly available.",
-      riskSignals.avgVisitGapDays != null
-        ? `Their usual return gap is about ${riskSignals.avgVisitGapDays} days.`
-        : null,
-      riskSignals.frequencyTrend === "declining"
-        ? "Recent visit frequency is lower than the prior three-month window."
-        : riskSignals.packageRisk === "lowBalance"
-          ? "Package balance is running low, so follow-up timing is strong."
-          : riskSignals.packageRisk === "healthy"
-            ? "There is still package balance available, which supports a rebooking prompt."
-            : `Retention should stay focused around ${customer.preferredService || "the main service relationship"}.`,
+      recentActivityLine,
+      hasHealthyPackage
+        ? `Package balance is still active with ${customer.remainingSessions.toLocaleString("en-US")} sessions remaining, which supports continuity.`
+        : hasLowPackageBalance
+          ? `Package balance is down to ${customer.remainingSessions.toLocaleString("en-US")} sessions, so renewal timing is getting closer.`
+          : `${serviceLabel} remains the clearest service relationship, so the next visit should be guided around that pattern.`,
+      therapistLabel
+        ? `${therapistLabel} is the strongest therapist relationship for continuity.`
+        : riskSignals.frequencyTrend === "declining"
+          ? "Recent visit momentum is softer than the prior three-month window and should stay on the owner watchlist."
+          : null,
     ]
       .filter(Boolean)
       .join(" "),

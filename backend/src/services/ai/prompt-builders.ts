@@ -62,15 +62,16 @@ export function buildCustomerInsightPrompt(params: {
   facts: unknown;
 }) {
   return `
-You are writing a short customer retention insight for GT_V2Report.
+You are writing a short customer business snapshot for GT_V2Report.
 
 Language instruction:
 ${languageInstruction(params.aiLanguage)}
 
 Rules:
 - ${baseRulesBlock()}
-- The risk labels and health score are already calculated deterministically. Do not change them.
-- Explain the current rebooking and churn situation in plain business language.
+- The deterministic signals are already calculated. Use them to guide the explanation, but do not change them.
+- Do not lean on internal wording like health score, churn risk, or rebooking status unless the facts make it necessary.
+- Focus on owner-facing meaning: current relationship strength, recent activity, package position, continuity, and the next business action.
 
 Return this JSON shape:
 {
@@ -80,9 +81,9 @@ Return this JSON shape:
 }
 
 Additional constraints:
-- shortExplanation: 1 to 3 short sentences.
-- nextBestAction: one short action statement.
-- suggestedFollowUpMessage: optional, short, friendly, and business-safe.
+- shortExplanation: 1 to 3 short sentences describing the customer's current business value, present activity, and what it means for the clinic.
+- nextBestAction: one short clinic-owner action statement.
+- suggestedFollowUpMessage: optional, short, friendly, business-safe, and suitable for front desk follow-up.
 - Do not include any diagnosis, clinical claim, or treatment advice.
 
 Facts:
