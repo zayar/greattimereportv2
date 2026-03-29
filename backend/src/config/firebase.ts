@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { applicationDefault, cert, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
+import { getFirestore } from "firebase-admin/firestore";
 import { env } from "./env.js";
 
 type ServiceAccountShape = {
@@ -44,3 +45,6 @@ export function firebaseAuth() {
   return getAuth(ensureFirebaseAdmin());
 }
 
+export function firestoreDb() {
+  return getFirestore(ensureFirebaseAdmin());
+}

@@ -36,6 +36,31 @@ export interface Business {
 
 export type AiLanguage = "my-MM" | "en-US";
 
+export type TelegramConnectionStatus = "not_linked" | "pending" | "linked";
+
+export interface TelegramIntegrationStatus {
+  clinicId: string;
+  clinicCode: string;
+  clinicName: string;
+  telegramChatId: string | null;
+  telegramChatType: "private" | "group" | "supergroup" | "channel" | null;
+  telegramChatTitle: string | null;
+  telegramLinkedAt: string | null;
+  isTodayAppointmentReportEnabled: boolean;
+  reportTime: string;
+  timezone: string;
+  lastTestSentAt: string | null;
+  lastScheduledSentAt: string | null;
+  lastScheduledDateKey: string | null;
+  pendingLinkCode: string | null;
+  pendingLinkCodeExpiresAt: string | null;
+  connectionStatus: TelegramConnectionStatus;
+  linkedTargetLabel: string | null;
+  botUsername: string | null;
+  botUrl: string | null;
+  botDeepLink: string | null;
+}
+
 export interface AiExecutiveSummaryResponse {
   summaryTitle: string;
   summaryText: string;

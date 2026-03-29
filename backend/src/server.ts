@@ -4,6 +4,7 @@ import routes from "./routes/index.js";
 import { env } from "./config/env.js";
 import { ensureFirebaseAdmin } from "./config/firebase.js";
 import { errorHandler } from "./middleware/error-handler.js";
+import { initializeTelegramRuntime } from "./services/telegram/runtime.service.js";
 
 ensureFirebaseAdmin();
 
@@ -33,4 +34,5 @@ app.use(errorHandler);
 
 app.listen(env.PORT, () => {
   console.log(`GT_V2Report backend listening on http://localhost:${env.PORT}`);
+  void initializeTelegramRuntime();
 });

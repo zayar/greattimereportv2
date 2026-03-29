@@ -81,6 +81,9 @@ export const navigationSections: NavigationSection[] = [
   },
   {
     title: "Settings",
-    items: [{ to: "/settings/sales-document", label: "Sales document designer" }],
+    items: [
+      { to: "/settings/telegram", label: "Telegram" },
+      { to: "/settings/sales-document", label: "Sales document designer" },
+    ],
   },
 ];

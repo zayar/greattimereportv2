@@ -37,6 +37,7 @@ import { InventoryHistoryPage } from "./features/core/inventory/InventoryHistory
 import { InventoryReportPage } from "./features/core/inventory/InventoryReportPage";
 import { StockSummaryPage } from "./features/core/inventory/StockSummaryPage";
 import { SalesDocumentSettingsPage } from "./features/settings/sales-document/SalesDocumentSettingsPage";
+import { TelegramSettingsPage } from "./features/settings/telegram/TelegramSettingsPage";
 
 export default function App() {
   return (
@@ -86,6 +87,7 @@ export default function App() {
                     <Route path="analytics/customers" element={<CustomerPortalPage />} />
                     <Route path="analytics/customers/:customerSlug" element={<CustomerDetailPage />} />
                     <Route path="settings/sales-document" element={<SalesDocumentSettingsPage />} />
+                    <Route path="settings/telegram" element={<TelegramSettingsPage />} />
                   </Route>
                 </Routes>
               </BrowserRouter>
