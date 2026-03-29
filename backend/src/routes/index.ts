@@ -1,6 +1,7 @@
 import { Router } from "express";
 import authRoutes from "./auth.routes.js";
 import analyticsRoutes from "./analytics.routes.js";
+import aiRoutes from "./ai.routes.js";
 
 const router = Router();
 
@@ -16,6 +17,6 @@ router.get("/health", (_req, res) => {
 
 router.use("/auth", authRoutes);
 router.use("/analytics", analyticsRoutes);
+router.use("/ai", aiRoutes);
 
 export default router;
-

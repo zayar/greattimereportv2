@@ -4,6 +4,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { navigationSections, type NavigationItem } from "./navigation";
 import { useAccess } from "../access/AccessProvider";
 import { useSession } from "../auth/SessionProvider";
+import { AiLanguageSelector } from "../ai/AiLanguageSelector";
 import { EmptyState, ErrorState, ScreenLoader } from "../../components/StatusViews";
 
 function flattenNavigationItems(items: NavigationItem[]): NavigationItem[] {
@@ -146,6 +147,7 @@ export function AppShell() {
           </div>
 
           <div className="topbar__controls">
+            <AiLanguageSelector className="topbar__ai-field" />
             {canSwitchClinics ? (
               <label className="field field--compact topbar__clinic-field">
                 <span>Clinic</span>

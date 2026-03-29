@@ -34,6 +34,40 @@ export interface Business {
   clinics: Clinic[];
 }
 
+export type AiLanguage = "my-MM" | "en-US";
+
+export interface AiExecutiveSummaryResponse {
+  summaryTitle: string;
+  summaryText: string;
+  topFindings: string[];
+  recommendedActions: string[];
+  warningText: string | null;
+  languageUsed: AiLanguage;
+  generatedAt: string;
+}
+
+export interface AiCustomerInsightResponse {
+  churnRiskLevel: "low" | "medium" | "high";
+  rebookingStatus: "dueSoon" | "overdue" | "onTrack" | "unknown";
+  healthScore: number;
+  nextBestAction: string;
+  shortExplanation: string;
+  suggestedFollowUpMessage: string | null;
+  languageUsed: AiLanguage;
+  generatedAt: string;
+}
+
+export interface AiServiceInsightResponse {
+  shortSummary: string;
+  growthInsight: string;
+  repeatRateInsight: string;
+  packageOpportunity: string;
+  staffingObservation: string | null;
+  recommendedActions: string[];
+  languageUsed: AiLanguage;
+  generatedAt: string;
+}
+
 export interface AppointmentRow {
   bookingid: string;
   FromTime: string;
@@ -671,6 +705,9 @@ export interface CustomerPortalListResponse {
     packageStatus: string;
     remainingSessions: number;
     serviceCategory: string;
+    churnRiskLevel: "low" | "medium" | "high";
+    rebookingStatus: "dueSoon" | "overdue" | "onTrack" | "unknown";
+    healthScore: number;
   }>;
   totalCount: number;
 }

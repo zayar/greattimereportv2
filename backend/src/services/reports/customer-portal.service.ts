@@ -1,5 +1,6 @@
 import { analyticsTables } from "../../config/bigquery.js";
 import { runAnalyticsQuery } from "../bigquery.service.js";
+import { calculateCustomerRiskSignals } from "../ai/customer-risk.service.js";
 
 type CustomerIdentity = {
   customerName: string;
@@ -351,6 +352,8 @@ function buildCustomerListCtes() {
           COALESCE(preferredTherapist.primaryTherapist, 'Unknown') AS primaryTherapist,
           COALESCE(preferredService.topCategory, 'Other') AS topCategory,
           COALESCE(packageHealth.remainingSessions, 0) AS remainingSessions,
+          COALESCE(visit.visitsLast90Days, 0) AS visitsLast90Days,
+          COALESCE(visit.visitsPrev90Days, 0) AS visitsPrev90Days,
           CASE
             WHEN visit.lastVisitDate IS NULL THEN 'New'
             WHEN DATE_DIFF(CURRENT_DATE(), visit.lastVisitDate, DAY) <= 30 AND COALESCE(visit.totalVisits, 0) <= 2 THEN 'New'
@@ -622,6 +625,8 @@ export async function getCustomerPortalList(params: CustomerListParams) {
       packageStatus: string;
       remainingSessions: number;
       topCategory: string;
+      visitsLast90Days: number;
+      visitsPrev90Days: number;
     }>(
       `
         ${customerListCtes}
@@ -642,7 +647,9 @@ export async function getCustomerPortalList(params: CustomerListParams) {
           spendTier,
           packageStatus,
           remainingSessions,
-          COALESCE(topCategory, 'Other') AS topCategory
+          COALESCE(topCategory, 'Other') AS topCategory,
+          visitsLast90Days,
+          visitsPrev90Days
         FROM FilteredCustomers
         ORDER BY ${orderBy} ${direction}, customerName ASC
         LIMIT @limit
@@ -673,6 +680,22 @@ export async function getCustomerPortalList(params: CustomerListParams) {
       statuses: ["New", "Active", "Returning", "At risk", "Dormant"],
     },
     rows: dataRows.map((row) => ({
+      ...(() => {
+        const riskSignals = calculateCustomerRiskSignals({
+          totalVisits: parseNumber(row.totalVisits),
+          daysSinceLastVisit: row.daysSinceLastVisit == null ? null : parseNumber(row.daysSinceLastVisit),
+          avgVisitGapDays: null,
+          remainingSessions: parseNumber(row.remainingSessions),
+          recent3MonthVisits: parseNumber(row.visitsLast90Days),
+          previous3MonthVisits: parseNumber(row.visitsPrev90Days),
+        });
+
+        return {
+          churnRiskLevel: riskSignals.churnRiskLevel,
+          rebookingStatus: riskSignals.rebookingStatus,
+          healthScore: riskSignals.healthScore,
+        };
+      })(),
       customerName: row.customerName,
       phoneNumber: row.phoneNumber,
       memberId: row.memberId,

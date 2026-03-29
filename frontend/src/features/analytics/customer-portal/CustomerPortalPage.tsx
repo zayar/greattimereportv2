@@ -9,6 +9,12 @@ import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import type { CustomerPortalListResponse } from "../../../types/domain";
 import { startOfCurrentYear, today } from "../../../utils/date";
 import { formatCurrency, formatDate } from "../../../utils/format";
+import {
+  churnRiskTone,
+  formatChurnRiskLabel,
+  formatRebookingStatusLabel,
+  rebookingTone,
+} from "../../ai/aiLabels";
 import { useAccess } from "../../access/AccessProvider";
 import { buildCustomerPortalDetailPath } from "./customerPortalLink";
 
@@ -395,7 +401,7 @@ export function CustomerPortalPage() {
             rowClassName={(row) =>
               row.spendTier === "VIP"
                 ? "customer-portal__row customer-portal__row--vip"
-                : row.status === "At risk" || row.status === "Dormant"
+                : row.churnRiskLevel === "high" || row.rebookingStatus === "overdue"
                   ? "customer-portal__row customer-portal__row--attention"
                   : "customer-portal__row"
             }
@@ -479,10 +485,18 @@ export function CustomerPortalPage() {
                 key: "health",
                 header: "Health",
                 render: (row) => (
-                  <div className="customer-portal__health-cell">
-                    <span className={`status-pill status-pill--${getStatusTone(row.status)}`.trim()}>{row.status}</span>
-                    <span className={`status-pill status-pill--${getSpendTierTone(row.spendTier)}`.trim()}>
-                      {row.packageStatus}
+                  <div className="customer-portal__health-stack">
+                    <div className="customer-portal__health-cell">
+                      <span className="status-pill status-pill--neutral">{row.healthScore}/100</span>
+                      <span className={`status-pill status-pill--${churnRiskTone(row.churnRiskLevel)}`.trim()}>
+                        {formatChurnRiskLabel(row.churnRiskLevel)}
+                      </span>
+                      <span className={`status-pill status-pill--${rebookingTone(row.rebookingStatus)}`.trim()}>
+                        {formatRebookingStatusLabel(row.rebookingStatus)}
+                      </span>
+                    </div>
+                    <span className="customer-portal__health-note">
+                      {row.status} • {row.packageStatus}
                     </span>
                   </div>
                 ),

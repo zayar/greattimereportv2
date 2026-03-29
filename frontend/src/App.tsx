@@ -6,6 +6,7 @@ import { env } from "./lib/env";
 import { SessionProvider } from "./features/auth/SessionProvider";
 import { ProtectedRoute } from "./features/auth/ProtectedRoute";
 import { LoginPage } from "./features/auth/LoginPage";
+import { AiPreferencesProvider } from "./features/ai/AiPreferencesProvider";
 import { AccessProvider } from "./features/access/AccessProvider";
 import { AppShell } from "./features/layout/AppShell";
 import { DashboardPage } from "./features/dashboard/DashboardPage";
@@ -42,52 +43,54 @@ export default function App() {
     <GoogleOAuthProvider clientId={env.googleClientId}>
       <SessionProvider>
         <ApolloProvider client={apolloClient}>
-          <AccessProvider>
-            <BrowserRouter>
-              <Routes>
-                <Route path="/login" element={<LoginPage />} />
-                <Route
-                  path="/"
-                  element={
-                    <ProtectedRoute>
-                      <AppShell />
-                    </ProtectedRoute>
-                  }
-                >
-                  <Route index element={<Navigate to="/dashboard" replace />} />
-                  <Route path="dashboard" element={<DashboardPage />} />
-                  <Route path="dashboard/overview" element={<ExecutiveDashboardPage />} />
-                  <Route path="operational/appointments" element={<AppointmentsPage />} />
-                  <Route path="operational/sales" element={<SalesPage />} />
-                  <Route path="operational/sales/:saleId" element={<SalesDetailPage />} />
-                  <Route path="operational/members" element={<MembersPage />} />
-                  <Route path="core/services/list" element={<ServiceListPage />} />
-                  <Route path="core/services/packages" element={<ServicePackagesPage />} />
-                  <Route path="core/services/categories" element={<ServiceCategoriesPage />} />
-                  <Route path="core/services/record-forms" element={<ServiceRecordFormsPage />} />
-                  <Route path="core/services/consent-forms" element={<ServiceConsentFormsPage />} />
-                  <Route path="core/products/list" element={<ProductListPage />} />
-                  <Route path="core/products/stock-items" element={<ProductStockItemsPage />} />
-                  <Route path="core/inventory/history" element={<InventoryHistoryPage />} />
-                  <Route path="core/inventory/report" element={<InventoryReportPage />} />
-                  <Route path="core/inventory/stock-summary" element={<StockSummaryPage />} />
-                  <Route path="analytics/sales-report" element={<Navigate to="/analytics/banking-summary" replace />} />
-                  <Route path="analytics/banking-summary" element={<BankingSummaryPage />} />
-                  <Route path="analytics/customer-behavior" element={<CustomerBehaviorPage />} />
-                  <Route path="analytics/service-behavior" element={<ServiceBehaviorPage />} />
-                  <Route path="analytics/services" element={<ServicePortalPage />} />
-                  <Route path="analytics/services/:serviceSlug" element={<ServiceDetailPage />} />
-                  <Route path="analytics/payment-report" element={<PaymentReportPage />} />
-                  <Route path="analytics/daily-treatment" element={<DailyTreatmentPage />} />
-                  <Route path="analytics/sales-by-seller" element={<SalesBySellerPage />} />
-                  <Route path="analytics/customers-by-salesperson" element={<CustomersBySalespersonPage />} />
-                  <Route path="analytics/customers" element={<CustomerPortalPage />} />
-                  <Route path="analytics/customers/:customerSlug" element={<CustomerDetailPage />} />
-                  <Route path="settings/sales-document" element={<SalesDocumentSettingsPage />} />
-                </Route>
-              </Routes>
-            </BrowserRouter>
-          </AccessProvider>
+          <AiPreferencesProvider>
+            <AccessProvider>
+              <BrowserRouter>
+                <Routes>
+                  <Route path="/login" element={<LoginPage />} />
+                  <Route
+                    path="/"
+                    element={
+                      <ProtectedRoute>
+                        <AppShell />
+                      </ProtectedRoute>
+                    }
+                  >
+                    <Route index element={<Navigate to="/dashboard" replace />} />
+                    <Route path="dashboard" element={<DashboardPage />} />
+                    <Route path="dashboard/overview" element={<ExecutiveDashboardPage />} />
+                    <Route path="operational/appointments" element={<AppointmentsPage />} />
+                    <Route path="operational/sales" element={<SalesPage />} />
+                    <Route path="operational/sales/:saleId" element={<SalesDetailPage />} />
+                    <Route path="operational/members" element={<MembersPage />} />
+                    <Route path="core/services/list" element={<ServiceListPage />} />
+                    <Route path="core/services/packages" element={<ServicePackagesPage />} />
+                    <Route path="core/services/categories" element={<ServiceCategoriesPage />} />
+                    <Route path="core/services/record-forms" element={<ServiceRecordFormsPage />} />
+                    <Route path="core/services/consent-forms" element={<ServiceConsentFormsPage />} />
+                    <Route path="core/products/list" element={<ProductListPage />} />
+                    <Route path="core/products/stock-items" element={<ProductStockItemsPage />} />
+                    <Route path="core/inventory/history" element={<InventoryHistoryPage />} />
+                    <Route path="core/inventory/report" element={<InventoryReportPage />} />
+                    <Route path="core/inventory/stock-summary" element={<StockSummaryPage />} />
+                    <Route path="analytics/sales-report" element={<Navigate to="/analytics/banking-summary" replace />} />
+                    <Route path="analytics/banking-summary" element={<BankingSummaryPage />} />
+                    <Route path="analytics/customer-behavior" element={<CustomerBehaviorPage />} />
+                    <Route path="analytics/service-behavior" element={<ServiceBehaviorPage />} />
+                    <Route path="analytics/services" element={<ServicePortalPage />} />
+                    <Route path="analytics/services/:serviceSlug" element={<ServiceDetailPage />} />
+                    <Route path="analytics/payment-report" element={<PaymentReportPage />} />
+                    <Route path="analytics/daily-treatment" element={<DailyTreatmentPage />} />
+                    <Route path="analytics/sales-by-seller" element={<SalesBySellerPage />} />
+                    <Route path="analytics/customers-by-salesperson" element={<CustomersBySalespersonPage />} />
+                    <Route path="analytics/customers" element={<CustomerPortalPage />} />
+                    <Route path="analytics/customers/:customerSlug" element={<CustomerDetailPage />} />
+                    <Route path="settings/sales-document" element={<SalesDocumentSettingsPage />} />
+                  </Route>
+                </Routes>
+              </BrowserRouter>
+            </AccessProvider>
+          </AiPreferencesProvider>
         </ApolloProvider>
       </SessionProvider>
     </GoogleOAuthProvider>

@@ -12,9 +12,9 @@ export function formatCompactNumber(value: number | string | null | undefined) {
   }).format(Number(value ?? 0));
 }
 
-export function formatDateTime(value: string | Date) {
+export function formatDateTime(value: string | Date, locale = "en-US") {
   const date = typeof value === "string" ? new Date(value) : value;
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat(locale, {
     year: "numeric",
     month: "short",
     day: "numeric",
@@ -36,4 +36,3 @@ export function formatPercent(value: number) {
   const prefix = value > 0 ? "+" : "";
   return `${prefix}${value.toFixed(1)}%`;
 }
-

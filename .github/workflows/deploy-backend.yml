@@ -92,17 +92,22 @@ jobs:
         env:
           APICORE_GRAPHQL_URL: ${{ vars.APICORE_GRAPHQL_URL }}
           CORS_ORIGIN: ${{ vars.CORS_ORIGIN }}
+          AI_PROVIDER: ${{ vars.AI_PROVIDER }}
+          AI_DEFAULT_LANGUAGE: ${{ vars.AI_DEFAULT_LANGUAGE }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          GEMINI_API_BASE_URL: ${{ vars.GEMINI_API_BASE_URL }}
           BQ_PROJECT_ID: ${{ vars.BQ_PROJECT_ID }}
           BQ_DATASET: ${{ vars.BQ_DATASET }}
           BQ_LOCATION: ${{ vars.BQ_LOCATION }}
           BQ_MAIN_DATA_VIEW: ${{ vars.BQ_MAIN_DATA_VIEW }}
           BQ_MAIN_PAYMENT_VIEW: ${{ vars.BQ_MAIN_PAYMENT_VIEW }}
           FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           node <<'NODE'
           const fs = require("node:fs");
 
-          const env = {
+          const requiredEnv = {
             CORS_ORIGIN: process.env.CORS_ORIGIN,
             APICORE_GRAPHQL_URL: process.env.APICORE_GRAPHQL_URL,
             FIREBASE_SERVICE_ACCOUNT_JSON: process.env.FIREBASE_SERVICE_ACCOUNT_JSON,
@@ -113,7 +118,22 @@ jobs:
             BQ_MAIN_PAYMENT_VIEW: process.env.BQ_MAIN_PAYMENT_VIEW,
           };
 
-          const missing = Object.entries(env)
+          const optionalEnv = {
+            AI_PROVIDER: process.env.AI_PROVIDER,
+            AI_DEFAULT_LANGUAGE: process.env.AI_DEFAULT_LANGUAGE,
+            GEMINI_MODEL: process.env.GEMINI_MODEL,
+            GEMINI_API_BASE_URL: process.env.GEMINI_API_BASE_URL,
+            GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+          };
+
+          const env = {
+            ...requiredEnv,
+            ...Object.fromEntries(
+              Object.entries(optionalEnv).filter(([, value]) => Boolean(value))
+            ),
+          };
+
+          const missing = Object.entries(requiredEnv)
             .filter(([, value]) => !value)
             .map(([key]) => key);
 

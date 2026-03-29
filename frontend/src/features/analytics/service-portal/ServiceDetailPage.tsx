@@ -1,6 +1,7 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@apollo/client";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { fetchAiServiceInsight } from "../../../api/ai";
 import {
   fetchServicePortalCustomers,
   fetchServicePortalOverview,
@@ -15,13 +16,16 @@ import { Panel } from "../../../components/Panel";
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import type {
+  AiServiceInsightResponse,
   ServicePortalCustomersResponse,
   ServicePortalOverviewResponse,
   ServicePortalPaymentsResponse,
   ServiceRow,
 } from "../../../types/domain";
 import { startOfCurrentYear, today } from "../../../utils/date";
-import { formatCurrency, formatDate, formatPercent } from "../../../utils/format";
+import { formatCurrency, formatDate, formatDateTime, formatPercent } from "../../../utils/format";
+import { useAiPreferences } from "../../ai/AiPreferencesProvider";
+import { formatAiLanguageLabel } from "../../ai/aiLabels";
 import { useAccess } from "../../access/AccessProvider";
 import { GET_SERVICES } from "../../core/services/queries";
 import { buildCustomerPortalDetailPath } from "../customer-portal/customerPortalLink";
@@ -85,6 +89,7 @@ export function ServiceDetailPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { currentClinic } = useAccess();
+  const { aiLanguage } = useAiPreferences();
   const serviceName = searchParams.get("name") ?? "";
   const [range, setRange] = useState(() => ({
     fromDate: searchParams.get("fromDate") ?? startOfCurrentYear(),
@@ -100,6 +105,9 @@ export function ServiceDetailPage() {
   const [paymentsPage, setPaymentsPage] = useState(1);
   const deferredCustomersSearch = useDeferredValue(customersSearch.trim());
   const deferredPaymentsSearch = useDeferredValue(paymentsSearch.trim());
+  const [aiInsight, setAiInsight] = useState<AiServiceInsightResponse | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   const { data: catalogData } = useQuery<ServiceCatalogResponse>(GET_SERVICES, {
     variables: currentClinic
@@ -132,6 +140,44 @@ export function ServiceDetailPage() {
     setCustomersPage(1);
     setPaymentsPage(1);
   }, [currentClinic?.id, serviceName, range.fromDate, range.toDate]);
+
+  function loadAiInsight() {
+    if (!currentClinic || !serviceName.trim() || !overviewState.data) {
+      return undefined;
+    }
+
+    let active = true;
+    setAiLoading(true);
+    setAiError(null);
+
+    fetchAiServiceInsight({
+      clinicId: currentClinic.id,
+      clinicCode: currentClinic.code,
+      fromDate: range.fromDate,
+      toDate: range.toDate,
+      serviceName,
+      aiLanguage,
+    })
+      .then((result) => {
+        if (active) {
+          setAiInsight(result);
+        }
+      })
+      .catch((loadError) => {
+        if (active) {
+          setAiError(loadError instanceof Error ? loadError.message : "Failed to load AI service insight.");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setAiLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }
 
   useEffect(() => {
     if (!currentClinic || !serviceName.trim()) {
@@ -171,6 +217,14 @@ export function ServiceDetailPage() {
       active = false;
     };
   }, [currentClinic, range.fromDate, range.toDate, serviceName]);
+
+  useEffect(() => {
+    if (!currentClinic || !serviceName.trim() || !overviewState.data) {
+      return;
+    }
+
+    return loadAiInsight();
+  }, [aiLanguage, currentClinic, overviewState.data, range.fromDate, range.toDate, serviceName]);
 
   useEffect(() => {
     if (!currentClinic || !serviceName.trim() || activeTab !== "customers") {
@@ -405,6 +459,67 @@ export function ServiceDetailPage() {
           </span>
         </div>
       </div>
+
+      <Panel
+        className="analytics-report__panel ai-panel customer-detail__panel"
+        title="AI service insight"
+        subtitle="Concise Gemini narrative grounded in the current service metrics only."
+        action={
+          <div className="ai-panel__header-actions">
+            <span className="ai-panel__language-chip">{formatAiLanguageLabel(aiLanguage)}</span>
+            <button className="button button--secondary" onClick={() => void loadAiInsight()} disabled={aiLoading}>
+              {aiLoading ? "Refreshing..." : "Refresh AI"}
+            </button>
+          </div>
+        }
+      >
+        {aiError && !aiInsight ? <ErrorState label="AI service insight could not be loaded" detail={aiError} /> : null}
+        {!aiInsight && aiLoading ? <div className="inline-note">Generating AI service insight...</div> : null}
+        {aiInsight ? (
+          <div className="ai-panel__content">
+            <div className="ai-panel__summary">
+              <span className="ai-panel__eyebrow">Short summary</span>
+              <p>{aiInsight.shortSummary}</p>
+            </div>
+
+            <div className="ai-panel__list-grid">
+              <div className="ai-panel__list-block">
+                <span className="ai-panel__section-title">Growth</span>
+                <p className="ai-panel__body-text">{aiInsight.growthInsight}</p>
+              </div>
+              <div className="ai-panel__list-block">
+                <span className="ai-panel__section-title">Repeat rate</span>
+                <p className="ai-panel__body-text">{aiInsight.repeatRateInsight}</p>
+              </div>
+              <div className="ai-panel__list-block">
+                <span className="ai-panel__section-title">Package opportunity</span>
+                <p className="ai-panel__body-text">{aiInsight.packageOpportunity}</p>
+              </div>
+              {aiInsight.staffingObservation ? (
+                <div className="ai-panel__list-block">
+                  <span className="ai-panel__section-title">Staffing observation</span>
+                  <p className="ai-panel__body-text">{aiInsight.staffingObservation}</p>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="ai-panel__list-block">
+              <span className="ai-panel__section-title">Recommended actions</span>
+              <ul className="ai-panel__list">
+                {aiInsight.recommendedActions.map((action) => (
+                  <li key={action}>{action}</li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="ai-panel__meta">
+              <span>AI-generated from clinic data</span>
+              <span>{formatAiLanguageLabel(aiInsight.languageUsed)}</span>
+              <span>{formatDateTime(aiInsight.generatedAt, aiInsight.languageUsed)}</span>
+            </div>
+          </div>
+        ) : null}
+      </Panel>
 
       <div className="customer-detail__tabs">
         {([

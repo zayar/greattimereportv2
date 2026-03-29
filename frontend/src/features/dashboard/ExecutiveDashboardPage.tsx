@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { createSearchParams, useSearchParams } from "react-router-dom";
+import { fetchAiExecutiveSummary } from "../../api/ai";
 import { fetchDashboardOverview } from "../../api/analytics";
 import { DataTable } from "../../components/DataTable";
 import { DateRangeControls } from "../../components/DateRangeControls";
@@ -8,10 +9,12 @@ import { Panel } from "../../components/Panel";
 import { PageHeader } from "../../components/PageHeader";
 import { EmptyState, ErrorState } from "../../components/StatusViews";
 import { TrendAreaChart } from "../../components/TrendAreaChart";
+import { useAiPreferences } from "../ai/AiPreferencesProvider";
+import { formatAiLanguageLabel } from "../ai/aiLabels";
 import { useAccess } from "../access/AccessProvider";
-import type { DashboardResponse } from "../../types/domain";
+import type { AiExecutiveSummaryResponse, DashboardResponse } from "../../types/domain";
 import { daysAgo, startOfCurrentMonth, today } from "../../utils/date";
-import { formatCurrency, formatDate, formatPercent } from "../../utils/format";
+import { formatCurrency, formatDate, formatDateTime, formatPercent } from "../../utils/format";
 
 type DashboardQueryState = {
   clinicId: string;
@@ -75,6 +78,7 @@ const metricCards = [
 
 export function ExecutiveDashboardPage() {
   const { currentClinic } = useAccess();
+  const { aiLanguage } = useAiPreferences();
   const [searchParams, setSearchParams] = useSearchParams();
   const appliedQuery = useMemo(() => readDashboardQuery(searchParams), [searchParams]);
   const [range, setRange] = useState(getDefaultRange());
@@ -83,6 +87,9 @@ export function ExecutiveDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<DashboardResponse | null>(null);
   const [loadedState, setLoadedState] = useState<DashboardQueryState | null>(appliedQuery);
+  const [aiSummary, setAiSummary] = useState<AiExecutiveSummaryResponse | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   useEffect(() => {
     if (appliedQuery) {
@@ -142,6 +149,51 @@ export function ExecutiveDashboardPage() {
       active = false;
     };
   }, [appliedQuery]);
+
+  function loadAiSummary() {
+    if (!currentClinic || !appliedQuery || !data) {
+      return undefined;
+    }
+
+    let active = true;
+    setAiLoading(true);
+    setAiError(null);
+
+    fetchAiExecutiveSummary({
+      clinicId: currentClinic.id,
+      clinicCode: currentClinic.code,
+      fromDate: appliedQuery.fromDate,
+      toDate: appliedQuery.toDate,
+      aiLanguage,
+    })
+      .then((result) => {
+        if (active) {
+          setAiSummary(result);
+        }
+      })
+      .catch((loadError) => {
+        if (active) {
+          setAiError(loadError instanceof Error ? loadError.message : "Failed to generate AI executive summary.");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setAiLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }
+
+  useEffect(() => {
+    if (!currentClinic || !appliedQuery || !data) {
+      return;
+    }
+
+    return loadAiSummary();
+  }, [aiLanguage, appliedQuery, currentClinic, data]);
 
   const isDirty =
     !loadedState ||
@@ -329,6 +381,59 @@ export function ExecutiveDashboardPage() {
               );
             })}
           </section>
+
+          <Panel
+            className="analytics-report__panel ai-panel executive-dashboard__ai-panel"
+            title="AI executive summary"
+            subtitle="AI-generated from clinic data. Gemini stays grounded in backend-computed dashboard metrics."
+            action={
+              <div className="ai-panel__header-actions">
+                <span className="ai-panel__language-chip">{formatAiLanguageLabel(aiLanguage)}</span>
+                <button className="button button--secondary" onClick={() => void loadAiSummary()} disabled={aiLoading}>
+                  {aiLoading ? "Refreshing..." : "Refresh AI"}
+                </button>
+              </div>
+            }
+          >
+            {aiError && !aiSummary ? <ErrorState label="AI summary could not be loaded" detail={aiError} /> : null}
+            {!aiSummary && aiLoading ? <div className="inline-note">Generating AI executive summary...</div> : null}
+            {aiSummary ? (
+              <div className="ai-panel__content">
+                <div className="ai-panel__summary">
+                  <span className="ai-panel__eyebrow">{aiSummary.summaryTitle}</span>
+                  <p>{aiSummary.summaryText}</p>
+                </div>
+
+                <div className="ai-panel__list-grid">
+                  <div className="ai-panel__list-block">
+                    <span className="ai-panel__section-title">Top findings</span>
+                    <ul className="ai-panel__list">
+                      {aiSummary.topFindings.map((finding) => (
+                        <li key={finding}>{finding}</li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div className="ai-panel__list-block">
+                    <span className="ai-panel__section-title">Recommended actions</span>
+                    <ul className="ai-panel__list">
+                      {aiSummary.recommendedActions.map((action) => (
+                        <li key={action}>{action}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+                {aiSummary.warningText ? <div className="ai-panel__warning">{aiSummary.warningText}</div> : null}
+
+                <div className="ai-panel__meta">
+                  <span>AI-generated from clinic data</span>
+                  <span>{formatAiLanguageLabel(aiSummary.languageUsed)}</span>
+                  <span>{formatDateTime(aiSummary.generatedAt, aiSummary.languageUsed)}</span>
+                </div>
+              </div>
+            ) : null}
+          </Panel>
 
           <section className="executive-dashboard__hero-grid">
             <Panel

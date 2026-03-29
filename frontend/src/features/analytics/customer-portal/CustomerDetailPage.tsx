@@ -1,5 +1,6 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { fetchAiCustomerInsight } from "../../../api/ai";
 import {
   fetchCustomerPortalBookings,
   fetchCustomerPortalOverview,
@@ -15,6 +16,7 @@ import { Panel } from "../../../components/Panel";
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import type {
+  AiCustomerInsightResponse,
   CustomerPortalBookingsResponse,
   CustomerPortalOverviewResponse,
   CustomerPortalPackagesResponse,
@@ -22,7 +24,15 @@ import type {
   CustomerPortalUsageResponse,
 } from "../../../types/domain";
 import { startOfCurrentYear, today } from "../../../utils/date";
-import { formatCurrency, formatDate } from "../../../utils/format";
+import { formatCurrency, formatDate, formatDateTime } from "../../../utils/format";
+import { useAiPreferences } from "../../ai/AiPreferencesProvider";
+import {
+  churnRiskTone,
+  formatAiLanguageLabel,
+  formatChurnRiskLabel,
+  formatRebookingStatusLabel,
+  rebookingTone,
+} from "../../ai/aiLabels";
 import { useAccess } from "../../access/AccessProvider";
 
 const SECTION_PAGE_SIZE = 12;
@@ -223,6 +233,7 @@ export function CustomerDetailPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { currentClinic } = useAccess();
+  const { aiLanguage } = useAiPreferences();
   const customerName = searchParams.get("name") ?? "";
   const customerPhone = searchParams.get("phone") ?? "";
   const [range, setRange] = useState(() => ({
@@ -251,6 +262,9 @@ export function CustomerDetailPage() {
   const [usageCategory, setUsageCategory] = useState("");
   const deferredBookingsSearch = useDeferredValue(bookingsSearch.trim());
   const deferredPaymentsSearch = useDeferredValue(paymentsSearch.trim());
+  const [aiInsight, setAiInsight] = useState<AiCustomerInsightResponse | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   const hasIdentity = customerName.trim() !== "" || customerPhone.trim() !== "";
 
@@ -274,6 +288,45 @@ export function CustomerDetailPage() {
     setUsageCategory("");
     setUsageYear(Number(range.toDate.slice(0, 4)));
   }, [currentClinic?.id, customerName, customerPhone, range.fromDate, range.toDate]);
+
+  function loadAiInsight() {
+    if (!currentClinic || !hasIdentity || !overviewState.data) {
+      return undefined;
+    }
+
+    let active = true;
+    setAiLoading(true);
+    setAiError(null);
+
+    fetchAiCustomerInsight({
+      clinicId: currentClinic.id,
+      clinicCode: currentClinic.code,
+      fromDate: range.fromDate,
+      toDate: range.toDate,
+      customerName,
+      customerPhone,
+      aiLanguage,
+    })
+      .then((result) => {
+        if (active) {
+          setAiInsight(result);
+        }
+      })
+      .catch((loadError) => {
+        if (active) {
+          setAiError(loadError instanceof Error ? loadError.message : "Failed to load AI customer insight.");
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setAiLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }
 
   useEffect(() => {
     if (!currentClinic || !hasIdentity) {
@@ -321,6 +374,14 @@ export function CustomerDetailPage() {
       active = false;
     };
   }, [currentClinic, customerName, customerPhone, hasIdentity, range.fromDate, range.toDate]);
+
+  useEffect(() => {
+    if (!currentClinic || !hasIdentity || !overviewState.data) {
+      return;
+    }
+
+    return loadAiInsight();
+  }, [aiLanguage, currentClinic, customerName, customerPhone, hasIdentity, overviewState.data, range.fromDate, range.toDate]);
 
   useEffect(() => {
     if (!currentClinic || !hasIdentity || activeTab !== "packages" || packagesState.data || packagesState.loading) {
@@ -662,6 +723,71 @@ export function CustomerDetailPage() {
           </span>
         </div>
       </div>
+
+      <Panel
+        className="analytics-report__panel ai-panel customer-detail__panel"
+        title="AI retention insight"
+        subtitle="Deterministic health scoring first, concise Gemini explanation second."
+        action={
+          <div className="ai-panel__header-actions">
+            <span className="ai-panel__language-chip">{formatAiLanguageLabel(aiLanguage)}</span>
+            <button className="button button--secondary" onClick={() => void loadAiInsight()} disabled={aiLoading}>
+              {aiLoading ? "Refreshing..." : "Refresh AI"}
+            </button>
+          </div>
+        }
+      >
+        {aiError && !aiInsight ? <ErrorState label="AI customer insight could not be loaded" detail={aiError} /> : null}
+        {!aiInsight && aiLoading ? <div className="inline-note">Generating AI customer insight...</div> : null}
+        {aiInsight ? (
+          <div className="ai-panel__content">
+            <div className="ai-panel__metric-grid">
+              <div className="ai-panel__metric">
+                <span>Health score</span>
+                <strong>{aiInsight.healthScore}</strong>
+                <small>0-100 signal</small>
+              </div>
+              <div className="ai-panel__metric">
+                <span>Churn risk</span>
+                <strong className={`ai-panel__metric-pill ai-panel__metric-pill--${churnRiskTone(aiInsight.churnRiskLevel)}`.trim()}>
+                  {formatChurnRiskLabel(aiInsight.churnRiskLevel)}
+                </strong>
+              </div>
+              <div className="ai-panel__metric">
+                <span>Rebooking</span>
+                <strong className={`ai-panel__metric-pill ai-panel__metric-pill--${rebookingTone(aiInsight.rebookingStatus)}`.trim()}>
+                  {formatRebookingStatusLabel(aiInsight.rebookingStatus)}
+                </strong>
+              </div>
+            </div>
+
+            <div className="ai-panel__summary">
+              <span className="ai-panel__eyebrow">What this means</span>
+              <p>{aiInsight.shortExplanation}</p>
+            </div>
+
+            <div className="ai-panel__list-grid">
+              <div className="ai-panel__list-block">
+                <span className="ai-panel__section-title">Next best action</span>
+                <p className="ai-panel__body-text">{aiInsight.nextBestAction}</p>
+              </div>
+
+              {aiInsight.suggestedFollowUpMessage ? (
+                <div className="ai-panel__list-block">
+                  <span className="ai-panel__section-title">Suggested follow-up</span>
+                  <p className="ai-panel__body-text">{aiInsight.suggestedFollowUpMessage}</p>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="ai-panel__meta">
+              <span>AI-generated from clinic data</span>
+              <span>{formatAiLanguageLabel(aiInsight.languageUsed)}</span>
+              <span>{formatDateTime(aiInsight.generatedAt, aiInsight.languageUsed)}</span>
+            </div>
+          </div>
+        ) : null}
+      </Panel>
 
       <div className="customer-detail__tabs">
         {([
