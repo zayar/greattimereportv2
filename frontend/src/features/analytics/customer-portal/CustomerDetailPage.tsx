@@ -16,6 +16,7 @@ import { Panel } from "../../../components/Panel";
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import type {
+  AiLanguage,
   AiCustomerInsightResponse,
   CustomerPortalBookingsResponse,
   CustomerPortalOverviewResponse,
@@ -167,234 +168,16 @@ function statusTone(status: string) {
   return "neutral";
 }
 
-type OwnerSignal = {
-  label: string;
-  value: string;
-  hint: string;
-  tone: "positive" | "attention" | "neutral";
-};
-
-function buildCustomerStatusSignal(
-  customer: CustomerPortalOverviewResponse["customer"] | null | undefined,
-): OwnerSignal {
-  if (!customer) {
-    return {
-      label: "Customer status",
-      value: "Loading",
-      hint: "Waiting for the customer profile to finish loading.",
-      tone: "neutral",
-    };
+function fallbackInsightNote(kind: "watchpoint" | "opportunity", language: AiLanguage) {
+  if (language === "my-MM") {
+    return kind === "watchpoint"
+      ? "လတ်တလော စောင့်ကြည့်ရန် ထူးခြားသည့်အချက် မထင်ရှားသေးပါ။"
+      : "လတ်တလော ဆက်လုပ်နိုင်သည့် အခွင့်အလမ်းကို ပုံမှန် continuity အတွင်းပဲ ထိန်းသိမ်းနိုင်ပါသည်။";
   }
 
-  const isVip = customer.badges.includes("VIP") || customer.spendTier === "VIP";
-  const daysHint =
-    customer.daysSinceLastVisit == null
-      ? "Recent visit timing is still being checked."
-      : customer.daysSinceLastVisit <= 7
-        ? "Visited within the last week."
-        : `Last visit was ${customer.daysSinceLastVisit} day${customer.daysSinceLastVisit === 1 ? "" : "s"} ago.`;
-
-  if (customer.status === "Dormant") {
-    return {
-      label: "Customer status",
-      value: "Needs reactivation",
-      hint: daysHint,
-      tone: "attention",
-    };
-  }
-
-  if (customer.status === "At risk") {
-    return {
-      label: "Customer status",
-      value: "Needs follow-up",
-      hint: daysHint,
-      tone: "attention",
-    };
-  }
-
-  if (isVip && (customer.status === "Returning" || customer.status === "Active")) {
-    return {
-      label: "Customer status",
-      value: "VIP active",
-      hint: daysHint,
-      tone: "positive",
-    };
-  }
-
-  if (customer.status === "Returning" || customer.status === "Active") {
-    return {
-      label: "Customer status",
-      value: "Recently active",
-      hint: daysHint,
-      tone: "positive",
-    };
-  }
-
-  return {
-    label: "Customer status",
-    value: "New relationship",
-    hint: customer.totalVisits <= 2 ? "Early visits are still shaping the relationship." : daysHint,
-    tone: "neutral",
-  };
-}
-
-function buildRelationshipSignal(
-  customer: CustomerPortalOverviewResponse["customer"] | null | undefined,
-  aiInsight: AiCustomerInsightResponse | null,
-): OwnerSignal {
-  if (!customer || !aiInsight) {
-    return {
-      label: "Relationship strength",
-      value: "Loading",
-      hint: "AI is preparing a business-facing relationship readout.",
-      tone: "neutral",
-    };
-  }
-
-  const therapistHint =
-    customer.preferredTherapist && customer.preferredTherapist !== "Unknown"
-      ? `${customer.preferredTherapist} is the clearest therapist anchor.`
-      : `${customer.totalVisits.toLocaleString("en-US")} visits already make this a meaningful repeat customer.`;
-
-  if (aiInsight.churnRiskLevel === "high" || aiInsight.healthScore < 45) {
-    return {
-      label: "Relationship strength",
-      value: "Needs protection",
-      hint: therapistHint,
-      tone: "attention",
-    };
-  }
-
-  if (aiInsight.churnRiskLevel === "medium" || aiInsight.rebookingStatus === "dueSoon") {
-    return {
-      label: "Relationship strength",
-      value: "Stable",
-      hint: therapistHint,
-      tone: "neutral",
-    };
-  }
-
-  return {
-    label: "Relationship strength",
-    value: customer.totalVisits >= 5 ? "Strong" : "Healthy",
-    hint: therapistHint,
-    tone: "positive",
-  };
-}
-
-function buildPackageSignal(
-  customer: CustomerPortalOverviewResponse["customer"] | null | undefined,
-): OwnerSignal {
-  if (!customer) {
-    return {
-      label: "Package position",
-      value: "Loading",
-      hint: "Package balance is still being checked.",
-      tone: "neutral",
-    };
-  }
-
-  if (customer.remainingSessions > 3) {
-    return {
-      label: "Package position",
-      value: "Package active",
-      hint: `${customer.remainingSessions.toLocaleString("en-US")} sessions are still available.`,
-      tone: "positive",
-    };
-  }
-
-  if (customer.remainingSessions > 0) {
-    return {
-      label: "Package position",
-      value: "Low balance",
-      hint: `${customer.remainingSessions.toLocaleString("en-US")} sessions remain, so renewal timing is approaching.`,
-      tone: "neutral",
-    };
-  }
-
-  return {
-    label: "Package position",
-    value: "No active package",
-    hint: "The next package conversation should be timed around the next confirmed visit.",
-    tone: "attention",
-  };
-}
-
-function buildOwnerPrioritySignal(
-  customer: CustomerPortalOverviewResponse["customer"] | null | undefined,
-  aiInsight: AiCustomerInsightResponse | null,
-): OwnerSignal {
-  if (!customer || !aiInsight) {
-    return {
-      label: "Owner priority",
-      value: "Loading",
-      hint: "The next action is still being prepared.",
-      tone: "neutral",
-    };
-  }
-
-  if (aiInsight.rebookingStatus === "overdue") {
-    return {
-      label: "Owner priority",
-      value: "Recover next visit",
-      hint: "Ask the team to contact the customer now and offer a clear slot.",
-      tone: "attention",
-    };
-  }
-
-  if (aiInsight.rebookingStatus === "dueSoon") {
-    return {
-      label: "Owner priority",
-      value: "Plan next booking",
-      hint: "Reach out before the usual return window closes.",
-      tone: "neutral",
-    };
-  }
-
-  if (customer.remainingSessions > 0) {
-    return {
-      label: "Owner priority",
-      value: "Keep usage moving",
-      hint: "Convert the active package balance into the next booked visit.",
-      tone: "positive",
-    };
-  }
-
-  if (customer.preferredTherapist && customer.preferredTherapist !== "Unknown") {
-    return {
-      label: "Owner priority",
-      value: "Protect continuity",
-      hint: `Keep the next visit aligned with ${customer.preferredTherapist}.`,
-      tone: "neutral",
-    };
-  }
-
-  return {
-    label: "Owner priority",
-    value: "Maintain touchpoints",
-    hint: "Keep this customer in the weekly owner review cadence.",
-    tone: "neutral",
-  };
-}
-
-function buildCustomerValueContext(
-  customer: CustomerPortalOverviewResponse["customer"] | null | undefined,
-  currency: string,
-) {
-  if (!customer) {
-    return "Customer value context will appear after the overview loads.";
-  }
-
-  const parts = [
-    `${formatCurrency(customer.lifetimeSpend, currency)} lifetime spend across ${customer.totalVisits.toLocaleString("en-US")} visits.`,
-    customer.preferredService ? `${customer.preferredService} is the clearest service anchor.` : null,
-    customer.preferredTherapist && customer.preferredTherapist !== "Unknown"
-      ? `${customer.preferredTherapist} is the strongest therapist relationship.`
-      : null,
-    customer.remainingSessions > 0 ? "Package balance is still active." : null,
-  ];
-
-  return parts.filter(Boolean).join(" ");
+  return kind === "watchpoint"
+    ? "No major watchpoint is standing out from the recent record."
+    : "No extra immediate opportunity is standing out beyond normal continuity.";
 }
 
 function UsageHeatmap({
@@ -843,12 +626,6 @@ export function CustomerDetailPage() {
   const preferredServiceLabel = displayText(customer?.preferredService, "No clear favorite yet");
   const preferredTherapistLabel = displayText(customer?.preferredTherapist, "Unknown");
   const displayInitials = initialsFor(displayName || "C");
-  // Keep deterministic scoring in the backend, but translate it into owner-friendly language here.
-  const customerStatusSignal = buildCustomerStatusSignal(customer);
-  const relationshipSignal = buildRelationshipSignal(customer, aiInsight);
-  const packageSignal = buildPackageSignal(customer);
-  const ownerPrioritySignal = buildOwnerPrioritySignal(customer, aiInsight);
-  const customerValueContext = buildCustomerValueContext(customer, currency);
 
   if (!hasIdentity) {
     return (
@@ -961,8 +738,8 @@ export function CustomerDetailPage() {
 
       <Panel
         className="analytics-report__panel ai-panel customer-detail__panel"
-        title="AI customer summary"
-        subtitle="Business-friendly snapshot from visit, package, payment, and usage history."
+        title="AI customer intelligence"
+        subtitle="Interpretive read of this exact customer from visit, package, therapist, and payment patterns."
         action={
           <div className="ai-panel__header-actions">
             <span className="ai-panel__language-chip">{formatAiLanguageLabel(aiLanguage)}</span>
@@ -980,7 +757,7 @@ export function CustomerDetailPage() {
           <div className="ai-panel__prompt">
             <EmptyState
               label="AI summary is off by default"
-              detail="Generate it only when you want a short owner-facing summary for this customer."
+              detail="Generate it when you want AI to explain who this customer is, what they mean to the clinic, and what the team should do next."
             />
             <button
               className="button button--secondary"
@@ -995,53 +772,40 @@ export function CustomerDetailPage() {
         {!aiInsight && aiLoading ? <div className="inline-note">Generating AI customer summary...</div> : null}
         {aiInsight ? (
           <div className="ai-panel__content">
-            <div className="ai-panel__metric-grid ai-panel__metric-grid--customer">
-              <div className="ai-panel__metric">
-                <span>{customerStatusSignal.label}</span>
-                <strong className={`ai-panel__metric-pill ai-panel__metric-pill--${customerStatusSignal.tone}`.trim()}>
-                  {customerStatusSignal.value}
-                </strong>
-                <small>{customerStatusSignal.hint}</small>
-              </div>
-              <div className="ai-panel__metric">
-                <span>{relationshipSignal.label}</span>
-                <strong className={`ai-panel__metric-pill ai-panel__metric-pill--${relationshipSignal.tone}`.trim()}>
-                  {relationshipSignal.value}
-                </strong>
-                <small>{relationshipSignal.hint}</small>
-              </div>
-              <div className="ai-panel__metric">
-                <span>{packageSignal.label}</span>
-                <strong className={`ai-panel__metric-pill ai-panel__metric-pill--${packageSignal.tone}`.trim()}>
-                  {packageSignal.value}
-                </strong>
-                <small>{packageSignal.hint}</small>
-              </div>
-              <div className="ai-panel__metric">
-                <span>{ownerPrioritySignal.label}</span>
-                <strong className={`ai-panel__metric-pill ai-panel__metric-pill--${ownerPrioritySignal.tone}`.trim()}>
-                  {ownerPrioritySignal.value}
-                </strong>
-                <small>{ownerPrioritySignal.hint}</small>
-              </div>
-            </div>
-
             <div className="ai-panel__summary">
-              <span className="ai-panel__eyebrow">Business snapshot</span>
-              <p>{aiInsight.shortExplanation}</p>
+              <span className="ai-panel__eyebrow">Customer type</span>
+              <strong className="ai-panel__summary-title">{aiInsight.customerArchetype}</strong>
+              <p>{aiInsight.ownerSummary}</p>
             </div>
 
             <div className="ai-panel__list-grid">
               <div className="ai-panel__list-block">
-                <span className="ai-panel__section-title">Why this customer matters</span>
-                <p className="ai-panel__body-text">{customerValueContext}</p>
+                <span className="ai-panel__section-title">What this means</span>
+                <p className="ai-panel__body-text">{aiInsight.businessMeaning}</p>
               </div>
-
               <div className="ai-panel__list-block">
-                <span className="ai-panel__section-title">Recommended owner action</span>
-                <p className="ai-panel__body-text">{aiInsight.nextBestAction}</p>
+                <span className="ai-panel__section-title">Relationship pattern</span>
+                <p className="ai-panel__body-text">{aiInsight.relationshipNote}</p>
               </div>
+              <div className="ai-panel__list-block">
+                <span className="ai-panel__section-title">Watchpoint</span>
+                <p className={`ai-panel__body-text ${!aiInsight.riskNote ? "ai-panel__body-text--muted" : ""}`.trim()}>
+                  {aiInsight.riskNote ?? fallbackInsightNote("watchpoint", aiInsight.languageUsed)}
+                </p>
+              </div>
+              <div className="ai-panel__list-block">
+                <span className="ai-panel__section-title">Opportunity</span>
+                <p className={`ai-panel__body-text ${!aiInsight.opportunityNote ? "ai-panel__body-text--muted" : ""}`.trim()}>
+                  {aiInsight.opportunityNote ?? fallbackInsightNote("opportunity", aiInsight.languageUsed)}
+                </p>
+              </div>
+            </div>
 
+            <div className="ai-panel__list-grid">
+              <div className="ai-panel__list-block ai-panel__list-block--accent">
+                <span className="ai-panel__section-title">Next best action</span>
+                <p className="ai-panel__body-text">{aiInsight.recommendedAction}</p>
+              </div>
               {aiInsight.suggestedFollowUpMessage ? (
                 <div className="ai-panel__list-block">
                   <span className="ai-panel__section-title">Suggested follow-up message</span>

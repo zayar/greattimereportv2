@@ -2202,6 +2202,12 @@ a {
   line-height: 1.68;
 }
 
+.ai-panel__summary-title {
+  font-size: 1.26rem;
+  line-height: 1.3;
+  color: #151b24;
+}
+
 .ai-panel__eyebrow,
 .ai-panel__section-title {
   text-transform: uppercase;
@@ -2224,6 +2230,17 @@ a {
   border: 1px solid var(--report-border);
   background: var(--report-surface-muted);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34);
+}
+
+.ai-panel__list-block--accent {
+  background:
+    linear-gradient(180deg, rgba(247, 251, 249, 0.92), rgba(255, 255, 255, 0.76)),
+    radial-gradient(circle at top right, rgba(13, 122, 82, 0.08), transparent 48%);
+  border-color: rgba(13, 122, 82, 0.12);
+}
+
+.ai-panel__body-text--muted {
+  color: #7b8089;
 }
 
 .ai-panel__list {

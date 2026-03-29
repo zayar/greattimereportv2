@@ -47,11 +47,13 @@ export interface AiExecutiveSummaryResponse {
 }
 
 export interface AiCustomerInsightResponse {
-  churnRiskLevel: "low" | "medium" | "high";
-  rebookingStatus: "dueSoon" | "overdue" | "onTrack" | "unknown";
-  healthScore: number;
-  nextBestAction: string;
-  shortExplanation: string;
+  customerArchetype: string;
+  ownerSummary: string;
+  businessMeaning: string;
+  relationshipNote: string;
+  riskNote: string | null;
+  opportunityNote: string | null;
+  recommendedAction: string;
   suggestedFollowUpMessage: string | null;
   languageUsed: AiLanguage;
   generatedAt: string;

@@ -13,8 +13,13 @@ export const executiveSummaryCoreSchema = z.object({
 });
 
 export const customerInsightCoreSchema = z.object({
-  nextBestAction: z.string().min(1).max(180),
-  shortExplanation: z.string().min(1).max(360),
+  customerArchetype: z.string().min(1).max(120),
+  ownerSummary: z.string().min(1).max(280),
+  businessMeaning: z.string().min(1).max(220),
+  relationshipNote: z.string().min(1).max(220),
+  riskNote: z.string().min(1).max(180).nullable().optional(),
+  opportunityNote: z.string().min(1).max(180).nullable().optional(),
+  recommendedAction: z.string().min(1).max(180),
   suggestedFollowUpMessage: z.string().min(1).max(180).nullable().optional(),
 });
 
@@ -36,13 +41,7 @@ export type ExecutiveSummaryResponse = ExecutiveSummaryCore & {
   generatedAt: string;
 };
 
-export type CustomerInsightResponse = {
-  churnRiskLevel: ChurnRiskLevel;
-  rebookingStatus: RebookingStatus;
-  healthScore: number;
-  nextBestAction: string;
-  shortExplanation: string;
-  suggestedFollowUpMessage: string | null;
+export type CustomerInsightResponse = CustomerInsightCore & {
   languageUsed: AiLanguage;
   generatedAt: string;
 };

@@ -50,6 +50,18 @@ function sanitizeOptionalText(value: string | null | undefined) {
   return text ? text : null;
 }
 
+function roundOne(value: number) {
+  return Number(value.toFixed(1));
+}
+
+function sharePct(value: number, total: number) {
+  if (total <= 0) {
+    return null;
+  }
+
+  return roundOne((value / total) * 100);
+}
+
 function stripJsonFences(payload: string) {
   return payload.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
 }
@@ -238,25 +250,92 @@ export async function generateCustomerInsight(
     recent3MonthVisits: customer.recent3MonthVisits,
     previous3MonthVisits: customer.previous3MonthVisits,
   });
+  const totalTherapistVisits = overview.therapistRelationship.reduce((sum, row) => sum + row.visitCount, 0);
+  const topTherapist = overview.therapistRelationship[0];
+  const totalCategoryVisits = overview.serviceMix.reduce((sum, row) => sum + row.visitCount, 0);
+  const topCategory = overview.serviceMix[0];
 
   const prompt = buildCustomerInsightPrompt({
     aiLanguage: params.aiLanguage,
     facts: {
-      customer: {
+      customerProfile: {
+        customerName: customer.customerName,
+        spendTier: customer.spendTier,
+        badges: customer.badges,
+        lifetimeSpend: customer.lifetimeSpend,
         preferredService: customer.preferredService,
         preferredServiceCategory: customer.preferredServiceCategory,
         preferredTherapist: customer.preferredTherapist,
-        spendTier: customer.spendTier,
         totalVisits: customer.totalVisits,
-        lastPaymentMethod: customer.lastPaymentMethod,
+        averageSpendPerVisit: customer.averageSpendPerVisit,
+        daysSinceLastVisit: customer.daysSinceLastVisit,
+        avgVisitIntervalDays: customer.avgVisitIntervalDays,
+        mostRecentPaymentMethod: customer.lastPaymentMethod,
         remainingSessions: customer.remainingSessions,
+        packageActive: customer.remainingSessions > 0,
+        usageBreadth: customer.categoryBreadth,
+        status: customer.status,
       },
-      deterministicSignals: riskSignals,
-      recentTrend: {
+      relationshipPattern: {
+        topTherapist: topTherapist
+          ? {
+              therapistName: topTherapist.therapistName,
+              visitCount: topTherapist.visitCount,
+              serviceValue: topTherapist.serviceValue,
+              visitSharePct: sharePct(topTherapist.visitCount, totalTherapistVisits),
+            }
+          : null,
+        therapistMix: overview.therapistRelationship.slice(0, 3).map((row) => ({
+          therapistName: row.therapistName,
+          visitCount: row.visitCount,
+          serviceValue: row.serviceValue,
+          visitSharePct: sharePct(row.visitCount, totalTherapistVisits),
+        })),
+        topCategory: topCategory
+          ? {
+              categoryName: topCategory.serviceCategory,
+              visitCount: topCategory.visitCount,
+              serviceValue: topCategory.serviceValue,
+              visitSharePct: sharePct(topCategory.visitCount, totalCategoryVisits),
+            }
+          : null,
+        categoryMix: overview.serviceMix.slice(0, 3).map((row) => ({
+          categoryName: row.serviceCategory,
+          visitCount: row.visitCount,
+          serviceValue: row.serviceValue,
+          visitSharePct: sharePct(row.visitCount, totalCategoryVisits),
+        })),
+        recentServices: overview.recentServices.slice(0, 3).map((row) => ({
+          serviceName: row.serviceName,
+          lastUsedDate: row.lastUsedDate,
+          visitCount: row.visitCount,
+        })),
+      },
+      momentum: {
         recent3MonthVisits: customer.recent3MonthVisits,
         previous3MonthVisits: customer.previous3MonthVisits,
+        frequencyTrend: riskSignals.frequencyTrend,
+        rebookingStatus: riskSignals.rebookingStatus,
+        overdueDays: riskSignals.overdueDays,
       },
-      insightRules: overview.insights.slice(0, 3).map((insight) => ({
+      deterministicSignals: {
+        healthScore: riskSignals.healthScore,
+        churnRiskLevel: riskSignals.churnRiskLevel,
+        rebookingStatus: riskSignals.rebookingStatus,
+        packageRisk: riskSignals.packageRisk,
+        frequencyTrend: riskSignals.frequencyTrend,
+        expectedReturnGapDays: riskSignals.expectedReturnGapDays,
+        overdueDays: riskSignals.overdueDays,
+      },
+      ruleBasedNotes: {
+        recommendedAction: overview.recommendedAction,
+        insightRules: overview.insights.slice(0, 4).map((insight) => ({
+          title: insight.title,
+          detail: insight.detail,
+        })),
+        assumptions: overview.assumptions.slice(0, 2),
+      },
+      visibleInsights: overview.insights.slice(0, 4).map((insight) => ({
         title: insight.title,
         detail: insight.detail,
       })),
@@ -279,11 +358,13 @@ export async function generateCustomerInsight(
   const aiCopy = aiResult.data ?? fallback;
 
   const response: CustomerInsightResponse = {
-    churnRiskLevel: riskSignals.churnRiskLevel,
-    rebookingStatus: riskSignals.rebookingStatus,
-    healthScore: riskSignals.healthScore,
-    nextBestAction: aiCopy.nextBestAction,
-    shortExplanation: aiCopy.shortExplanation,
+    customerArchetype: aiCopy.customerArchetype,
+    ownerSummary: aiCopy.ownerSummary,
+    businessMeaning: aiCopy.businessMeaning,
+    relationshipNote: aiCopy.relationshipNote,
+    riskNote: sanitizeOptionalText(aiCopy.riskNote),
+    opportunityNote: sanitizeOptionalText(aiCopy.opportunityNote),
+    recommendedAction: aiCopy.recommendedAction,
     suggestedFollowUpMessage: sanitizeOptionalText(aiCopy.suggestedFollowUpMessage),
     languageUsed: params.aiLanguage,
     generatedAt,

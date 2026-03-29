@@ -62,7 +62,7 @@ export function buildCustomerInsightPrompt(params: {
   facts: unknown;
 }) {
   return `
-You are writing a short customer business snapshot for GT_V2Report.
+You are acting like a clinic growth manager reviewing one exact customer record inside GT_V2Report.
 
 Language instruction:
 ${languageInstruction(params.aiLanguage)}
@@ -70,20 +70,33 @@ ${languageInstruction(params.aiLanguage)}
 Rules:
 - ${baseRulesBlock()}
 - The deterministic signals are already calculated. Use them to guide the explanation, but do not change them.
+- Do not just repeat visible labels, badges, or raw metrics.
 - Do not lean on internal wording like health score, churn risk, or rebooking status unless the facts make it necessary.
-- Focus on owner-facing meaning: current relationship strength, recent activity, package position, continuity, and the next business action.
+- Describe this customer as a real commercial relationship: who they are, what they mean to the clinic, what pattern is visible, what risk or dependency exists, and what the team should do next.
+- Focus on interpretation, not metric restatement.
 
 Return this JSON shape:
 {
-  "nextBestAction": "string",
-  "shortExplanation": "string",
+  "customerArchetype": "string",
+  "ownerSummary": "string",
+  "businessMeaning": "string",
+  "relationshipNote": "string",
+  "riskNote": "string | null",
+  "opportunityNote": "string | null",
+  "recommendedAction": "string",
   "suggestedFollowUpMessage": "string | null"
 }
 
 Additional constraints:
-- shortExplanation: 1 to 3 short sentences describing the customer's current business value, present activity, and what it means for the clinic.
-- nextBestAction: one short clinic-owner action statement.
+- customerArchetype: 3 to 7 words, business style, for example a customer type or relationship archetype.
+- ownerSummary: 1 to 2 short sentences on who this customer is overall.
+- businessMeaning: 1 short sentence on the commercial meaning of this customer to the clinic.
+- relationshipNote: 1 short sentence on therapist, service, package, or visit pattern.
+- riskNote: null when there is no meaningful current risk or dependency.
+- opportunityNote: null when there is no clear current opportunity.
+- recommendedAction: one concrete clinic-team action statement.
 - suggestedFollowUpMessage: optional, short, friendly, business-safe, and suitable for front desk follow-up.
+- Make every field feel specific to this customer record.
 - Do not include any diagnosis, clinical claim, or treatment advice.
 
 Facts:

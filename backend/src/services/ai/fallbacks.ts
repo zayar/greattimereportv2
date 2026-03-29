@@ -102,20 +102,25 @@ export function buildExecutiveSummaryFallback(params: {
   };
 }
 
-function buildCustomerFollowUpMessage(aiLanguage: AiLanguage, rebookingStatus: CustomerRiskSignals["rebookingStatus"]) {
+function buildCustomerFollowUpMessage(params: {
+  aiLanguage: AiLanguage;
+  preferredService: string;
+  rebookingStatus: CustomerRiskSignals["rebookingStatus"];
+}) {
+  const { aiLanguage, preferredService, rebookingStatus } = params;
   if (rebookingStatus === "onTrack" || rebookingStatus === "unknown") {
     return null;
   }
 
   if (isMyanmarLanguage(aiLanguage)) {
     return rebookingStatus === "overdue"
-      ? "ပြန်လည်ချိန်းဆိုရန် အချိန်အဆင်ပြေပါက ဆက်သွယ်ပေးနိုင်ပါသည်။"
-      : "နောက်တစ်ကြိမ် booking အတွက် အချိန်ကြိုတင်ထားနိုင်ပါသည်။";
+      ? `${preferredService || "service"} အတွက် နောက်တစ်ကြိမ်ချိန်းဆိုရန် အချိန်အဆင်ပြေပါက ကူညီစီစဉ်ပေးနိုင်ပါသည်။`
+      : `${preferredService || "service"} အတွက် နောက်တစ်ကြိမ် booking ကို ကြိုတင်စီစဉ်ပေးနိုင်ပါသည်။`;
   }
 
   return rebookingStatus === "overdue"
-    ? "We can help arrange your next booking whenever convenient."
-    : "We can help secure your next booking ahead of time.";
+    ? `We can help arrange your next ${preferredService || "service"} visit whenever convenient.`
+    : `We can help secure your next ${preferredService || "service"} visit ahead of time.`;
 }
 
 export function buildCustomerInsightFallback(params: {
@@ -125,90 +130,179 @@ export function buildCustomerInsightFallback(params: {
 }): CustomerInsightCore {
   const { aiLanguage, overview, riskSignals } = params;
   const customer = overview.customer;
-  const serviceLabel = customer.preferredService || (isMyanmarLanguage(aiLanguage) ? "ဤ customer ၏ အဓိက service pattern" : "this customer's main service pattern");
+  const serviceLabel =
+    customer.preferredService ||
+    (isMyanmarLanguage(aiLanguage) ? "အဓိက service pattern" : "the main service relationship");
   const therapistLabel =
     customer.preferredTherapist && customer.preferredTherapist !== "Unknown"
       ? customer.preferredTherapist
       : null;
+  const topTherapist = overview.therapistRelationship[0];
+  const totalTherapistVisits = overview.therapistRelationship.reduce((sum, row) => sum + row.visitCount, 0);
+  const topTherapistShare =
+    topTherapist && totalTherapistVisits > 0
+      ? Number(((topTherapist.visitCount / totalTherapistVisits) * 100).toFixed(1))
+      : null;
+  const topCategory = overview.serviceMix[0];
+  const totalCategoryVisits = overview.serviceMix.reduce((sum, row) => sum + row.visitCount, 0);
+  const topCategoryShare =
+    topCategory && totalCategoryVisits > 0
+      ? Number(((topCategory.visitCount / totalCategoryVisits) * 100).toFixed(1))
+      : null;
+  const recentService = overview.recentServices[0]?.serviceName || serviceLabel;
+  const formattedSpend = customer.lifetimeSpend.toLocaleString("en-US");
+  const hasActivePackage = customer.remainingSessions > 0;
   const hasHealthyPackage = customer.remainingSessions > 3;
   const hasLowPackageBalance = customer.remainingSessions > 0 && customer.remainingSessions <= 3;
-  const recentActivityLine =
-    riskSignals.daysSinceLastVisit == null
-      ? null
-      : riskSignals.daysSinceLastVisit <= 14
+  const archetype = isMyanmarLanguage(aiLanguage)
+    ? customer.spendTier === "VIP" && hasActivePackage
+      ? "တန်ဖိုးမြင့် package customer"
+      : topTherapistShare != null && topTherapistShare >= 60
+        ? "Therapist အခြေပြု returning customer"
+        : customer.categoryBreadth >= 3 && hasActivePackage
+          ? "Service စုံအသုံးပြု renewal customer"
+          : hasActivePackage
+            ? "Package အခြေပြု repeat customer"
+            : customer.totalVisits >= 8
+              ? "တန်ဖိုးမြင့် continuity customer"
+              : "Returning relationship customer"
+    : customer.spendTier === "VIP" && hasActivePackage
+      ? "Loyal package-driven customer"
+      : topTherapistShare != null && topTherapistShare >= 60
+        ? "Returning customer with therapist-led retention"
+        : customer.categoryBreadth >= 3 && hasActivePackage
+          ? "Broad-usage customer with renewal potential"
+          : hasActivePackage
+            ? "Package-led repeat customer"
+            : customer.totalVisits >= 8
+              ? "High-value continuity customer"
+              : "Returning relationship customer";
+  const relationshipNote = isMyanmarLanguage(aiLanguage)
+    ? [
+        therapistLabel
+          ? `${therapistLabel} နှင့် continuity အားကောင်းနေပြီး${topTherapistShare != null ? ` tracked visits ၏ ${topTherapistShare}% ခန့်ကို ကိုင်တွယ်ထားပါသည်။` : " visit relationship ၏ အဓိကအချက်ဖြစ်ပါသည်။"}`
+          : null,
+        topCategory
+          ? `${topCategory.serviceCategory} category အတွင်း အသုံးပြုမှု အများဆုံးဖြစ်ပြီး${topCategoryShare != null ? ` share ${topCategoryShare}% ခန့်ရှိပါသည်။` : " service mix အတွင်း အားကောင်းနေပါသည်။"}`
+          : `${serviceLabel} ပတ်ဝန်းကျင်တွင် relationship အများဆုံးတွေ့ရပါသည်။`,
+        hasActivePackage ? `Package လက်ကျန် ${customer.remainingSessions.toLocaleString("en-US")} ခုရှိနေပါသည်။` : null,
+      ]
+        .filter(Boolean)
+        .join(" ")
+    : [
+        therapistLabel
+          ? `${therapistLabel} is the clearest therapist anchor${topTherapistShare != null ? `, carrying about ${topTherapistShare}% of tracked visits.` : "."}`
+          : null,
+        topCategory
+          ? `${topCategory.serviceCategory} is the strongest usage category${topCategoryShare != null ? ` at about ${topCategoryShare}% of tracked visits.` : "."}`
+          : `${serviceLabel} is still the clearest service anchor.`,
+        hasActivePackage ? `${customer.remainingSessions.toLocaleString("en-US")} package sessions remain active.` : null,
+      ]
+        .filter(Boolean)
+        .join(" ");
+  const riskNote = riskSignals.rebookingStatus === "overdue"
+    ? isMyanmarLanguage(aiLanguage)
+      ? "ပုံမှန်ပြန်လာချိန်ကို ကျော်သွားပြီးဖြစ်သောကြောင့် လက်ရှိ momentum လျော့နိုင်ပါသည်။"
+      : "The customer is already past the expected return window, so current momentum could soften."
+    : riskSignals.frequencyTrend === "declining"
+      ? isMyanmarLanguage(aiLanguage)
+        ? "မကြာသေးမီ 3 လအတွင်း လာရောက်မှု အင်အားသည် ယခင်ကာလထက် လျော့နေပါသည်။"
+        : "Recent visit momentum is softer than the previous three-month window."
+      : topTherapistShare != null && topTherapistShare >= 70
         ? isMyanmarLanguage(aiLanguage)
-          ? "မကြာသေးမီက လာရောက်ထားသဖြင့် customer relationship သည် လက်ရှိတက်ကြွနေဆဲဖြစ်ပါသည်။"
-          : "The customer visited recently, so the relationship still looks active."
-        : riskSignals.daysSinceLastVisit <= 45
+          ? `${topTherapist?.therapistName || therapistLabel} တစ်ဦးတည်းအပေါ် relationship များစွာမူတည်နေပါသည်။`
+          : `The relationship is heavily dependent on ${topTherapist?.therapistName || therapistLabel}.`
+        : !hasActivePackage && (customer.daysSinceLastVisit ?? 0) >= 45
           ? isMyanmarLanguage(aiLanguage)
-            ? `နောက်ဆုံးလာရောက်ပြီး ${riskSignals.daysSinceLastVisit} ရက်ရှိထားသဖြင့် follow-up timing ကို စီမံနိုင်သေးပါသည်။`
-            : `It has been ${riskSignals.daysSinceLastVisit} days since the last visit, so follow-up timing is still manageable.`
-          : isMyanmarLanguage(aiLanguage)
-            ? `နောက်ဆုံးလာရောက်မှုမှ ${riskSignals.daysSinceLastVisit} ရက်ကျော်သွားသဖြင့် relationship ကို ပြန်နိုးဆော်ရန်လိုပါသည်။`
-            : `It has been ${riskSignals.daysSinceLastVisit} days since the last visit, so the relationship needs a stronger follow-up push.`;
+            ? "Active package မရှိဘဲ visit gap ရှည်လာနေသောကြောင့် continuity အားပျော့နိုင်ပါသည်။"
+            : "There is no active package and the visit gap is stretching, which can weaken continuity."
+          : null;
+  const opportunityNote = hasLowPackageBalance
+    ? isMyanmarLanguage(aiLanguage)
+      ? "Package လက်ကျန်နည်းလာနေသောကြောင့် နောက် booking နှင့် renewal conversation ကို တွဲစီစဉ်နိုင်ပါသည်။"
+      : "Low remaining sessions make this a good moment to secure the next booking and prepare renewal."
+    : hasHealthyPackage
+      ? isMyanmarLanguage(aiLanguage)
+        ? "Active package balance ကို အသုံးချပြီး နောက်တစ်ကြိမ်လာရောက်မှုကို လွယ်ကူစွာချိတ်နိုင်ပါသည်။"
+        : "Active package balance gives the team a clean reason to secure the next visit."
+      : customer.categoryBreadth <= 1 && customer.preferredServiceCategory !== "Other"
+        ? isMyanmarLanguage(aiLanguage)
+          ? `${customer.preferredServiceCategory} အပေါ် စုပုံနေသောကြောင့် related service cross-sell အခွင့်အလမ်းရှိပါသည်။`
+          : `Usage is concentrated in ${customer.preferredServiceCategory.toLowerCase()}, so there is room for a related cross-sell.`
+        : therapistLabel
+          ? isMyanmarLanguage(aiLanguage)
+            ? `${therapistLabel} နှင့် bond ကောင်းနေသောအချိန်တွင် နောက်တစ်ကြိမ် appointment ကို ကြိုတင်ချိတ်နိုင်ပါသည်။`
+            : `The strong bond with ${therapistLabel} can be used to lock in the next appointment.`
+          : null;
 
   if (isMyanmarLanguage(aiLanguage)) {
     return {
-      nextBestAction:
+      customerArchetype: archetype,
+      ownerSummary:
+        customer.spendTier === "VIP"
+          ? `ဤ customer သည် ${formattedSpend} lifetime spend နှင့် ${customer.totalVisits.toLocaleString("en-US")} visits ရှိသော တန်ဖိုးမြင့် returning record ဖြစ်ပါသည်။${customer.daysSinceLastVisit != null ? ` နောက်ဆုံးလာရောက်ပြီး ${customer.daysSinceLastVisit} ရက်ရှိပါပြီ။` : ""}`
+          : `ဤ customer သည် ${customer.totalVisits.toLocaleString("en-US")} visits နှင့် ${formattedSpend} lifetime spend ရှိသော repeat relationship ဖြစ်ပါသည်။${customer.daysSinceLastVisit != null ? ` နောက်ဆုံးလာရောက်ပြီး ${customer.daysSinceLastVisit} ရက်ရှိပါပြီ။` : ""}`,
+      businessMeaning:
+        hasActivePackage
+          ? "လုပ်ငန်းအရ ဤ customer သည် package usage မှတဆင့် ဆက်လက်ဝင်ငွေပြန်ရနိုင်သည့် retention record ဖြစ်ပါသည်။"
+          : customer.totalVisits >= 8 || customer.spendTier === "VIP"
+            ? "လုပ်ငန်းအရ ဤ customer သည် continuity ကို ထိန်းသိမ်းရမည့် တန်ဖိုးမြင့် repeat relationship ဖြစ်ပါသည်။"
+            : "လုပ်ငန်းအရ ဤ customer သည် regular repeat demand ကို တည်ဆောက်နိုင်သည့် relationship ဖြစ်ပါသည်။",
+      relationshipNote,
+      riskNote,
+      opportunityNote,
+      recommendedAction:
         riskSignals.rebookingStatus === "overdue"
-          ? "ပြန်လည်လာရောက်မှုကို အမြန်ပြန်ချိတ်ပြီး အချိန်ရွေးချယ်နိုင်သော slot ကို ချက်ချင်းပေးပါ။"
+          ? `${recentService} အတွက် နောက်လာရောက်နိုင်မည့် slot ကို ချက်ချင်းကမ်းလှမ်းပြီး front desk follow-up စတင်ပါ။`
           : riskSignals.rebookingStatus === "dueSoon"
-            ? "ပုံမှန်ပြန်လာချိန်မကျော်မီ reminder ပို့ပြီး နောက်တစ်ကြိမ် booking ကို စီစဉ်ပါ။"
-            : hasHealthyPackage
-              ? "Package usage ဆက်လက်လှုပ်ရှားနေစေရန် continuity follow-up လုပ်ပြီး renewal timing ကို စောင့်ကြည့်ပါ။"
-              : hasLowPackageBalance
-                ? "Package လက်ကျန်နည်းနေသောကြောင့် နောက်တစ်ကြိမ်လာရောက်ချိန်နှင့် renewal conversation ကို ပြင်ဆင်ပါ။"
+            ? `ပုံမှန်ပြန်လာချိန်မကျော်မီ ${recentService} အခြေပြု reminder ပို့ပြီး နောက် booking ကို ချိတ်ပါ။`
+            : hasLowPackageBalance
+              ? "နောက်လာရောက်မှုကို အတည်ပြုပြီး renewal conversation ကို ပျော့ပျော့စတင်ပါ။"
+              : hasHealthyPackage
+                ? "Active package balance ကို အသုံးချပြီး နောက်တစ်ကြိမ်လာရောက်မှုကို ကြိုတင်ချိတ်ပါ။"
                 : therapistLabel
-                  ? `${therapistLabel} နှင့် continuity ကို ထိန်းသိမ်းပြီး နောက်လာရောက်မှုအတွက် light check-in လုပ်ပါ။`
-                  : "ပုံမှန် customer relationship check-in တစ်ခုလုပ်ပြီး နောက်လာရောက်နိုင်မည့် service ကို သေချာအတည်ပြုပါ။",
-      shortExplanation: [
-        recentActivityLine,
-        hasHealthyPackage
-          ? `Package လက်ကျန် ${customer.remainingSessions.toLocaleString("en-US")} ခုရှိနေသေးသောကြောင့် ဆက်လက်အသုံးပြုမှုနှင့် continuity ကို ထိန်းနိုင်ပါသည်။`
-          : hasLowPackageBalance
-            ? `Package လက်ကျန် ${customer.remainingSessions.toLocaleString("en-US")} ခုသာကျန်သဖြင့် renewal timing ကို စတင်ကြည့်သင့်ပါသည်။`
-            : `${serviceLabel} ကို အဓိကထားအသုံးပြုနေသဖြင့် နောက်တစ်ကြိမ်ပြန်လာမှုကို business follow-up ဖြင့်ထိန်းသိမ်းသင့်ပါသည်။`,
-        therapistLabel
-          ? `${therapistLabel} နှင့် relationship သည် continuity အတွက် အားသာချက်တစ်ခုဖြစ်ပါသည်။`
-          : riskSignals.frequencyTrend === "declining"
-            ? "မကြာသေးမီလာရောက်မှု အင်အား လျော့နေသောကြောင့် owner review ထဲတွင် ထည့်သွင်းစောင့်ကြည့်သင့်ပါသည်။"
-            : null,
-      ]
-        .filter(Boolean)
-        .join(" "),
-      suggestedFollowUpMessage: buildCustomerFollowUpMessage(aiLanguage, riskSignals.rebookingStatus),
+                  ? `${therapistLabel} နှင့် continuity မပျက်စေရန် next visit ကို အတည်ပြုပါ။`
+                  : overview.recommendedAction,
+      suggestedFollowUpMessage: buildCustomerFollowUpMessage({
+        aiLanguage,
+        preferredService: recentService,
+        rebookingStatus: riskSignals.rebookingStatus,
+      }),
     };
   }
 
   return {
-    nextBestAction:
+    customerArchetype: archetype,
+    ownerSummary:
+      customer.spendTier === "VIP"
+        ? `This is a high-value repeat customer with ${customer.totalVisits.toLocaleString("en-US")} visits and ${formattedSpend} in visible lifetime spend.${customer.daysSinceLastVisit != null ? ` The last visit was ${customer.daysSinceLastVisit} days ago.` : ""}`
+        : `This customer has ${customer.totalVisits.toLocaleString("en-US")} visits and ${formattedSpend} in visible lifetime spend, which makes the record meaningfully repeat-led.${customer.daysSinceLastVisit != null ? ` The last visit was ${customer.daysSinceLastVisit} days ago.` : ""}`,
+    businessMeaning:
+      hasActivePackage
+        ? "Commercially this record still carries future repeat revenue because package balance can convert into more visits."
+        : customer.totalVisits >= 8 || customer.spendTier === "VIP"
+          ? "Commercially this is a valuable continuity relationship worth protecting, not a one-off transaction."
+          : "Commercially this is a repeat relationship that can still be strengthened through continuity and timely follow-up.",
+    relationshipNote,
+    riskNote,
+    opportunityNote,
+    recommendedAction:
       riskSignals.rebookingStatus === "overdue"
-        ? "Reconnect now and offer a clear next-visit slot while the relationship is still warm."
+        ? `Have the front desk contact the customer now and offer the next available ${recentService} slot.`
         : riskSignals.rebookingStatus === "dueSoon"
-          ? "Send a reminder before the usual return window closes and guide the next booking."
-          : hasHealthyPackage
-            ? "Keep package usage moving and watch for the right renewal timing."
-            : hasLowPackageBalance
-              ? "Prepare the next visit and start a soft renewal conversation because package balance is getting low."
+          ? `Send a reminder before the usual return window closes and secure the next ${recentService} booking.`
+          : hasLowPackageBalance
+            ? "Secure the next visit now and start a soft renewal conversation while momentum is still warm."
+            : hasHealthyPackage
+              ? "Convert the active package balance into the next booked visit while the relationship is still warm."
               : therapistLabel
-                ? `Protect continuity with ${therapistLabel} and keep a light relationship check-in.`
-                : "Keep the customer in a light follow-up cadence and confirm the next likely service.",
-    shortExplanation: [
-      recentActivityLine,
-      hasHealthyPackage
-        ? `Package balance is still active with ${customer.remainingSessions.toLocaleString("en-US")} sessions remaining, which supports continuity.`
-        : hasLowPackageBalance
-          ? `Package balance is down to ${customer.remainingSessions.toLocaleString("en-US")} sessions, so renewal timing is getting closer.`
-          : `${serviceLabel} remains the clearest service relationship, so the next visit should be guided around that pattern.`,
-      therapistLabel
-        ? `${therapistLabel} is the strongest therapist relationship for continuity.`
-        : riskSignals.frequencyTrend === "declining"
-          ? "Recent visit momentum is softer than the prior three-month window and should stay on the owner watchlist."
-          : null,
-    ]
-      .filter(Boolean)
-      .join(" "),
-    suggestedFollowUpMessage: buildCustomerFollowUpMessage(aiLanguage, riskSignals.rebookingStatus),
+                ? `Protect continuity with ${therapistLabel} and lock in the next visit while the bond is strong.`
+                : overview.recommendedAction,
+    suggestedFollowUpMessage: buildCustomerFollowUpMessage({
+      aiLanguage,
+      preferredService: recentService,
+      rebookingStatus: riskSignals.rebookingStatus,
+    }),
   };
 }
 
