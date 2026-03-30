@@ -5,6 +5,7 @@ import { requireClinicAccess } from "../middleware/clinic-access.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { HttpError } from "../utils/http-error.js";
 import { getTelegramBotLinkMetadata, handleTelegramWebhook, type TelegramUpdate } from "../services/telegram/bot.service.js";
+import { sendTodayPaymentReport } from "../services/telegram/payment-report.service.js";
 import { sendTodayAppointmentReport } from "../services/telegram/report.service.js";
 import {
   generateTelegramLinkCode,
@@ -14,6 +15,7 @@ import {
   updateTelegramReportSettings,
 } from "../services/telegram/storage.service.js";
 import { normalizeReportTime, normalizeTimeZone } from "../services/telegram/time.js";
+import type { TelegramReportType } from "../services/telegram/types.js";
 
 const router = Router();
 
@@ -26,10 +28,13 @@ const clinicScopedBaseSchema = z.object({
 const settingsSchema = clinicScopedBaseSchema.extend({
   isTodayAppointmentReportEnabled: z.boolean(),
   reportTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  isTodayPaymentReportEnabled: z.boolean(),
+  paymentReportTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   timezone: z.string().min(1),
 });
 
 const sendTestSchema = clinicScopedBaseSchema.extend({
+  reportType: z.enum(["appointment", "payment"]).default("appointment"),
   timezone: z.string().optional(),
 });
 
@@ -92,6 +97,7 @@ router.post(
     const status = await updateTelegramReportSettings({
       ...params,
       reportTime: normalizeReportTime(params.reportTime),
+      paymentReportTime: normalizeReportTime(params.paymentReportTime),
       timezone: normalizeTimeZone(params.timezone),
     });
     const botMetadata = await getTelegramBotLinkMetadata(status.pendingLinkCode);
@@ -135,20 +141,46 @@ router.post(
       throw new HttpError(400, "Link Telegram first before sending a test report.");
     }
 
+    const reportType = params.reportType as TelegramReportType;
+    const timezone = normalizeTimeZone(params.timezone ?? status.timezone);
+    if (reportType === "payment") {
+      const sent = await sendTodayPaymentReport({
+        chatId: status.telegramChatId,
+        clinicId: status.clinicId || params.clinicId,
+        clinicName: status.clinicName || params.clinicName,
+        timezone,
+        authorizationHeader: req.headers.authorization,
+      });
+
+      await markTelegramTestSent(params.clinicId, reportType, sent.sentAt);
+
+      res.json({
+        success: true,
+        data: {
+          sentAt: sent.sentAt,
+          reportType,
+          paymentCount: sent.report.paymentCount,
+          totalPaymentAmount: sent.report.totalPaymentAmount,
+        },
+      });
+      return;
+    }
+
     const sent = await sendTodayAppointmentReport({
       chatId: status.telegramChatId,
       clinicCode: status.clinicCode || params.clinicCode,
       clinicName: status.clinicName || params.clinicName,
-      timezone: normalizeTimeZone(params.timezone ?? status.timezone),
+      timezone,
       authorizationHeader: req.headers.authorization,
     });
 
-    await markTelegramTestSent(params.clinicId, sent.sentAt);
+    await markTelegramTestSent(params.clinicId, reportType, sent.sentAt);
 
     res.json({
       success: true,
       data: {
         sentAt: sent.sentAt,
+        reportType,
         appointmentCount: sent.report.totalAppointments,
       },
     });

@@ -1,5 +1,6 @@
 import { env } from "../../config/env.js";
 import { ensureTelegramWebhook, isTelegramBotConfigured, startTelegramPolling } from "./bot.service.js";
+import { sendTodayPaymentReport } from "./payment-report.service.js";
 import { buildTodayAppointmentReport, sendTodayAppointmentReport } from "./report.service.js";
 import {
   listTelegramIntegrationsForScheduling,
@@ -9,6 +10,7 @@ import {
   tryAcquireTelegramScheduleLock,
 } from "./storage.service.js";
 import { formatDateKeyInTimeZone, formatTimeKeyInTimeZone } from "./time.js";
+import type { TelegramIntegrationRecord, TelegramReportType } from "./types.js";
 
 let schedulerStarted = false;
 let schedulerBusy = false;
@@ -44,40 +46,66 @@ async function runSchedulerTick() {
         continue;
       }
 
-      const dateKey = isDueNow(record.reportTime, record.timezone, record.lastScheduledDateKey, now);
-      if (!dateKey) {
-        continue;
-      }
+      const scheduledReports: Array<{
+        type: TelegramReportType;
+        enabled: boolean;
+        reportTime: string;
+        lastScheduledDateKey: string | null;
+      }> = [
+        {
+          type: "appointment",
+          enabled: record.isTodayAppointmentReportEnabled,
+          reportTime: record.reportTime,
+          lastScheduledDateKey: record.lastScheduledDateKey,
+        },
+        {
+          type: "payment",
+          enabled: record.isTodayPaymentReportEnabled,
+          reportTime: record.paymentReportTime,
+          lastScheduledDateKey: record.lastPaymentScheduledDateKey,
+        },
+      ];
 
-      const lockId = await tryAcquireTelegramScheduleLock({
-        clinicId: record.clinicId,
-        dateKey,
-      });
+      for (const scheduledReport of scheduledReports) {
+        if (!scheduledReport.enabled) {
+          continue;
+        }
 
-      if (!lockId) {
-        continue;
-      }
+        const dateKey = isDueNow(
+          scheduledReport.reportTime,
+          record.timezone,
+          scheduledReport.lastScheduledDateKey,
+          now,
+        );
+        if (!dateKey) {
+          continue;
+        }
 
-      try {
-        const sent = await sendTodayAppointmentReport({
-          chatId: record.telegramChatId,
-          clinicCode: record.clinicCode,
-          clinicName: record.clinicName,
-          timezone: record.timezone,
-          referenceDate: now,
+        const lockId = await tryAcquireTelegramScheduleLock({
+          clinicId: record.clinicId,
+          reportType: scheduledReport.type,
+          dateKey,
         });
 
-        await markTelegramScheduledSent(record.clinicId, sent.sentAt, dateKey);
-        await markTelegramScheduleLockSent(lockId, sent.sentAt);
-        console.log(
-          `[telegram] scheduled today appointment report sent clinicId=${record.clinicId} timezone=${record.timezone} appointments=${sent.report.totalAppointments}`,
-        );
-      } catch (error) {
-        await releaseTelegramScheduleLock(lockId);
-        console.error(
-          `[telegram] scheduled report failed clinicId=${record.clinicId} timezone=${record.timezone}`,
-          error,
-        );
+        if (!lockId) {
+          continue;
+        }
+
+        try {
+          const sent = await sendScheduledReport(record, scheduledReport.type, now);
+
+          await markTelegramScheduledSent(record.clinicId, scheduledReport.type, sent.sentAt, dateKey);
+          await markTelegramScheduleLockSent(lockId, sent.sentAt);
+          console.log(
+            `[telegram] scheduled ${scheduledReport.type} report sent clinicId=${record.clinicId} timezone=${record.timezone}`,
+          );
+        } catch (error) {
+          await releaseTelegramScheduleLock(lockId);
+          console.error(
+            `[telegram] scheduled ${scheduledReport.type} report failed clinicId=${record.clinicId} timezone=${record.timezone}`,
+            error,
+          );
+        }
       }
     }
   } catch (error) {
@@ -85,6 +113,30 @@ async function runSchedulerTick() {
   } finally {
     schedulerBusy = false;
   }
+}
+
+async function sendScheduledReport(record: TelegramIntegrationRecord, reportType: TelegramReportType, referenceDate: Date) {
+  if (!record.telegramChatId) {
+    throw new Error("Telegram chat is not linked.");
+  }
+
+  if (reportType === "payment") {
+    return sendTodayPaymentReport({
+      chatId: record.telegramChatId,
+      clinicId: record.clinicId,
+      clinicName: record.clinicName,
+      timezone: record.timezone,
+      referenceDate,
+    });
+  }
+
+  return sendTodayAppointmentReport({
+    chatId: record.telegramChatId,
+    clinicCode: record.clinicCode,
+    clinicName: record.clinicName,
+    timezone: record.timezone,
+    referenceDate,
+  });
 }
 
 function startTelegramScheduler() {

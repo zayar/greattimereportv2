@@ -37,6 +37,7 @@ export interface Business {
 export type AiLanguage = "my-MM" | "en-US";
 
 export type TelegramConnectionStatus = "not_linked" | "pending" | "linked";
+export type TelegramReportType = "appointment" | "payment";
 
 export interface TelegramIntegrationStatus {
   clinicId: string;
@@ -48,10 +49,15 @@ export interface TelegramIntegrationStatus {
   telegramLinkedAt: string | null;
   isTodayAppointmentReportEnabled: boolean;
   reportTime: string;
+  isTodayPaymentReportEnabled: boolean;
+  paymentReportTime: string;
   timezone: string;
   lastTestSentAt: string | null;
   lastScheduledSentAt: string | null;
   lastScheduledDateKey: string | null;
+  lastPaymentTestSentAt: string | null;
+  lastPaymentScheduledSentAt: string | null;
+  lastPaymentScheduledDateKey: string | null;
   pendingLinkCode: string | null;
   pendingLinkCodeExpiresAt: string | null;
   connectionStatus: TelegramConnectionStatus;

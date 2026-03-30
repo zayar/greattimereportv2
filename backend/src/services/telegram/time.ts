@@ -11,6 +11,52 @@ function getPart(parts: Intl.DateTimeFormatPart[], type: Intl.DateTimeFormatPart
   return parts.find((part) => part.type === type)?.value ?? "";
 }
 
+function getOffsetMilliseconds(date: Date, timeZone: string) {
+  const parts = formatParts(date, normalizeTimeZone(timeZone), {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+
+  const zonedTimestamp = Date.UTC(
+    Number(getPart(parts, "year")),
+    Number(getPart(parts, "month")) - 1,
+    Number(getPart(parts, "day")),
+    Number(getPart(parts, "hour")),
+    Number(getPart(parts, "minute")),
+    Number(getPart(parts, "second")),
+  );
+
+  return zonedTimestamp - date.getTime();
+}
+
+function getUtcDateForLocalParts(
+  dateKey: string,
+  timeZone: string,
+  hours: number,
+  minutes: number,
+  seconds: number,
+  milliseconds: number,
+) {
+  const [year, month, day] = dateKey.split("-").map((value) => Number(value));
+  const localTimestamp = Date.UTC(year, month - 1, day, hours, minutes, seconds, milliseconds);
+  let guess = new Date(localTimestamp);
+  let offset = getOffsetMilliseconds(guess, timeZone);
+  let resolved = new Date(localTimestamp - offset);
+  const adjustedOffset = getOffsetMilliseconds(resolved, timeZone);
+
+  if (adjustedOffset !== offset) {
+    offset = adjustedOffset;
+    resolved = new Date(localTimestamp - offset);
+  }
+
+  return resolved;
+}
+
 export function normalizeTimeZone(value: string | null | undefined) {
   return value?.trim() || env.DEFAULT_TIMEZONE;
 }
@@ -52,5 +98,12 @@ export function buildUtcDayRangeForDateKey(dateKey: string) {
   return {
     startIso: new Date(`${dateKey}T00:00:00.000Z`).toISOString(),
     endIso: new Date(`${dateKey}T23:59:59.999Z`).toISOString(),
+  };
+}
+
+export function buildUtcDayRangeForDateKeyInTimeZone(dateKey: string, timeZone: string) {
+  return {
+    startIso: getUtcDateForLocalParts(dateKey, timeZone, 0, 0, 0, 0).toISOString(),
+    endIso: getUtcDateForLocalParts(dateKey, timeZone, 23, 59, 59, 999).toISOString(),
   };
 }

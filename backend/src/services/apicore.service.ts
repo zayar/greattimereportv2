@@ -58,6 +58,53 @@ const BOOKING_DETAILS_QUERY = `
   }
 `;
 
+const TELEGRAM_PAYMENT_ORDERS_QUERY = `
+  query TelegramPaymentOrders(
+    $where: OrderWhereInput
+    $orderBy: [OrderOrderByWithRelationInput!]
+    $take: Int
+    $skip: Int
+    $clinicMembersWhere2: ClinicMemberWhereInput
+  ) {
+    orders(where: $where, orderBy: $orderBy, take: $take, skip: $skip) {
+      id
+      order_id
+      created_at
+      status
+      net_total
+      total
+      balance
+      credit_balance
+      payment_method
+      payment_status
+      member {
+        name
+        clinic_members(where: $clinicMembersWhere2) {
+          name
+          clinic_id
+        }
+      }
+      user {
+        name
+      }
+      seller {
+        display_name
+      }
+      payments {
+        payment_amount
+        payment_method
+        payment_note
+        payment_date
+      }
+    }
+    aggregateOrder(where: $where) {
+      _count {
+        id
+      }
+    }
+  }
+`;
+
 type GraphQLErrorShape = {
   message?: string;
 };
@@ -83,10 +130,53 @@ export type ApicoreBookingDetailsRow = {
   member_note?: string | null;
 };
 
+export type ApicoreOrderPaymentRow = {
+  payment_amount: number | string;
+  payment_method?: string | null;
+  payment_note?: string | null;
+  payment_date: string;
+};
+
+export type ApicoreOrderWithPaymentsRow = {
+  id: string;
+  order_id: string;
+  created_at: string;
+  status?: string | null;
+  net_total?: number | string | null;
+  total?: number | string | null;
+  balance?: number | string | null;
+  credit_balance?: number | string | null;
+  payment_method?: string | null;
+  payment_status?: string | null;
+  member?: {
+    name?: string | null;
+    clinic_members?: Array<{
+      name?: string | null;
+      clinic_id?: string | null;
+    }> | null;
+  } | null;
+  user?: {
+    name?: string | null;
+  } | null;
+  seller?: {
+    display_name?: string | null;
+  } | null;
+  payments?: ApicoreOrderPaymentRow[] | null;
+};
+
 type BookingDetailsPayload = {
   getBookingDetails?: {
     data?: ApicoreBookingDetailsRow[];
     totalCount?: number;
+  } | null;
+};
+
+type TelegramPaymentOrdersPayload = {
+  orders?: ApicoreOrderWithPaymentsRow[] | null;
+  aggregateOrder?: {
+    _count?: {
+      id?: number | null;
+    } | null;
   } | null;
 };
 
@@ -160,6 +250,42 @@ async function postGraphql<T>(body: Record<string, unknown>, authorization?: str
   }
 
   return (await response.json()) as GraphQLResponse<T>;
+}
+
+async function executeApicoreQueryWithFallback<T>(input: {
+  requestBody: Record<string, unknown>;
+  authorizationHeader?: string;
+  errorMessage: string;
+}) {
+  const usingCallerAuthorization =
+    Boolean(input.authorizationHeader) && input.authorizationHeader!.trim().length > 0;
+  const authorization = usingCallerAuthorization
+    ? input.authorizationHeader!.trim()
+    : `Bearer ${await getApicoreServiceIdToken()}`;
+
+  let payload: GraphQLResponse<T>;
+
+  try {
+    payload = await postGraphql<T>(input.requestBody, authorization);
+  } catch (error) {
+    if (usingCallerAuthorization && error instanceof HttpError && error.statusCode === 401) {
+      const serviceAuthorization = `Bearer ${await getApicoreServiceIdToken()}`;
+      payload = await postGraphql<T>(input.requestBody, serviceAuthorization);
+    } else {
+      throw error;
+    }
+  }
+
+  if (payload.errors?.length && usingCallerAuthorization && isGraphqlAuthError(payload.errors[0]?.message)) {
+    const serviceAuthorization = `Bearer ${await getApicoreServiceIdToken()}`;
+    payload = await postGraphql<T>(input.requestBody, serviceAuthorization);
+  }
+
+  if (payload.errors?.length) {
+    throw new HttpError(401, payload.errors[0]?.message || input.errorMessage);
+  }
+
+  return payload;
 }
 
 export async function exchangeGoogleCredentialForCustomToken(credential: string) {
@@ -276,48 +402,77 @@ export async function fetchApicoreBookingDetails(params: {
   take?: number;
   authorizationHeader?: string;
 }) {
-  const usingCallerAuthorization =
-    Boolean(params.authorizationHeader) && params.authorizationHeader!.trim().length > 0;
-  const authorization = usingCallerAuthorization
-    ? params.authorizationHeader!.trim()
-    : `Bearer ${await getApicoreServiceIdToken()}`;
-
-  const requestBody = {
-    query: BOOKING_DETAILS_QUERY,
-    variables: {
-      clinicCode: params.clinicCode,
-      startDate: params.startDate,
-      endDate: params.endDate,
-      status: params.status,
-      skip: params.skip ?? 0,
-      take: params.take ?? 200,
+  const payload = await executeApicoreQueryWithFallback<BookingDetailsPayload>({
+    requestBody: {
+      query: BOOKING_DETAILS_QUERY,
+      variables: {
+        clinicCode: params.clinicCode,
+        startDate: params.startDate,
+        endDate: params.endDate,
+        status: params.status,
+        skip: params.skip ?? 0,
+        take: params.take ?? 200,
+      },
     },
-  };
-
-  let payload: GraphQLResponse<BookingDetailsPayload>;
-
-  try {
-    payload = await postGraphql<BookingDetailsPayload>(requestBody, authorization);
-  } catch (error) {
-    if (usingCallerAuthorization && error instanceof HttpError && error.statusCode === 401) {
-      const serviceAuthorization = `Bearer ${await getApicoreServiceIdToken()}`;
-      payload = await postGraphql<BookingDetailsPayload>(requestBody, serviceAuthorization);
-    } else {
-      throw error;
-    }
-  }
-
-  if (payload.errors?.length && usingCallerAuthorization && isGraphqlAuthError(payload.errors[0]?.message)) {
-    const serviceAuthorization = `Bearer ${await getApicoreServiceIdToken()}`;
-    payload = await postGraphql<BookingDetailsPayload>(requestBody, serviceAuthorization);
-  }
-
-  if (payload.errors?.length) {
-    throw new HttpError(401, payload.errors[0]?.message || "Booking details query failed.");
-  }
+    authorizationHeader: params.authorizationHeader,
+    errorMessage: "Booking details query failed.",
+  });
 
   return {
     data: payload.data?.getBookingDetails?.data ?? [],
     totalCount: payload.data?.getBookingDetails?.totalCount ?? 0,
+  };
+}
+
+export async function fetchApicoreOrdersWithPayments(params: {
+  clinicId: string;
+  startDate: string;
+  endDate: string;
+  skip?: number;
+  take?: number;
+  authorizationHeader?: string;
+}) {
+  const payload = await executeApicoreQueryWithFallback<TelegramPaymentOrdersPayload>({
+    requestBody: {
+      query: TELEGRAM_PAYMENT_ORDERS_QUERY,
+      variables: {
+        where: {
+          clinic_id: {
+            equals: params.clinicId,
+          },
+          status: {
+            equals: "ACTIVE",
+          },
+          order_id: {
+            not: {
+              startsWith: "CO-",
+            },
+          },
+          payments: {
+            some: {
+              payment_date: {
+                gte: params.startDate,
+                lte: params.endDate,
+              },
+            },
+          },
+        },
+        orderBy: [{ created_at: "desc" }],
+        take: params.take ?? 200,
+        skip: params.skip ?? 0,
+        clinicMembersWhere2: {
+          clinic_id: {
+            equals: params.clinicId,
+          },
+        },
+      },
+    },
+    authorizationHeader: params.authorizationHeader,
+    errorMessage: "Payment report query failed.",
+  });
+
+  return {
+    data: payload.data?.orders ?? [],
+    totalCount: payload.data?.aggregateOrder?._count?.id ?? 0,
   };
 }

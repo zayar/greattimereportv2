@@ -7,6 +7,7 @@ import type {
   TelegramChatTarget,
   TelegramConnectionStatus,
   TelegramIntegrationRecord,
+  TelegramReportType,
   TelegramIntegrationStatus,
   TelegramLinkCodeRecord,
 } from "./types.js";
@@ -52,10 +53,15 @@ function buildDefaultRecord(input: { clinicId: string; clinicCode?: string; clin
     telegramLinkedAt: null,
     isTodayAppointmentReportEnabled: false,
     reportTime: env.TELEGRAM_REPORT_DEFAULT_TIME,
+    isTodayPaymentReportEnabled: false,
+    paymentReportTime: env.TELEGRAM_REPORT_DEFAULT_TIME,
     timezone: env.DEFAULT_TIMEZONE,
     lastTestSentAt: null,
     lastScheduledSentAt: null,
     lastScheduledDateKey: null,
+    lastPaymentTestSentAt: null,
+    lastPaymentScheduledSentAt: null,
+    lastPaymentScheduledDateKey: null,
     pendingLinkCode: null,
     pendingLinkCodeExpiresAt: null,
     createdAt: null,
@@ -97,10 +103,22 @@ function normalizeRecord(
         ? data.isTodayAppointmentReportEnabled
         : defaults.isTodayAppointmentReportEnabled,
     reportTime: normalizeReportTime(typeof data.reportTime === "string" ? data.reportTime : defaults.reportTime),
+    isTodayPaymentReportEnabled:
+      typeof data.isTodayPaymentReportEnabled === "boolean"
+        ? data.isTodayPaymentReportEnabled
+        : defaults.isTodayPaymentReportEnabled,
+    paymentReportTime: normalizeReportTime(
+      typeof data.paymentReportTime === "string" ? data.paymentReportTime : defaults.paymentReportTime,
+    ),
     timezone: normalizeTimeZone(typeof data.timezone === "string" ? data.timezone : defaults.timezone),
     lastTestSentAt: typeof data.lastTestSentAt === "string" ? data.lastTestSentAt : null,
     lastScheduledSentAt: typeof data.lastScheduledSentAt === "string" ? data.lastScheduledSentAt : null,
     lastScheduledDateKey: typeof data.lastScheduledDateKey === "string" ? data.lastScheduledDateKey : null,
+    lastPaymentTestSentAt: typeof data.lastPaymentTestSentAt === "string" ? data.lastPaymentTestSentAt : null,
+    lastPaymentScheduledSentAt:
+      typeof data.lastPaymentScheduledSentAt === "string" ? data.lastPaymentScheduledSentAt : null,
+    lastPaymentScheduledDateKey:
+      typeof data.lastPaymentScheduledDateKey === "string" ? data.lastPaymentScheduledDateKey : null,
     pendingLinkCode: typeof data.pendingLinkCode === "string" ? data.pendingLinkCode : null,
     pendingLinkCodeExpiresAt: typeof data.pendingLinkCodeExpiresAt === "string" ? data.pendingLinkCodeExpiresAt : null,
     createdAt: typeof data.createdAt === "string" ? data.createdAt : null,
@@ -195,6 +213,8 @@ export async function updateTelegramReportSettings(input: {
   clinicName?: string;
   isTodayAppointmentReportEnabled: boolean;
   reportTime: string;
+  isTodayPaymentReportEnabled: boolean;
+  paymentReportTime: string;
   timezone: string;
 }) {
   const existing = await getTelegramIntegrationStatus({
@@ -210,6 +230,8 @@ export async function updateTelegramReportSettings(input: {
     clinicName: input.clinicName ?? existing.clinicName,
     isTodayAppointmentReportEnabled: Boolean(input.isTodayAppointmentReportEnabled) && Boolean(existing.telegramChatId),
     reportTime: normalizeReportTime(input.reportTime),
+    isTodayPaymentReportEnabled: Boolean(input.isTodayPaymentReportEnabled) && Boolean(existing.telegramChatId),
+    paymentReportTime: normalizeReportTime(input.paymentReportTime),
     timezone: normalizeTimeZone(input.timezone),
     updatedAt: timestamp,
     createdAt: existing.createdAt ?? timestamp,
@@ -396,6 +418,7 @@ export async function unlinkTelegramIntegration(input: {
     telegramChatTitle: null,
     telegramLinkedAt: null,
     isTodayAppointmentReportEnabled: false,
+    isTodayPaymentReportEnabled: false,
     pendingLinkCode: null,
     pendingLinkCodeExpiresAt: null,
     updatedAt: timestamp,
@@ -421,43 +444,61 @@ export async function unlinkTelegramIntegration(input: {
   return buildStatus(nextRecord);
 }
 
-export async function markTelegramTestSent(clinicId: string, sentAt: string) {
+export async function markTelegramTestSent(clinicId: string, reportType: TelegramReportType, sentAt: string) {
   await settingsRef(clinicId).set(
-    {
-      lastTestSentAt: sentAt,
-      updatedAt: sentAt,
-    },
+    reportType === "appointment"
+      ? {
+          lastTestSentAt: sentAt,
+          updatedAt: sentAt,
+        }
+      : {
+          lastPaymentTestSentAt: sentAt,
+          updatedAt: sentAt,
+        },
     { merge: true },
   );
 }
 
-export async function markTelegramScheduledSent(clinicId: string, sentAt: string, dateKey: string) {
+export async function markTelegramScheduledSent(
+  clinicId: string,
+  reportType: TelegramReportType,
+  sentAt: string,
+  dateKey: string,
+) {
   await settingsRef(clinicId).set(
-    {
-      lastScheduledSentAt: sentAt,
-      lastScheduledDateKey: dateKey,
-      updatedAt: sentAt,
-    },
+    reportType === "appointment"
+      ? {
+          lastScheduledSentAt: sentAt,
+          lastScheduledDateKey: dateKey,
+          updatedAt: sentAt,
+        }
+      : {
+          lastPaymentScheduledSentAt: sentAt,
+          lastPaymentScheduledDateKey: dateKey,
+          updatedAt: sentAt,
+        },
     { merge: true },
   );
 }
 
 export async function listTelegramIntegrationsForScheduling() {
-  const snapshot = await firestoreDb()
-    .collection(SETTINGS_COLLECTION)
-    .where("isTodayAppointmentReportEnabled", "==", true)
-    .get();
+  const snapshot = await firestoreDb().collection(SETTINGS_COLLECTION).get();
 
   return snapshot.docs
     .map((doc) => normalizeRecord(doc.id, doc.data()))
-    .filter((record) => Boolean(record.telegramChatId));
+    .filter(
+      (record) =>
+        Boolean(record.telegramChatId) &&
+        (record.isTodayAppointmentReportEnabled || record.isTodayPaymentReportEnabled),
+    );
 }
 
 export async function tryAcquireTelegramScheduleLock(input: {
   clinicId: string;
+  reportType: TelegramReportType;
   dateKey: string;
 }) {
-  const lockId = `${input.clinicId}_${input.dateKey}`;
+  const lockId = `${input.clinicId}_${input.reportType}_${input.dateKey}`;
   const lockDoc = scheduleLockRef(lockId);
   const acquiredAt = nowIso();
   const expiresAt = new Date(Date.now() + 20 * 60_000).toISOString();
@@ -473,6 +514,7 @@ export async function tryAcquireTelegramScheduleLock(input: {
 
     transaction.set(lockDoc, {
       clinicId: input.clinicId,
+      reportType: input.reportType,
       dateKey: input.dateKey,
       acquiredAt,
       expiresAt,

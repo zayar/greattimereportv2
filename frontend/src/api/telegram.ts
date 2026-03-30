@@ -1,5 +1,5 @@
 import { apiClient } from "./http";
-import type { TelegramIntegrationStatus } from "../types/domain";
+import type { TelegramIntegrationStatus, TelegramReportType } from "../types/domain";
 
 type ApiEnvelope<T> = {
   success: true;
@@ -28,6 +28,8 @@ export async function generateTelegramLinkCode(payload: ClinicScopedInput) {
 export async function saveTelegramSettings(payload: ClinicScopedInput & {
   isTodayAppointmentReportEnabled: boolean;
   reportTime: string;
+  isTodayPaymentReportEnabled: boolean;
+  paymentReportTime: string;
   timezone: string;
 }) {
   const response = await apiClient.post<ApiEnvelope<TelegramIntegrationStatus>>("/integrations/telegram/settings", payload);
@@ -39,8 +41,16 @@ export async function unlinkTelegramIntegration(payload: { clinicId: string }) {
   return response.data.data;
 }
 
-export async function sendTelegramTestReport(payload: ClinicScopedInput & { timezone?: string }) {
-  const response = await apiClient.post<ApiEnvelope<{ sentAt: string; appointmentCount: number }>>(
+export async function sendTelegramTestReport(payload: ClinicScopedInput & { timezone?: string; reportType?: TelegramReportType }) {
+  const response = await apiClient.post<
+    ApiEnvelope<{
+      sentAt: string;
+      reportType: TelegramReportType;
+      appointmentCount?: number;
+      paymentCount?: number;
+      totalPaymentAmount?: number;
+    }>
+  >(
     "/integrations/telegram/send-test",
     payload,
   );

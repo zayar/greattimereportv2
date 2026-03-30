@@ -7,7 +7,7 @@ import { Panel } from "../../../components/Panel";
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import { useAccess } from "../../access/AccessProvider";
-import { daysAgo, today } from "../../../utils/date";
+import { today } from "../../../utils/date";
 import { formatCurrency, formatDate } from "../../../utils/format";
 import type { OrderRow } from "../../../types/domain";
 import { GET_SALES } from "./queries";
@@ -114,7 +114,7 @@ export function SalesPage() {
   const [showZeroValue, setShowZeroValue] = useState(() => parseBooleanSearchParam(searchParams.get("showZeroValue")));
   const [showCoOrders, setShowCoOrders] = useState(() => parseBooleanSearchParam(searchParams.get("showCoOrders")));
   const [range, setRange] = useState({
-    fromDate: searchParams.get("fromDate") ?? daysAgo(30),
+    fromDate: searchParams.get("fromDate") ?? today(),
     toDate: searchParams.get("toDate") ?? today(),
   });
 

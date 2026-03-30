@@ -6,7 +6,7 @@ import { Panel } from "../../../components/Panel";
 import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import { useAccess } from "../../access/AccessProvider";
-import { daysAgo, daysAhead } from "../../../utils/date";
+import { today } from "../../../utils/date";
 import { formatDateTime } from "../../../utils/format";
 import type { AppointmentRow } from "../../../types/domain";
 import { GET_BOOKING_DETAILS } from "./queries";
@@ -25,8 +25,8 @@ export function AppointmentsPage() {
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
   const [range, setRange] = useState({
-    fromDate: daysAgo(7),
-    toDate: daysAhead(7),
+    fromDate: today(),
+    toDate: today(),
   });
 
   const { data, loading, error } = useQuery<BookingDetailsResponse>(GET_BOOKING_DETAILS, {

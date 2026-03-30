@@ -1,6 +1,7 @@
 export type TelegramChatType = "private" | "group" | "supergroup" | "channel";
 
 export type TelegramConnectionStatus = "not_linked" | "pending" | "linked";
+export type TelegramReportType = "appointment" | "payment";
 
 export interface TelegramIntegrationRecord {
   clinicId: string;
@@ -12,10 +13,15 @@ export interface TelegramIntegrationRecord {
   telegramLinkedAt: string | null;
   isTodayAppointmentReportEnabled: boolean;
   reportTime: string;
+  isTodayPaymentReportEnabled: boolean;
+  paymentReportTime: string;
   timezone: string;
   lastTestSentAt: string | null;
   lastScheduledSentAt: string | null;
   lastScheduledDateKey: string | null;
+  lastPaymentTestSentAt: string | null;
+  lastPaymentScheduledSentAt: string | null;
+  lastPaymentScheduledDateKey: string | null;
   pendingLinkCode: string | null;
   pendingLinkCodeExpiresAt: string | null;
   createdAt: string | null;
@@ -71,4 +77,25 @@ export interface TodayAppointmentReportSummary {
   appointments: TodayAppointmentReportItem[];
   topServices: Array<{ serviceName: string; count: number }>;
   therapistLoad: Array<{ therapistName: string; count: number }>;
+}
+
+export interface TodayPaymentReportItem {
+  time: string;
+  customerName: string;
+  invoiceNumber: string;
+  paymentMethod: string;
+  amount: number;
+  sellerName: string;
+}
+
+export interface TodayPaymentReportSummary {
+  clinicName: string;
+  dateKey: string;
+  timezone: string;
+  totalPaymentAmount: number;
+  paidInvoiceCount: number;
+  paymentCount: number;
+  payments: TodayPaymentReportItem[];
+  paymentMethods: Array<{ paymentMethod: string; count: number; amount: number }>;
+  sellerTotals: Array<{ sellerName: string; count: number; amount: number }>;
 }
