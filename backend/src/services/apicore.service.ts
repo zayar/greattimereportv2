@@ -92,6 +92,20 @@ function buildBasicAuthorization(username: string, password: string) {
   return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
 }
 
+function isGraphqlAuthError(message: string | undefined) {
+  if (!message) {
+    return false;
+  }
+
+  const normalized = message.toLowerCase();
+  return (
+    normalized.includes("access forbidden") ||
+    normalized.includes("unauthorized") ||
+    normalized.includes("token is invalid") ||
+    normalized.includes("token has expired")
+  );
+}
+
 async function postGraphql<T>(body: Record<string, unknown>, authorization?: string) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -233,20 +247,24 @@ export async function fetchApicoreBookingDetails(params: {
       ? params.authorizationHeader
       : `Bearer ${await getApicoreServiceIdToken()}`;
 
-  const payload = await postGraphql<BookingDetailsPayload>(
-    {
-      query: BOOKING_DETAILS_QUERY,
-      variables: {
-        clinicCode: params.clinicCode,
-        startDate: params.startDate,
-        endDate: params.endDate,
-        status: params.status,
-        skip: params.skip ?? 0,
-        take: params.take ?? 200,
-      },
+  const requestBody = {
+    query: BOOKING_DETAILS_QUERY,
+    variables: {
+      clinicCode: params.clinicCode,
+      startDate: params.startDate,
+      endDate: params.endDate,
+      status: params.status,
+      skip: params.skip ?? 0,
+      take: params.take ?? 200,
     },
-    authorization,
-  );
+  };
+
+  let payload = await postGraphql<BookingDetailsPayload>(requestBody, authorization);
+
+  if (payload.errors?.length && params.authorizationHeader && isGraphqlAuthError(payload.errors[0]?.message)) {
+    const serviceAuthorization = `Bearer ${await getApicoreServiceIdToken()}`;
+    payload = await postGraphql<BookingDetailsPayload>(requestBody, serviceAuthorization);
+  }
 
   if (payload.errors?.length) {
     throw new HttpError(401, payload.errors[0]?.message || "Booking details query failed.");
