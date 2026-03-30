@@ -11,10 +11,6 @@ export function LoginPage() {
   const buttonWrapperRef = useRef<HTMLDivElement | null>(null);
   const [googleButtonWidth, setGoogleButtonWidth] = useState(320);
 
-  if (!loading && firebaseUser) {
-    return <Navigate to="/dashboard" replace />;
-  }
-
   useEffect(() => {
     const wrapper = buttonWrapperRef.current;
     if (!wrapper) {
@@ -41,6 +37,10 @@ export function LoginPage() {
     window.addEventListener("resize", updateWidth);
     return () => window.removeEventListener("resize", updateWidth);
   }, []);
+
+  if (!loading && firebaseUser) {
+    return <Navigate to="/dashboard" replace />;
+  }
 
   const handleSuccess = async (response: CredentialResponse) => {
     if (!response.credential) {
