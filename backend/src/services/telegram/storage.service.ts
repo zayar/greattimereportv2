@@ -403,15 +403,18 @@ export async function unlinkTelegramIntegration(input: {
   };
 
   await firestoreDb().runTransaction(async (transaction) => {
-    transaction.set(settingsRef(input.clinicId), nextRecord, { merge: true });
+    let shouldDeleteChatLink = false;
 
     if (existing.telegramChatId) {
       const existingChatLinkSnapshot = await transaction.get(chatLinkRef(existing.telegramChatId));
       const existingChatLink = existingChatLinkSnapshot.data() as { clinicId?: string } | undefined;
+      shouldDeleteChatLink = existingChatLink?.clinicId === input.clinicId;
+    }
 
-      if (existingChatLink?.clinicId === input.clinicId) {
-        transaction.delete(chatLinkRef(existing.telegramChatId));
-      }
+    transaction.set(settingsRef(input.clinicId), nextRecord, { merge: true });
+
+    if (existing.telegramChatId && shouldDeleteChatLink) {
+      transaction.delete(chatLinkRef(existing.telegramChatId));
     }
   });
 
