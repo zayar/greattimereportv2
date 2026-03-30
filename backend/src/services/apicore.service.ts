@@ -1,6 +1,10 @@
 import { env } from "../config/env.js";
 import { HttpError } from "../utils/http-error.js";
 
+const CANONICAL_APICORE_GRAPHQL_URL = "https://greattime-api-core-hs6rtohe3q-uc.a.run.app/apicore";
+const DEV_APICORE_GRAPHQL_HOST = "greattime-api-core-dev-75918019031.us-central1.run.app";
+const PROD_CLOUD_RUN_APICORE_HOST_PATTERN = /^greattime-api-core-\d+\.us-central1\.run\.app$/;
+
 const GAUTH_MUTATION = `
   mutation Gauth2($token: String!) {
     gauth2(token: $token) {
@@ -87,9 +91,39 @@ type BookingDetailsPayload = {
 };
 
 let cachedServiceIdToken: { token: string; expiresAt: number } | null = null;
+let hasLoggedApicoreUrlRewrite = false;
 
 function buildBasicAuthorization(username: string, password: string) {
   return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+}
+
+function resolveApicoreGraphqlUrl() {
+  let configuredUrl: URL;
+
+  try {
+    configuredUrl = new URL(env.APICORE_GRAPHQL_URL);
+  } catch {
+    return env.APICORE_GRAPHQL_URL;
+  }
+
+  if (configuredUrl.hostname === DEV_APICORE_GRAPHQL_HOST) {
+    return env.APICORE_GRAPHQL_URL;
+  }
+
+  // gt.apicore's production auth allowlist currently trusts the hashed public URL,
+  // not the direct Cloud Run service hostname. Normalize here so Telegram live
+  // appointment fetches do not fail when deploy vars drift to the service URL.
+  if (PROD_CLOUD_RUN_APICORE_HOST_PATTERN.test(configuredUrl.hostname)) {
+    if (!hasLoggedApicoreUrlRewrite) {
+      console.warn(
+        `[apicore] rewriting APICORE_GRAPHQL_URL host from ${configuredUrl.hostname} to ${new URL(CANONICAL_APICORE_GRAPHQL_URL).hostname}`,
+      );
+      hasLoggedApicoreUrlRewrite = true;
+    }
+    return CANONICAL_APICORE_GRAPHQL_URL;
+  }
+
+  return env.APICORE_GRAPHQL_URL;
 }
 
 function isGraphqlAuthError(message: string | undefined) {
@@ -115,7 +149,7 @@ async function postGraphql<T>(body: Record<string, unknown>, authorization?: str
     headers.Authorization = authorization;
   }
 
-  const response = await fetch(env.APICORE_GRAPHQL_URL, {
+  const response = await fetch(resolveApicoreGraphqlUrl(), {
     method: "POST",
     headers,
     body: JSON.stringify(body),
