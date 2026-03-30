@@ -844,11 +844,12 @@ a {
 .al-google-btn-wrapper {
   display: flex;
   justify-content: center;
+  width: 100%;
 }
 
-/* Make google button full width inside wrapper if possible */
+/* Keep the rendered GIS button centered without passing invalid percentage widths. */
 .al-google-btn-wrapper > div {
-  width: 100% !important;
+  max-width: 100%;
 }
 
 .al-error {
@@ -946,6 +947,14 @@ a {
     grid-template-columns: 1fr;
   }
 
+  .al-right {
+    order: 1;
+  }
+
+  .al-left {
+    order: 2;
+  }
+
   .al-left,
   .al-right {
     padding-left: 48px;
@@ -953,13 +962,13 @@ a {
   }
 
   .al-left {
-    min-height: 58vh;
-    padding-top: 120px;
+    min-height: auto;
+    padding-top: 20px;
     padding-bottom: 56px;
   }
 
   .al-right {
-    padding-top: 0;
+    padding-top: 120px;
     padding-bottom: 96px;
   }
 

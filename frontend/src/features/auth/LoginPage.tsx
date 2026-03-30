@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GoogleLogin, type CredentialResponse } from "@react-oauth/google";
 import { isAxiosError } from "axios";
 import { Navigate } from "react-router-dom";
@@ -8,10 +8,39 @@ export function LoginPage() {
   const { firebaseUser, loading, signInWithGoogleCredential } = useSession();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const buttonWrapperRef = useRef<HTMLDivElement | null>(null);
+  const [googleButtonWidth, setGoogleButtonWidth] = useState(320);
 
   if (!loading && firebaseUser) {
     return <Navigate to="/dashboard" replace />;
   }
+
+  useEffect(() => {
+    const wrapper = buttonWrapperRef.current;
+    if (!wrapper) {
+      return;
+    }
+
+    const updateWidth = () => {
+      const nextWidth = Math.floor(wrapper.getBoundingClientRect().width);
+      if (nextWidth > 0) {
+        setGoogleButtonWidth(Math.max(220, Math.min(380, nextWidth)));
+      }
+    };
+
+    updateWidth();
+
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(() => {
+        updateWidth();
+      });
+      observer.observe(wrapper);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener("resize", updateWidth);
+    return () => window.removeEventListener("resize", updateWidth);
+  }, []);
 
   const handleSuccess = async (response: CredentialResponse) => {
     if (!response.credential) {
@@ -133,7 +162,7 @@ export function LoginPage() {
                 </div>
               </div>
 
-              <div className="al-google-btn-wrapper">
+              <div className="al-google-btn-wrapper" ref={buttonWrapperRef}>
                 <GoogleLogin
                   onSuccess={handleSuccess}
                   onError={() => setError("Google sign-in failed.")}
@@ -141,7 +170,7 @@ export function LoginPage() {
                   shape="pill"
                   size="large"
                   text="continue_with"
-                  width="100%"
+                  width={String(googleButtonWidth)}
                 />
               </div>
 
