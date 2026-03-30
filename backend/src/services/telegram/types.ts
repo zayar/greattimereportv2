@@ -3,10 +3,7 @@ export type TelegramChatType = "private" | "group" | "supergroup" | "channel";
 export type TelegramConnectionStatus = "not_linked" | "pending" | "linked";
 export type TelegramReportType = "appointment" | "payment";
 
-export interface TelegramIntegrationRecord {
-  clinicId: string;
-  clinicCode: string;
-  clinicName: string;
+export interface TelegramReportSettingsRecord {
   telegramChatId: string | null;
   telegramChatType: TelegramChatType | null;
   telegramChatTitle: string | null;
@@ -22,15 +19,35 @@ export interface TelegramIntegrationRecord {
   lastPaymentTestSentAt: string | null;
   lastPaymentScheduledSentAt: string | null;
   lastPaymentScheduledDateKey: string | null;
+}
+
+export interface TelegramTargetRecord extends TelegramReportSettingsRecord {
+  clinicId: string;
+  clinicCode: string;
+  clinicName: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface TelegramIntegrationRecord extends TelegramReportSettingsRecord {
+  clinicId: string;
+  clinicCode: string;
+  clinicName: string;
   pendingLinkCode: string | null;
   pendingLinkCodeExpiresAt: string | null;
   createdAt: string | null;
   updatedAt: string | null;
 }
 
+export interface TelegramTargetStatus extends TelegramTargetRecord {
+  targetLabel: string;
+}
+
 export interface TelegramIntegrationStatus extends TelegramIntegrationRecord {
   connectionStatus: TelegramConnectionStatus;
   linkedTargetLabel: string | null;
+  linkedTargetCount: number;
+  linkedTargets: TelegramTargetStatus[];
   botUsername: string | null;
   botUrl: string | null;
   botDeepLink: string | null;

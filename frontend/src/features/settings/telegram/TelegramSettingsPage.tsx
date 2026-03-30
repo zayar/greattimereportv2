@@ -10,10 +10,18 @@ import {
   sendTelegramTestReport,
   unlinkTelegramIntegration,
 } from "../../../api/telegram";
-import type { TelegramIntegrationStatus } from "../../../types/domain";
+import type { TelegramIntegrationStatus, TelegramTargetStatus } from "../../../types/domain";
 import { useAccess } from "../../access/AccessProvider";
 
 type BusyAction = "load" | "link" | "save" | "unlink" | "test" | null;
+
+type TargetDraft = {
+  appointmentEnabled: boolean;
+  appointmentTime: string;
+  paymentEnabled: boolean;
+  paymentTime: string;
+  timezone: string;
+};
 
 const COMMON_TIMEZONES = [
   "Asia/Yangon",
@@ -40,7 +48,7 @@ function formatStatusLabel(status: TelegramIntegrationStatus | null) {
 
   switch (status.connectionStatus) {
     case "linked":
-      return "Connected";
+      return status.linkedTargetCount > 1 ? `${status.linkedTargetCount} targets connected` : "Connected";
     case "pending":
       return "Waiting for link";
     default:
@@ -74,14 +82,21 @@ function hasActivePendingCode(status: TelegramIntegrationStatus | null) {
 
 function getApiErrorMessage(error: unknown, fallback: string) {
   if (isAxiosError(error)) {
-    const apiMessage =
-      typeof error.response?.data?.error === "string"
-        ? error.response.data.error
-        : null;
+    const apiMessage = typeof error.response?.data?.error === "string" ? error.response.data.error : null;
     return apiMessage || error.message || fallback;
   }
 
   return error instanceof Error ? error.message : fallback;
+}
+
+function buildTargetDraft(target: TelegramTargetStatus): TargetDraft {
+  return {
+    appointmentEnabled: target.isTodayAppointmentReportEnabled,
+    appointmentTime: target.reportTime,
+    paymentEnabled: target.isTodayPaymentReportEnabled,
+    paymentTime: target.paymentReportTime,
+    timezone: target.timezone,
+  };
 }
 
 export function TelegramSettingsPage() {
@@ -92,11 +107,8 @@ export function TelegramSettingsPage() {
   const [busyAction, setBusyAction] = useState<BusyAction>("load");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [draftAppointmentEnabled, setDraftAppointmentEnabled] = useState(false);
-  const [draftAppointmentTime, setDraftAppointmentTime] = useState("08:00");
-  const [draftPaymentEnabled, setDraftPaymentEnabled] = useState(false);
-  const [draftPaymentTime, setDraftPaymentTime] = useState("08:00");
-  const [draftTimezone, setDraftTimezone] = useState("Asia/Yangon");
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [draftsByChatId, setDraftsByChatId] = useState<Record<string, TargetDraft>>({});
 
   const loadStatus = useCallback(
     async (showLoader = true) => {
@@ -133,14 +145,27 @@ export function TelegramSettingsPage() {
 
   useEffect(() => {
     if (!status) {
+      setDraftsByChatId({});
+      setSelectedChatId(null);
       return;
     }
 
-    setDraftAppointmentEnabled(status.isTodayAppointmentReportEnabled);
-    setDraftAppointmentTime(status.reportTime);
-    setDraftPaymentEnabled(status.isTodayPaymentReportEnabled);
-    setDraftPaymentTime(status.paymentReportTime);
-    setDraftTimezone(status.timezone);
+    setDraftsByChatId((current) => {
+      const next: Record<string, TargetDraft> = {};
+      status.linkedTargets.forEach((target) => {
+        if (target.telegramChatId) {
+          next[target.telegramChatId] = current[target.telegramChatId] ?? buildTargetDraft(target);
+        }
+      });
+      return next;
+    });
+
+    setSelectedChatId((current) => {
+      if (current && status.linkedTargets.some((target) => target.telegramChatId === current)) {
+        return current;
+      }
+      return status.linkedTargets[0]?.telegramChatId ?? null;
+    });
   }, [status]);
 
   useEffect(() => {
@@ -155,17 +180,22 @@ export function TelegramSettingsPage() {
     return () => window.clearInterval(intervalId);
   }, [loadStatus, status]);
 
+  const selectedTarget =
+    status?.linkedTargets.find((target) => target.telegramChatId === selectedChatId) ?? status?.linkedTargets[0] ?? null;
+  const selectedDraft =
+    selectedTarget?.telegramChatId ? draftsByChatId[selectedTarget.telegramChatId] ?? buildTargetDraft(selectedTarget) : null;
   const hasChanges = Boolean(
-    status &&
-      (draftAppointmentEnabled !== status.isTodayAppointmentReportEnabled ||
-        draftAppointmentTime !== status.reportTime ||
-        draftPaymentEnabled !== status.isTodayPaymentReportEnabled ||
-        draftPaymentTime !== status.paymentReportTime ||
-        draftTimezone !== status.timezone),
+    selectedTarget &&
+      selectedDraft &&
+      (selectedDraft.appointmentEnabled !== selectedTarget.isTodayAppointmentReportEnabled ||
+        selectedDraft.appointmentTime !== selectedTarget.reportTime ||
+        selectedDraft.paymentEnabled !== selectedTarget.isTodayPaymentReportEnabled ||
+        selectedDraft.paymentTime !== selectedTarget.paymentReportTime ||
+        selectedDraft.timezone !== selectedTarget.timezone),
   );
-  const isLinked = status?.connectionStatus === "linked";
+  const isLinked = (status?.linkedTargetCount ?? 0) > 0;
   const pendingCodeActive = hasActivePendingCode(status);
-  const saveButtonLabel = busyAction === "save" ? "Saving..." : "Save settings";
+  const saveButtonLabel = busyAction === "save" ? "Saving..." : "Save target settings";
 
   if (!clinic) {
     return (
@@ -176,6 +206,20 @@ export function TelegramSettingsPage() {
   }
 
   const activeClinic = clinic;
+
+  function updateSelectedDraft(patch: Partial<TargetDraft>) {
+    if (!selectedTarget?.telegramChatId || !selectedDraft) {
+      return;
+    }
+
+    setDraftsByChatId((current) => ({
+      ...current,
+      [selectedTarget.telegramChatId!]: {
+        ...selectedDraft,
+        ...patch,
+      },
+    }));
+  }
 
   async function handleGenerateLinkCode() {
     setBusyAction("link");
@@ -189,7 +233,7 @@ export function TelegramSettingsPage() {
         clinicName: activeClinic.name,
       });
       setStatus(nextStatus);
-      setNotice("New Telegram link code generated for this clinic.");
+      setNotice("New Telegram link code generated for this clinic. Connect it to another owner chat or group if needed.");
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error, "Link code could not be generated."));
     } finally {
@@ -198,6 +242,10 @@ export function TelegramSettingsPage() {
   }
 
   async function handleSaveSettings() {
+    if (!selectedTarget?.telegramChatId || !selectedDraft) {
+      return;
+    }
+
     setBusyAction("save");
     setNotice(null);
     setErrorMessage(null);
@@ -207,14 +255,15 @@ export function TelegramSettingsPage() {
         clinicId: activeClinic.id,
         clinicCode: activeClinic.code,
         clinicName: activeClinic.name,
-        isTodayAppointmentReportEnabled: draftAppointmentEnabled,
-        reportTime: draftAppointmentTime,
-        isTodayPaymentReportEnabled: draftPaymentEnabled,
-        paymentReportTime: draftPaymentTime,
-        timezone: draftTimezone,
+        chatId: selectedTarget.telegramChatId,
+        isTodayAppointmentReportEnabled: selectedDraft.appointmentEnabled,
+        reportTime: selectedDraft.appointmentTime,
+        isTodayPaymentReportEnabled: selectedDraft.paymentEnabled,
+        paymentReportTime: selectedDraft.paymentTime,
+        timezone: selectedDraft.timezone,
       });
       setStatus(nextStatus);
-      setNotice("Telegram report settings saved.");
+      setNotice(`Saved Telegram settings for ${selectedTarget.targetLabel}.`);
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error, "Telegram settings could not be saved."));
     } finally {
@@ -223,7 +272,11 @@ export function TelegramSettingsPage() {
   }
 
   async function handleUnlink() {
-    if (!window.confirm("Disconnect this clinic from the current Telegram target?")) {
+    if (!selectedTarget?.telegramChatId) {
+      return;
+    }
+
+    if (!window.confirm(`Disconnect ${selectedTarget.targetLabel} from this clinic?`)) {
       return;
     }
 
@@ -234,9 +287,10 @@ export function TelegramSettingsPage() {
     try {
       const nextStatus = await unlinkTelegramIntegration({
         clinicId: activeClinic.id,
+        chatId: selectedTarget.telegramChatId,
       });
       setStatus(nextStatus);
-      setNotice("Telegram target unlinked for this clinic.");
+      setNotice(`${selectedTarget.targetLabel} was disconnected from this clinic.`);
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error, "Telegram target could not be unlinked."));
     } finally {
@@ -245,6 +299,10 @@ export function TelegramSettingsPage() {
   }
 
   async function handleSendTest(reportType: "appointment" | "payment") {
+    if (!selectedTarget?.telegramChatId || !selectedDraft) {
+      return;
+    }
+
     setBusyAction("test");
     setNotice(null);
     setErrorMessage(null);
@@ -254,16 +312,17 @@ export function TelegramSettingsPage() {
         clinicId: activeClinic.id,
         clinicCode: activeClinic.code,
         clinicName: activeClinic.name,
-        timezone: draftTimezone,
+        chatId: selectedTarget.telegramChatId,
+        timezone: selectedDraft.timezone,
         reportType,
       });
 
       if (reportType === "payment") {
         setNotice(
-          `Payment test report sent (${result.paymentCount ?? 0} payment records, ${Math.round(result.totalPaymentAmount ?? 0).toLocaleString("en-US")} MMK).`,
+          `Payment test sent to ${selectedTarget.targetLabel} (${result.paymentCount ?? 0} payment records, ${Math.round(result.totalPaymentAmount ?? 0).toLocaleString("en-US")} MMK).`,
         );
       } else {
-        setNotice(`Appointment test report sent (${result.appointmentCount ?? 0} appointments).`);
+        setNotice(`Appointment test sent to ${selectedTarget.targetLabel} (${result.appointmentCount ?? 0} appointments).`);
       }
       await loadStatus(false);
     } catch (error) {
@@ -303,7 +362,7 @@ export function TelegramSettingsPage() {
             <button
               className="button telegram-settings__button telegram-settings__button--primary"
               onClick={() => void handleSaveSettings()}
-              disabled={busyAction !== null || !hasChanges}
+              disabled={busyAction !== null || !hasChanges || !selectedTarget}
             >
               {saveButtonLabel}
             </button>
@@ -330,16 +389,20 @@ export function TelegramSettingsPage() {
         <Panel
           className="telegram-settings__card"
           title="Connection"
-          subtitle="Link one Telegram owner chat or group to this clinic with a short-lived code."
+          subtitle="Link one or more Telegram owner chats or groups to this clinic with a short-lived code."
           action={<span className={`telegram-settings__badge telegram-settings__badge--${status?.connectionStatus ?? "idle"}`}>{formatStatusLabel(status)}</span>}
         >
           {busyAction === "load" && !status ? <div className="inline-note">Loading Telegram connection...</div> : null}
 
           <div className="telegram-settings__meta-grid">
             <article className="telegram-settings__meta-card">
-              <span>Linked target</span>
+              <span>Linked targets</span>
               <strong>{status?.linkedTargetLabel ?? "Not linked yet"}</strong>
-              <small>{status?.telegramLinkedAt ? `Linked ${formatTimestamp(status.telegramLinkedAt)}` : "Generate a code to start the bot link flow."}</small>
+              <small>
+                {status?.linkedTargetCount
+                  ? `${status.linkedTargetCount} Telegram target${status.linkedTargetCount > 1 ? "s" : ""} can receive clinic reports.`
+                  : "Generate a code to start the bot link flow."}
+              </small>
             </article>
 
             <article className="telegram-settings__meta-card">
@@ -350,12 +413,18 @@ export function TelegramSettingsPage() {
           </div>
 
           <div className="telegram-settings__callout">
-            <strong>{pendingCodeActive ? "Next step: send the code in Telegram" : isLinked ? "Telegram is connected to this clinic" : "Start by generating a link code"}</strong>
+            <strong>
+              {pendingCodeActive
+                ? "Next step: send the code in Telegram"
+                : isLinked
+                  ? "Telegram is connected to this clinic"
+                  : "Start by generating a link code"}
+            </strong>
             <span>
               {pendingCodeActive
-                ? "Open the bot, paste the code, and this page will switch to connected automatically."
+                ? "Open the bot, paste the code, and this clinic will add a new Telegram target automatically."
                 : isLinked
-                  ? "You can now send a test report or enable daily delivery below."
+                  ? "You can manage each linked target below, or generate another code to add an owner, manager, or group."
                   : "Generate a short-lived code first, then open the bot and paste the code there."}
             </span>
           </div>
@@ -395,17 +464,41 @@ export function TelegramSettingsPage() {
                 Copy code
               </button>
             ) : null}
-
-            {isLinked ? (
-              <button
-                className="button telegram-settings__button telegram-settings__button--danger"
-                onClick={() => void handleUnlink()}
-                disabled={busyAction !== null}
-              >
-                {busyAction === "unlink" ? "Disconnecting..." : "Disconnect Telegram"}
-              </button>
-            ) : null}
           </div>
+
+          {status?.linkedTargets.length ? (
+            <label className="field">
+              <span>Manage linked target</span>
+              <select value={selectedTarget?.telegramChatId ?? ""} onChange={(event) => setSelectedChatId(event.target.value)}>
+                {status.linkedTargets.map((target) => (
+                  <option key={target.telegramChatId ?? target.targetLabel} value={target.telegramChatId ?? ""}>
+                    {target.targetLabel}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+
+          {selectedTarget ? (
+            <div className="telegram-settings__meta-grid">
+              <article className="telegram-settings__meta-card">
+                <span>Selected target</span>
+                <strong>{selectedTarget.targetLabel}</strong>
+                <small>
+                  {selectedTarget.telegramChatType ? `${selectedTarget.telegramChatType} chat` : "Telegram target"} · Linked{" "}
+                  {formatTimestamp(selectedTarget.telegramLinkedAt)}
+                </small>
+              </article>
+              <article className="telegram-settings__meta-card">
+                <span>Target coverage</span>
+                <strong>
+                  {selectedDraft?.appointmentEnabled ? "Appointment on" : "Appointment off"} ·{" "}
+                  {selectedDraft?.paymentEnabled ? "Payment on" : "Payment off"}
+                </strong>
+                <small>Each linked target can receive its own report mix and send time.</small>
+              </article>
+            </div>
+          ) : null}
 
           <div className="telegram-settings__steps">
             <div>
@@ -418,7 +511,7 @@ export function TelegramSettingsPage() {
             </div>
             <div>
               <strong>3. Send the code</strong>
-              <span>Paste the code in Telegram. This clinic will refresh to connected once the bot redeems it.</span>
+              <span>Paste the code in Telegram. Each redeemed code adds one new linked target for this clinic.</span>
             </div>
           </div>
         </Panel>
@@ -426,24 +519,29 @@ export function TelegramSettingsPage() {
         <Panel
           className="telegram-settings__card"
           title="Today Appointment Report"
-          subtitle="Owner-facing operational report with today’s appointment counts, schedule list, therapist load, and top services."
+          subtitle={
+            selectedTarget
+              ? `Owner-facing operational report for ${selectedTarget.targetLabel}.`
+              : "Link a Telegram target first, then configure its daily appointment report."
+          }
         >
-          <label className={`telegram-settings__toggle ${!isLinked ? "telegram-settings__toggle--disabled" : ""}`}>
+          <label className={`telegram-settings__toggle ${!selectedTarget ? "telegram-settings__toggle--disabled" : ""}`}>
             <input
               type="checkbox"
-              checked={draftAppointmentEnabled}
-              onChange={(event) => setDraftAppointmentEnabled(event.target.checked)}
-              disabled={!isLinked}
+              checked={selectedDraft?.appointmentEnabled ?? false}
+              onChange={(event) => updateSelectedDraft({ appointmentEnabled: event.target.checked })}
+              disabled={!selectedTarget}
             />
-            <span
-              className={`telegram-settings__switch ${draftAppointmentEnabled ? "telegram-settings__switch--on" : ""}`}
-              aria-hidden="true"
-            >
+            <span className={`telegram-settings__switch ${selectedDraft?.appointmentEnabled ? "telegram-settings__switch--on" : ""}`} aria-hidden="true">
               <span className="telegram-settings__switch-handle" />
             </span>
             <div className="telegram-settings__toggle-copy">
               <strong>Enable daily Today Appointment Report</strong>
-              <span>{isLinked ? "Once enabled, the backend scheduler will send this report once per day." : "Link Telegram first to enable scheduled delivery."}</span>
+              <span>
+                {selectedTarget
+                  ? "This target will receive the daily today-appointment report at the selected time."
+                  : "Link Telegram first to enable scheduled delivery."}
+              </span>
             </div>
           </label>
 
@@ -452,14 +550,19 @@ export function TelegramSettingsPage() {
               <span>Daily send time</span>
               <input
                 type="time"
-                value={draftAppointmentTime}
-                onChange={(event) => setDraftAppointmentTime(event.target.value)}
+                value={selectedDraft?.appointmentTime ?? envDefaultTime()}
+                onChange={(event) => updateSelectedDraft({ appointmentTime: event.target.value })}
+                disabled={!selectedTarget}
               />
             </label>
 
             <label className="field">
-              <span>Shared timezone</span>
-              <select value={draftTimezone} onChange={(event) => setDraftTimezone(event.target.value)}>
+              <span>Timezone</span>
+              <select
+                value={selectedDraft?.timezone ?? timezoneOptions[0]}
+                onChange={(event) => updateSelectedDraft({ timezone: event.target.value })}
+                disabled={!selectedTarget}
+              >
                 {timezoneOptions.map((timezone) => (
                   <option key={timezone} value={timezone}>
                     {timezone}
@@ -471,15 +574,19 @@ export function TelegramSettingsPage() {
 
           <div className="telegram-settings__meta-grid">
             <article className="telegram-settings__meta-card">
-              <span>Last test send</span>
-              <strong>{formatTimestamp(status?.lastTestSentAt)}</strong>
+              <span>Last appointment test</span>
+              <strong>{formatTimestamp(selectedTarget?.lastTestSentAt)}</strong>
               <small>Manual test sends use the same report format as the daily schedule.</small>
             </article>
 
             <article className="telegram-settings__meta-card">
-              <span>Last daily send</span>
-              <strong>{formatTimestamp(status?.lastScheduledSentAt)}</strong>
-              <small>{status?.lastScheduledDateKey ? `Last scheduled report date: ${status.lastScheduledDateKey}` : "No scheduled send recorded yet."}</small>
+              <span>Last appointment daily send</span>
+              <strong>{formatTimestamp(selectedTarget?.lastScheduledSentAt)}</strong>
+              <small>
+                {selectedTarget?.lastScheduledDateKey
+                  ? `Last scheduled appointment report date: ${selectedTarget.lastScheduledDateKey}`
+                  : "No scheduled appointment send recorded yet."}
+              </small>
             </article>
           </div>
 
@@ -487,64 +594,73 @@ export function TelegramSettingsPage() {
             <button
               className="button telegram-settings__button telegram-settings__button--secondary"
               onClick={() => void handleSendTest("appointment")}
-              disabled={!isLinked || busyAction !== null}
+              disabled={!selectedTarget || busyAction !== null}
             >
               {busyAction === "test" ? "Sending..." : "Send appointment test"}
             </button>
           </div>
-
-          <p className="telegram-settings__hint">
-            V1 uses the live operational appointment source from core. Timezone is shared across Telegram reports for this clinic.
-          </p>
         </Panel>
 
         <Panel
           className="telegram-settings__card telegram-settings__card--wide"
           title="Today Payment Report"
-          subtitle="Live payment activity report with today’s payment amount, method mix, recent payments, and top sellers."
+          subtitle={
+            selectedTarget
+              ? `Live payment activity report for ${selectedTarget.targetLabel}.`
+              : "Link a Telegram target first, then configure its payment report."
+          }
         >
-          <label className={`telegram-settings__toggle ${!isLinked ? "telegram-settings__toggle--disabled" : ""}`}>
+          <label className={`telegram-settings__toggle ${!selectedTarget ? "telegram-settings__toggle--disabled" : ""}`}>
             <input
               type="checkbox"
-              checked={draftPaymentEnabled}
-              onChange={(event) => setDraftPaymentEnabled(event.target.checked)}
-              disabled={!isLinked}
+              checked={selectedDraft?.paymentEnabled ?? false}
+              onChange={(event) => updateSelectedDraft({ paymentEnabled: event.target.checked })}
+              disabled={!selectedTarget}
             />
-            <span className={`telegram-settings__switch ${draftPaymentEnabled ? "telegram-settings__switch--on" : ""}`} aria-hidden="true">
+            <span className={`telegram-settings__switch ${selectedDraft?.paymentEnabled ? "telegram-settings__switch--on" : ""}`} aria-hidden="true">
               <span className="telegram-settings__switch-handle" />
             </span>
             <div className="telegram-settings__toggle-copy">
               <strong>Enable daily Today Payment Report</strong>
-              <span>{isLinked ? "Sends a same-day live payment summary once per day at the time below." : "Link Telegram first to enable scheduled delivery."}</span>
+              <span>
+                {selectedTarget
+                  ? "This target will receive the live same-day payment summary at the selected time."
+                  : "Link Telegram first to enable scheduled delivery."}
+              </span>
             </div>
           </label>
 
           <div className="telegram-settings__two-up">
             <label className="field">
               <span>Daily send time</span>
-              <input type="time" value={draftPaymentTime} onChange={(event) => setDraftPaymentTime(event.target.value)} />
+              <input
+                type="time"
+                value={selectedDraft?.paymentTime ?? envDefaultTime()}
+                onChange={(event) => updateSelectedDraft({ paymentTime: event.target.value })}
+                disabled={!selectedTarget}
+              />
             </label>
 
             <article className="telegram-settings__meta-card telegram-settings__meta-card--inline">
-              <span>Timezone</span>
-              <strong>{draftTimezone}</strong>
-              <small>Uses the shared Telegram timezone selected above.</small>
+              <span>Selected target</span>
+              <strong>{selectedTarget?.targetLabel ?? "No target selected"}</strong>
+              <small>Use the target selector above to switch between owner chats or groups.</small>
             </article>
           </div>
 
           <div className="telegram-settings__meta-grid">
             <article className="telegram-settings__meta-card">
               <span>Last payment test</span>
-              <strong>{formatTimestamp(status?.lastPaymentTestSentAt)}</strong>
-              <small>Manual tests send the same Telegram payment message owners will receive daily.</small>
+              <strong>{formatTimestamp(selectedTarget?.lastPaymentTestSentAt)}</strong>
+              <small>Manual tests send the same payment message owners will receive daily.</small>
             </article>
 
             <article className="telegram-settings__meta-card">
               <span>Last payment daily send</span>
-              <strong>{formatTimestamp(status?.lastPaymentScheduledSentAt)}</strong>
+              <strong>{formatTimestamp(selectedTarget?.lastPaymentScheduledSentAt)}</strong>
               <small>
-                {status?.lastPaymentScheduledDateKey
-                  ? `Last scheduled payment report date: ${status.lastPaymentScheduledDateKey}`
+                {selectedTarget?.lastPaymentScheduledDateKey
+                  ? `Last scheduled payment report date: ${selectedTarget.lastPaymentScheduledDateKey}`
                   : "No scheduled payment send recorded yet."}
               </small>
             </article>
@@ -554,17 +670,28 @@ export function TelegramSettingsPage() {
             <button
               className="button telegram-settings__button telegram-settings__button--secondary"
               onClick={() => void handleSendTest("payment")}
-              disabled={!isLinked || busyAction !== null}
+              disabled={!selectedTarget || busyAction !== null}
             >
               {busyAction === "test" ? "Sending..." : "Send payment test"}
+            </button>
+            <button
+              className="button telegram-settings__button telegram-settings__button--danger"
+              onClick={() => void handleUnlink()}
+              disabled={!selectedTarget || busyAction !== null}
+            >
+              {busyAction === "unlink" ? "Disconnecting..." : "Disconnect selected target"}
             </button>
           </div>
 
           <p className="telegram-settings__hint">
-            Today Payment Report uses live core order payments instead of analytics snapshots, so owners get intraday payment activity at the exact scheduled time.
+            Each linked Telegram target has its own report toggles, times, and timezone, so one clinic can send owners and management groups different schedules without reconnecting.
           </p>
         </Panel>
       </div>
     </div>
   );
+}
+
+function envDefaultTime() {
+  return "08:00";
 }

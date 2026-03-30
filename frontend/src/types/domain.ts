@@ -39,7 +39,7 @@ export type AiLanguage = "my-MM" | "en-US";
 export type TelegramConnectionStatus = "not_linked" | "pending" | "linked";
 export type TelegramReportType = "appointment" | "payment";
 
-export interface TelegramIntegrationStatus {
+export interface TelegramTargetStatus {
   clinicId: string;
   clinicCode: string;
   clinicName: string;
@@ -58,10 +58,16 @@ export interface TelegramIntegrationStatus {
   lastPaymentTestSentAt: string | null;
   lastPaymentScheduledSentAt: string | null;
   lastPaymentScheduledDateKey: string | null;
+  targetLabel: string;
+}
+
+export interface TelegramIntegrationStatus extends TelegramTargetStatus {
   pendingLinkCode: string | null;
   pendingLinkCodeExpiresAt: string | null;
   connectionStatus: TelegramConnectionStatus;
   linkedTargetLabel: string | null;
+  linkedTargetCount: number;
+  linkedTargets: TelegramTargetStatus[];
   botUsername: string | null;
   botUrl: string | null;
   botDeepLink: string | null;

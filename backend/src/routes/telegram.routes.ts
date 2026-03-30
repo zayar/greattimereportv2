@@ -25,7 +25,11 @@ const clinicScopedBaseSchema = z.object({
   clinicName: z.string().default(""),
 });
 
-const settingsSchema = clinicScopedBaseSchema.extend({
+const clinicTargetSchema = clinicScopedBaseSchema.extend({
+  chatId: z.string().min(1),
+});
+
+const settingsSchema = clinicTargetSchema.extend({
   isTodayAppointmentReportEnabled: z.boolean(),
   reportTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   isTodayPaymentReportEnabled: z.boolean(),
@@ -33,7 +37,7 @@ const settingsSchema = clinicScopedBaseSchema.extend({
   timezone: z.string().min(1),
 });
 
-const sendTestSchema = clinicScopedBaseSchema.extend({
+const sendTestSchema = clinicTargetSchema.extend({
   reportType: z.enum(["appointment", "payment"]).default("appointment"),
   timezone: z.string().optional(),
 });
@@ -116,7 +120,7 @@ router.post(
   "/unlink",
   requireClinicAccess("body", "clinicId"),
   asyncHandler(async (req, res) => {
-    const params = clinicScopedBaseSchema.pick({ clinicId: true }).parse(req.body);
+    const params = clinicTargetSchema.pick({ clinicId: true, chatId: true }).parse(req.body);
     const status = await unlinkTelegramIntegration(params);
     const botMetadata = await getTelegramBotLinkMetadata(null);
 
@@ -136,23 +140,24 @@ router.post(
   asyncHandler(async (req, res) => {
     const params = sendTestSchema.parse(req.body);
     const status = await getTelegramIntegrationStatus(params);
+    const target = status.linkedTargets.find((item) => item.telegramChatId === params.chatId);
 
-    if (!status.telegramChatId) {
+    if (!target?.telegramChatId) {
       throw new HttpError(400, "Link Telegram first before sending a test report.");
     }
 
     const reportType = params.reportType as TelegramReportType;
-    const timezone = normalizeTimeZone(params.timezone ?? status.timezone);
+    const timezone = normalizeTimeZone(params.timezone ?? target.timezone);
     if (reportType === "payment") {
       const sent = await sendTodayPaymentReport({
-        chatId: status.telegramChatId,
-        clinicId: status.clinicId || params.clinicId,
-        clinicName: status.clinicName || params.clinicName,
+        chatId: target.telegramChatId,
+        clinicId: target.clinicId || params.clinicId,
+        clinicName: target.clinicName || params.clinicName,
         timezone,
         authorizationHeader: req.headers.authorization,
       });
 
-      await markTelegramTestSent(params.clinicId, reportType, sent.sentAt);
+      await markTelegramTestSent(params.clinicId, target.telegramChatId, reportType, sent.sentAt);
 
       res.json({
         success: true,
@@ -167,14 +172,14 @@ router.post(
     }
 
     const sent = await sendTodayAppointmentReport({
-      chatId: status.telegramChatId,
-      clinicCode: status.clinicCode || params.clinicCode,
-      clinicName: status.clinicName || params.clinicName,
+      chatId: target.telegramChatId,
+      clinicCode: target.clinicCode || params.clinicCode,
+      clinicName: target.clinicName || params.clinicName,
       timezone,
       authorizationHeader: req.headers.authorization,
     });
 
-    await markTelegramTestSent(params.clinicId, reportType, sent.sentAt);
+    await markTelegramTestSent(params.clinicId, target.telegramChatId, reportType, sent.sentAt);
 
     res.json({
       success: true,

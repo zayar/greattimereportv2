@@ -26,6 +26,7 @@ export async function generateTelegramLinkCode(payload: ClinicScopedInput) {
 }
 
 export async function saveTelegramSettings(payload: ClinicScopedInput & {
+  chatId: string;
   isTodayAppointmentReportEnabled: boolean;
   reportTime: string;
   isTodayPaymentReportEnabled: boolean;
@@ -36,12 +37,14 @@ export async function saveTelegramSettings(payload: ClinicScopedInput & {
   return response.data.data;
 }
 
-export async function unlinkTelegramIntegration(payload: { clinicId: string }) {
+export async function unlinkTelegramIntegration(payload: { clinicId: string; chatId: string }) {
   const response = await apiClient.post<ApiEnvelope<TelegramIntegrationStatus>>("/integrations/telegram/unlink", payload);
   return response.data.data;
 }
 
-export async function sendTelegramTestReport(payload: ClinicScopedInput & { timezone?: string; reportType?: TelegramReportType }) {
+export async function sendTelegramTestReport(
+  payload: ClinicScopedInput & { chatId: string; timezone?: string; reportType?: TelegramReportType },
+) {
   const response = await apiClient.post<
     ApiEnvelope<{
       sentAt: string;

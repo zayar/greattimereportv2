@@ -10,7 +10,7 @@ import {
   tryAcquireTelegramScheduleLock,
 } from "./storage.service.js";
 import { formatDateKeyInTimeZone, formatTimeKeyInTimeZone } from "./time.js";
-import type { TelegramIntegrationRecord, TelegramReportType } from "./types.js";
+import type { TelegramReportType, TelegramTargetRecord } from "./types.js";
 
 let schedulerStarted = false;
 let schedulerBusy = false;
@@ -83,6 +83,7 @@ async function runSchedulerTick() {
 
         const lockId = await tryAcquireTelegramScheduleLock({
           clinicId: record.clinicId,
+          chatId: record.telegramChatId,
           reportType: scheduledReport.type,
           dateKey,
         });
@@ -94,15 +95,15 @@ async function runSchedulerTick() {
         try {
           const sent = await sendScheduledReport(record, scheduledReport.type, now);
 
-          await markTelegramScheduledSent(record.clinicId, scheduledReport.type, sent.sentAt, dateKey);
+          await markTelegramScheduledSent(record.clinicId, record.telegramChatId, scheduledReport.type, sent.sentAt, dateKey);
           await markTelegramScheduleLockSent(lockId, sent.sentAt);
           console.log(
-            `[telegram] scheduled ${scheduledReport.type} report sent clinicId=${record.clinicId} timezone=${record.timezone}`,
+            `[telegram] scheduled ${scheduledReport.type} report sent clinicId=${record.clinicId} chatId=${record.telegramChatId} timezone=${record.timezone}`,
           );
         } catch (error) {
           await releaseTelegramScheduleLock(lockId);
           console.error(
-            `[telegram] scheduled ${scheduledReport.type} report failed clinicId=${record.clinicId} timezone=${record.timezone}`,
+            `[telegram] scheduled ${scheduledReport.type} report failed clinicId=${record.clinicId} chatId=${record.telegramChatId} timezone=${record.timezone}`,
             error,
           );
         }
@@ -115,7 +116,7 @@ async function runSchedulerTick() {
   }
 }
 
-async function sendScheduledReport(record: TelegramIntegrationRecord, reportType: TelegramReportType, referenceDate: Date) {
+async function sendScheduledReport(record: TelegramTargetRecord, reportType: TelegramReportType, referenceDate: Date) {
   if (!record.telegramChatId) {
     throw new Error("Telegram chat is not linked.");
   }

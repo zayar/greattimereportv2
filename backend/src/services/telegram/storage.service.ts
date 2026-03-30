@@ -7,15 +7,19 @@ import type {
   TelegramChatTarget,
   TelegramConnectionStatus,
   TelegramIntegrationRecord,
-  TelegramReportType,
   TelegramIntegrationStatus,
   TelegramLinkCodeRecord,
+  TelegramReportSettingsRecord,
+  TelegramReportType,
+  TelegramTargetRecord,
+  TelegramTargetStatus,
 } from "./types.js";
 
 const SETTINGS_COLLECTION = "gt_v2report_telegram_settings";
 const LINK_CODES_COLLECTION = "gt_v2report_telegram_link_codes";
 const SCHEDULE_LOCKS_COLLECTION = "gt_v2report_telegram_schedule_locks";
 const CHAT_LINKS_COLLECTION = "gt_v2report_telegram_chat_links";
+const TARGETS_COLLECTION = "gt_v2report_telegram_targets";
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 function settingsRef(clinicId: string) {
@@ -34,6 +38,14 @@ function chatLinkRef(chatId: string) {
   return firestoreDb().collection(CHAT_LINKS_COLLECTION).doc(chatId);
 }
 
+function targetDocId(clinicId: string, chatId: string) {
+  return `${encodeURIComponent(clinicId)}__${encodeURIComponent(chatId)}`;
+}
+
+function targetRef(clinicId: string, chatId: string) {
+  return firestoreDb().collection(TARGETS_COLLECTION).doc(targetDocId(clinicId, chatId));
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -42,15 +54,63 @@ function isFutureIso(value: string | null | undefined) {
   return Boolean(value && new Date(value).getTime() > Date.now());
 }
 
-function buildDefaultRecord(input: { clinicId: string; clinicCode?: string; clinicName?: string }): TelegramIntegrationRecord {
+function parseReportSettings(
+  data: Record<string, unknown> | undefined,
+  defaults: TelegramReportSettingsRecord,
+): TelegramReportSettingsRecord {
   return {
-    clinicId: input.clinicId,
-    clinicCode: input.clinicCode ?? "",
-    clinicName: input.clinicName ?? "",
-    telegramChatId: null,
-    telegramChatType: null,
-    telegramChatTitle: null,
-    telegramLinkedAt: null,
+    telegramChatId: typeof data?.telegramChatId === "string" ? data.telegramChatId : defaults.telegramChatId,
+    telegramChatType:
+      data?.telegramChatType === "private" ||
+      data?.telegramChatType === "group" ||
+      data?.telegramChatType === "supergroup" ||
+      data?.telegramChatType === "channel"
+        ? data.telegramChatType
+        : defaults.telegramChatType,
+    telegramChatTitle: typeof data?.telegramChatTitle === "string" ? data.telegramChatTitle : defaults.telegramChatTitle,
+    telegramLinkedAt: typeof data?.telegramLinkedAt === "string" ? data.telegramLinkedAt : defaults.telegramLinkedAt,
+    isTodayAppointmentReportEnabled:
+      typeof data?.isTodayAppointmentReportEnabled === "boolean"
+        ? data.isTodayAppointmentReportEnabled
+        : defaults.isTodayAppointmentReportEnabled,
+    reportTime: normalizeReportTime(typeof data?.reportTime === "string" ? data.reportTime : defaults.reportTime),
+    isTodayPaymentReportEnabled:
+      typeof data?.isTodayPaymentReportEnabled === "boolean"
+        ? data.isTodayPaymentReportEnabled
+        : defaults.isTodayPaymentReportEnabled,
+    paymentReportTime: normalizeReportTime(
+      typeof data?.paymentReportTime === "string" ? data.paymentReportTime : defaults.paymentReportTime,
+    ),
+    timezone: normalizeTimeZone(typeof data?.timezone === "string" ? data.timezone : defaults.timezone),
+    lastTestSentAt: typeof data?.lastTestSentAt === "string" ? data.lastTestSentAt : defaults.lastTestSentAt,
+    lastScheduledSentAt:
+      typeof data?.lastScheduledSentAt === "string" ? data.lastScheduledSentAt : defaults.lastScheduledSentAt,
+    lastScheduledDateKey:
+      typeof data?.lastScheduledDateKey === "string" ? data.lastScheduledDateKey : defaults.lastScheduledDateKey,
+    lastPaymentTestSentAt:
+      typeof data?.lastPaymentTestSentAt === "string" ? data.lastPaymentTestSentAt : defaults.lastPaymentTestSentAt,
+    lastPaymentScheduledSentAt:
+      typeof data?.lastPaymentScheduledSentAt === "string"
+        ? data.lastPaymentScheduledSentAt
+        : defaults.lastPaymentScheduledSentAt,
+    lastPaymentScheduledDateKey:
+      typeof data?.lastPaymentScheduledDateKey === "string"
+        ? data.lastPaymentScheduledDateKey
+        : defaults.lastPaymentScheduledDateKey,
+  };
+}
+
+function buildDefaultReportSettings(input?: {
+  telegramChatId?: string | null;
+  telegramChatType?: TelegramChatTarget["type"] | null;
+  telegramChatTitle?: string | null;
+  telegramLinkedAt?: string | null;
+}): TelegramReportSettingsRecord {
+  return {
+    telegramChatId: input?.telegramChatId ?? null,
+    telegramChatType: input?.telegramChatType ?? null,
+    telegramChatTitle: input?.telegramChatTitle ?? null,
+    telegramLinkedAt: input?.telegramLinkedAt ?? null,
     isTodayAppointmentReportEnabled: false,
     reportTime: env.TELEGRAM_REPORT_DEFAULT_TIME,
     isTodayPaymentReportEnabled: false,
@@ -62,8 +122,41 @@ function buildDefaultRecord(input: { clinicId: string; clinicCode?: string; clin
     lastPaymentTestSentAt: null,
     lastPaymentScheduledSentAt: null,
     lastPaymentScheduledDateKey: null,
+  };
+}
+
+function buildDefaultRecord(input: { clinicId: string; clinicCode?: string; clinicName?: string }): TelegramIntegrationRecord {
+  return {
+    clinicId: input.clinicId,
+    clinicCode: input.clinicCode ?? "",
+    clinicName: input.clinicName ?? "",
+    ...buildDefaultReportSettings(),
     pendingLinkCode: null,
     pendingLinkCodeExpiresAt: null,
+    createdAt: null,
+    updatedAt: null,
+  };
+}
+
+function buildDefaultTargetRecord(input: {
+  clinicId: string;
+  clinicCode?: string;
+  clinicName?: string;
+  telegramChatId: string;
+  telegramChatType: TelegramChatTarget["type"];
+  telegramChatTitle: string | null;
+  telegramLinkedAt?: string | null;
+}): TelegramTargetRecord {
+  return {
+    clinicId: input.clinicId,
+    clinicCode: input.clinicCode ?? "",
+    clinicName: input.clinicName ?? "",
+    ...buildDefaultReportSettings({
+      telegramChatId: input.telegramChatId,
+      telegramChatType: input.telegramChatType,
+      telegramChatTitle: input.telegramChatTitle,
+      telegramLinkedAt: input.telegramLinkedAt ?? null,
+    }),
     createdAt: null,
     updatedAt: null,
   };
@@ -88,37 +181,7 @@ function normalizeRecord(
     clinicId,
     clinicCode: typeof data.clinicCode === "string" && data.clinicCode.trim() ? data.clinicCode : defaults.clinicCode,
     clinicName: typeof data.clinicName === "string" && data.clinicName.trim() ? data.clinicName : defaults.clinicName,
-    telegramChatId: typeof data.telegramChatId === "string" ? data.telegramChatId : null,
-    telegramChatType:
-      data.telegramChatType === "private" ||
-      data.telegramChatType === "group" ||
-      data.telegramChatType === "supergroup" ||
-      data.telegramChatType === "channel"
-        ? data.telegramChatType
-        : null,
-    telegramChatTitle: typeof data.telegramChatTitle === "string" ? data.telegramChatTitle : null,
-    telegramLinkedAt: typeof data.telegramLinkedAt === "string" ? data.telegramLinkedAt : null,
-    isTodayAppointmentReportEnabled:
-      typeof data.isTodayAppointmentReportEnabled === "boolean"
-        ? data.isTodayAppointmentReportEnabled
-        : defaults.isTodayAppointmentReportEnabled,
-    reportTime: normalizeReportTime(typeof data.reportTime === "string" ? data.reportTime : defaults.reportTime),
-    isTodayPaymentReportEnabled:
-      typeof data.isTodayPaymentReportEnabled === "boolean"
-        ? data.isTodayPaymentReportEnabled
-        : defaults.isTodayPaymentReportEnabled,
-    paymentReportTime: normalizeReportTime(
-      typeof data.paymentReportTime === "string" ? data.paymentReportTime : defaults.paymentReportTime,
-    ),
-    timezone: normalizeTimeZone(typeof data.timezone === "string" ? data.timezone : defaults.timezone),
-    lastTestSentAt: typeof data.lastTestSentAt === "string" ? data.lastTestSentAt : null,
-    lastScheduledSentAt: typeof data.lastScheduledSentAt === "string" ? data.lastScheduledSentAt : null,
-    lastScheduledDateKey: typeof data.lastScheduledDateKey === "string" ? data.lastScheduledDateKey : null,
-    lastPaymentTestSentAt: typeof data.lastPaymentTestSentAt === "string" ? data.lastPaymentTestSentAt : null,
-    lastPaymentScheduledSentAt:
-      typeof data.lastPaymentScheduledSentAt === "string" ? data.lastPaymentScheduledSentAt : null,
-    lastPaymentScheduledDateKey:
-      typeof data.lastPaymentScheduledDateKey === "string" ? data.lastPaymentScheduledDateKey : null,
+    ...parseReportSettings(data, defaults),
     pendingLinkCode: typeof data.pendingLinkCode === "string" ? data.pendingLinkCode : null,
     pendingLinkCodeExpiresAt: typeof data.pendingLinkCodeExpiresAt === "string" ? data.pendingLinkCodeExpiresAt : null,
     createdAt: typeof data.createdAt === "string" ? data.createdAt : null,
@@ -126,8 +189,65 @@ function normalizeRecord(
   };
 }
 
-function getConnectionStatus(record: TelegramIntegrationRecord): TelegramConnectionStatus {
-  if (record.telegramChatId) {
+function normalizeTargetRecord(
+  clinicId: string,
+  data: Record<string, unknown> | undefined,
+  fallback: {
+    clinicCode?: string;
+    clinicName?: string;
+    telegramChatId: string;
+    telegramChatType?: TelegramChatTarget["type"] | null;
+    telegramChatTitle?: string | null;
+  },
+): TelegramTargetRecord {
+  const defaults = buildDefaultTargetRecord({
+    clinicId,
+    clinicCode: fallback.clinicCode,
+    clinicName: fallback.clinicName,
+    telegramChatId: fallback.telegramChatId,
+    telegramChatType: fallback.telegramChatType ?? "private",
+    telegramChatTitle: fallback.telegramChatTitle ?? null,
+  });
+
+  if (!data) {
+    return defaults;
+  }
+
+  return {
+    clinicId,
+    clinicCode: typeof data.clinicCode === "string" && data.clinicCode.trim() ? data.clinicCode : defaults.clinicCode,
+    clinicName: typeof data.clinicName === "string" && data.clinicName.trim() ? data.clinicName : defaults.clinicName,
+    ...parseReportSettings(data, defaults),
+    createdAt: typeof data.createdAt === "string" ? data.createdAt : null,
+    updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : null,
+  };
+}
+
+function getTargetLabel(target: TelegramTargetRecord) {
+  if (target.telegramChatTitle?.trim()) {
+    return target.telegramChatTitle.trim();
+  }
+
+  return target.telegramChatType === "private" ? "Telegram private chat" : `Telegram ${target.telegramChatType ?? "chat"}`;
+}
+
+function buildTargetStatus(target: TelegramTargetRecord): TelegramTargetStatus {
+  return {
+    ...target,
+    targetLabel: getTargetLabel(target),
+  };
+}
+
+function sortTargets(targets: TelegramTargetRecord[]) {
+  return [...targets].sort((left, right) => {
+    const leftTime = new Date(left.telegramLinkedAt ?? left.updatedAt ?? left.createdAt ?? 0).getTime();
+    const rightTime = new Date(right.telegramLinkedAt ?? right.updatedAt ?? right.createdAt ?? 0).getTime();
+    return rightTime - leftTime;
+  });
+}
+
+function getConnectionStatus(record: TelegramIntegrationRecord, targets: TelegramTargetRecord[]): TelegramConnectionStatus {
+  if (targets.length > 0) {
     return "linked";
   }
 
@@ -138,23 +258,48 @@ function getConnectionStatus(record: TelegramIntegrationRecord): TelegramConnect
   return "not_linked";
 }
 
-function getLinkedTargetLabel(record: TelegramIntegrationRecord) {
-  if (!record.telegramChatId) {
+function getLinkedTargetLabel(targets: TelegramTargetRecord[]) {
+  if (targets.length === 0) {
     return null;
   }
 
-  if (record.telegramChatTitle?.trim()) {
-    return record.telegramChatTitle;
+  if (targets.length === 1) {
+    return getTargetLabel(targets[0]);
   }
 
-  return record.telegramChatType === "private" ? "Telegram private chat" : `Telegram ${record.telegramChatType ?? "chat"}`;
+  return `${targets.length} Telegram targets linked`;
 }
 
-function buildStatus(record: TelegramIntegrationRecord): TelegramIntegrationStatus {
+function buildStatus(record: TelegramIntegrationRecord, targets: TelegramTargetRecord[]): TelegramIntegrationStatus {
+  const sortedTargets = sortTargets(targets);
+  const primaryTarget = sortedTargets[0] ?? null;
+  const primaryReportSettings = primaryTarget
+    ? {
+        telegramChatId: primaryTarget.telegramChatId,
+        telegramChatType: primaryTarget.telegramChatType,
+        telegramChatTitle: primaryTarget.telegramChatTitle,
+        telegramLinkedAt: primaryTarget.telegramLinkedAt,
+        isTodayAppointmentReportEnabled: primaryTarget.isTodayAppointmentReportEnabled,
+        reportTime: primaryTarget.reportTime,
+        isTodayPaymentReportEnabled: primaryTarget.isTodayPaymentReportEnabled,
+        paymentReportTime: primaryTarget.paymentReportTime,
+        timezone: primaryTarget.timezone,
+        lastTestSentAt: primaryTarget.lastTestSentAt,
+        lastScheduledSentAt: primaryTarget.lastScheduledSentAt,
+        lastScheduledDateKey: primaryTarget.lastScheduledDateKey,
+        lastPaymentTestSentAt: primaryTarget.lastPaymentTestSentAt,
+        lastPaymentScheduledSentAt: primaryTarget.lastPaymentScheduledSentAt,
+        lastPaymentScheduledDateKey: primaryTarget.lastPaymentScheduledDateKey,
+      }
+    : buildDefaultReportSettings();
+
   return {
     ...record,
-    connectionStatus: getConnectionStatus(record),
-    linkedTargetLabel: getLinkedTargetLabel(record),
+    ...primaryReportSettings,
+    connectionStatus: getConnectionStatus(record, sortedTargets),
+    linkedTargetLabel: getLinkedTargetLabel(sortedTargets),
+    linkedTargetCount: sortedTargets.length,
+    linkedTargets: sortedTargets.map(buildTargetStatus),
     botUsername: null,
     botUrl: null,
     botDeepLink: null,
@@ -175,11 +320,12 @@ async function clearExpiredPendingCode(clinicId: string, record: TelegramIntegra
     return record;
   }
 
+  const updatedAt = nowIso();
   await settingsRef(clinicId).set(
     {
       pendingLinkCode: null,
       pendingLinkCodeExpiresAt: null,
-      updatedAt: nowIso(),
+      updatedAt,
     },
     { merge: true },
   );
@@ -188,8 +334,86 @@ async function clearExpiredPendingCode(clinicId: string, record: TelegramIntegra
     ...record,
     pendingLinkCode: null,
     pendingLinkCodeExpiresAt: null,
-    updatedAt: nowIso(),
+    updatedAt,
   };
+}
+
+async function loadTargetsForClinic(clinicId: string) {
+  const snapshot = await firestoreDb().collection(TARGETS_COLLECTION).where("clinicId", "==", clinicId).get();
+
+  return snapshot.docs.map((doc) =>
+    normalizeTargetRecord(clinicId, doc.data(), {
+      clinicCode: typeof doc.data().clinicCode === "string" ? doc.data().clinicCode : "",
+      clinicName: typeof doc.data().clinicName === "string" ? doc.data().clinicName : "",
+      telegramChatId: typeof doc.data().telegramChatId === "string" ? doc.data().telegramChatId : "",
+      telegramChatType:
+        doc.data().telegramChatType === "private" ||
+        doc.data().telegramChatType === "group" ||
+        doc.data().telegramChatType === "supergroup" ||
+        doc.data().telegramChatType === "channel"
+          ? doc.data().telegramChatType
+          : "private",
+      telegramChatTitle: typeof doc.data().telegramChatTitle === "string" ? doc.data().telegramChatTitle : null,
+    }),
+  );
+}
+
+async function ensureLegacyTargetMigrated(record: TelegramIntegrationRecord) {
+  if (!record.telegramChatId || !record.telegramChatType) {
+    return;
+  }
+
+  const existingTargetSnapshot = await targetRef(record.clinicId, record.telegramChatId).get();
+  if (!existingTargetSnapshot.exists) {
+    const legacyTarget: TelegramTargetRecord = {
+      clinicId: record.clinicId,
+      clinicCode: record.clinicCode,
+      clinicName: record.clinicName,
+      telegramChatId: record.telegramChatId,
+      telegramChatType: record.telegramChatType,
+      telegramChatTitle: record.telegramChatTitle,
+      telegramLinkedAt: record.telegramLinkedAt,
+      isTodayAppointmentReportEnabled: record.isTodayAppointmentReportEnabled,
+      reportTime: record.reportTime,
+      isTodayPaymentReportEnabled: record.isTodayPaymentReportEnabled,
+      paymentReportTime: record.paymentReportTime,
+      timezone: record.timezone,
+      lastTestSentAt: record.lastTestSentAt,
+      lastScheduledSentAt: record.lastScheduledSentAt,
+      lastScheduledDateKey: record.lastScheduledDateKey,
+      lastPaymentTestSentAt: record.lastPaymentTestSentAt,
+      lastPaymentScheduledSentAt: record.lastPaymentScheduledSentAt,
+      lastPaymentScheduledDateKey: record.lastPaymentScheduledDateKey,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
+    };
+
+    await targetRef(record.clinicId, record.telegramChatId).set(legacyTarget, { merge: true });
+  }
+
+  await chatLinkRef(record.telegramChatId).set(
+    {
+      clinicId: record.clinicId,
+      clinicCode: record.clinicCode,
+      clinicName: record.clinicName,
+      telegramChatId: record.telegramChatId,
+      telegramChatType: record.telegramChatType,
+      telegramChatTitle: record.telegramChatTitle,
+      linkedAt: record.telegramLinkedAt ?? record.updatedAt ?? nowIso(),
+    },
+    { merge: true },
+  );
+}
+
+async function migrateLegacyTargetsForClinic(record: TelegramIntegrationRecord) {
+  if (record.telegramChatId) {
+    await ensureLegacyTargetMigrated(record);
+  }
+}
+
+async function listAllSettingsRecords() {
+  const snapshot = await firestoreDb().collection(SETTINGS_COLLECTION).get();
+  return snapshot.docs.map((doc) => normalizeRecord(doc.id, doc.data()));
 }
 
 export async function getTelegramIntegrationStatus(input: {
@@ -203,43 +427,64 @@ export async function getTelegramIntegrationStatus(input: {
     clinicName: input.clinicName,
   });
   const cleanedRecord = await clearExpiredPendingCode(input.clinicId, record);
+  await migrateLegacyTargetsForClinic(cleanedRecord);
+  const targets = await loadTargetsForClinic(input.clinicId);
 
-  return buildStatus(cleanedRecord);
+  return buildStatus(cleanedRecord, targets);
 }
 
 export async function updateTelegramReportSettings(input: {
   clinicId: string;
   clinicCode?: string;
   clinicName?: string;
+  chatId: string;
   isTodayAppointmentReportEnabled: boolean;
   reportTime: string;
   isTodayPaymentReportEnabled: boolean;
   paymentReportTime: string;
   timezone: string;
 }) {
-  const existing = await getTelegramIntegrationStatus({
+  const clinicStatus = await getTelegramIntegrationStatus({
     clinicId: input.clinicId,
     clinicCode: input.clinicCode,
     clinicName: input.clinicName,
   });
-  const timestamp = nowIso();
+  const existingTarget = clinicStatus.linkedTargets.find((target) => target.telegramChatId === input.chatId);
 
-  const nextRecord: TelegramIntegrationRecord = {
-    ...existing,
-    clinicCode: input.clinicCode ?? existing.clinicCode,
-    clinicName: input.clinicName ?? existing.clinicName,
-    isTodayAppointmentReportEnabled: Boolean(input.isTodayAppointmentReportEnabled) && Boolean(existing.telegramChatId),
+  if (!existingTarget) {
+    throw new HttpError(404, "Linked Telegram target not found for this clinic.");
+  }
+
+  const timestamp = nowIso();
+  const nextTarget: TelegramTargetRecord = {
+    ...existingTarget,
+    clinicCode: input.clinicCode ?? existingTarget.clinicCode,
+    clinicName: input.clinicName ?? existingTarget.clinicName,
+    isTodayAppointmentReportEnabled: Boolean(input.isTodayAppointmentReportEnabled),
     reportTime: normalizeReportTime(input.reportTime),
-    isTodayPaymentReportEnabled: Boolean(input.isTodayPaymentReportEnabled) && Boolean(existing.telegramChatId),
+    isTodayPaymentReportEnabled: Boolean(input.isTodayPaymentReportEnabled),
     paymentReportTime: normalizeReportTime(input.paymentReportTime),
     timezone: normalizeTimeZone(input.timezone),
     updatedAt: timestamp,
-    createdAt: existing.createdAt ?? timestamp,
+    createdAt: existingTarget.createdAt ?? timestamp,
   };
 
-  await settingsRef(input.clinicId).set(nextRecord, { merge: true });
+  await targetRef(input.clinicId, input.chatId).set(nextTarget, { merge: true });
+  await settingsRef(input.clinicId).set(
+    {
+      clinicCode: input.clinicCode ?? clinicStatus.clinicCode,
+      clinicName: input.clinicName ?? clinicStatus.clinicName,
+      updatedAt: timestamp,
+      createdAt: clinicStatus.createdAt ?? timestamp,
+    },
+    { merge: true },
+  );
 
-  return buildStatus(nextRecord);
+  return getTelegramIntegrationStatus({
+    clinicId: input.clinicId,
+    clinicCode: input.clinicCode,
+    clinicName: input.clinicName,
+  });
 }
 
 export async function generateTelegramLinkCode(input: {
@@ -320,8 +565,11 @@ export async function redeemTelegramLinkCode(input: {
   chat: TelegramChatTarget;
 }) {
   const codeValue = input.code.trim().toUpperCase();
+  let redeemedClinicId = "";
+  let redeemedClinicCode = "";
+  let redeemedClinicName = "";
 
-  return firestoreDb().runTransaction(async (transaction) => {
+  await firestoreDb().runTransaction(async (transaction) => {
     const codeSnapshot = await transaction.get(linkCodeRef(codeValue));
     if (!codeSnapshot.exists) {
       throw new HttpError(404, "Telegram link code not found or already expired.");
@@ -331,6 +579,10 @@ export async function redeemTelegramLinkCode(input: {
     if (!linkRecord) {
       throw new HttpError(404, "Telegram link code is invalid.");
     }
+
+    redeemedClinicId = linkRecord.clinicId;
+    redeemedClinicCode = linkRecord.clinicCode;
+    redeemedClinicName = linkRecord.clinicName;
 
     if (linkRecord.redeemedAt) {
       throw new HttpError(409, "Telegram link code has already been used.");
@@ -346,6 +598,7 @@ export async function redeemTelegramLinkCode(input: {
       clinicName: linkRecord.clinicName,
     });
     const existingChatLinkSnapshot = await transaction.get(chatLinkRef(input.chat.id));
+    const existingTargetSnapshot = await transaction.get(targetRef(linkRecord.clinicId, input.chat.id));
     const existingChatLink = existingChatLinkSnapshot.data() as
       | {
           clinicId?: string;
@@ -361,26 +614,28 @@ export async function redeemTelegramLinkCode(input: {
       );
     }
 
-    if (currentSettings.telegramChatId && currentSettings.telegramChatId !== input.chat.id) {
-      transaction.delete(chatLinkRef(currentSettings.telegramChatId));
-    }
     const timestamp = nowIso();
+    const existingTarget = normalizeTargetRecord(linkRecord.clinicId, existingTargetSnapshot.data(), {
+      clinicCode: linkRecord.clinicCode,
+      clinicName: linkRecord.clinicName,
+      telegramChatId: input.chat.id,
+      telegramChatType: input.chat.type,
+      telegramChatTitle: input.chat.title,
+    });
 
-    const nextRecord: TelegramIntegrationRecord = {
-      ...currentSettings,
+    const nextTarget: TelegramTargetRecord = {
+      ...existingTarget,
       clinicCode: linkRecord.clinicCode,
       clinicName: linkRecord.clinicName,
       telegramChatId: input.chat.id,
       telegramChatType: input.chat.type,
       telegramChatTitle: input.chat.title,
       telegramLinkedAt: timestamp,
-      pendingLinkCode: null,
-      pendingLinkCodeExpiresAt: null,
       updatedAt: timestamp,
-      createdAt: currentSettings.createdAt ?? timestamp,
+      createdAt: existingTarget.createdAt ?? timestamp,
     };
 
-    transaction.set(settingsRef(linkRecord.clinicId), nextRecord, { merge: true });
+    transaction.set(targetRef(linkRecord.clinicId, input.chat.id), nextTarget, { merge: true });
     transaction.set(chatLinkRef(input.chat.id), {
       clinicId: linkRecord.clinicId,
       clinicCode: linkRecord.clinicCode,
@@ -391,6 +646,23 @@ export async function redeemTelegramLinkCode(input: {
       linkedAt: timestamp,
     });
     transaction.set(
+      settingsRef(linkRecord.clinicId),
+      {
+        ...currentSettings,
+        clinicCode: linkRecord.clinicCode,
+        clinicName: linkRecord.clinicName,
+        telegramChatId: input.chat.id,
+        telegramChatType: input.chat.type,
+        telegramChatTitle: input.chat.title,
+        telegramLinkedAt: timestamp,
+        pendingLinkCode: null,
+        pendingLinkCodeExpiresAt: null,
+        updatedAt: timestamp,
+        createdAt: currentSettings.createdAt ?? timestamp,
+      },
+      { merge: true },
+    );
+    transaction.set(
       linkCodeRef(codeValue),
       {
         redeemedAt: timestamp,
@@ -400,52 +672,64 @@ export async function redeemTelegramLinkCode(input: {
       },
       { merge: true },
     );
+  });
 
-    return buildStatus(nextRecord);
+  return getTelegramIntegrationStatus({
+    clinicId: redeemedClinicId,
+    clinicCode: redeemedClinicCode,
+    clinicName: redeemedClinicName,
   });
 }
 
 export async function unlinkTelegramIntegration(input: {
   clinicId: string;
+  chatId: string;
 }) {
-  const existing = await getTelegramIntegrationStatus({ clinicId: input.clinicId });
-  const timestamp = nowIso();
+  const clinicStatus = await getTelegramIntegrationStatus({ clinicId: input.clinicId });
+  const existingTarget = clinicStatus.linkedTargets.find((target) => target.telegramChatId === input.chatId);
 
-  const nextRecord: TelegramIntegrationRecord = {
-    ...existing,
-    telegramChatId: null,
-    telegramChatType: null,
-    telegramChatTitle: null,
-    telegramLinkedAt: null,
-    isTodayAppointmentReportEnabled: false,
-    isTodayPaymentReportEnabled: false,
-    pendingLinkCode: null,
-    pendingLinkCodeExpiresAt: null,
-    updatedAt: timestamp,
-    createdAt: existing.createdAt ?? timestamp,
-  };
+  if (!existingTarget) {
+    throw new HttpError(404, "Telegram target not found for this clinic.");
+  }
+
+  const timestamp = nowIso();
+  const shouldClearLegacySummary = clinicStatus.telegramChatId === input.chatId;
 
   await firestoreDb().runTransaction(async (transaction) => {
-    let shouldDeleteChatLink = false;
+    const existingChatLinkSnapshot = await transaction.get(chatLinkRef(input.chatId));
+    const existingChatLink = existingChatLinkSnapshot.data() as { clinicId?: string } | undefined;
 
-    if (existing.telegramChatId) {
-      const existingChatLinkSnapshot = await transaction.get(chatLinkRef(existing.telegramChatId));
-      const existingChatLink = existingChatLinkSnapshot.data() as { clinicId?: string } | undefined;
-      shouldDeleteChatLink = existingChatLink?.clinicId === input.clinicId;
+    transaction.delete(targetRef(input.clinicId, input.chatId));
+
+    if (existingChatLink?.clinicId === input.clinicId) {
+      transaction.delete(chatLinkRef(input.chatId));
     }
 
-    transaction.set(settingsRef(input.clinicId), nextRecord, { merge: true });
-
-    if (existing.telegramChatId && shouldDeleteChatLink) {
-      transaction.delete(chatLinkRef(existing.telegramChatId));
+    if (shouldClearLegacySummary) {
+      transaction.set(
+        settingsRef(input.clinicId),
+        {
+          telegramChatId: null,
+          telegramChatType: null,
+          telegramChatTitle: null,
+          telegramLinkedAt: null,
+          updatedAt: timestamp,
+        },
+        { merge: true },
+      );
     }
   });
 
-  return buildStatus(nextRecord);
+  return getTelegramIntegrationStatus({ clinicId: input.clinicId });
 }
 
-export async function markTelegramTestSent(clinicId: string, reportType: TelegramReportType, sentAt: string) {
-  await settingsRef(clinicId).set(
+export async function markTelegramTestSent(
+  clinicId: string,
+  chatId: string,
+  reportType: TelegramReportType,
+  sentAt: string,
+) {
+  await targetRef(clinicId, chatId).set(
     reportType === "appointment"
       ? {
           lastTestSentAt: sentAt,
@@ -461,11 +745,12 @@ export async function markTelegramTestSent(clinicId: string, reportType: Telegra
 
 export async function markTelegramScheduledSent(
   clinicId: string,
+  chatId: string,
   reportType: TelegramReportType,
   sentAt: string,
   dateKey: string,
 ) {
-  await settingsRef(clinicId).set(
+  await targetRef(clinicId, chatId).set(
     reportType === "appointment"
       ? {
           lastScheduledSentAt: sentAt,
@@ -482,10 +767,26 @@ export async function markTelegramScheduledSent(
 }
 
 export async function listTelegramIntegrationsForScheduling() {
-  const snapshot = await firestoreDb().collection(SETTINGS_COLLECTION).get();
+  const settingsRecords = await listAllSettingsRecords();
+  await Promise.all(settingsRecords.map((record) => migrateLegacyTargetsForClinic(record)));
+  const targets = await firestoreDb().collection(TARGETS_COLLECTION).get();
 
-  return snapshot.docs
-    .map((doc) => normalizeRecord(doc.id, doc.data()))
+  return targets.docs
+    .map((doc) =>
+      normalizeTargetRecord(doc.data().clinicId as string, doc.data(), {
+        clinicCode: typeof doc.data().clinicCode === "string" ? doc.data().clinicCode : "",
+        clinicName: typeof doc.data().clinicName === "string" ? doc.data().clinicName : "",
+        telegramChatId: typeof doc.data().telegramChatId === "string" ? doc.data().telegramChatId : "",
+        telegramChatType:
+          doc.data().telegramChatType === "private" ||
+          doc.data().telegramChatType === "group" ||
+          doc.data().telegramChatType === "supergroup" ||
+          doc.data().telegramChatType === "channel"
+            ? doc.data().telegramChatType
+            : "private",
+        telegramChatTitle: typeof doc.data().telegramChatTitle === "string" ? doc.data().telegramChatTitle : null,
+      }),
+    )
     .filter(
       (record) =>
         Boolean(record.telegramChatId) &&
@@ -495,10 +796,11 @@ export async function listTelegramIntegrationsForScheduling() {
 
 export async function tryAcquireTelegramScheduleLock(input: {
   clinicId: string;
+  chatId: string;
   reportType: TelegramReportType;
   dateKey: string;
 }) {
-  const lockId = `${input.clinicId}_${input.reportType}_${input.dateKey}`;
+  const lockId = `${encodeURIComponent(input.clinicId)}_${encodeURIComponent(input.chatId)}_${input.reportType}_${input.dateKey}`;
   const lockDoc = scheduleLockRef(lockId);
   const acquiredAt = nowIso();
   const expiresAt = new Date(Date.now() + 20 * 60_000).toISOString();
@@ -514,6 +816,7 @@ export async function tryAcquireTelegramScheduleLock(input: {
 
     transaction.set(lockDoc, {
       clinicId: input.clinicId,
+      chatId: input.chatId,
       reportType: input.reportType,
       dateKey: input.dateKey,
       acquiredAt,
