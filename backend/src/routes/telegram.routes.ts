@@ -2,15 +2,13 @@ import { Router } from "express";
 import { z } from "zod";
 import { verifyFirebaseToken } from "../middleware/auth.js";
 import { requireClinicAccess } from "../middleware/clinic-access.js";
+import { sendTrackedTelegramReport } from "../services/telegram/delivery.service.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { HttpError } from "../utils/http-error.js";
 import { getTelegramBotLinkMetadata, handleTelegramWebhook, type TelegramUpdate } from "../services/telegram/bot.service.js";
-import { sendTodayPaymentReport } from "../services/telegram/payment-report.service.js";
-import { sendTodayAppointmentReport } from "../services/telegram/report.service.js";
 import {
   generateTelegramLinkCode,
   getTelegramIntegrationStatus,
-  markTelegramTestSent,
   unlinkTelegramIntegration,
   updateTelegramReportSettings,
 } from "../services/telegram/storage.service.js";
@@ -41,6 +39,8 @@ const sendTestSchema = clinicTargetSchema.extend({
   reportType: z.enum(["appointment", "payment"]).default("appointment"),
   timezone: z.string().optional(),
 });
+
+const resendSchema = sendTestSchema;
 
 router.post(
   "/webhook",
@@ -148,45 +148,63 @@ router.post(
 
     const reportType = params.reportType as TelegramReportType;
     const timezone = normalizeTimeZone(params.timezone ?? target.timezone);
-    if (reportType === "payment") {
-      const sent = await sendTodayPaymentReport({
-        chatId: target.telegramChatId,
-        clinicId: target.clinicId || params.clinicId,
-        clinicName: target.clinicName || params.clinicName,
-        timezone,
-        authorizationHeader: req.headers.authorization,
-      });
-
-      await markTelegramTestSent(params.clinicId, target.telegramChatId, reportType, sent.sentAt);
-
-      res.json({
-        success: true,
-        data: {
-          sentAt: sent.sentAt,
-          reportType,
-          paymentCount: sent.report.paymentCount,
-          totalPaymentAmount: sent.report.totalPaymentAmount,
-        },
-      });
-      return;
-    }
-
-    const sent = await sendTodayAppointmentReport({
-      chatId: target.telegramChatId,
+    const sent = await sendTrackedTelegramReport({
+      clinicId: target.clinicId || params.clinicId,
       clinicCode: target.clinicCode || params.clinicCode,
       clinicName: target.clinicName || params.clinicName,
+      chatId: target.telegramChatId,
+      reportType,
+      trigger: "manual_test",
       timezone,
       authorizationHeader: req.headers.authorization,
     });
-
-    await markTelegramTestSent(params.clinicId, target.telegramChatId, reportType, sent.sentAt);
 
     res.json({
       success: true,
       data: {
         sentAt: sent.sentAt,
         reportType,
-        appointmentCount: sent.report.totalAppointments,
+        appointmentCount: "totalAppointments" in sent.report ? sent.report.totalAppointments : undefined,
+        paymentCount: "paymentCount" in sent.report ? sent.report.paymentCount : undefined,
+        totalPaymentAmount: "totalPaymentAmount" in sent.report ? sent.report.totalPaymentAmount : undefined,
+      },
+    });
+  }),
+);
+
+router.post(
+  "/resend",
+  requireClinicAccess("body", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = resendSchema.parse(req.body);
+    const status = await getTelegramIntegrationStatus(params);
+    const target = status.linkedTargets.find((item) => item.telegramChatId === params.chatId);
+
+    if (!target?.telegramChatId) {
+      throw new HttpError(400, "Link Telegram first before resending a report.");
+    }
+
+    const reportType = params.reportType as TelegramReportType;
+    const timezone = normalizeTimeZone(params.timezone ?? target.timezone);
+    const sent = await sendTrackedTelegramReport({
+      clinicId: target.clinicId || params.clinicId,
+      clinicCode: target.clinicCode || params.clinicCode,
+      clinicName: target.clinicName || params.clinicName,
+      chatId: target.telegramChatId,
+      reportType,
+      trigger: "resend",
+      timezone,
+      authorizationHeader: req.headers.authorization,
+    });
+
+    res.json({
+      success: true,
+      data: {
+        sentAt: sent.sentAt,
+        reportType,
+        appointmentCount: "totalAppointments" in sent.report ? sent.report.totalAppointments : undefined,
+        paymentCount: "paymentCount" in sent.report ? sent.report.paymentCount : undefined,
+        totalPaymentAmount: "totalPaymentAmount" in sent.report ? sent.report.totalPaymentAmount : undefined,
       },
     });
   }),

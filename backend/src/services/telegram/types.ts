@@ -2,6 +2,8 @@ export type TelegramChatType = "private" | "group" | "supergroup" | "channel";
 
 export type TelegramConnectionStatus = "not_linked" | "pending" | "linked";
 export type TelegramReportType = "appointment" | "payment";
+export type TelegramDeliveryTrigger = "manual_test" | "scheduled" | "resend";
+export type TelegramDeliveryOutcome = "sent" | "failed";
 
 export interface TelegramReportSettingsRecord {
   telegramChatId: string | null;
@@ -19,6 +21,10 @@ export interface TelegramReportSettingsRecord {
   lastPaymentTestSentAt: string | null;
   lastPaymentScheduledSentAt: string | null;
   lastPaymentScheduledDateKey: string | null;
+  lastAppointmentFailureAt: string | null;
+  lastAppointmentFailureReason: string | null;
+  lastPaymentFailureAt: string | null;
+  lastPaymentFailureReason: string | null;
 }
 
 export interface TelegramTargetRecord extends TelegramReportSettingsRecord {
@@ -41,6 +47,7 @@ export interface TelegramIntegrationRecord extends TelegramReportSettingsRecord 
 
 export interface TelegramTargetStatus extends TelegramTargetRecord {
   targetLabel: string;
+  deliveryHistory: TelegramDeliveryLogEntry[];
 }
 
 export interface TelegramIntegrationStatus extends TelegramIntegrationRecord {
@@ -72,6 +79,27 @@ export interface TelegramChatTarget {
   id: string;
   type: TelegramChatType;
   title: string | null;
+}
+
+export interface TelegramDeliveryLogRecord {
+  clinicId: string;
+  clinicCode: string;
+  clinicName: string;
+  telegramChatId: string;
+  reportType: TelegramReportType;
+  trigger: TelegramDeliveryTrigger;
+  outcome: TelegramDeliveryOutcome;
+  attemptedAt: string;
+  dateKey: string | null;
+  timezone: string;
+  appointmentCount: number | null;
+  paymentCount: number | null;
+  totalPaymentAmount: number | null;
+  errorMessage: string | null;
+}
+
+export interface TelegramDeliveryLogEntry extends TelegramDeliveryLogRecord {
+  id: string;
 }
 
 export interface TodayAppointmentReportItem {

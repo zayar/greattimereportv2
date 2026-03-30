@@ -59,3 +59,21 @@ export async function sendTelegramTestReport(
   );
   return response.data.data;
 }
+
+export async function resendTelegramReport(
+  payload: ClinicScopedInput & { chatId: string; timezone?: string; reportType?: TelegramReportType },
+) {
+  const response = await apiClient.post<
+    ApiEnvelope<{
+      sentAt: string;
+      reportType: TelegramReportType;
+      appointmentCount?: number;
+      paymentCount?: number;
+      totalPaymentAmount?: number;
+    }>
+  >(
+    "/integrations/telegram/resend",
+    payload,
+  );
+  return response.data.data;
+}

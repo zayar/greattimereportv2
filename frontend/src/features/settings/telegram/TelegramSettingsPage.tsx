@@ -6,14 +6,20 @@ import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import {
   fetchTelegramIntegrationStatus,
   generateTelegramLinkCode,
+  resendTelegramReport,
   saveTelegramSettings,
   sendTelegramTestReport,
   unlinkTelegramIntegration,
 } from "../../../api/telegram";
-import type { TelegramIntegrationStatus, TelegramTargetStatus } from "../../../types/domain";
+import type {
+  TelegramDeliveryLogEntry,
+  TelegramIntegrationStatus,
+  TelegramReportType,
+  TelegramTargetStatus,
+} from "../../../types/domain";
 import { useAccess } from "../../access/AccessProvider";
 
-type BusyAction = "load" | "link" | "save" | "unlink" | "test" | null;
+type BusyAction = "load" | "link" | "save" | "unlink" | "test" | "resend" | null;
 
 type TargetDraft = {
   appointmentEnabled: boolean;
@@ -97,6 +103,38 @@ function buildTargetDraft(target: TelegramTargetStatus): TargetDraft {
     paymentTime: target.paymentReportTime,
     timezone: target.timezone,
   };
+}
+
+function getReportHistory(target: TelegramTargetStatus | null, reportType: TelegramReportType) {
+  return (target?.deliveryHistory ?? []).filter((entry) => entry.reportType === reportType);
+}
+
+function formatTriggerLabel(trigger: TelegramDeliveryLogEntry["trigger"]) {
+  switch (trigger) {
+    case "scheduled":
+      return "Scheduled";
+    case "resend":
+      return "Resend";
+    default:
+      return "Manual test";
+  }
+}
+
+function formatOutcomeLabel(outcome: TelegramDeliveryLogEntry["outcome"]) {
+  return outcome === "sent" ? "Sent" : "Failed";
+}
+
+function formatDeliverySummary(entry: TelegramDeliveryLogEntry) {
+  if (entry.outcome === "failed") {
+    return entry.errorMessage || "Delivery failed.";
+  }
+
+  if (entry.reportType === "payment") {
+    const amount = Math.round(entry.totalPaymentAmount ?? 0).toLocaleString("en-US");
+    return `${entry.paymentCount ?? 0} payment records · ${amount} MMK`;
+  }
+
+  return `${entry.appointmentCount ?? 0} appointments`;
 }
 
 export function TelegramSettingsPage() {
@@ -184,6 +222,10 @@ export function TelegramSettingsPage() {
     status?.linkedTargets.find((target) => target.telegramChatId === selectedChatId) ?? status?.linkedTargets[0] ?? null;
   const selectedDraft =
     selectedTarget?.telegramChatId ? draftsByChatId[selectedTarget.telegramChatId] ?? buildTargetDraft(selectedTarget) : null;
+  const appointmentHistory = getReportHistory(selectedTarget, "appointment");
+  const paymentHistory = getReportHistory(selectedTarget, "payment");
+  const latestAppointmentDelivery = appointmentHistory[0] ?? null;
+  const latestPaymentDelivery = paymentHistory[0] ?? null;
   const hasChanges = Boolean(
     selectedTarget &&
       selectedDraft &&
@@ -196,6 +238,10 @@ export function TelegramSettingsPage() {
   const isLinked = (status?.linkedTargetCount ?? 0) > 0;
   const pendingCodeActive = hasActivePendingCode(status);
   const saveButtonLabel = busyAction === "save" ? "Saving..." : "Save target settings";
+  const appointmentResendLabel =
+    latestAppointmentDelivery?.outcome === "failed" ? "Retry appointment send" : "Resend appointment report";
+  const paymentResendLabel =
+    latestPaymentDelivery?.outcome === "failed" ? "Retry payment send" : "Resend payment report";
 
   if (!clinic) {
     return (
@@ -327,6 +373,40 @@ export function TelegramSettingsPage() {
       await loadStatus(false);
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error, "Test report could not be sent."));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function handleResend(reportType: "appointment" | "payment") {
+    if (!selectedTarget?.telegramChatId || !selectedDraft) {
+      return;
+    }
+
+    setBusyAction("resend");
+    setNotice(null);
+    setErrorMessage(null);
+
+    try {
+      const result = await resendTelegramReport({
+        clinicId: activeClinic.id,
+        clinicCode: activeClinic.code,
+        clinicName: activeClinic.name,
+        chatId: selectedTarget.telegramChatId,
+        timezone: selectedDraft.timezone,
+        reportType,
+      });
+
+      if (reportType === "payment") {
+        setNotice(
+          `Payment report resent to ${selectedTarget.targetLabel} (${result.paymentCount ?? 0} payment records, ${Math.round(result.totalPaymentAmount ?? 0).toLocaleString("en-US")} MMK).`,
+        );
+      } else {
+        setNotice(`Appointment report resent to ${selectedTarget.targetLabel} (${result.appointmentCount ?? 0} appointments).`);
+      }
+      await loadStatus(false);
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error, "Report could not be resent."));
     } finally {
       setBusyAction(null);
     }
@@ -590,6 +670,14 @@ export function TelegramSettingsPage() {
             </article>
           </div>
 
+          {selectedTarget?.lastAppointmentFailureReason ? (
+            <div className="telegram-settings__failure-note">
+              <strong>Last appointment delivery issue</strong>
+              <span>{selectedTarget.lastAppointmentFailureReason}</span>
+              <small>Recorded {formatTimestamp(selectedTarget.lastAppointmentFailureAt)}</small>
+            </div>
+          ) : null}
+
           <div className="telegram-settings__button-row">
             <button
               className="button telegram-settings__button telegram-settings__button--secondary"
@@ -597,6 +685,13 @@ export function TelegramSettingsPage() {
               disabled={!selectedTarget || busyAction !== null}
             >
               {busyAction === "test" ? "Sending..." : "Send appointment test"}
+            </button>
+            <button
+              className="button telegram-settings__button telegram-settings__button--secondary"
+              onClick={() => void handleResend("appointment")}
+              disabled={!selectedTarget || busyAction !== null || appointmentHistory.length === 0}
+            >
+              {busyAction === "resend" ? "Resending..." : appointmentResendLabel}
             </button>
           </div>
         </Panel>
@@ -666,6 +761,14 @@ export function TelegramSettingsPage() {
             </article>
           </div>
 
+          {selectedTarget?.lastPaymentFailureReason ? (
+            <div className="telegram-settings__failure-note">
+              <strong>Last payment delivery issue</strong>
+              <span>{selectedTarget.lastPaymentFailureReason}</span>
+              <small>Recorded {formatTimestamp(selectedTarget.lastPaymentFailureAt)}</small>
+            </div>
+          ) : null}
+
           <div className="telegram-settings__button-row">
             <button
               className="button telegram-settings__button telegram-settings__button--secondary"
@@ -673,6 +776,13 @@ export function TelegramSettingsPage() {
               disabled={!selectedTarget || busyAction !== null}
             >
               {busyAction === "test" ? "Sending..." : "Send payment test"}
+            </button>
+            <button
+              className="button telegram-settings__button telegram-settings__button--secondary"
+              onClick={() => void handleResend("payment")}
+              disabled={!selectedTarget || busyAction !== null || paymentHistory.length === 0}
+            >
+              {busyAction === "resend" ? "Resending..." : paymentResendLabel}
             </button>
             <button
               className="button telegram-settings__button telegram-settings__button--danger"
@@ -686,6 +796,44 @@ export function TelegramSettingsPage() {
           <p className="telegram-settings__hint">
             Each linked Telegram target has its own report toggles, times, and timezone, so one clinic can send owners and management groups different schedules without reconnecting.
           </p>
+        </Panel>
+
+        <Panel
+          className="telegram-settings__card telegram-settings__card--wide"
+          title="Recent delivery activity"
+          subtitle={
+            selectedTarget
+              ? `Latest Telegram sends and failures for ${selectedTarget.targetLabel}.`
+              : "Link and select a Telegram target to see recent delivery history."
+          }
+        >
+          {!selectedTarget ? (
+            <div className="inline-note">Choose a Telegram target first.</div>
+          ) : selectedTarget.deliveryHistory.length === 0 ? (
+            <div className="inline-note">No delivery activity recorded for this target yet.</div>
+          ) : (
+            <div className="telegram-settings__delivery-list">
+              {selectedTarget.deliveryHistory.map((entry) => (
+                <article
+                  key={entry.id}
+                  className={`telegram-settings__delivery-item telegram-settings__delivery-item--${entry.outcome}`}
+                >
+                  <div className="telegram-settings__delivery-header">
+                    <strong>{entry.reportType === "appointment" ? "Today Appointment Report" : "Today Payment Report"}</strong>
+                    <span className={`telegram-settings__delivery-badge telegram-settings__delivery-badge--${entry.outcome}`}>
+                      {formatOutcomeLabel(entry.outcome)}
+                    </span>
+                  </div>
+                  <div className="telegram-settings__delivery-meta">
+                    <span>{formatTriggerLabel(entry.trigger)}</span>
+                    <span>{formatTimestamp(entry.attemptedAt)}</span>
+                    <span>{entry.timezone}</span>
+                  </div>
+                  <p>{formatDeliverySummary(entry)}</p>
+                </article>
+              ))}
+            </div>
+          )}
         </Panel>
       </div>
     </div>

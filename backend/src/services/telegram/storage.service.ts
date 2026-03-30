@@ -6,6 +6,9 @@ import { normalizeReportTime, normalizeTimeZone } from "./time.js";
 import type {
   TelegramChatTarget,
   TelegramConnectionStatus,
+  TelegramDeliveryLogEntry,
+  TelegramDeliveryLogRecord,
+  TelegramDeliveryTrigger,
   TelegramIntegrationRecord,
   TelegramIntegrationStatus,
   TelegramLinkCodeRecord,
@@ -20,6 +23,7 @@ const LINK_CODES_COLLECTION = "gt_v2report_telegram_link_codes";
 const SCHEDULE_LOCKS_COLLECTION = "gt_v2report_telegram_schedule_locks";
 const CHAT_LINKS_COLLECTION = "gt_v2report_telegram_chat_links";
 const TARGETS_COLLECTION = "gt_v2report_telegram_targets";
+const DELIVERY_LOGS_COLLECTION = "gt_v2report_telegram_delivery_logs";
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
 function settingsRef(clinicId: string) {
@@ -44,6 +48,10 @@ function targetDocId(clinicId: string, chatId: string) {
 
 function targetRef(clinicId: string, chatId: string) {
   return firestoreDb().collection(TARGETS_COLLECTION).doc(targetDocId(clinicId, chatId));
+}
+
+function deliveryLogsCollection() {
+  return firestoreDb().collection(DELIVERY_LOGS_COLLECTION);
 }
 
 function nowIso() {
@@ -97,6 +105,22 @@ function parseReportSettings(
       typeof data?.lastPaymentScheduledDateKey === "string"
         ? data.lastPaymentScheduledDateKey
         : defaults.lastPaymentScheduledDateKey,
+    lastAppointmentFailureAt:
+      typeof data?.lastAppointmentFailureAt === "string"
+        ? data.lastAppointmentFailureAt
+        : defaults.lastAppointmentFailureAt,
+    lastAppointmentFailureReason:
+      typeof data?.lastAppointmentFailureReason === "string"
+        ? data.lastAppointmentFailureReason
+        : defaults.lastAppointmentFailureReason,
+    lastPaymentFailureAt:
+      typeof data?.lastPaymentFailureAt === "string"
+        ? data.lastPaymentFailureAt
+        : defaults.lastPaymentFailureAt,
+    lastPaymentFailureReason:
+      typeof data?.lastPaymentFailureReason === "string"
+        ? data.lastPaymentFailureReason
+        : defaults.lastPaymentFailureReason,
   };
 }
 
@@ -122,6 +146,10 @@ function buildDefaultReportSettings(input?: {
     lastPaymentTestSentAt: null,
     lastPaymentScheduledSentAt: null,
     lastPaymentScheduledDateKey: null,
+    lastAppointmentFailureAt: null,
+    lastAppointmentFailureReason: null,
+    lastPaymentFailureAt: null,
+    lastPaymentFailureReason: null,
   };
 }
 
@@ -231,10 +259,42 @@ function getTargetLabel(target: TelegramTargetRecord) {
   return target.telegramChatType === "private" ? "Telegram private chat" : `Telegram ${target.telegramChatType ?? "chat"}`;
 }
 
-function buildTargetStatus(target: TelegramTargetRecord): TelegramTargetStatus {
+function buildDeliveryLogEntry(id: string, data: Record<string, unknown> | undefined): TelegramDeliveryLogEntry | null {
+  const clinicId = typeof data?.clinicId === "string" ? data.clinicId : null;
+  const telegramChatId = typeof data?.telegramChatId === "string" ? data.telegramChatId : null;
+  const reportType = data?.reportType === "appointment" || data?.reportType === "payment" ? data.reportType : null;
+  const trigger =
+    data?.trigger === "manual_test" || data?.trigger === "scheduled" || data?.trigger === "resend" ? data.trigger : null;
+  const outcome = data?.outcome === "sent" || data?.outcome === "failed" ? data.outcome : null;
+
+  if (!clinicId || !telegramChatId || !reportType || !trigger || !outcome) {
+    return null;
+  }
+
+  return {
+    id,
+    clinicId,
+    clinicCode: typeof data?.clinicCode === "string" ? data.clinicCode : "",
+    clinicName: typeof data?.clinicName === "string" ? data.clinicName : "",
+    telegramChatId,
+    reportType,
+    trigger,
+    outcome,
+    attemptedAt: typeof data?.attemptedAt === "string" ? data.attemptedAt : nowIso(),
+    dateKey: typeof data?.dateKey === "string" ? data.dateKey : null,
+    timezone: normalizeTimeZone(typeof data?.timezone === "string" ? data.timezone : env.DEFAULT_TIMEZONE),
+    appointmentCount: typeof data?.appointmentCount === "number" ? data.appointmentCount : null,
+    paymentCount: typeof data?.paymentCount === "number" ? data.paymentCount : null,
+    totalPaymentAmount: typeof data?.totalPaymentAmount === "number" ? data.totalPaymentAmount : null,
+    errorMessage: typeof data?.errorMessage === "string" ? data.errorMessage : null,
+  };
+}
+
+function buildTargetStatus(target: TelegramTargetRecord, deliveryHistory: TelegramDeliveryLogEntry[]): TelegramTargetStatus {
   return {
     ...target,
     targetLabel: getTargetLabel(target),
+    deliveryHistory,
   };
 }
 
@@ -270,8 +330,32 @@ function getLinkedTargetLabel(targets: TelegramTargetRecord[]) {
   return `${targets.length} Telegram targets linked`;
 }
 
-function buildStatus(record: TelegramIntegrationRecord, targets: TelegramTargetRecord[]): TelegramIntegrationStatus {
+async function loadDeliveryLogsForClinic(clinicId: string) {
+  const snapshot = await deliveryLogsCollection().where("clinicId", "==", clinicId).get();
+
+  return snapshot.docs
+    .map((doc) => buildDeliveryLogEntry(doc.id, doc.data()))
+    .filter((entry): entry is TelegramDeliveryLogEntry => Boolean(entry))
+    .sort(
+      (left, right) =>
+        new Date(right.attemptedAt).getTime() - new Date(left.attemptedAt).getTime(),
+    );
+}
+
+function buildStatus(
+  record: TelegramIntegrationRecord,
+  targets: TelegramTargetRecord[],
+  deliveries: TelegramDeliveryLogEntry[],
+): TelegramIntegrationStatus {
   const sortedTargets = sortTargets(targets);
+  const deliveriesByChatId = new Map<string, TelegramDeliveryLogEntry[]>();
+  deliveries.forEach((entry) => {
+    const current = deliveriesByChatId.get(entry.telegramChatId) ?? [];
+    if (current.length < 8) {
+      current.push(entry);
+    }
+    deliveriesByChatId.set(entry.telegramChatId, current);
+  });
   const primaryTarget = sortedTargets[0] ?? null;
   const primaryReportSettings = primaryTarget
     ? {
@@ -290,6 +374,10 @@ function buildStatus(record: TelegramIntegrationRecord, targets: TelegramTargetR
         lastPaymentTestSentAt: primaryTarget.lastPaymentTestSentAt,
         lastPaymentScheduledSentAt: primaryTarget.lastPaymentScheduledSentAt,
         lastPaymentScheduledDateKey: primaryTarget.lastPaymentScheduledDateKey,
+        lastAppointmentFailureAt: primaryTarget.lastAppointmentFailureAt,
+        lastAppointmentFailureReason: primaryTarget.lastAppointmentFailureReason,
+        lastPaymentFailureAt: primaryTarget.lastPaymentFailureAt,
+        lastPaymentFailureReason: primaryTarget.lastPaymentFailureReason,
       }
     : buildDefaultReportSettings();
 
@@ -299,7 +387,7 @@ function buildStatus(record: TelegramIntegrationRecord, targets: TelegramTargetR
     connectionStatus: getConnectionStatus(record, sortedTargets),
     linkedTargetLabel: getLinkedTargetLabel(sortedTargets),
     linkedTargetCount: sortedTargets.length,
-    linkedTargets: sortedTargets.map(buildTargetStatus),
+    linkedTargets: sortedTargets.map((target) => buildTargetStatus(target, deliveriesByChatId.get(target.telegramChatId ?? "") ?? [])),
     botUsername: null,
     botUrl: null,
     botDeepLink: null,
@@ -384,6 +472,10 @@ async function ensureLegacyTargetMigrated(record: TelegramIntegrationRecord) {
       lastPaymentTestSentAt: record.lastPaymentTestSentAt,
       lastPaymentScheduledSentAt: record.lastPaymentScheduledSentAt,
       lastPaymentScheduledDateKey: record.lastPaymentScheduledDateKey,
+      lastAppointmentFailureAt: record.lastAppointmentFailureAt,
+      lastAppointmentFailureReason: record.lastAppointmentFailureReason,
+      lastPaymentFailureAt: record.lastPaymentFailureAt,
+      lastPaymentFailureReason: record.lastPaymentFailureReason,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     };
@@ -429,8 +521,9 @@ export async function getTelegramIntegrationStatus(input: {
   const cleanedRecord = await clearExpiredPendingCode(input.clinicId, record);
   await migrateLegacyTargetsForClinic(cleanedRecord);
   const targets = await loadTargetsForClinic(input.clinicId);
+  const deliveries = await loadDeliveryLogsForClinic(input.clinicId);
 
-  return buildStatus(cleanedRecord, targets);
+  return buildStatus(cleanedRecord, targets, deliveries);
 }
 
 export async function updateTelegramReportSettings(input: {
@@ -723,47 +816,146 @@ export async function unlinkTelegramIntegration(input: {
   return getTelegramIntegrationStatus({ clinicId: input.clinicId });
 }
 
-export async function markTelegramTestSent(
-  clinicId: string,
-  chatId: string,
-  reportType: TelegramReportType,
-  sentAt: string,
-) {
-  await targetRef(clinicId, chatId).set(
-    reportType === "appointment"
-      ? {
-          lastTestSentAt: sentAt,
-          updatedAt: sentAt,
-        }
-      : {
-          lastPaymentTestSentAt: sentAt,
-          updatedAt: sentAt,
-        },
-    { merge: true },
-  );
+function sanitizeTelegramErrorMessage(errorMessage: string | null | undefined) {
+  if (!errorMessage?.trim()) {
+    return "Telegram delivery failed.";
+  }
+
+  return errorMessage.trim().slice(0, 300);
 }
 
-export async function markTelegramScheduledSent(
-  clinicId: string,
-  chatId: string,
-  reportType: TelegramReportType,
-  sentAt: string,
-  dateKey: string,
-) {
-  await targetRef(clinicId, chatId).set(
-    reportType === "appointment"
-      ? {
-          lastScheduledSentAt: sentAt,
-          lastScheduledDateKey: dateKey,
-          updatedAt: sentAt,
-        }
-      : {
-          lastPaymentScheduledSentAt: sentAt,
-          lastPaymentScheduledDateKey: dateKey,
-          updatedAt: sentAt,
-        },
-    { merge: true },
-  );
+async function createTelegramDeliveryLog(entry: TelegramDeliveryLogRecord) {
+  const docRef = deliveryLogsCollection().doc();
+  await docRef.set(entry);
+}
+
+export async function markTelegramDeliverySent(input: {
+  clinicId: string;
+  clinicCode?: string;
+  clinicName?: string;
+  chatId: string;
+  reportType: TelegramReportType;
+  trigger: TelegramDeliveryTrigger;
+  sentAt: string;
+  dateKey: string | null;
+  timezone: string;
+  appointmentCount?: number;
+  paymentCount?: number;
+  totalPaymentAmount?: number;
+}) {
+  const targetSnapshot = await targetRef(input.clinicId, input.chatId).get();
+  const targetRecord = normalizeTargetRecord(input.clinicId, targetSnapshot.data(), {
+    clinicCode: input.clinicCode,
+    clinicName: input.clinicName,
+    telegramChatId: input.chatId,
+    telegramChatType: "private",
+    telegramChatTitle: null,
+  });
+
+  await Promise.all([
+    createTelegramDeliveryLog({
+      clinicId: input.clinicId,
+      clinicCode: input.clinicCode ?? targetRecord.clinicCode,
+      clinicName: input.clinicName ?? targetRecord.clinicName,
+      telegramChatId: input.chatId,
+      reportType: input.reportType,
+      trigger: input.trigger,
+      outcome: "sent",
+      attemptedAt: input.sentAt,
+      dateKey: input.dateKey,
+      timezone: normalizeTimeZone(input.timezone),
+      appointmentCount: input.appointmentCount ?? null,
+      paymentCount: input.paymentCount ?? null,
+      totalPaymentAmount: input.totalPaymentAmount ?? null,
+      errorMessage: null,
+    }),
+    targetRef(input.clinicId, input.chatId).set(
+      input.reportType === "appointment"
+        ? {
+            ...(input.trigger === "scheduled"
+              ? {
+                  lastScheduledSentAt: input.sentAt,
+                  lastScheduledDateKey: input.dateKey,
+                }
+              : {
+                  lastTestSentAt: input.sentAt,
+                }),
+            lastAppointmentFailureAt: null,
+            lastAppointmentFailureReason: null,
+            updatedAt: input.sentAt,
+          }
+        : {
+            ...(input.trigger === "scheduled"
+              ? {
+                  lastPaymentScheduledSentAt: input.sentAt,
+                  lastPaymentScheduledDateKey: input.dateKey,
+                }
+              : {
+                  lastPaymentTestSentAt: input.sentAt,
+                }),
+            lastPaymentFailureAt: null,
+            lastPaymentFailureReason: null,
+            updatedAt: input.sentAt,
+          },
+      { merge: true },
+    ),
+  ]);
+}
+
+export async function markTelegramDeliveryFailed(input: {
+  clinicId: string;
+  clinicCode?: string;
+  clinicName?: string;
+  chatId: string;
+  reportType: TelegramReportType;
+  trigger: TelegramDeliveryTrigger;
+  attemptedAt: string;
+  dateKey: string | null;
+  timezone: string;
+  errorMessage: string;
+}) {
+  const targetSnapshot = await targetRef(input.clinicId, input.chatId).get();
+  const targetRecord = normalizeTargetRecord(input.clinicId, targetSnapshot.data(), {
+    clinicCode: input.clinicCode,
+    clinicName: input.clinicName,
+    telegramChatId: input.chatId,
+    telegramChatType: "private",
+    telegramChatTitle: null,
+  });
+  const errorMessage = sanitizeTelegramErrorMessage(input.errorMessage);
+
+  await Promise.all([
+    createTelegramDeliveryLog({
+      clinicId: input.clinicId,
+      clinicCode: input.clinicCode ?? targetRecord.clinicCode,
+      clinicName: input.clinicName ?? targetRecord.clinicName,
+      telegramChatId: input.chatId,
+      reportType: input.reportType,
+      trigger: input.trigger,
+      outcome: "failed",
+      attemptedAt: input.attemptedAt,
+      dateKey: input.dateKey,
+      timezone: normalizeTimeZone(input.timezone),
+      appointmentCount: null,
+      paymentCount: null,
+      totalPaymentAmount: null,
+      errorMessage,
+    }),
+    targetRef(input.clinicId, input.chatId).set(
+      input.reportType === "appointment"
+        ? {
+            lastAppointmentFailureAt: input.attemptedAt,
+            lastAppointmentFailureReason: errorMessage,
+            updatedAt: input.attemptedAt,
+          }
+        : {
+            lastPaymentFailureAt: input.attemptedAt,
+            lastPaymentFailureReason: errorMessage,
+            updatedAt: input.attemptedAt,
+          },
+      { merge: true },
+    ),
+  ]);
 }
 
 export async function listTelegramIntegrationsForScheduling() {

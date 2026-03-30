@@ -38,6 +38,26 @@ export type AiLanguage = "my-MM" | "en-US";
 
 export type TelegramConnectionStatus = "not_linked" | "pending" | "linked";
 export type TelegramReportType = "appointment" | "payment";
+export type TelegramDeliveryTrigger = "manual_test" | "scheduled" | "resend";
+export type TelegramDeliveryOutcome = "sent" | "failed";
+
+export interface TelegramDeliveryLogEntry {
+  id: string;
+  clinicId: string;
+  clinicCode: string;
+  clinicName: string;
+  telegramChatId: string;
+  reportType: TelegramReportType;
+  trigger: TelegramDeliveryTrigger;
+  outcome: TelegramDeliveryOutcome;
+  attemptedAt: string;
+  dateKey: string | null;
+  timezone: string;
+  appointmentCount: number | null;
+  paymentCount: number | null;
+  totalPaymentAmount: number | null;
+  errorMessage: string | null;
+}
 
 export interface TelegramTargetStatus {
   clinicId: string;
@@ -58,7 +78,12 @@ export interface TelegramTargetStatus {
   lastPaymentTestSentAt: string | null;
   lastPaymentScheduledSentAt: string | null;
   lastPaymentScheduledDateKey: string | null;
+  lastAppointmentFailureAt: string | null;
+  lastAppointmentFailureReason: string | null;
+  lastPaymentFailureAt: string | null;
+  lastPaymentFailureReason: string | null;
   targetLabel: string;
+  deliveryHistory: TelegramDeliveryLogEntry[];
 }
 
 export interface TelegramIntegrationStatus extends TelegramTargetStatus {

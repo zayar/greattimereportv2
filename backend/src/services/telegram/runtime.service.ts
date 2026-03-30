@@ -1,11 +1,10 @@
 import { env } from "../../config/env.js";
 import { ensureTelegramWebhook, isTelegramBotConfigured, startTelegramPolling } from "./bot.service.js";
-import { sendTodayPaymentReport } from "./payment-report.service.js";
-import { buildTodayAppointmentReport, sendTodayAppointmentReport } from "./report.service.js";
+import { sendTrackedTelegramReport } from "./delivery.service.js";
+import { buildTodayAppointmentReport } from "./report.service.js";
 import {
   listTelegramIntegrationsForScheduling,
   markTelegramScheduleLockSent,
-  markTelegramScheduledSent,
   releaseTelegramScheduleLock,
   tryAcquireTelegramScheduleLock,
 } from "./storage.service.js";
@@ -95,7 +94,6 @@ async function runSchedulerTick() {
         try {
           const sent = await sendScheduledReport(record, scheduledReport.type, now);
 
-          await markTelegramScheduledSent(record.clinicId, record.telegramChatId, scheduledReport.type, sent.sentAt, dateKey);
           await markTelegramScheduleLockSent(lockId, sent.sentAt);
           console.log(
             `[telegram] scheduled ${scheduledReport.type} report sent clinicId=${record.clinicId} chatId=${record.telegramChatId} timezone=${record.timezone}`,
@@ -121,20 +119,13 @@ async function sendScheduledReport(record: TelegramTargetRecord, reportType: Tel
     throw new Error("Telegram chat is not linked.");
   }
 
-  if (reportType === "payment") {
-    return sendTodayPaymentReport({
-      chatId: record.telegramChatId,
-      clinicId: record.clinicId,
-      clinicName: record.clinicName,
-      timezone: record.timezone,
-      referenceDate,
-    });
-  }
-
-  return sendTodayAppointmentReport({
-    chatId: record.telegramChatId,
+  return sendTrackedTelegramReport({
+    clinicId: record.clinicId,
     clinicCode: record.clinicCode,
     clinicName: record.clinicName,
+    chatId: record.telegramChatId,
+    reportType,
+    trigger: "scheduled",
     timezone: record.timezone,
     referenceDate,
   });

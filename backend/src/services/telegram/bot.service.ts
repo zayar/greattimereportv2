@@ -49,11 +49,12 @@ async function callTelegramApi<T>(method: string, body?: Record<string, unknown>
     body: body ? JSON.stringify(body) : undefined,
   });
 
+  const payload = (await response.json()) as TelegramApiResponse<T>;
+
   if (!response.ok) {
-    throw new HttpError(response.status, `Telegram API request failed for ${method}.`);
+    throw new HttpError(response.status, payload.description || `Telegram API request failed for ${method}.`);
   }
 
-  const payload = (await response.json()) as TelegramApiResponse<T>;
   if (!payload.ok || payload.result === undefined) {
     throw new HttpError(502, payload.description || `Telegram API request failed for ${method}.`);
   }
