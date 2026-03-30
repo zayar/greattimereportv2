@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { fetchDailyTreatment } from "../../../api/analytics";
 import { DataTable } from "../../../components/DataTable";
 import { HorizontalBarList } from "../../../components/HorizontalBarList";
@@ -8,8 +9,11 @@ import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import { useAccess } from "../../access/AccessProvider";
 import type { DailyTreatmentResponse } from "../../../types/domain";
 import { today } from "../../../utils/date";
+import { buildCustomerPortalDetailPath } from "../customer-portal/customerPortalLink";
+import { buildServicePortalDetailPath } from "../service-portal/servicePortalLink";
 
 export function DailyTreatmentPage() {
+  const navigate = useNavigate();
   const { currentClinic } = useAccess();
   const [date, setDate] = useState(today());
   const [loading, setLoading] = useState(true);
@@ -152,8 +156,49 @@ export function DailyTreatmentPage() {
             columns={[
               { key: "time", header: "Check-in", render: (row) => row.checkInTime },
               { key: "therapist", header: "Therapist", render: (row) => row.therapistName },
-              { key: "service", header: "Service", render: (row) => row.serviceName },
-              { key: "customer", header: "Customer", render: (row) => row.customerName },
+              {
+                key: "service",
+                header: "Service",
+                render: (row) => (
+                  <button
+                    type="button"
+                    className="entity-link-button entity-link-button--strong"
+                    onClick={() =>
+                      navigate(
+                        buildServicePortalDetailPath({
+                          serviceName: row.serviceName,
+                          fromDate: date,
+                          toDate: date,
+                        }),
+                      )
+                    }
+                  >
+                    {row.serviceName}
+                  </button>
+                ),
+              },
+              {
+                key: "customer",
+                header: "Customer",
+                render: (row) => (
+                  <button
+                    type="button"
+                    className="entity-link-button entity-link-button--strong"
+                    onClick={() =>
+                      navigate(
+                        buildCustomerPortalDetailPath({
+                          customerName: row.customerName,
+                          customerPhone: row.customerPhone ?? "",
+                          fromDate: date,
+                          toDate: date,
+                        }),
+                      )
+                    }
+                  >
+                    {row.customerName}
+                  </button>
+                ),
+              },
               { key: "phone", header: "Phone", render: (row) => row.customerPhone || "—" },
             ]}
           />

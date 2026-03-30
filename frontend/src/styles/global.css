@@ -58,6 +58,119 @@
   --luxe-divider: rgba(17, 24, 39, 0.048);
 }
 
+.entity-link-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: #1d6ef2;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: color 180ms ease, text-decoration-color 180ms ease;
+}
+
+.entity-link-button:hover {
+  color: #1459ca;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+}
+
+.entity-link-button--strong {
+  color: #141923;
+  font-weight: 700;
+}
+
+.entity-link-button--strong:hover {
+  color: #1459ca;
+}
+
+.therapist-portal__hero-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 20px;
+}
+
+.therapist-portal__highlight-card {
+  width: 100%;
+  display: grid;
+  gap: 14px;
+  padding: 20px 22px;
+  border: 1px solid rgba(34, 97, 70, 0.08);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(137, 191, 171, 0.18), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 250, 247, 0.96));
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 18px 32px rgba(19, 37, 28, 0.08);
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.therapist-portal__highlight-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 24px 38px rgba(19, 37, 28, 0.12);
+  border-color: rgba(34, 97, 70, 0.16);
+}
+
+.therapist-portal__highlight-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.therapist-portal__highlight-header strong {
+  font-size: 1.2rem;
+  color: #141923;
+}
+
+.therapist-portal__highlight-card p {
+  margin: 0;
+  color: #556273;
+  line-height: 1.5;
+}
+
+.therapist-portal__highlight-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+}
+
+.therapist-portal__highlight-metrics span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(20, 89, 202, 0.08);
+  color: #23508c;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.therapist-portal__row--attention td {
+  background: rgba(255, 247, 244, 0.72);
+}
+
+.therapist-portal__row--high-load td {
+  background: linear-gradient(180deg, rgba(255, 249, 241, 0.96), rgba(255, 255, 255, 0.98));
+}
+
+.therapist-portal__assumptions {
+  margin-top: -4px;
+}
+
+.therapist-detail__hero .customer-detail__action-card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(243, 250, 247, 0.96)),
+    linear-gradient(135deg, rgba(137, 191, 171, 0.18), rgba(29, 110, 242, 0.08));
+}
+
+.therapist-detail__avatar {
+  background: linear-gradient(135deg, rgba(27, 76, 59, 0.92), rgba(72, 141, 109, 0.88));
+}
+
 * {
   box-sizing: border-box;
 }

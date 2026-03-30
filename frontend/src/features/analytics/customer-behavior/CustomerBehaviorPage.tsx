@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { fetchCustomerBehavior } from "../../../api/analytics";
 import { DataTable } from "../../../components/DataTable";
 import { DateRangeControls } from "../../../components/DateRangeControls";
@@ -9,8 +10,10 @@ import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import { useAccess } from "../../access/AccessProvider";
 import { startOfCurrentYear, today } from "../../../utils/date";
 import type { CustomerBehaviorResponse } from "../../../types/domain";
+import { buildCustomerPortalDetailPath } from "../customer-portal/customerPortalLink";
 
 export function CustomerBehaviorPage() {
+  const navigate = useNavigate();
   const { currentClinic } = useAccess();
   const [granularity, setGranularity] = useState<"month" | "quarter" | "year">("month");
   const [range, setRange] = useState({
@@ -170,7 +173,28 @@ export function CustomerBehaviorPage() {
                   render: (row) =>
                     (data.topCustomers.findIndex((r) => r.customerName === row.customerName) + 1).toLocaleString("en-US"),
                 },
-                { key: "customer", header: "Member name", render: (row) => row.customerName },
+                {
+                  key: "customer",
+                  header: "Member name",
+                  render: (row) => (
+                    <button
+                      type="button"
+                      className="entity-link-button entity-link-button--strong"
+                      onClick={() =>
+                        navigate(
+                          buildCustomerPortalDetailPath({
+                            customerName: row.customerName,
+                            customerPhone: "",
+                            fromDate: range.fromDate,
+                            toDate: range.toDate,
+                          }),
+                        )
+                      }
+                    >
+                      {row.customerName}
+                    </button>
+                  ),
+                },
                 { key: "visits", header: "Visits", render: (row) => row.visitCount.toLocaleString("en-US") },
                 { key: "lastVisit", header: "Last visit", render: (row) => row.lastVisitDate },
               ]}

@@ -15,6 +15,10 @@ import type {
   SalesReportResponse,
   SalesBySellerResponse,
   ServiceBehaviorResponse,
+  TherapistPortalCustomersResponse,
+  TherapistPortalOverviewResponse,
+  TherapistPortalResponse,
+  TherapistPortalTreatmentsResponse,
   ServicePortalCustomersResponse,
   ServicePortalListResponse,
   ServicePortalOverviewResponse,
@@ -143,6 +147,69 @@ export async function fetchServiceBehavior(
 ) {
   const response = await apiClient.get<{ success: true; data: ServiceBehaviorResponse }>(
     "/analytics/service-behavior",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchTherapistPortal(
+  params: BaseParams & {
+    search: string;
+    serviceCategory: string;
+    sortBy:
+      | "treatmentsCompleted"
+      | "customersServed"
+      | "estimatedTreatmentValue"
+      | "repeatCustomerRate"
+      | "growthRate"
+      | "utilizationScore";
+    sortDirection: "asc" | "desc";
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: TherapistPortalResponse }>(
+    "/analytics/therapists",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchTherapistPortalOverview(
+  params: BaseParams & {
+    therapistName: string;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: TherapistPortalOverviewResponse }>(
+    "/analytics/therapists/detail/overview",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchTherapistPortalCustomers(
+  params: BaseParams & {
+    therapistName: string;
+    search: string;
+    page: number;
+    pageSize: number;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: TherapistPortalCustomersResponse }>(
+    "/analytics/therapists/detail/customers",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchTherapistPortalTreatments(
+  params: BaseParams & {
+    therapistName: string;
+    search: string;
+    page: number;
+    pageSize: number;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: TherapistPortalTreatmentsResponse }>(
+    "/analytics/therapists/detail/treatments",
     { params },
   );
   return response.data.data;

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { fetchServiceBehavior } from "../../../api/analytics";
 import { BarChart } from "../../../components/BarChart";
 import { DataTable } from "../../../components/DataTable";
@@ -9,8 +10,10 @@ import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import { useAccess } from "../../access/AccessProvider";
 import { startOfCurrentYear, today } from "../../../utils/date";
 import type { ServiceBehaviorResponse } from "../../../types/domain";
+import { buildServicePortalDetailPath } from "../service-portal/servicePortalLink";
 
 export function ServiceBehaviorPage() {
+  const navigate = useNavigate();
   const { currentClinic } = useAccess();
   const [granularity, setGranularity] = useState<"month" | "quarter" | "year">("month");
   const [range, setRange] = useState({
@@ -173,7 +176,27 @@ export function ServiceBehaviorPage() {
                   render: (row) =>
                     (data.topServices.findIndex((r) => r.serviceName === row.serviceName) + 1).toLocaleString("en-US"),
                 },
-                { key: "service", header: "Service name", render: (row) => row.serviceName },
+                {
+                  key: "service",
+                  header: "Service name",
+                  render: (row) => (
+                    <button
+                      type="button"
+                      className="entity-link-button entity-link-button--strong"
+                      onClick={() =>
+                        navigate(
+                          buildServicePortalDetailPath({
+                            serviceName: row.serviceName,
+                            fromDate: range.fromDate,
+                            toDate: range.toDate,
+                          }),
+                        )
+                      }
+                    >
+                      {row.serviceName}
+                    </button>
+                  ),
+                },
                 { key: "bookings", header: "Bookings", render: (row) => row.bookingCount.toLocaleString("en-US") },
               ]}
             />
@@ -207,7 +230,27 @@ export function ServiceBehaviorPage() {
               rowKey={(row) => `${row.practitionerName}-${row.serviceName}`}
               columns={[
                 { key: "practitioner", header: "Practitioner", render: (row) => row.practitionerName },
-                { key: "service", header: "Service", render: (row) => row.serviceName },
+                {
+                  key: "service",
+                  header: "Service",
+                  render: (row) => (
+                    <button
+                      type="button"
+                      className="entity-link-button entity-link-button--strong"
+                      onClick={() =>
+                        navigate(
+                          buildServicePortalDetailPath({
+                            serviceName: row.serviceName,
+                            fromDate: range.fromDate,
+                            toDate: range.toDate,
+                          }),
+                        )
+                      }
+                    >
+                      {row.serviceName}
+                    </button>
+                  ),
+                },
                 { key: "bookings", header: "Bookings", render: (row) => row.bookingCount.toLocaleString("en-US") },
               ]}
             />

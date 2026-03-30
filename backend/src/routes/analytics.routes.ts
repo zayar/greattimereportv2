@@ -6,6 +6,12 @@ import { getDashboardOverview } from "../services/reports/dashboard.service.js";
 import { getCustomerBehaviorReport } from "../services/reports/customer-behavior.service.js";
 import { getServiceBehaviorReport } from "../services/reports/service-behavior.service.js";
 import {
+  getTherapistPortalCustomers,
+  getTherapistPortalOverview,
+  getTherapistPortalReport,
+  getTherapistPortalTreatments,
+} from "../services/reports/therapist-portal.service.js";
+import {
   getServicePortalCustomers,
   getServicePortalList,
   getServicePortalOverview,
@@ -75,6 +81,16 @@ const serviceDetailSchema = baseAnalyticsSchema.extend({
 
 const servicePagedDetailSchema = baseAnalyticsSchema.extend({
   serviceName: z.string().min(1),
+  search: z.string().default(""),
+  page: z.coerce.number().min(1).default(1),
+  pageSize: z.coerce.number().min(1).max(100).default(20),
+});
+
+const therapistDetailSchema = baseAnalyticsSchema.extend({
+  therapistName: z.string().min(1),
+});
+
+const therapistPagedDetailSchema = therapistDetailSchema.extend({
   search: z.string().default(""),
   page: z.coerce.number().min(1).default(1),
   pageSize: z.coerce.number().min(1).max(100).default(20),
@@ -208,6 +224,63 @@ router.get(
       .parse(req.query);
 
     const data = await getServiceBehaviorReport(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/therapists",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = baseAnalyticsSchema
+      .extend({
+        search: z.string().default(""),
+        serviceCategory: z.string().default(""),
+        sortBy: z
+          .enum([
+            "treatmentsCompleted",
+            "customersServed",
+            "estimatedTreatmentValue",
+            "repeatCustomerRate",
+            "growthRate",
+            "utilizationScore",
+          ])
+          .default("treatmentsCompleted"),
+        sortDirection: z.enum(["asc", "desc"]).default("desc"),
+      })
+      .parse(req.query);
+
+    const data = await getTherapistPortalReport(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/therapists/detail/overview",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = therapistDetailSchema.parse(req.query);
+    const data = await getTherapistPortalOverview(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/therapists/detail/customers",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = therapistPagedDetailSchema.parse(req.query);
+    const data = await getTherapistPortalCustomers(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/therapists/detail/treatments",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = therapistPagedDetailSchema.parse(req.query);
+    const data = await getTherapistPortalTreatments(params);
     res.json({ success: true, data });
   }),
 );

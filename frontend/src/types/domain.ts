@@ -420,6 +420,175 @@ export interface ServiceBehaviorResponse {
   }>;
 }
 
+export interface TherapistPortalResponse {
+  summary: {
+    totalTherapists: number;
+    activeTherapists: number;
+    totalTreatments: number;
+    customersServed: number;
+    averageTreatmentsPerTherapist: number;
+    repeatCustomerContribution: number;
+    averageUtilizationScore: number;
+  };
+  highlight: {
+    therapistName: string;
+    treatmentsCompleted: number;
+    customersServed: number;
+    repeatCustomerRate: number;
+    estimatedTreatmentValue: number;
+    topService: string;
+    growthRate: number;
+    utilizationScore: number;
+    topTherapistShare: number;
+  } | null;
+  trend: Array<{
+    bucket: string;
+    treatmentsCompleted: number;
+    customersServed: number;
+    estimatedTreatmentValue: number;
+  }>;
+  leaderboard: Array<{
+    therapistName: string;
+    treatmentsCompleted: number;
+    customersServed: number;
+    repeatCustomers: number;
+    repeatCustomerRate: number;
+    estimatedTreatmentValue: number;
+    averageTreatmentValue: number;
+    activeDays: number;
+    lastTreatmentDate: string | null;
+    topService: string;
+    topServiceShare: number;
+    topCategory: string;
+    growthRate: number;
+    utilizationScore: number;
+    workloadBand: string;
+  }>;
+  topServices: Array<{
+    serviceName: string;
+    treatmentsCompleted: number;
+    therapistCount: number;
+    estimatedTreatmentValue: number;
+  }>;
+  serviceMix: Array<{
+    serviceCategory: string;
+    treatmentsCompleted: number;
+    estimatedTreatmentValue: number;
+  }>;
+  filterOptions: {
+    serviceCategories: string[];
+  };
+  insights: Array<{
+    id: string;
+    tone: "positive" | "attention" | "neutral";
+    title: string;
+    detail: string;
+  }>;
+  assumptions: string[];
+}
+
+export interface TherapistPortalOverviewResponse {
+  therapist: {
+    therapistName: string;
+    treatmentsCompleted: number;
+    customersServed: number;
+    repeatCustomers: number;
+    repeatCustomerRate: number;
+    estimatedTreatmentValue: number;
+    averageTreatmentValue: number;
+    activeDays: number;
+    averageTreatmentsPerActiveDay: number;
+    topService: string;
+    topServiceShare: number;
+    topCategory: string;
+    serviceBreadth: number;
+    lastTreatmentDate: string | null;
+    growthRate: number;
+    utilizationScore: number;
+    workloadBand: string;
+  };
+  trend: Array<{
+    bucket: string;
+    treatmentsCompleted: number;
+    customersServed: number;
+    estimatedTreatmentValue: number;
+  }>;
+  topServices: Array<{
+    serviceName: string;
+    serviceCategory: string;
+    treatmentsCompleted: number;
+    customersServed: number;
+    repeatCustomers: number;
+    repeatCustomerRate: number;
+    estimatedTreatmentValue: number;
+  }>;
+  serviceMix: Array<{
+    serviceCategory: string;
+    treatmentsCompleted: number;
+    estimatedTreatmentValue: number;
+  }>;
+  recentCustomers: Array<{
+    customerName: string;
+    phoneNumber: string;
+    memberId: string;
+    visitCount: number;
+    estimatedTreatmentValue: number;
+    lastVisitDate: string | null;
+    lastService: string;
+    relationship: string;
+  }>;
+  busiestPeriods: {
+    weekdays: Array<{
+      label: string;
+      treatmentCount: number;
+    }>;
+    hours: Array<{
+      label: string;
+      treatmentCount: number;
+    }>;
+  };
+  insights: Array<{
+    id: string;
+    tone: "positive" | "attention" | "neutral";
+    title: string;
+    detail: string;
+  }>;
+  recommendedAction: string;
+  assumptions: string[];
+}
+
+export interface TherapistPortalCustomersResponse {
+  summary: {
+    customersServed: number;
+    repeatCustomers: number;
+    averageTreatmentValuePerCustomer: number;
+  };
+  rows: Array<{
+    customerName: string;
+    phoneNumber: string;
+    memberId: string;
+    visitCount: number;
+    estimatedTreatmentValue: number;
+    lastVisitDate: string | null;
+    lastService: string;
+    relationship: string;
+  }>;
+  totalCount: number;
+}
+
+export interface TherapistPortalTreatmentsResponse {
+  rows: Array<{
+    checkInTime: string;
+    customerName: string;
+    phoneNumber: string;
+    memberId: string;
+    serviceName: string;
+    serviceCategory: string;
+    estimatedTreatmentValue: number;
+  }>;
+  totalCount: number;
+}
+
 export interface ServicePortalListResponse {
   summary: {
     serviceCount: number;
