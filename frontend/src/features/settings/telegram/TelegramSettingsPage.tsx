@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { isAxiosError } from "axios";
 import { PageHeader } from "../../../components/PageHeader";
 import { Panel } from "../../../components/Panel";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
@@ -71,6 +72,18 @@ function hasActivePendingCode(status: TelegramIntegrationStatus | null) {
   return new Date(status.pendingLinkCodeExpiresAt).getTime() > Date.now();
 }
 
+function getApiErrorMessage(error: unknown, fallback: string) {
+  if (isAxiosError(error)) {
+    const apiMessage =
+      typeof error.response?.data?.error === "string"
+        ? error.response.data.error
+        : null;
+    return apiMessage || error.message || fallback;
+  }
+
+  return error instanceof Error ? error.message : fallback;
+}
+
 export function TelegramSettingsPage() {
   const { currentClinic } = useAccess();
   const clinic = currentClinic;
@@ -104,7 +117,7 @@ export function TelegramSettingsPage() {
         });
         setStatus(nextStatus);
       } catch (error) {
-        setErrorMessage(error instanceof Error ? error.message : "Telegram settings could not be loaded.");
+        setErrorMessage(getApiErrorMessage(error, "Telegram settings could not be loaded."));
       } finally {
         setBusyAction((current) => (current === "load" ? null : current));
       }
@@ -171,7 +184,7 @@ export function TelegramSettingsPage() {
       setStatus(nextStatus);
       setNotice("New Telegram link code generated for this clinic.");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Link code could not be generated.");
+      setErrorMessage(getApiErrorMessage(error, "Link code could not be generated."));
     } finally {
       setBusyAction(null);
     }
@@ -194,7 +207,7 @@ export function TelegramSettingsPage() {
       setStatus(nextStatus);
       setNotice("Telegram report settings saved.");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Telegram settings could not be saved.");
+      setErrorMessage(getApiErrorMessage(error, "Telegram settings could not be saved."));
     } finally {
       setBusyAction(null);
     }
@@ -216,7 +229,7 @@ export function TelegramSettingsPage() {
       setStatus(nextStatus);
       setNotice("Telegram target unlinked for this clinic.");
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Telegram target could not be unlinked.");
+      setErrorMessage(getApiErrorMessage(error, "Telegram target could not be unlinked."));
     } finally {
       setBusyAction(null);
     }
@@ -238,7 +251,7 @@ export function TelegramSettingsPage() {
       setNotice(`Test report sent (${result.appointmentCount} appointments).`);
       await loadStatus(false);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Test report could not be sent.");
+      setErrorMessage(getApiErrorMessage(error, "Test report could not be sent."));
     } finally {
       setBusyAction(null);
     }

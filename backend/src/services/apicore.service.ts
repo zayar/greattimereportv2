@@ -242,10 +242,11 @@ export async function fetchApicoreBookingDetails(params: {
   take?: number;
   authorizationHeader?: string;
 }) {
-  const authorization =
-    params.authorizationHeader && params.authorizationHeader.trim().length > 0
-      ? params.authorizationHeader
-      : `Bearer ${await getApicoreServiceIdToken()}`;
+  const usingCallerAuthorization =
+    Boolean(params.authorizationHeader) && params.authorizationHeader!.trim().length > 0;
+  const authorization = usingCallerAuthorization
+    ? params.authorizationHeader!.trim()
+    : `Bearer ${await getApicoreServiceIdToken()}`;
 
   const requestBody = {
     query: BOOKING_DETAILS_QUERY,
@@ -259,9 +260,20 @@ export async function fetchApicoreBookingDetails(params: {
     },
   };
 
-  let payload = await postGraphql<BookingDetailsPayload>(requestBody, authorization);
+  let payload: GraphQLResponse<BookingDetailsPayload>;
 
-  if (payload.errors?.length && params.authorizationHeader && isGraphqlAuthError(payload.errors[0]?.message)) {
+  try {
+    payload = await postGraphql<BookingDetailsPayload>(requestBody, authorization);
+  } catch (error) {
+    if (usingCallerAuthorization && error instanceof HttpError && error.statusCode === 401) {
+      const serviceAuthorization = `Bearer ${await getApicoreServiceIdToken()}`;
+      payload = await postGraphql<BookingDetailsPayload>(requestBody, serviceAuthorization);
+    } else {
+      throw error;
+    }
+  }
+
+  if (payload.errors?.length && usingCallerAuthorization && isGraphqlAuthError(payload.errors[0]?.message)) {
     const serviceAuthorization = `Bearer ${await getApicoreServiceIdToken()}`;
     payload = await postGraphql<BookingDetailsPayload>(requestBody, serviceAuthorization);
   }
