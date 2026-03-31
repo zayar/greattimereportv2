@@ -523,17 +523,24 @@ export async function getTherapistPortalReport(params: TherapistListParams) {
           SELECT therapistName, serviceName AS topService, treatmentCount AS topServiceCount
           FROM (
             SELECT
-              therapistName,
-              serviceName,
-              COUNT(*) AS treatmentCount,
-              MAX(checkInTime) AS latestVisitDate,
+              grouped.therapistName,
+              grouped.serviceName,
+              grouped.treatmentCount,
+              grouped.latestVisitDate,
               ROW_NUMBER() OVER (
-                PARTITION BY therapistName
-                ORDER BY treatmentCount DESC, latestVisitDate DESC, serviceName ASC
+                PARTITION BY grouped.therapistName
+                ORDER BY grouped.treatmentCount DESC, grouped.latestVisitDate DESC, grouped.serviceName ASC
               ) AS rowNum
-            FROM PeriodVisits
-            WHERE COALESCE(serviceName, '') != ''
-            GROUP BY therapistName, serviceName
+            FROM (
+              SELECT
+                therapistName,
+                serviceName,
+                COUNT(*) AS treatmentCount,
+                MAX(checkInTime) AS latestVisitDate
+              FROM PeriodVisits
+              WHERE COALESCE(serviceName, '') != ''
+              GROUP BY therapistName, serviceName
+            ) AS grouped
           )
           WHERE rowNum = 1
         ),
@@ -541,20 +548,27 @@ export async function getTherapistPortalReport(params: TherapistListParams) {
           SELECT therapistName, serviceCategory AS topCategory, treatmentCount AS topCategoryCount
           FROM (
             SELECT
-              therapistName,
-              serviceCategory,
-              COUNT(*) AS treatmentCount,
-              MAX(checkInTime) AS latestVisitDate,
+              grouped.therapistName,
+              grouped.serviceCategory,
+              grouped.treatmentCount,
+              grouped.latestVisitDate,
               ROW_NUMBER() OVER (
-                PARTITION BY therapistName
-                ORDER BY treatmentCount DESC, latestVisitDate DESC, serviceCategory ASC
+                PARTITION BY grouped.therapistName
+                ORDER BY grouped.treatmentCount DESC, grouped.latestVisitDate DESC, grouped.serviceCategory ASC
               ) AS rowNum
-            FROM PeriodVisits
-            GROUP BY therapistName, serviceCategory
+            FROM (
+              SELECT
+                therapistName,
+                serviceCategory,
+                COUNT(*) AS treatmentCount,
+                MAX(checkInTime) AS latestVisitDate
+              FROM PeriodVisits
+              GROUP BY therapistName, serviceCategory
+            ) AS grouped
           )
           WHERE rowNum = 1
         ),
-        ActiveDays AS (
+        ActiveDayStats AS (
           SELECT
             therapistName,
             COUNT(DISTINCT DATE(checkInTime)) AS activeDays,
@@ -562,7 +576,7 @@ export async function getTherapistPortalReport(params: TherapistListParams) {
           FROM PeriodVisits
           GROUP BY therapistName
         ),
-        PreviousCounts AS (
+        PreviousVisitCounts AS (
           SELECT therapistName, COUNT(*) AS previousTreatmentCount
           FROM PreviousVisits
           GROUP BY therapistName
@@ -574,33 +588,33 @@ export async function getTherapistPortalReport(params: TherapistListParams) {
           COUNT(DISTINCT IF(customerCounts.visitCount > 1, visits.customerKey, NULL)) AS repeatCustomers,
           COALESCE(SUM(visits.price), 0) AS estimatedTreatmentValue,
           COALESCE(AVG(visits.price), 0) AS averageTreatmentValue,
-          COALESCE(activeDays.activeDays, 0) AS activeDays,
-          activeDays.lastTreatmentDate,
-          COALESCE(previousCounts.previousTreatmentCount, 0) AS previousTreatmentCount,
-          COALESCE(topService.topService, 'Unknown') AS topService,
-          COALESCE(topService.topServiceCount, 0) AS topServiceCount,
-          COALESCE(topCategory.topCategory, 'Other') AS topCategory,
-          COALESCE(topCategory.topCategoryCount, 0) AS topCategoryCount
+          COALESCE(activeDayStats.activeDays, 0) AS activeDays,
+          activeDayStats.lastTreatmentDate,
+          COALESCE(previousVisitCounts.previousTreatmentCount, 0) AS previousTreatmentCount,
+          COALESCE(therapistTopService.topService, 'Unknown') AS topService,
+          COALESCE(therapistTopService.topServiceCount, 0) AS topServiceCount,
+          COALESCE(therapistTopCategory.topCategory, 'Other') AS topCategory,
+          COALESCE(therapistTopCategory.topCategoryCount, 0) AS topCategoryCount
         FROM PeriodVisits AS visits
         LEFT JOIN TherapistCustomerCounts AS customerCounts
           USING (therapistName, customerKey)
-        LEFT JOIN ActiveDays AS activeDays
+        LEFT JOIN ActiveDayStats AS activeDayStats
           USING (therapistName)
-        LEFT JOIN PreviousCounts AS previousCounts
+        LEFT JOIN PreviousVisitCounts AS previousVisitCounts
           USING (therapistName)
-        LEFT JOIN TherapistTopService AS topService
+        LEFT JOIN TherapistTopService AS therapistTopService
           USING (therapistName)
-        LEFT JOIN TherapistTopCategory AS topCategory
+        LEFT JOIN TherapistTopCategory AS therapistTopCategory
           USING (therapistName)
         GROUP BY
           visits.therapistName,
-          activeDays.activeDays,
-          activeDays.lastTreatmentDate,
-          previousCounts.previousTreatmentCount,
-          topService.topService,
-          topService.topServiceCount,
-          topCategory.topCategory,
-          topCategory.topCategoryCount
+          activeDayStats.activeDays,
+          activeDayStats.lastTreatmentDate,
+          previousVisitCounts.previousTreatmentCount,
+          therapistTopService.topService,
+          therapistTopService.topServiceCount,
+          therapistTopCategory.topCategory,
+          therapistTopCategory.topCategoryCount
         ORDER BY treatmentsCompleted DESC, estimatedTreatmentValue DESC, visits.therapistName ASC
       `,
       queryParams,
@@ -891,13 +905,21 @@ export async function getTherapistPortalOverview(params: TherapistDetailParams) 
             SELECT serviceName AS topService, treatmentCount AS topServiceCount
             FROM (
               SELECT
-                serviceName,
-                COUNT(*) AS treatmentCount,
-                MAX(checkInTime) AS latestVisitDate,
-                ROW_NUMBER() OVER (ORDER BY treatmentCount DESC, latestVisitDate DESC, serviceName ASC) AS rowNum
-              FROM TherapistCurrent
-              WHERE COALESCE(serviceName, '') != ''
-              GROUP BY serviceName
+                grouped.serviceName,
+                grouped.treatmentCount,
+                grouped.latestVisitDate,
+                ROW_NUMBER() OVER (
+                  ORDER BY grouped.treatmentCount DESC, grouped.latestVisitDate DESC, grouped.serviceName ASC
+                ) AS rowNum
+              FROM (
+                SELECT
+                  serviceName,
+                  COUNT(*) AS treatmentCount,
+                  MAX(checkInTime) AS latestVisitDate
+                FROM TherapistCurrent
+                WHERE COALESCE(serviceName, '') != ''
+                GROUP BY serviceName
+              ) AS grouped
             )
             WHERE rowNum = 1
           ),
@@ -905,12 +927,20 @@ export async function getTherapistPortalOverview(params: TherapistDetailParams) 
             SELECT serviceCategory AS topCategory, treatmentCount AS topCategoryCount
             FROM (
               SELECT
-                serviceCategory,
-                COUNT(*) AS treatmentCount,
-                MAX(checkInTime) AS latestVisitDate,
-                ROW_NUMBER() OVER (ORDER BY treatmentCount DESC, latestVisitDate DESC, serviceCategory ASC) AS rowNum
-              FROM TherapistCurrent
-              GROUP BY serviceCategory
+                grouped.serviceCategory,
+                grouped.treatmentCount,
+                grouped.latestVisitDate,
+                ROW_NUMBER() OVER (
+                  ORDER BY grouped.treatmentCount DESC, grouped.latestVisitDate DESC, grouped.serviceCategory ASC
+                ) AS rowNum
+              FROM (
+                SELECT
+                  serviceCategory,
+                  COUNT(*) AS treatmentCount,
+                  MAX(checkInTime) AS latestVisitDate
+                FROM TherapistCurrent
+                GROUP BY serviceCategory
+              ) AS grouped
             )
             WHERE rowNum = 1
           )
@@ -1076,6 +1106,9 @@ export async function getTherapistPortalOverview(params: TherapistDetailParams) 
     customersServed > 0 ? Number(((repeatCustomers / customersServed) * 100).toFixed(1)) : 0;
   const topServiceShare =
     treatmentsCompleted > 0 ? Number(((topServiceCount / treatmentsCompleted) * 100).toFixed(1)) : 0;
+  const primaryServiceName = parseText(summary?.topService) || parseText(topServiceRows[0]?.serviceName, "Unknown");
+  const primaryCategory =
+    parseText(summary?.topCategory) || parseText(serviceMixRows[0]?.serviceCategory, "Other");
   const growthRate = buildGrowthRate(treatmentsCompleted, previousTreatmentCount);
   const utilizationScore = buildUtilizationScore({
     treatmentsCompleted,
@@ -1087,7 +1120,7 @@ export async function getTherapistPortalOverview(params: TherapistDetailParams) 
     therapistName: params.therapistName,
     growthRate,
     repeatCustomerRate,
-    topService: parseText(summary?.topService, "Unknown"),
+    topService: primaryServiceName,
     topServiceShare,
     serviceBreadth: parseNumber(summary?.serviceBreadth),
     utilizationScore,
@@ -1106,9 +1139,9 @@ export async function getTherapistPortalOverview(params: TherapistDetailParams) 
       activeDays,
       averageTreatmentsPerActiveDay:
         activeDays > 0 ? Number((treatmentsCompleted / activeDays).toFixed(1)) : 0,
-      topService: parseText(summary?.topService, "Unknown"),
+      topService: primaryServiceName,
       topServiceShare,
-      topCategory: parseText(summary?.topCategory, "Other"),
+      topCategory: primaryCategory,
       serviceBreadth: parseNumber(summary?.serviceBreadth),
       lastTreatmentDate: summary?.lastTreatmentDate ?? null,
       growthRate,
