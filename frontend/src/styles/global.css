@@ -113,6 +113,8 @@
   top: 104px;
   max-height: calc(100vh - 128px);
   overflow: auto;
+  width: min(100%, 560px);
+  justify-self: end;
 }
 
 .entity-inspector--overlay {
@@ -4131,7 +4133,7 @@ a {
 }
 
 .appointments-report__workspace--split {
-  grid-template-columns: minmax(0, 1fr) minmax(380px, 440px);
+  grid-template-columns: minmax(0, 1fr) minmax(480px, 560px);
   align-items: start;
 }
 
