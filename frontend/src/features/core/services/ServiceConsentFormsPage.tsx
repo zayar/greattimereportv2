@@ -82,7 +82,7 @@ export function ServiceConsentFormsPage() {
         title="Consent form library"
         subtitle="Read-only visibility into consent templates, media readiness, and signature alignment."
       >
-        {loading ? <div className="inline-note">Loading consent forms...</div> : null}
+        {loading ? <div className="inline-note inline-note--loading">Loading consent forms...</div> : null}
         {error ? <ErrorState label="Consent forms could not be loaded" detail={error.message} /> : null}
         {!loading && !error && rows.length === 0 ? (
           <EmptyState label="No consent forms matched this search" detail="Try clearing the search to see all consent templates." />

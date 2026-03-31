@@ -76,6 +76,80 @@ const metricCards = [
   { key: "averageInvoice", label: "Average invoice", hint: "Average paid invoice value." },
 ] as const;
 
+function ExecutiveDashboardSkeleton() {
+  return (
+    <>
+      <section className="executive-dashboard__metrics executive-dashboard__metrics--loading" aria-hidden="true">
+        {metricCards.map((card) => (
+          <article key={card.key} className="executive-dashboard__metric-card executive-dashboard__metric-card--loading">
+            <span className="executive-dashboard__metric-label">{card.label}</span>
+            <span className="executive-dashboard__skeleton executive-dashboard__skeleton--value" />
+            <div className="executive-dashboard__metric-meta">
+              <span className="executive-dashboard__skeleton executive-dashboard__skeleton--meta" />
+              <span className="executive-dashboard__skeleton executive-dashboard__skeleton--meta executive-dashboard__skeleton--meta-wide" />
+            </div>
+          </article>
+        ))}
+      </section>
+
+      <section className="executive-dashboard__hero-grid executive-dashboard__hero-grid--loading" aria-hidden="true">
+        <article className="executive-dashboard__skeleton-panel executive-dashboard__skeleton-panel--trend">
+          <span className="executive-dashboard__skeleton executive-dashboard__skeleton--title" />
+          <span className="executive-dashboard__skeleton executive-dashboard__skeleton--subtitle" />
+          <div className="executive-dashboard__skeleton-chart">
+            {Array.from({ length: 8 }).map((_, index) => (
+              <span
+                key={`chart-${index}`}
+                className="executive-dashboard__skeleton-bar"
+                style={{ height: `${44 + ((index * 13) % 68)}px` }}
+              />
+            ))}
+          </div>
+        </article>
+
+        <article className="executive-dashboard__skeleton-panel executive-dashboard__skeleton-panel--insights">
+          <span className="executive-dashboard__skeleton executive-dashboard__skeleton--title" />
+          <span className="executive-dashboard__skeleton executive-dashboard__skeleton--subtitle" />
+          <div className="executive-dashboard__skeleton-stack">
+            {Array.from({ length: 3 }).map((_, index) => (
+              <div key={`insight-${index}`} className="executive-dashboard__skeleton-block">
+                <span className="executive-dashboard__skeleton executive-dashboard__skeleton--block-title" />
+                <span className="executive-dashboard__skeleton executive-dashboard__skeleton--block-line" />
+                <span className="executive-dashboard__skeleton executive-dashboard__skeleton--block-line executive-dashboard__skeleton--block-line-short" />
+              </div>
+            ))}
+          </div>
+        </article>
+      </section>
+
+      <section className="executive-dashboard__spotlights executive-dashboard__spotlights--loading" aria-hidden="true">
+        {Array.from({ length: 3 }).map((_, index) => (
+          <article key={`spotlight-${index}`} className="executive-dashboard__spotlight-card executive-dashboard__spotlight-card--loading">
+            <span className="executive-dashboard__skeleton executive-dashboard__skeleton--label" />
+            <span className="executive-dashboard__skeleton executive-dashboard__skeleton--value executive-dashboard__skeleton--value-short" />
+            <span className="executive-dashboard__skeleton executive-dashboard__skeleton--meta" />
+            <span className="executive-dashboard__skeleton executive-dashboard__skeleton--subtitle" />
+          </article>
+        ))}
+      </section>
+
+      <section className="executive-dashboard__lower-grid executive-dashboard__lower-grid--loading" aria-hidden="true">
+        {Array.from({ length: 3 }).map((_, index) => (
+          <article key={`panel-${index}`} className="executive-dashboard__skeleton-panel executive-dashboard__skeleton-panel--table">
+            <span className="executive-dashboard__skeleton executive-dashboard__skeleton--title" />
+            <span className="executive-dashboard__skeleton executive-dashboard__skeleton--subtitle" />
+            <div className="executive-dashboard__skeleton-stack">
+              {Array.from({ length: index === 1 ? 1 : 4 }).map((__, rowIndex) => (
+                <div key={`row-${index}-${rowIndex}`} className="executive-dashboard__skeleton-row" />
+              ))}
+            </div>
+          </article>
+        ))}
+      </section>
+    </>
+  );
+}
+
 export function ExecutiveDashboardPage() {
   const { currentClinic } = useAccess();
   const { aiLanguage } = useAiPreferences();
@@ -287,6 +361,7 @@ export function ExecutiveDashboardPage() {
         description="A focused clinic overview for revenue, bookings, payment mix, and therapist performance."
         actions={
           <div className="executive-dashboard__header-status">
+            {loading ? <span className="executive-dashboard__status-dot" aria-hidden="true" /> : null}
             {loading ? "Refreshing overview…" : isDirty ? "Filters changed" : "Live overview ready"}
           </div>
         }
@@ -310,7 +385,7 @@ export function ExecutiveDashboardPage() {
             </label>
 
             <button className="dashboard-home__primary-action" onClick={loadOverview}>
-              {loadedState ? "Refresh dashboard" : "Load dashboard"}
+              {loading ? "Loading..." : loadedState ? "Refresh dashboard" : "Load dashboard"}
             </button>
           </div>
         </div>
@@ -352,6 +427,15 @@ export function ExecutiveDashboardPage() {
       ) : null}
 
       {error ? <ErrorState label="Dashboard could not be loaded" detail={error} /> : null}
+
+      {loading && !data && !error ? <ExecutiveDashboardSkeleton /> : null}
+
+      {loading && data && !error ? (
+        <div className="executive-dashboard__loading-banner">
+          <span className="executive-dashboard__status-dot" aria-hidden="true" />
+          Updating dashboard metrics with the latest clinic data…
+        </div>
+      ) : null}
 
       {data && !error ? (
         <>
@@ -408,7 +492,7 @@ export function ExecutiveDashboardPage() {
               </div>
             ) : null}
             {aiError && !aiSummary ? <ErrorState label="AI summary could not be loaded" detail={aiError} /> : null}
-            {!aiSummary && aiLoading ? <div className="inline-note">Generating AI executive summary...</div> : null}
+            {!aiSummary && aiLoading ? <div className="inline-note inline-note--loading">Generating AI executive summary...</div> : null}
             {aiSummary ? (
               <div className="ai-panel__content">
                 <div className="ai-panel__summary">

@@ -472,7 +472,7 @@ export function TelegramSettingsPage() {
           subtitle="Link one or more Telegram owner chats or groups to this clinic with a short-lived code."
           action={<span className={`telegram-settings__badge telegram-settings__badge--${status?.connectionStatus ?? "idle"}`}>{formatStatusLabel(status)}</span>}
         >
-          {busyAction === "load" && !status ? <div className="inline-note">Loading Telegram connection...</div> : null}
+          {busyAction === "load" && !status ? <div className="inline-note inline-note--loading">Loading Telegram connection...</div> : null}
 
           <div className="telegram-settings__meta-grid">
             <article className="telegram-settings__meta-card">

@@ -86,7 +86,7 @@ export function ServiceListPage() {
         title="Service catalog"
         subtitle="Service catalog, pricing, cadence, and status from the core service table."
       >
-        {loading ? <div className="inline-note">Loading service catalog...</div> : null}
+        {loading ? <div className="inline-note inline-note--loading">Loading service catalog...</div> : null}
         {error ? <ErrorState label="Service list could not be loaded" detail={error.message} /> : null}
         {!loading && !error && rows.length === 0 ? (
           <EmptyState label="No services matched these filters" detail="Try clearing the search or changing the status filter." />

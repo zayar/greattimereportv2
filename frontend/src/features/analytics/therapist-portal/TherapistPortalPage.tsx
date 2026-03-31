@@ -212,7 +212,7 @@ export function TherapistPortalPage() {
           subtitle="A quick owner-facing read on who is currently carrying demand."
         >
           {loading ? (
-            <div className="inline-note">Loading therapist highlight...</div>
+            <div className="inline-note inline-note--loading">Loading therapist highlight...</div>
           ) : !highlight ? (
             <EmptyState label="No therapist highlight available" />
           ) : (
@@ -252,7 +252,7 @@ export function TherapistPortalPage() {
           subtitle="Who currently carries the largest share of visible treatment demand."
         >
           {loading ? (
-            <div className="inline-note">Loading therapist contribution...</div>
+            <div className="inline-note inline-note--loading">Loading therapist contribution...</div>
           ) : contributionItems.length === 0 ? (
             <EmptyState label="No therapist contribution found" />
           ) : (
@@ -266,7 +266,7 @@ export function TherapistPortalPage() {
         title="Therapist leaderboard"
         subtitle={`${(data?.leaderboard.length ?? 0).toLocaleString("en-US")} therapists matched the current filters`}
       >
-        {loading ? <div className="inline-note">Loading therapist leaderboard...</div> : null}
+        {loading ? <div className="inline-note inline-note--loading">Loading therapist leaderboard...</div> : null}
         {!loading && !error && (!data || data.leaderboard.length === 0) ? (
           <EmptyState label="No therapists matched these filters" detail="Try widening the date range or clearing the service category filter." />
         ) : null}

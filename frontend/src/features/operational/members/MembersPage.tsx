@@ -96,7 +96,7 @@ export function MembersPage() {
           </div>
         }
       >
-        {loading ? <div className="inline-note">Loading members...</div> : null}
+        {loading ? <div className="inline-note inline-note--loading">Loading members...</div> : null}
         {error ? <ErrorState label="Members could not be loaded" detail={error.message} /> : null}
         {!loading && !error && rows.length === 0 ? (
           <EmptyState label="No members found" detail="Try a different search term or switch to another clinic." />

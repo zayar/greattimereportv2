@@ -114,7 +114,7 @@ export function DailyTreatmentPage() {
           title="Treatment matrix"
           subtitle={`Service distribution by therapist for ${currentClinic?.name ?? "the selected clinic"}.`}
         >
-          {loading ? <div className="inline-note">Loading treatment matrix...</div> : null}
+          {loading ? <div className="inline-note inline-note--loading">Loading treatment matrix...</div> : null}
           {!loading && !error && (!data || data.matrix.length === 0) ? (
             <EmptyState label="No treatment data found for this date" detail="Try another day or verify clinic mapping." />
           ) : null}
@@ -125,7 +125,7 @@ export function DailyTreatmentPage() {
 
         <Panel className="analytics-report__panel" title="Service totals" subtitle="Completed treatments by service.">
           {loading ? (
-            <div className="inline-note">Loading service totals...</div>
+            <div className="inline-note inline-note--loading">Loading service totals...</div>
           ) : !data || data.serviceTotals.length === 0 ? (
             <EmptyState label="No service totals available" />
           ) : (
@@ -145,7 +145,7 @@ export function DailyTreatmentPage() {
         title="Treatment records"
         subtitle={`${(data?.records.length ?? 0).toLocaleString("en-US")} detailed rows returned from BigQuery`}
       >
-        {loading ? <div className="inline-note">Loading treatment records...</div> : null}
+        {loading ? <div className="inline-note inline-note--loading">Loading treatment records...</div> : null}
         {!loading && !error && (!data || data.records.length === 0) ? (
           <EmptyState label="No treatment records matched this date" />
         ) : null}

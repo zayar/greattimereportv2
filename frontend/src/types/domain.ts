@@ -1001,6 +1001,23 @@ export interface CustomerPortalOverviewResponse {
   assumptions: string[];
 }
 
+export interface CustomerQuickViewResponse {
+  customer: CustomerPortalOverviewResponse["customer"];
+  insights: CustomerPortalOverviewResponse["insights"];
+  recommendedAction: string;
+  recentServices: CustomerPortalOverviewResponse["recentServices"];
+  therapistRelationship: CustomerPortalOverviewResponse["therapistRelationship"];
+  serviceMix: CustomerPortalOverviewResponse["serviceMix"];
+  packageSummary: {
+    activePackages: number;
+    remainingSessions: number;
+    lowBalancePackages: number;
+  };
+  packages: CustomerPortalPackagesResponse["packages"];
+  recentBookings: CustomerPortalBookingsResponse["rows"];
+  assumptions: string[];
+}
+
 export interface CustomerPortalPackagesResponse {
   packages: Array<{
     id: string;

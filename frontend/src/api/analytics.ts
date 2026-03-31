@@ -2,6 +2,7 @@ import { apiClient } from "./http";
 import type {
   BankingSummaryResponse,
   CustomerPortalBookingsResponse,
+  CustomerQuickViewResponse,
   CustomerPortalListResponse,
   CustomerPortalOverviewResponse,
   CustomerPortalPackagesResponse,
@@ -77,6 +78,19 @@ export async function fetchCustomerPortalOverview(
 ) {
   const response = await apiClient.get<{ success: true; data: CustomerPortalOverviewResponse }>(
     "/analytics/customers/detail/overview",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchCustomerQuickView(
+  params: BaseParams & {
+    customerName: string;
+    customerPhone: string;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: CustomerQuickViewResponse }>(
+    "/analytics/customers/detail/quick-view",
     { params },
   );
   return response.data.data;

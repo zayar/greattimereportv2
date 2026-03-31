@@ -296,7 +296,7 @@ export function SalesBySellerPage() {
           ) : null
         }
       >
-        {loading ? <div className="inline-note">Loading sales summary...</div> : null}
+        {loading ? <div className="inline-note inline-note--loading">Loading sales summary...</div> : null}
         {!loading && !error && (!data || data.sellers.length === 0) ? (
           <EmptyState label="No sales people found for this range" />
         ) : null}
@@ -361,7 +361,7 @@ export function SalesBySellerPage() {
           </div>
         }
       >
-        {loading ? <div className="inline-note">Loading invoice rows...</div> : null}
+        {loading ? <div className="inline-note inline-note--loading">Loading invoice rows...</div> : null}
         {!loading && !error && rows.length === 0 ? (
           <EmptyState label="No invoice rows matched these filters" detail="Try clearing the search or widening the date range." />
         ) : null}

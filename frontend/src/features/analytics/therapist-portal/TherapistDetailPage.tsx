@@ -384,7 +384,7 @@ export function TherapistDetailPage() {
               subtitle="Treatment flow and estimated treatment value across the selected date range."
             >
               {overviewState.loading ? (
-                <div className="inline-note">Loading therapist trend...</div>
+                <div className="inline-note inline-note--loading">Loading therapist trend...</div>
               ) : !overview || overview.trend.length === 0 ? (
                 <EmptyState label="No trend data found" detail="The current date range may not include completed treatment activity for this therapist." />
               ) : (
@@ -407,7 +407,7 @@ export function TherapistDetailPage() {
               subtitle="Signal-first observations for growth, continuity, specialization, and workload balance."
             >
               {overviewState.loading ? (
-                <div className="inline-note">Loading therapist insights...</div>
+                <div className="inline-note inline-note--loading">Loading therapist insights...</div>
               ) : !overview ? (
                 <EmptyState label="No insights available" />
               ) : (
@@ -703,7 +703,7 @@ export function TherapistDetailPage() {
               </div>
             }
           >
-            {customersState.loading ? <div className="inline-note">Loading therapist customers...</div> : null}
+            {customersState.loading ? <div className="inline-note inline-note--loading">Loading therapist customers...</div> : null}
             {customersState.error ? (
               <ErrorState label="Therapist customers could not be loaded" detail={customersState.error} />
             ) : null}
@@ -826,7 +826,7 @@ export function TherapistDetailPage() {
             </div>
           }
         >
-          {treatmentsState.loading ? <div className="inline-note">Loading treatment ledger...</div> : null}
+          {treatmentsState.loading ? <div className="inline-note inline-note--loading">Loading treatment ledger...</div> : null}
           {treatmentsState.error ? (
             <ErrorState label="Treatment ledger could not be loaded" detail={treatmentsState.error} />
           ) : null}

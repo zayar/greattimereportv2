@@ -83,7 +83,7 @@ export function ServiceRecordFormsPage() {
         title="Record form library"
         subtitle="A read-only operational audit of record forms, their term blocks, and their current publishing state."
       >
-        {loading ? <div className="inline-note">Loading record forms...</div> : null}
+        {loading ? <div className="inline-note inline-note--loading">Loading record forms...</div> : null}
         {error ? <ErrorState label="Record forms could not be loaded" detail={error.message} /> : null}
         {!loading && !error && rows.length === 0 ? (
           <EmptyState label="No record forms matched this search" detail="Try clearing the search to see all record templates." />

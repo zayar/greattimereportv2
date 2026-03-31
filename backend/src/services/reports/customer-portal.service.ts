@@ -1103,6 +1103,39 @@ export async function getCustomerPortalOverview(params: DetailBaseParams) {
   };
 }
 
+export async function getCustomerQuickView(params: DetailBaseParams) {
+  const [overview, packages, bookings] = await Promise.all([
+    getCustomerPortalOverview(params),
+    getCustomerPortalPackages(params),
+    getCustomerPortalBookings({
+      ...params,
+      search: "",
+      page: 1,
+      pageSize: 5,
+    }),
+  ]);
+
+  const activePackages = packages.packages.filter((entry) => entry.remainingCount > 0);
+  const lowBalancePackages = activePackages.filter((entry) => entry.remainingCount <= 3);
+
+  return {
+    customer: overview.customer,
+    insights: overview.insights.slice(0, 3),
+    recommendedAction: overview.recommendedAction,
+    recentServices: overview.recentServices.slice(0, 4),
+    therapistRelationship: overview.therapistRelationship.slice(0, 4),
+    serviceMix: overview.serviceMix.slice(0, 4),
+    packageSummary: {
+      activePackages: activePackages.length,
+      remainingSessions: overview.customer.remainingSessions,
+      lowBalancePackages: lowBalancePackages.length,
+    },
+    packages: activePackages.slice(0, 4),
+    recentBookings: bookings.rows.slice(0, 5),
+    assumptions: overview.assumptions,
+  };
+}
+
 export async function getCustomerPortalPackages(params: DetailBaseParams) {
   const queryParams = {
     clinicCode: params.clinicCode,

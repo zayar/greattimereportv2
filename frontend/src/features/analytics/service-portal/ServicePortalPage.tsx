@@ -334,7 +334,7 @@ export function ServicePortalPage() {
           </div>
         }
       >
-        {loading ? <div className="inline-note">Loading service intelligence...</div> : null}
+        {loading ? <div className="inline-note inline-note--loading">Loading service intelligence...</div> : null}
         {!loading && !error && visibleRows.length === 0 ? (
           <EmptyState
             label="No services matched these filters"

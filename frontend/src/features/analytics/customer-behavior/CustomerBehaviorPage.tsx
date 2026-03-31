@@ -125,7 +125,7 @@ export function CustomerBehaviorPage() {
           subtitle="Unique customers and total visits by period."
         >
           {loading ? (
-            <div className="inline-note">Loading trend...</div>
+            <div className="inline-note inline-note--loading">Loading trend...</div>
           ) : !data || data.trend.length === 0 ? (
             <EmptyState label="No customer trend data found" />
           ) : (

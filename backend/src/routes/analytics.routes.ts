@@ -26,6 +26,7 @@ import { getCustomersBySalespersonReport } from "../services/reports/customers-b
 import {
   getCustomerPortalBookings,
   getCustomerPortalList,
+  getCustomerQuickView,
   getCustomerPortalOverview,
   getCustomerPortalPackages,
   getCustomerPortalPayments,
@@ -156,6 +157,16 @@ router.get(
       offset: (params.page - 1) * params.pageSize,
     });
 
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/customers/detail/quick-view",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = customerDetailSchema.parse(req.query);
+    const data = await getCustomerQuickView(params);
     res.json({ success: true, data });
   }),
 );

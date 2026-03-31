@@ -432,7 +432,7 @@ export function ServiceDetailPage() {
               subtitle="Monthly commercial demand and operational usage for this service."
             >
               {overviewState.loading ? (
-                <div className="inline-note">Loading service trend...</div>
+                <div className="inline-note inline-note--loading">Loading service trend...</div>
               ) : !overview || overview.trend.length === 0 ? (
                 <EmptyState label="No trend data found" detail="The selected range may not include paid or completed activity for this service." />
               ) : (
@@ -455,7 +455,7 @@ export function ServiceDetailPage() {
               subtitle="Signals designed to help teams decide whether to promote, protect, reprice, or improve this service."
             >
               {overviewState.loading ? (
-                <div className="inline-note">Loading service insights...</div>
+                <div className="inline-note inline-note--loading">Loading service insights...</div>
               ) : !overview ? (
                 <EmptyState label="No insights available" />
               ) : (
@@ -708,7 +708,7 @@ export function ServiceDetailPage() {
               </div>
             }
           >
-            {customersState.loading ? <div className="inline-note">Loading service customers...</div> : null}
+            {customersState.loading ? <div className="inline-note inline-note--loading">Loading service customers...</div> : null}
             {customersState.error ? (
               <ErrorState label="Service customers could not be loaded" detail={customersState.error} />
             ) : null}
@@ -846,7 +846,7 @@ export function ServiceDetailPage() {
               </div>
             }
           >
-            {paymentsState.loading ? <div className="inline-note">Loading service payments...</div> : null}
+            {paymentsState.loading ? <div className="inline-note inline-note--loading">Loading service payments...</div> : null}
             {paymentsState.error ? (
               <ErrorState label="Service payments could not be loaded" detail={paymentsState.error} />
             ) : null}

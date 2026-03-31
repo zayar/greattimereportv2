@@ -361,7 +361,7 @@ export function PaymentReportPage() {
           </div>
         }
       >
-        {loading ? <div className="inline-note">Loading sales details...</div> : null}
+        {loading ? <div className="inline-note inline-note--loading">Loading sales details...</div> : null}
         {!loading && !error && rows.length === 0 ? (
           <EmptyState label="No sales details matched these filters" detail="Try clearing the search or widening the date range." />
         ) : null}

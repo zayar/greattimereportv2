@@ -190,7 +190,7 @@ export function SalesDetailPage() {
         {configError ? <span className="sales-document-page__hint">Template settings fallback: {configError}</span> : null}
       </div>
 
-      {loading || configLoading ? <div className="inline-note">Loading sales document preview...</div> : null}
+      {loading || configLoading ? <div className="inline-note inline-note--loading">Loading sales document preview...</div> : null}
       {error ? <ErrorState label="Sales detail could not be loaded" detail={error.message} /> : null}
       {!loading && !error && !order ? (
         <EmptyState

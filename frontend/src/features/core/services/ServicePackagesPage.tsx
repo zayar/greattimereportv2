@@ -74,7 +74,7 @@ export function ServicePackagesPage() {
         title="Package catalog"
         subtitle="Package pricing, expiry day, and publishing state."
       >
-        {loading ? <div className="inline-note">Loading service packages...</div> : null}
+        {loading ? <div className="inline-note inline-note--loading">Loading service packages...</div> : null}
         {error ? <ErrorState label="Service packages could not be loaded" detail={error.message} /> : null}
         {!loading && !error && rows.length === 0 ? (
           <EmptyState label="No packages matched these filters" detail="Try clearing the search or changing the status filter." />

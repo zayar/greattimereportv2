@@ -74,7 +74,7 @@ export function ProductListPage() {
         title="Product catalog"
         subtitle="Read-only operational view of products, measurement amounts, and brand mapping."
       >
-        {loading ? <div className="inline-note">Loading products...</div> : null}
+        {loading ? <div className="inline-note inline-note--loading">Loading products...</div> : null}
         {error ? <ErrorState label="Product list could not be loaded" detail={error.message} /> : null}
         {!loading && !error && rows.length === 0 ? (
           <EmptyState label="No products matched these filters" detail="Try clearing the search or adjusting the status filter." />

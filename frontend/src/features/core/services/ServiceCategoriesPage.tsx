@@ -92,7 +92,7 @@ export function ServiceCategoriesPage() {
         title="Service category registry"
         subtitle="Use this view to audit category visibility, ordering, and linked sale channels."
       >
-        {loading ? <div className="inline-note">Loading service categories...</div> : null}
+        {loading ? <div className="inline-note inline-note--loading">Loading service categories...</div> : null}
         {error ? <ErrorState label="Service categories could not be loaded" detail={error.message} /> : null}
         {!loading && !error && rows.length === 0 ? (
           <EmptyState label="No service categories matched this search" detail="Try clearing the search to see all categories." />

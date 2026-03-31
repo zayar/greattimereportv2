@@ -5,6 +5,7 @@ type CustomerPortalIdentity = {
   customerPhone: string;
   fromDate: string;
   toDate: string;
+  tab?: "overview" | "packages" | "bookings" | "payments" | "usage";
 };
 
 function slugify(value: string) {
@@ -20,6 +21,7 @@ export function buildCustomerPortalDetailPath({
   customerPhone,
   fromDate,
   toDate,
+  tab,
 }: CustomerPortalIdentity) {
   const slugBase = customerName || customerPhone || "customer";
   const slug = slugify(slugBase) || "customer";
@@ -28,6 +30,7 @@ export function buildCustomerPortalDetailPath({
     phone: customerPhone,
     fromDate,
     toDate,
+    ...(tab ? { tab } : {}),
   });
 
   return `/analytics/customers/${slug}?${search.toString()}`;

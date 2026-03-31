@@ -167,7 +167,7 @@ export function InventoryHistoryPage() {
           </div>
         }
       >
-        {loading || countLoading ? <div className="inline-note">Loading inventory history...</div> : null}
+        {loading || countLoading ? <div className="inline-note inline-note--loading">Loading inventory history...</div> : null}
         {error ? <ErrorState label="Inventory history could not be loaded" detail={error.message} /> : null}
         {countError ? <ErrorState label="Inventory history count could not be loaded" detail={countError.message} /> : null}
         {!loading && !countLoading && !error && !countError && rows.length === 0 ? (

@@ -259,7 +259,7 @@ export function SalesPage() {
           </div>
         }
       >
-        {loading ? <div className="inline-note">Loading orders...</div> : null}
+        {loading ? <div className="inline-note inline-note--loading">Loading orders...</div> : null}
         {error ? <ErrorState label="Sales could not be loaded" detail={error.message} /> : null}
         {!loading && !error && rows.length === 0 ? (
           <EmptyState

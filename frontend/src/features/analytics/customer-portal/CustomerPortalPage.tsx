@@ -387,7 +387,7 @@ export function CustomerPortalPage() {
           </div>
         }
       >
-        {loading ? <div className="inline-note">Loading customer portfolio...</div> : null}
+        {loading ? <div className="inline-note inline-note--loading">Loading customer portfolio...</div> : null}
         {!loading && !error && (!data || data.rows.length === 0) ? (
           <EmptyState
             label="No customers matched these filters"

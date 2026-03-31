@@ -140,7 +140,7 @@ export function StockSummaryPage() {
           </div>
         }
       >
-        {loading || countLoading ? <div className="inline-note">Loading stock summary...</div> : null}
+        {loading || countLoading ? <div className="inline-note inline-note--loading">Loading stock summary...</div> : null}
         {error ? <ErrorState label="Stock summary could not be loaded" detail={error.message} /> : null}
         {countError ? <ErrorState label="Stock summary count could not be loaded" detail={countError.message} /> : null}
         {!loading && !countLoading && !error && !countError && rows.length === 0 ? (

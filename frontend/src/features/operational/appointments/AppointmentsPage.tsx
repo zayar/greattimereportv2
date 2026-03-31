@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@apollo/client";
 import { DateRangeControls } from "../../../components/DateRangeControls";
 import { DataTable } from "../../../components/DataTable";
@@ -10,6 +10,7 @@ import { today } from "../../../utils/date";
 import { formatDateTime } from "../../../utils/format";
 import type { AppointmentRow } from "../../../types/domain";
 import { GET_BOOKING_DETAILS } from "./queries";
+import { CustomerQuickDetailsPanel } from "./CustomerQuickDetailsPanel";
 
 type BookingDetailsResponse = {
   getBookingDetails: {
@@ -28,6 +29,36 @@ export function AppointmentsPage() {
     fromDate: today(),
     toDate: today(),
   });
+  const [selectedCustomer, setSelectedCustomer] = useState<{
+    customerName: string;
+    customerPhone: string;
+  } | null>(null);
+  const [inspectorPinned, setInspectorPinned] = useState(() =>
+    typeof window === "undefined" ? true : window.innerWidth >= 1440,
+  );
+  const [canPinInspector, setCanPinInspector] = useState(() =>
+    typeof window === "undefined" ? true : window.innerWidth >= 1440,
+  );
+
+  useEffect(() => {
+    function syncViewport() {
+      const nextCanPin = window.innerWidth >= 1440;
+      setCanPinInspector(nextCanPin);
+      if (!nextCanPin) {
+        setInspectorPinned(false);
+      }
+    }
+
+    syncViewport();
+    window.addEventListener("resize", syncViewport);
+    return () => {
+      window.removeEventListener("resize", syncViewport);
+    };
+  }, []);
+
+  useEffect(() => {
+    setSelectedCustomer(null);
+  }, [currentClinic?.id]);
 
   const { data, loading, error } = useQuery<BookingDetailsResponse>(GET_BOOKING_DETAILS, {
     variables: {
@@ -49,6 +80,10 @@ export function AppointmentsPage() {
     [rows],
   );
   const noShowCount = useMemo(() => rows.filter((row) => row.status === "NO_SHOW").length, [rows]);
+  const showPinnedInspector = Boolean(selectedCustomer && inspectorPinned && canPinInspector);
+  const selectedCustomerKey = selectedCustomer
+    ? `${selectedCustomer.customerName}::${selectedCustomer.customerPhone}`
+    : "";
 
   return (
     <div className="page-stack page-stack--workspace analytics-report internal-workspace internal-workspace--soft appointments-report appointments-report--luxe">
@@ -105,49 +140,109 @@ export function AppointmentsPage() {
         </article>
       </div>
 
-      <Panel
-        className="internal-workspace__panel"
-        title="Appointment ledger"
-        subtitle={`${totalCount.toLocaleString("en-US")} records in the selected date window`}
-        action={
-          <div className="pagination-controls">
-            <button className="button button--secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
-              Previous
-            </button>
-            <span>
-              Page {page} of {totalPages}
-            </span>
-            <button
-              className="button button--secondary"
-              disabled={page >= totalPages}
-              onClick={() => setPage((value) => value + 1)}
-            >
-              Next
-            </button>
-          </div>
-        }
-      >
-        {loading ? <div className="inline-note">Loading appointments...</div> : null}
-        {error ? <ErrorState label="Appointments could not be loaded" detail={error.message} /> : null}
-        {!loading && !error && rows.length === 0 ? (
-          <EmptyState label="No appointments matched these filters" detail="Try widening the date window or clearing the status filter." />
-        ) : null}
-        {!error && rows.length > 0 ? (
-          <DataTable
-            rows={rows}
-            rowKey={(row) => row.bookingid}
-            columns={[
-              { key: "time", header: "Time", render: (row) => formatDateTime(row.FromTime) },
-              { key: "member", header: "Member", render: (row) => row.MemberName },
-              { key: "phone", header: "Phone", render: (row) => row.MemberPhoneNumber },
-              { key: "service", header: "Service", render: (row) => row.ServiceName },
-              { key: "practitioner", header: "Practitioner", render: (row) => row.PractitionerName },
-              { key: "status", header: "Status", render: (row) => <span className="chip">{row.status}</span> },
-              { key: "helper", header: "Helper", render: (row) => row.HelperName || "—" },
-            ]}
+      <div className={`appointments-report__workspace ${showPinnedInspector ? "appointments-report__workspace--split" : ""}`.trim()}>
+        <div className="appointments-report__ledger">
+          <Panel
+            className="internal-workspace__panel"
+            title="Appointment ledger"
+            subtitle={`${totalCount.toLocaleString("en-US")} records in the selected date window`}
+            action={
+              <div className="pagination-controls">
+                <button className="button button--secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
+                  Previous
+                </button>
+                <span>
+                  Page {page} of {totalPages}
+                </span>
+                <button
+                  className="button button--secondary"
+                  disabled={page >= totalPages}
+                  onClick={() => setPage((value) => value + 1)}
+                >
+                  Next
+                </button>
+              </div>
+            }
+          >
+            {loading ? <div className="inline-note inline-note--loading">Loading appointments...</div> : null}
+            {error ? <ErrorState label="Appointments could not be loaded" detail={error.message} /> : null}
+            {!loading && !error && rows.length === 0 ? (
+              <EmptyState label="No appointments matched these filters" detail="Try widening the date window or clearing the status filter." />
+            ) : null}
+            {!error && rows.length > 0 ? (
+              <DataTable
+                rows={rows}
+                rowKey={(row) => row.bookingid}
+                rowClassName={(row) =>
+                  `${row.MemberName}::${row.MemberPhoneNumber ?? ""}` === selectedCustomerKey
+                    ? "appointments-report__row--selected"
+                    : undefined
+                }
+                columns={[
+                  { key: "time", header: "Time", render: (row) => formatDateTime(row.FromTime) },
+                  {
+                    key: "member",
+                    header: "Member",
+                    render: (row) => (
+                      <button
+                        type="button"
+                        className="entity-link-button entity-link-button--strong appointments-report__member-link"
+                        onClick={() =>
+                          setSelectedCustomer({
+                            customerName: row.MemberName,
+                            customerPhone: row.MemberPhoneNumber ?? "",
+                          })
+                        }
+                      >
+                        {row.MemberName}
+                      </button>
+                    ),
+                  },
+                  { key: "phone", header: "Phone", render: (row) => row.MemberPhoneNumber },
+                  { key: "service", header: "Service", render: (row) => row.ServiceName },
+                  { key: "practitioner", header: "Practitioner", render: (row) => row.PractitionerName },
+                  { key: "status", header: "Status", render: (row) => <span className="chip">{row.status}</span> },
+                  { key: "helper", header: "Helper", render: (row) => row.HelperName || "—" },
+                ]}
+              />
+            ) : null}
+          </Panel>
+        </div>
+
+        {selectedCustomer && showPinnedInspector ? (
+          <CustomerQuickDetailsPanel
+            clinicId={currentClinic?.id ?? ""}
+            clinicCode={currentClinic?.code ?? ""}
+            currency={currentClinic?.currency || "MMK"}
+            fromDate={range.fromDate}
+            toDate={range.toDate}
+            customer={selectedCustomer}
+            isPinned
+            canPin={canPinInspector}
+            onTogglePin={() => setInspectorPinned(false)}
+            onClose={() => setSelectedCustomer(null)}
           />
         ) : null}
-      </Panel>
+      </div>
+
+      {selectedCustomer && !showPinnedInspector ? (
+        <CustomerQuickDetailsPanel
+          clinicId={currentClinic?.id ?? ""}
+          clinicCode={currentClinic?.code ?? ""}
+          currency={currentClinic?.currency || "MMK"}
+          fromDate={range.fromDate}
+          toDate={range.toDate}
+          customer={selectedCustomer}
+          isPinned={false}
+          canPin={canPinInspector}
+          onTogglePin={() => {
+            if (canPinInspector) {
+              setInspectorPinned(true);
+            }
+          }}
+          onClose={() => setSelectedCustomer(null)}
+        />
+      ) : null}
     </div>
   );
 }

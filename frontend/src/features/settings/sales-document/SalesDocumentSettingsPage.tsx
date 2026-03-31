@@ -388,7 +388,7 @@ export function SalesDocumentSettingsPage() {
           title="Live preview"
           subtitle="The same renderer is used by the Sales row-click detail page."
         >
-          {loading ? <div className="inline-note">Loading saved template...</div> : null}
+          {loading ? <div className="inline-note inline-note--loading">Loading saved template...</div> : null}
           <div className="sales-document-settings__preview-stage">
             <SalesDocumentPreview model={sampleModel} config={draftConfig} previewLabel="Designer preview" />
           </div>

@@ -238,7 +238,9 @@ export function CustomersBySalespersonPage() {
             ) : null}
 
             {loadingSellers ? (
-              <span className="customer-salesperson-report__selector-note">Loading sales people...</span>
+              <span className="customer-salesperson-report__selector-note customer-salesperson-report__selector-note--loading">
+                Loading sales people...
+              </span>
             ) : null}
 
             {selectedSellerName && !loadingSellers ? (
@@ -320,7 +322,7 @@ export function CustomersBySalespersonPage() {
           ) : null
         }
       >
-        {loadingCustomers ? <div className="inline-note">Loading customer list...</div> : null}
+        {loadingCustomers ? <div className="inline-note inline-note--loading">Loading customer list...</div> : null}
         {!loadingCustomers && !activeSellerName ? (
           <EmptyState label="Select a salesperson to load customers" />
         ) : null}

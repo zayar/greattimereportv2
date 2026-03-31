@@ -249,7 +249,7 @@ export function SalesReportPage() {
           subtitle="Daily paid revenue across the selected range."
         >
           {loading ? (
-            <div className="inline-note">Loading revenue trend...</div>
+            <div className="inline-note inline-note--loading">Loading revenue trend...</div>
           ) : !data || data.trend.length === 0 ? (
             <EmptyState label="No payment trend data found" />
           ) : (
@@ -270,7 +270,7 @@ export function SalesReportPage() {
           subtitle="Top services by paid value. Click a service row to filter the ledger below."
         >
           {loading ? (
-            <div className="inline-note">Loading service ranking...</div>
+            <div className="inline-note inline-note--loading">Loading service ranking...</div>
           ) : !data || data.topServices.length === 0 ? (
             <EmptyState label="No service ranking found" />
           ) : (
@@ -328,7 +328,7 @@ export function SalesReportPage() {
           </div>
         }
       >
-        {loading ? <div className="inline-note">Loading payment rows...</div> : null}
+        {loading ? <div className="inline-note inline-note--loading">Loading payment rows...</div> : null}
         {!loading && !error && rows.length === 0 ? (
           <EmptyState label="No payment rows matched these filters" detail="Try clearing the search or widening the date range." />
         ) : null}

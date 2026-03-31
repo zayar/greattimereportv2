@@ -136,7 +136,7 @@ export function ServiceBehaviorPage() {
 
         <Panel className="panel--tall behavior-report__panel" title="Monthly service bookings" subtitle="Total service bookings by period.">
           {loading ? (
-            <div className="inline-note">Loading trend...</div>
+            <div className="inline-note inline-note--loading">Loading trend...</div>
           ) : !data || data.trend.length === 0 ? (
             <EmptyState label="No booking trend data found" />
           ) : (

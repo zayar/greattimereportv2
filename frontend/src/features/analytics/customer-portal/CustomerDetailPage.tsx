@@ -29,6 +29,14 @@ const SECTION_PAGE_SIZE = 12;
 
 type DetailTab = "overview" | "packages" | "bookings" | "payments" | "usage";
 
+function parseDetailTab(value: string | null): DetailTab {
+  if (value === "packages" || value === "bookings" || value === "payments" || value === "usage") {
+    return value;
+  }
+
+  return "overview";
+}
+
 type SectionState<Data> = {
   data: Data | null;
   loading: boolean;
@@ -225,11 +233,12 @@ export function CustomerDetailPage() {
   const { currentClinic } = useAccess();
   const customerName = searchParams.get("name") ?? "";
   const customerPhone = searchParams.get("phone") ?? "";
+  const requestedTab = searchParams.get("tab");
   const [range, setRange] = useState(() => ({
     fromDate: searchParams.get("fromDate") ?? startOfCurrentYear(),
     toDate: searchParams.get("toDate") ?? today(),
   }));
-  const [activeTab, setActiveTab] = useState<DetailTab>("overview");
+  const [activeTab, setActiveTab] = useState<DetailTab>(() => parseDetailTab(requestedTab));
   const [overviewState, setOverviewState] = useState<SectionState<CustomerPortalOverviewResponse>>(
     createIdleState(),
   );
@@ -253,6 +262,10 @@ export function CustomerDetailPage() {
   const deferredPaymentsSearch = useDeferredValue(paymentsSearch.trim());
 
   const hasIdentity = customerName.trim() !== "" || customerPhone.trim() !== "";
+
+  useEffect(() => {
+    setActiveTab(parseDetailTab(requestedTab));
+  }, [customerName, customerPhone, requestedTab]);
 
   useEffect(() => {
     setBookingsPage(1);
@@ -691,7 +704,7 @@ export function CustomerDetailPage() {
               subtitle="Monthly revenue and visit depth for this customer inside the selected date range."
             >
               {overviewState.loading ? (
-                <div className="inline-note">Loading customer trend...</div>
+                <div className="inline-note inline-note--loading">Loading customer trend...</div>
               ) : !overview || overview.trend.length === 0 ? (
                 <EmptyState label="No trend data found" detail="The current range may not include any completed visits or payments." />
               ) : (
@@ -714,7 +727,7 @@ export function CustomerDetailPage() {
               subtitle="Signal-first observations designed for doctors, managers, and owners."
             >
               {overviewState.loading ? (
-                <div className="inline-note">Loading insight rules...</div>
+                <div className="inline-note inline-note--loading">Loading insight rules...</div>
               ) : !overview ? (
                 <EmptyState label="No insights available" />
               ) : (
@@ -843,7 +856,7 @@ export function CustomerDetailPage() {
           title="Purchased services and package holdings"
           subtitle="Package health, remaining counts, and most recent usage in one place."
         >
-          {packagesState.loading ? <div className="inline-note">Loading package holdings...</div> : null}
+          {packagesState.loading ? <div className="inline-note inline-note--loading">Loading package holdings...</div> : null}
           {packagesState.error ? (
             <ErrorState label="Package holdings could not be loaded" detail={packagesState.error} />
           ) : null}
@@ -922,7 +935,7 @@ export function CustomerDetailPage() {
             </div>
           }
         >
-          {bookingsState.loading ? <div className="inline-note">Loading booking history...</div> : null}
+          {bookingsState.loading ? <div className="inline-note inline-note--loading">Loading booking history...</div> : null}
           {bookingsState.error ? (
             <ErrorState label="Booking history could not be loaded" detail={bookingsState.error} />
           ) : null}
@@ -1029,7 +1042,7 @@ export function CustomerDetailPage() {
               </div>
             }
           >
-            {paymentsState.loading ? <div className="inline-note">Loading payment history...</div> : null}
+            {paymentsState.loading ? <div className="inline-note inline-note--loading">Loading payment history...</div> : null}
             {paymentsState.error ? (
               <ErrorState label="Payment history could not be loaded" detail={paymentsState.error} />
             ) : null}
@@ -1124,7 +1137,7 @@ export function CustomerDetailPage() {
               </div>
             }
           >
-            {usageState.loading ? <div className="inline-note">Loading usage heat map...</div> : null}
+            {usageState.loading ? <div className="inline-note inline-note--loading">Loading usage heat map...</div> : null}
             {usageState.error ? (
               <ErrorState label="Usage history could not be loaded" detail={usageState.error} />
             ) : null}

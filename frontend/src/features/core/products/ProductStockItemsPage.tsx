@@ -74,7 +74,7 @@ export function ProductStockItemsPage() {
         title="Stock item registry"
         subtitle="Operational view of SKU-level stock items and their linked product definitions."
       >
-        {loading ? <div className="inline-note">Loading product stock items...</div> : null}
+        {loading ? <div className="inline-note inline-note--loading">Loading product stock items...</div> : null}
         {error ? <ErrorState label="Product stock items could not be loaded" detail={error.message} /> : null}
         {!loading && !error && rows.length === 0 ? (
           <EmptyState label="No stock items matched these filters" detail="Try clearing the search or adjusting the status filter." />

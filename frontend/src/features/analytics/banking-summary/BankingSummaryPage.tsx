@@ -330,7 +330,7 @@ export function BankingSummaryPage() {
           ) : null
         }
       >
-        {loading ? <div className="inline-note">Loading payment method summary...</div> : null}
+        {loading ? <div className="inline-note inline-note--loading">Loading payment method summary...</div> : null}
         {!loading && !error && (!data || data.methods.length === 0) ? (
           <EmptyState label="No payment methods found for this range" />
         ) : null}
@@ -395,7 +395,7 @@ export function BankingSummaryPage() {
           </div>
         }
       >
-        {loading ? <div className="inline-note">Loading detailed transactions...</div> : null}
+        {loading ? <div className="inline-note inline-note--loading">Loading detailed transactions...</div> : null}
         {!loading && !error && rows.length === 0 ? (
           <EmptyState label="No banking details matched these filters" detail="Try clearing the search or widening the date range." />
         ) : null}
