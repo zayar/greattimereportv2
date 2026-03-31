@@ -32,24 +32,6 @@ function initialsFor(name: string) {
     .join("");
 }
 
-function buildRevisitSignal(data: CustomerQuickViewResponse) {
-  const { daysSinceLastVisit, avgVisitIntervalDays, recent3MonthVisits, previous3MonthVisits } = data.customer;
-
-  if (daysSinceLastVisit == null) {
-    return "No recent completed visit is visible yet.";
-  }
-
-  if (avgVisitIntervalDays && daysSinceLastVisit > avgVisitIntervalDays * 1.2) {
-    return `This customer is now ${daysSinceLastVisit} days out, which is beyond the usual ${avgVisitIntervalDays.toFixed(0)}-day return gap.`;
-  }
-
-  if (recent3MonthVisits < previous3MonthVisits && previous3MonthVisits > 0) {
-    return `Visit momentum softened from ${previous3MonthVisits} to ${recent3MonthVisits} across the last two 3-month windows.`;
-  }
-
-  return `Current revisit timing still looks steady at ${daysSinceLastVisit} days since the last visit.`;
-}
-
 function buildPackageNote(data: CustomerQuickViewResponse) {
   const { packageSummary } = data;
 
@@ -246,6 +228,28 @@ export function CustomerQuickDetailsPanel({
             </article>
           </div>
 
+          <section className="customer-quick-panel__section customer-quick-panel__section--package-watch">
+            <span className="customer-quick-panel__section-label">Package watch</span>
+            <article className="customer-quick-panel__insight customer-quick-panel__insight--accent">
+              <strong>{buildPackageNote(data)}</strong>
+            </article>
+            {data.packages.length === 0 ? (
+              <EmptyState label="No active package balance" detail="This customer currently has no visible remaining package sessions." />
+            ) : (
+              <div className="customer-quick-panel__package-list">
+                {data.packages.map((entry) => (
+                  <article key={entry.id} className="customer-quick-panel__package-row">
+                    <div>
+                      <strong>{entry.serviceName}</strong>
+                      <p>{entry.latestTherapist || "Unknown therapist"}</p>
+                    </div>
+                    <span>{entry.remainingCount.toLocaleString("en-US")} left</span>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+
           <div className="customer-quick-panel__grid">
             <section className="customer-quick-panel__section">
               <span className="customer-quick-panel__section-label">Operational insights</span>
@@ -262,19 +266,7 @@ export function CustomerQuickDetailsPanel({
                   <span>Payment preference</span>
                   <strong>{data.customer.lastPaymentMethod || "Unknown"}</strong>
                 </div>
-                <div>
-                  <span>Revisit signal</span>
-                  <strong>{buildRevisitSignal(data)}</strong>
-                </div>
               </div>
-            </section>
-
-            <section className="customer-quick-panel__section">
-              <span className="customer-quick-panel__section-label">Next best action</span>
-              <article className="customer-quick-panel__action-callout">
-                <strong>{data.recommendedAction}</strong>
-                <p>{buildPackageNote(data)}</p>
-              </article>
               {data.insights.length > 0 ? (
                 <div className="customer-quick-panel__insight-list">
                   {data.insights.map((insight) => (
@@ -326,24 +318,6 @@ export function CustomerQuickDetailsPanel({
             </section>
           </div>
 
-          <section className="customer-quick-panel__section">
-            <span className="customer-quick-panel__section-label">Package watch</span>
-            {data.packages.length === 0 ? (
-              <EmptyState label="No active package balance" detail="This customer currently has no visible remaining package sessions." />
-            ) : (
-              <div className="customer-quick-panel__package-list">
-                {data.packages.map((entry) => (
-                  <article key={entry.id} className="customer-quick-panel__package-row">
-                    <div>
-                      <strong>{entry.serviceName}</strong>
-                      <p>{entry.latestTherapist || "Unknown therapist"}</p>
-                    </div>
-                    <span>{entry.remainingCount.toLocaleString("en-US")} left</span>
-                  </article>
-                ))}
-              </div>
-            )}
-          </section>
         </div>
       ) : null}
     </EntityInspectorPanel>
