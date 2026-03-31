@@ -22,7 +22,8 @@ function isDueNow(reportTime: string, timezone: string, lastScheduledDateKey: st
     return null;
   }
 
-  if (reportTime !== currentTimeKey) {
+  // Allow same-day catch-up if the runtime starts after the configured minute.
+  if (currentTimeKey < reportTime) {
     return null;
   }
 
