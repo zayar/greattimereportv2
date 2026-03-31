@@ -2404,66 +2404,125 @@ a {
 }
 
 .home-directory__activity-card {
-  padding: 22px;
-  border-radius: 28px;
+  padding: 24px 24px 22px;
+  border-radius: 30px;
   background:
-    radial-gradient(circle at top right, rgba(255, 255, 255, 0.08), transparent 28%),
-    linear-gradient(135deg, #2d2338 0%, #17101f 100%);
-  min-height: 172px;
+    radial-gradient(circle at 88% 18%, rgba(255, 255, 255, 0.18), transparent 18%),
+    radial-gradient(circle at 20% 120%, rgba(96, 164, 154, 0.24), transparent 30%),
+    linear-gradient(135deg, #24152d 0%, #17101f 42%, #13373d 100%);
+  min-height: 188px;
   display: grid;
-  gap: 14px;
+  gap: 16px;
   align-content: start;
   position: relative;
   overflow: hidden;
-  border: none;
-  box-shadow: 0 16px 32px rgba(45, 14, 52, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 22px 44px rgba(28, 16, 38, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
   margin-top: 8px;
 }
 
+.home-directory__activity-card:hover {
+  border-color: rgba(155, 224, 209, 0.2);
+  box-shadow:
+    0 28px 56px rgba(20, 13, 28, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.home-directory__activity-card:focus-visible {
+  outline: 3px solid rgba(160, 231, 215, 0.34);
+  outline-offset: 3px;
+}
+
+.home-directory__activity-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
 .home-directory__activity-card .home-directory__card-eyebrow {
-  color: #9788a1;
+  color: rgba(221, 211, 227, 0.76);
   font-weight: 600;
+  letter-spacing: 0.14em;
+}
+
+.home-directory__activity-action {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #f5ecec;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .home-directory__activity-copy {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   max-width: 520px;
 }
 
-.home-directory__activity-title {
-  color: #fffaf8;
+.home-directory__activity-card .home-directory__activity-title {
+  margin: 0;
+  color: #fff8f2;
   font-style: normal;
   font-weight: 700;
   font-family: "Space Grotesk", "Noto Sans Myanmar", "Avenir Next", "Segoe UI", sans-serif;
-  font-size: clamp(1.42rem, 2vw, 1.7rem);
-  line-height: 1.04;
-  letter-spacing: -0.03em;
+  font-size: clamp(1.5rem, 2vw, 1.85rem);
+  line-height: 0.98;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
 }
 
-.home-directory__activity-description {
-  color: #c8bdcd;
+.home-directory__activity-card .home-directory__activity-description {
+  color: rgba(229, 220, 230, 0.88);
   font-size: 0.98rem;
-  line-height: 1.6;
+  line-height: 1.7;
+  max-width: 46ch;
+}
+
+.home-directory__activity-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.home-directory__activity-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 11px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(242, 234, 240, 0.92);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .home-directory__activity-subline {
   font-style: normal;
   font-size: 0.84rem;
-  color: #a99db0;
+  color: rgba(193, 184, 199, 0.88);
   font-family: "Instrument Sans", "Noto Sans Myanmar", "Avenir Next", "Segoe UI", sans-serif;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-weight: 600;
+  letter-spacing: 0.02em;
 }
 
 .home-directory__activity-mesh {
   position: absolute;
-  right: -20%;
-  top: -50%;
-  width: 150%;
-  height: 200%;
-  background: radial-gradient(ellipse at right, rgba(255, 255, 255, 0.04) 0%, transparent 60%);
+  inset: 0;
+  background:
+    linear-gradient(115deg, transparent 0%, transparent 58%, rgba(255, 255, 255, 0.08) 78%, transparent 100%),
+    radial-gradient(circle at 82% 30%, rgba(255, 255, 255, 0.08), transparent 24%);
   pointer-events: none;
 }
 

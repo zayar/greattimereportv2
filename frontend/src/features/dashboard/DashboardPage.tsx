@@ -373,13 +373,20 @@ export function DashboardPage() {
               className="home-directory__activity-card"
               onClick={() => openRoute("/operational/appointments", "today")}
             >
-              <span className="home-directory__card-eyebrow">Daily Queue</span>
+              <div className="home-directory__activity-top">
+                <span className="home-directory__card-eyebrow">Daily Queue</span>
+                <span className="home-directory__activity-action">Open board</span>
+              </div>
               <div className="home-directory__activity-copy">
-                <strong className="home-directory__activity-title">Today Appoint List</strong>
+                <strong className="home-directory__activity-title">Today Appointment List</strong>
                 <p className="home-directory__activity-description">
                   Open today&apos;s appointment board for arrivals, room flow, and live schedule changes.
                 </p>
-                <span className="home-directory__activity-subline">Front desk and clinic team quick view</span>
+                <div className="home-directory__activity-meta">
+                  <span className="home-directory__activity-chip">Live updates</span>
+                  <span className="home-directory__activity-chip">Front desk quick view</span>
+                </div>
+                <span className="home-directory__activity-subline">For arrivals, room coordination, and same-day schedule control</span>
               </div>
               <div className="home-directory__activity-mesh" aria-hidden />
             </button>
