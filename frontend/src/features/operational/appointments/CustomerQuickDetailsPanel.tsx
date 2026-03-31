@@ -252,36 +252,6 @@ export function CustomerQuickDetailsPanel({
 
           <div className="customer-quick-panel__grid">
             <section className="customer-quick-panel__section">
-              <span className="customer-quick-panel__section-label">Operational insights</span>
-              <div className="customer-quick-panel__fact-list">
-                <div>
-                  <span>Preferred service</span>
-                  <strong>{data.customer.preferredService || "No clear favorite yet"}</strong>
-                </div>
-                <div>
-                  <span>Preferred therapist</span>
-                  <strong>{data.customer.preferredTherapist || "Unknown"}</strong>
-                </div>
-                <div>
-                  <span>Payment preference</span>
-                  <strong>{data.customer.lastPaymentMethod || "Unknown"}</strong>
-                </div>
-              </div>
-              {data.insights.length > 0 ? (
-                <div className="customer-quick-panel__insight-list">
-                  {data.insights.map((insight) => (
-                    <article key={insight.id} className="customer-quick-panel__insight">
-                      <strong>{insight.title}</strong>
-                      <p>{insight.detail}</p>
-                    </article>
-                  ))}
-                </div>
-              ) : null}
-            </section>
-          </div>
-
-          <div className="customer-quick-panel__grid">
-            <section className="customer-quick-panel__section">
               <span className="customer-quick-panel__section-label">Recent treatments</span>
               {data.recentServices.length === 0 ? (
                 <EmptyState label="No recent treatments visible" />
