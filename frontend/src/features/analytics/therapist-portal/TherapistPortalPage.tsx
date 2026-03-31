@@ -3,7 +3,6 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { fetchTherapistPortal } from "../../../api/analytics";
 import { DataTable } from "../../../components/DataTable";
 import { DateRangeControls } from "../../../components/DateRangeControls";
-import { DualMetricBarChart } from "../../../components/DualMetricBarChart";
 import { HorizontalBarList } from "../../../components/HorizontalBarList";
 import { Panel } from "../../../components/Panel";
 import { PageHeader } from "../../../components/PageHeader";
@@ -22,18 +21,6 @@ type SortBy =
   | "growthRate"
   | "utilizationScore";
 type SortDirection = "asc" | "desc";
-
-function toneClass(tone: "positive" | "attention" | "neutral") {
-  if (tone === "positive") {
-    return "positive";
-  }
-
-  if (tone === "attention") {
-    return "attention";
-  }
-
-  return "neutral";
-}
 
 export function TherapistPortalPage() {
   const navigate = useNavigate();
@@ -143,21 +130,6 @@ export function TherapistPortalPage() {
       label: "Customers touched",
       value: (summary?.customersServed ?? 0).toLocaleString("en-US"),
       hint: "Distinct customers served across the visible therapist set.",
-    },
-    {
-      label: "Avg treatments / therapist",
-      value: (summary?.averageTreatmentsPerTherapist ?? 0).toLocaleString("en-US"),
-      hint: "Average treatment depth per therapist in this window.",
-    },
-    {
-      label: "Repeat-customer contribution",
-      value: `${(summary?.repeatCustomerContribution ?? 0).toFixed(1)}%`,
-      hint: "Share of therapist-customer relationships driven by repeat visits.",
-    },
-    {
-      label: "Average utilization",
-      value: `${(summary?.averageUtilizationScore ?? 0).toFixed(0)}/100`,
-      hint: "A workload score built from active days and treatment density.",
     },
   ];
 
@@ -276,55 +248,6 @@ export function TherapistPortalPage() {
 
         <Panel
           className="analytics-report__panel therapist-portal__panel"
-          title="What to watch"
-          subtitle="Signals that help owners decide where to protect, grow, or rebalance therapist capacity."
-        >
-          {loading ? (
-            <div className="inline-note">Loading therapist insights...</div>
-          ) : !data ? (
-            <EmptyState label="No insights available" />
-          ) : (
-            <div className="customer-detail__insight-list">
-              {data.insights.map((insight) => (
-                <article
-                  key={insight.id}
-                  className={`customer-detail__insight customer-detail__insight--${toneClass(insight.tone)}`.trim()}
-                >
-                  <strong>{insight.title}</strong>
-                  <p>{insight.detail}</p>
-                </article>
-              ))}
-            </div>
-          )}
-        </Panel>
-      </div>
-
-      <div className="panel-grid panel-grid--split therapist-portal__grid">
-        <Panel
-          className="analytics-report__panel therapist-portal__panel therapist-portal__panel--tall"
-          title="Therapist contribution trend"
-          subtitle="Treatment flow and estimated treatment value across the visible date window."
-        >
-          {loading ? (
-            <div className="inline-note">Loading therapist trend...</div>
-          ) : !data || data.trend.length === 0 ? (
-            <EmptyState label="No therapist trend data found" />
-          ) : (
-            <DualMetricBarChart
-              items={data.trend.map((row) => ({
-                label: row.bucket,
-                primary: row.estimatedTreatmentValue,
-                secondary: row.treatmentsCompleted,
-              }))}
-              primaryLabel="Estimated treatment value"
-              secondaryLabel="Treatments"
-              formatPrimary={(value) => formatCurrency(value, currency)}
-            />
-          )}
-        </Panel>
-
-        <Panel
-          className="analytics-report__panel therapist-portal__panel"
           title="Therapist contribution share"
           subtitle="Who currently carries the largest share of visible treatment demand."
         >
@@ -334,36 +257,6 @@ export function TherapistPortalPage() {
             <EmptyState label="No therapist contribution found" />
           ) : (
             <HorizontalBarList items={contributionItems} />
-          )}
-        </Panel>
-      </div>
-
-      <div className="panel-grid panel-grid--split therapist-portal__grid">
-        <Panel
-          className="analytics-report__panel therapist-portal__panel"
-          title="Services driving therapist workload"
-          subtitle="The services most frequently handled by the visible therapist mix."
-        >
-          {loading ? (
-            <div className="inline-note">Loading top services...</div>
-          ) : topServiceItems.length === 0 ? (
-            <EmptyState label="No service workload found" />
-          ) : (
-            <HorizontalBarList items={topServiceItems} />
-          )}
-        </Panel>
-
-        <Panel
-          className="analytics-report__panel therapist-portal__panel"
-          title="Category mix by therapist activity"
-          subtitle="A simple read on where therapist delivery is concentrated today."
-        >
-          {loading ? (
-            <div className="inline-note">Loading category mix...</div>
-          ) : categoryItems.length === 0 ? (
-            <EmptyState label="No category mix found" />
-          ) : (
-            <HorizontalBarList items={categoryItems} />
           )}
         </Panel>
       </div>
