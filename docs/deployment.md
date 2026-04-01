@@ -22,7 +22,6 @@ Required GitHub secret:
 
 Required GitHub repository variables for frontend build:
 - `VITE_API_BASE_URL`
-- `VITE_APICORE_GRAPHQL_URL`
 - `VITE_GOOGLE_CLIENT_ID`
 - `VITE_FIREBASE_API_KEY`
 - `VITE_FIREBASE_AUTH_DOMAIN`

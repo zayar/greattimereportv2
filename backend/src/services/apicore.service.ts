@@ -252,6 +252,19 @@ async function postGraphql<T>(body: Record<string, unknown>, authorization?: str
   return (await response.json()) as GraphQLResponse<T>;
 }
 
+export async function forwardApicoreGraphqlRequest<T>(input: {
+  requestBody: Record<string, unknown>;
+  authorizationHeader?: string;
+}) {
+  const authorization = input.authorizationHeader?.trim();
+
+  if (!authorization) {
+    throw new HttpError(401, "Missing Firebase bearer token.");
+  }
+
+  return postGraphql<T>(input.requestBody, authorization);
+}
+
 async function executeApicoreQueryWithFallback<T>(input: {
   requestBody: Record<string, unknown>;
   authorizationHeader?: string;

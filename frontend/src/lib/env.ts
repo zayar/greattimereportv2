@@ -24,9 +24,15 @@ function normalizeApiBaseUrl(value: string) {
   return parsed.toString().replace(/\/+$/, "");
 }
 
+function buildApicoreProxyUrl(apiBaseUrl: string) {
+  return `${apiBaseUrl.replace(/\/+$/, "")}/apicore/graphql`;
+}
+
+const apiBaseUrl = normalizeApiBaseUrl(readEnv("VITE_API_BASE_URL"));
+
 export const env = {
-  apiBaseUrl: normalizeApiBaseUrl(readEnv("VITE_API_BASE_URL")),
-  apicoreGraphqlUrl: readEnv("VITE_APICORE_GRAPHQL_URL"),
+  apiBaseUrl,
+  apicoreProxyUrl: buildApicoreProxyUrl(apiBaseUrl),
   googleClientId: readEnv("VITE_GOOGLE_CLIENT_ID"),
   firebase: {
     apiKey: readEnv("VITE_FIREBASE_API_KEY"),

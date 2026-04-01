@@ -12,7 +12,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VITE_API_BASE_URL: https://example-api.invalid
-      VITE_APICORE_GRAPHQL_URL: https://example-apicore.invalid/graphql
       VITE_GOOGLE_CLIENT_ID: placeholder-google-client-id
       VITE_FIREBASE_API_KEY: placeholder-firebase-api-key
       VITE_FIREBASE_AUTH_DOMAIN: example.firebaseapp.com

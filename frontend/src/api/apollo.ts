@@ -4,7 +4,7 @@ import { auth } from "../lib/firebase";
 import { env } from "../lib/env";
 
 const httpLink = createHttpLink({
-  uri: env.apicoreGraphqlUrl,
+  uri: env.apicoreProxyUrl,
 });
 
 const authLink = setContext(async (_, previousContext) => {
@@ -30,4 +30,3 @@ export const apolloClient = new ApolloClient({
     addTypename: false,
   }),
 });
-
