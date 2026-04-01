@@ -1023,23 +1023,53 @@ a {
   align-items: center;
 }
 
+.telegram-settings__qr-card {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  padding: 28px 20px 22px;
+  border-radius: 32px;
+  background:
+    radial-gradient(circle at top left, rgba(95, 141, 78, 0.18), transparent 34%),
+    linear-gradient(180deg, rgba(230, 243, 223, 0.94), rgba(212, 232, 201, 0.9));
+  border: 1px solid rgba(95, 141, 78, 0.14);
+}
+
+.telegram-settings__qr-logo {
+  position: absolute;
+  top: -22px;
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #244b4d, #17363a 74%);
+  color: #f4e2a4;
+  font-family: "Cormorant Garamond", "Iowan Old Style", serif;
+  font-size: 2rem;
+  font-weight: 700;
+  box-shadow:
+    0 14px 24px rgba(23, 54, 58, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
 .telegram-settings__qr-frame {
   display: grid;
   place-items: center;
-  min-height: 340px;
+  min-height: 320px;
+  width: 100%;
   padding: 18px;
-  border-radius: 26px;
+  border-radius: 28px;
   border: 1px solid rgba(17, 24, 39, 0.08);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 248, 250, 0.94)),
-    radial-gradient(circle at top right, rgba(230, 199, 235, 0.12), transparent 50%);
+  background: rgba(255, 255, 255, 0.98);
 }
 
 .telegram-settings__qr-image {
   width: min(100%, 320px);
   height: auto;
   display: block;
-  border-radius: 20px;
+  border-radius: 18px;
 }
 
 .telegram-settings__qr-empty {
@@ -1061,6 +1091,13 @@ a {
 .telegram-settings__qr-copy strong {
   font-size: 1.12rem;
   color: #143437;
+}
+
+.telegram-settings__qr-username {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: #5f8d4e;
 }
 
 .telegram-settings__qr-copy p {

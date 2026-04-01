@@ -261,6 +261,18 @@ export function TelegramSettingsPage() {
 
     return null;
   }, [status?.botDeepLink, status?.botUrl, status?.botUsername]);
+  const qrBotUrl = useMemo(() => {
+    if (status?.botUrl) {
+      return status.botUrl;
+    }
+
+    if (status?.botUsername) {
+      return `https://t.me/${status.botUsername}`;
+    }
+
+    return null;
+  }, [status?.botUrl, status?.botUsername]);
+  const botDisplayUsername = status?.botUsername ? `@${status.botUsername.toUpperCase()}` : "Telegram bot";
 
   if (!clinic) {
     return (
@@ -273,7 +285,7 @@ export function TelegramSettingsPage() {
   const activeClinic = clinic;
 
   useEffect(() => {
-    if (!isQrOpen || !botTargetUrl) {
+    if (!isQrOpen || !qrBotUrl) {
       setQrCodeDataUrl(null);
       setQrError(null);
       return;
@@ -283,11 +295,11 @@ export function TelegramSettingsPage() {
     setQrCodeDataUrl(null);
     setQrError(null);
 
-    void QRCode.toDataURL(botTargetUrl, {
+    void QRCode.toDataURL(qrBotUrl, {
       width: 320,
       margin: 2,
       color: {
-        dark: "#17363a",
+        dark: "#5f8d4e",
         light: "#ffffffff",
       },
     })
@@ -305,7 +317,7 @@ export function TelegramSettingsPage() {
     return () => {
       active = false;
     };
-  }, [botTargetUrl, isQrOpen]);
+  }, [qrBotUrl, isQrOpen]);
 
   useEffect(() => {
     if (!isQrOpen) {
@@ -610,7 +622,7 @@ export function TelegramSettingsPage() {
             <button
               className="button telegram-settings__button telegram-settings__button--secondary"
               onClick={() => setIsQrOpen(true)}
-              disabled={!botTargetUrl}
+              disabled={!qrBotUrl}
             >
               Show Telegram QR
             </button>
@@ -921,7 +933,7 @@ export function TelegramSettingsPage() {
               <div>
                 <span className="telegram-settings__qr-eyebrow">Telegram quick access</span>
                 <h3 id="telegram-qr-title">Show Telegram QR</h3>
-                <p>Scan with your phone to open the GT Telegram bot quickly.</p>
+                <p>Scan with your phone to open {botDisplayUsername} quickly in Telegram.</p>
               </div>
               <button
                 type="button"
@@ -933,29 +945,33 @@ export function TelegramSettingsPage() {
             </div>
 
             <div className="telegram-settings__qr-body">
-              <div className="telegram-settings__qr-frame">
-                {qrCodeDataUrl ? (
-                  <img src={qrCodeDataUrl} alt="Telegram bot QR code" className="telegram-settings__qr-image" />
-                ) : qrError ? (
-                  <div className="telegram-settings__qr-empty">
-                    <strong>QR could not be generated</strong>
-                    <span>{qrError}</span>
-                  </div>
-                ) : (
-                  <div className="telegram-settings__qr-empty">
-                    <strong>Generating QR…</strong>
-                    <span>Preparing a scannable Telegram link.</span>
-                  </div>
-                )}
+              <div className="telegram-settings__qr-card">
+                <div className="telegram-settings__qr-logo">GT</div>
+                <div className="telegram-settings__qr-frame">
+                  {qrCodeDataUrl ? (
+                    <img src={qrCodeDataUrl} alt="Telegram bot QR code" className="telegram-settings__qr-image" />
+                  ) : qrError ? (
+                    <div className="telegram-settings__qr-empty">
+                      <strong>QR could not be generated</strong>
+                      <span>{qrError}</span>
+                    </div>
+                  ) : (
+                    <div className="telegram-settings__qr-empty">
+                      <strong>Generating QR…</strong>
+                      <span>Preparing a scannable Telegram link.</span>
+                    </div>
+                  )}
+                </div>
+                <strong className="telegram-settings__qr-username">{botDisplayUsername}</strong>
               </div>
 
               <div className="telegram-settings__qr-copy">
-                <strong>{status?.botUsername ? `@${status.botUsername}` : "Telegram bot"}</strong>
-                <p>Open Telegram and scan this QR to jump into the bot without typing the username manually.</p>
+                <strong>{botDisplayUsername}</strong>
+                <p>Open Telegram and scan this QR to jump into the GT bot without typing the username manually.</p>
                 <div className="telegram-settings__code-card">
                   <span>Bot link</span>
-                  <strong>{botTargetUrl ?? "Telegram bot not configured"}</strong>
-                  <small>QR uses the same Telegram target as the “Open Telegram bot” button.</small>
+                  <strong>{qrBotUrl ?? "Telegram bot not configured"}</strong>
+                  <small>QR is intentionally generated from the direct bot link so it opens the official GT bot cleanly.</small>
                 </div>
                 {botTargetUrl ? (
                   <button
