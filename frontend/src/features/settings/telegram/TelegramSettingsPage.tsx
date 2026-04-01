@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isAxiosError } from "axios";
+import QRCode from "qrcode";
 import { PageHeader } from "../../../components/PageHeader";
 import { Panel } from "../../../components/Panel";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
@@ -147,6 +148,9 @@ export function TelegramSettingsPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [draftsByChatId, setDraftsByChatId] = useState<Record<string, TargetDraft>>({});
+  const [isQrOpen, setIsQrOpen] = useState(false);
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
+  const [qrError, setQrError] = useState<string | null>(null);
 
   const loadStatus = useCallback(
     async (showLoader = true) => {
@@ -242,6 +246,21 @@ export function TelegramSettingsPage() {
     latestAppointmentDelivery?.outcome === "failed" ? "Retry appointment send" : "Resend appointment report";
   const paymentResendLabel =
     latestPaymentDelivery?.outcome === "failed" ? "Retry payment send" : "Resend payment report";
+  const botTargetUrl = useMemo(() => {
+    if (status?.botDeepLink) {
+      return status.botDeepLink;
+    }
+
+    if (status?.botUrl) {
+      return status.botUrl;
+    }
+
+    if (status?.botUsername) {
+      return `https://t.me/${status.botUsername}`;
+    }
+
+    return null;
+  }, [status?.botDeepLink, status?.botUrl, status?.botUsername]);
 
   if (!clinic) {
     return (
@@ -252,6 +271,56 @@ export function TelegramSettingsPage() {
   }
 
   const activeClinic = clinic;
+
+  useEffect(() => {
+    if (!isQrOpen || !botTargetUrl) {
+      setQrCodeDataUrl(null);
+      setQrError(null);
+      return;
+    }
+
+    let active = true;
+    setQrCodeDataUrl(null);
+    setQrError(null);
+
+    void QRCode.toDataURL(botTargetUrl, {
+      width: 320,
+      margin: 2,
+      color: {
+        dark: "#17363a",
+        light: "#ffffffff",
+      },
+    })
+      .then((dataUrl: string) => {
+        if (active) {
+          setQrCodeDataUrl(dataUrl);
+        }
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setQrError(error instanceof Error ? error.message : "QR code could not be generated.");
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [botTargetUrl, isQrOpen]);
+
+  useEffect(() => {
+    if (!isQrOpen) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsQrOpen(false);
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isQrOpen]);
 
   function updateSelectedDraft(patch: Partial<TargetDraft>) {
     if (!selectedTarget?.telegramChatId || !selectedDraft) {
@@ -529,14 +598,21 @@ export function TelegramSettingsPage() {
             <button
               className="button telegram-settings__button telegram-settings__button--secondary"
               onClick={() => {
-                const target = status?.botDeepLink ?? status?.botUrl;
-                if (target) {
-                  window.open(target, "_blank", "noopener,noreferrer");
+                if (botTargetUrl) {
+                  window.open(botTargetUrl, "_blank", "noopener,noreferrer");
                 }
               }}
-              disabled={!status?.botUrl}
+              disabled={!botTargetUrl}
             >
               Open Telegram bot
+            </button>
+
+            <button
+              className="button telegram-settings__button telegram-settings__button--secondary"
+              onClick={() => setIsQrOpen(true)}
+              disabled={!botTargetUrl}
+            >
+              Show Telegram QR
             </button>
 
             {pendingCodeActive ? (
@@ -836,6 +912,65 @@ export function TelegramSettingsPage() {
           )}
         </Panel>
       </div>
+
+      {isQrOpen ? (
+        <div className="telegram-settings__qr-modal-shell" role="dialog" aria-modal="true" aria-labelledby="telegram-qr-title">
+          <button className="telegram-settings__qr-backdrop" type="button" aria-label="Close Telegram QR" onClick={() => setIsQrOpen(false)} />
+          <div className="telegram-settings__qr-modal">
+            <div className="telegram-settings__qr-header">
+              <div>
+                <span className="telegram-settings__qr-eyebrow">Telegram quick access</span>
+                <h3 id="telegram-qr-title">Show Telegram QR</h3>
+                <p>Scan with your phone to open the GT Telegram bot quickly.</p>
+              </div>
+              <button
+                type="button"
+                className="button telegram-settings__button telegram-settings__button--secondary"
+                onClick={() => setIsQrOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="telegram-settings__qr-body">
+              <div className="telegram-settings__qr-frame">
+                {qrCodeDataUrl ? (
+                  <img src={qrCodeDataUrl} alt="Telegram bot QR code" className="telegram-settings__qr-image" />
+                ) : qrError ? (
+                  <div className="telegram-settings__qr-empty">
+                    <strong>QR could not be generated</strong>
+                    <span>{qrError}</span>
+                  </div>
+                ) : (
+                  <div className="telegram-settings__qr-empty">
+                    <strong>Generating QR…</strong>
+                    <span>Preparing a scannable Telegram link.</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="telegram-settings__qr-copy">
+                <strong>{status?.botUsername ? `@${status.botUsername}` : "Telegram bot"}</strong>
+                <p>Open Telegram and scan this QR to jump into the bot without typing the username manually.</p>
+                <div className="telegram-settings__code-card">
+                  <span>Bot link</span>
+                  <strong>{botTargetUrl ?? "Telegram bot not configured"}</strong>
+                  <small>QR uses the same Telegram target as the “Open Telegram bot” button.</small>
+                </div>
+                {botTargetUrl ? (
+                  <button
+                    type="button"
+                    className="button telegram-settings__button telegram-settings__button--primary"
+                    onClick={() => window.open(botTargetUrl, "_blank", "noopener,noreferrer")}
+                  >
+                    Open Telegram bot
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
