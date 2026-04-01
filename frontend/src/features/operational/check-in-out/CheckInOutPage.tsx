@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@apollo/client";
+import { apolloClient } from "../../../api/apollo";
 import { Link, useSearchParams } from "react-router-dom";
 import { DateRangeControls } from "../../../components/DateRangeControls";
 import { DataTable } from "../../../components/DataTable";
@@ -9,6 +10,7 @@ import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import { useAccess } from "../../access/AccessProvider";
 import type { CheckInOrderItemRow, CheckInOutRow } from "../../../types/domain";
 import { daysAgo, today } from "../../../utils/date";
+import { buildDatedExportFileName, chunkArray, downloadExcelWorkbook } from "../../../utils/exportExcel";
 import { formatCurrency, formatDateTime } from "../../../utils/format";
 import {
   buildCheckInOrderItemsVariables,
@@ -31,6 +33,8 @@ type CheckInOrderItemsResponse = {
 };
 
 const PAGE_SIZE = 20;
+const EXPORT_BATCH_SIZE = 500;
+const ORDER_ITEM_EXPORT_BATCH_SIZE = 250;
 
 function parsePositivePage(value: string | null) {
   const parsed = Number(value);
@@ -45,12 +49,106 @@ function resolveMemberPhone(row: CheckInOutRow) {
   return row.member?.clinic_members?.[0]?.phonenumber || row.member?.phonenumber || "—";
 }
 
+function buildOrderItemLookup(items: CheckInOrderItemRow[]) {
+  const lookup = new Map<string, CheckInOrderItemRow[]>();
+
+  for (const item of items) {
+    const key = `${item.order_id}::${item.service_id}`;
+    const current = lookup.get(key) ?? [];
+    current.push(item);
+    lookup.set(key, current);
+  }
+
+  return lookup;
+}
+
+function getMatchedOrderItem(row: CheckInOutRow, orderItemLookup: Map<string, CheckInOrderItemRow[]>) {
+  if (row.status !== "CHECKOUT" || !row.order_id || !row.service?.id) {
+    return null;
+  }
+
+  const matches = orderItemLookup.get(`${row.order_id}::${row.service.id}`) ?? [];
+
+  if (row.isUsePurchaseService) {
+    return matches.find((item) => Number(item.price ?? 0) === 0) ?? null;
+  }
+
+  return matches[0] ?? null;
+}
+
+async function loadAllCheckInRows(params: {
+  clinicId: string;
+  fromDate: string;
+  toDate: string;
+  search: string;
+  status: string;
+}) {
+  const rows: CheckInOutRow[] = [];
+  let totalCount = Number.POSITIVE_INFINITY;
+  let skip = 0;
+
+  while (skip < totalCount) {
+    const result = await apolloClient.query<CheckInOutResponse>({
+      query: GET_CHECKIN_OUT_DATA,
+      variables: buildCheckInOutVariables({
+        clinicId: params.clinicId,
+        fromDate: params.fromDate,
+        toDate: params.toDate,
+        search: params.search,
+        status: params.status,
+        take: EXPORT_BATCH_SIZE,
+        skip,
+      }),
+      fetchPolicy: "network-only",
+    });
+
+    const batch = result.data?.checkIns ?? [];
+    totalCount = result.data?.aggregateCheckIn?._count._all ?? 0;
+
+    if (batch.length === 0) {
+      break;
+    }
+
+    rows.push(...batch);
+    skip += batch.length;
+
+    if (batch.length < EXPORT_BATCH_SIZE) {
+      break;
+    }
+  }
+
+  return rows;
+}
+
+async function loadOrderItemsForCheckIns(rows: CheckInOutRow[]) {
+  const orderIds = Array.from(
+    new Set(
+      rows
+        .filter((row) => row.status === "CHECKOUT" && row.order_id)
+        .map((row) => row.order_id as string),
+    ),
+  );
+  const items: CheckInOrderItemRow[] = [];
+
+  for (const chunk of chunkArray(orderIds, ORDER_ITEM_EXPORT_BATCH_SIZE)) {
+    const result = await apolloClient.query<CheckInOrderItemsResponse>({
+      query: GET_CHECKIN_ORDER_ITEMS,
+      variables: buildCheckInOrderItemsVariables(chunk),
+      fetchPolicy: "network-only",
+    });
+    items.push(...(result.data?.orderItems ?? []));
+  }
+
+  return buildOrderItemLookup(items);
+}
+
 export function CheckInOutPage() {
   const [searchParams] = useSearchParams();
   const { currentClinic } = useAccess();
   const [search, setSearch] = useState(() => searchParams.get("search") ?? "");
   const [status, setStatus] = useState(() => searchParams.get("status") ?? "");
   const [page, setPage] = useState(() => parsePositivePage(searchParams.get("page")));
+  const [exporting, setExporting] = useState(false);
   const [range, setRange] = useState({
     fromDate: searchParams.get("fromDate") ?? daysAgo(6),
     toDate: searchParams.get("toDate") ?? today(),
@@ -103,37 +201,12 @@ export function CheckInOutPage() {
     skip: !orderItemVariables,
   });
 
-  const orderItemLookup = useMemo(() => {
-    const lookup = new Map<string, CheckInOrderItemRow[]>();
-
-    for (const item of orderItemsData?.orderItems ?? []) {
-      const key = `${item.order_id}::${item.service_id}`;
-      const current = lookup.get(key) ?? [];
-      current.push(item);
-      lookup.set(key, current);
-    }
-
-    return lookup;
-  }, [orderItemsData?.orderItems]);
-
-  const getMatchedOrderItem = (row: CheckInOutRow) => {
-    if (row.status !== "CHECKOUT" || !row.order_id || !row.service?.id) {
-      return null;
-    }
-
-    const matches = orderItemLookup.get(`${row.order_id}::${row.service.id}`) ?? [];
-
-    if (row.isUsePurchaseService) {
-      return matches.find((item) => Number(item.price ?? 0) === 0) ?? null;
-    }
-
-    return matches[0] ?? null;
-  };
+  const orderItemLookup = useMemo(() => buildOrderItemLookup(orderItemsData?.orderItems ?? []), [orderItemsData?.orderItems]);
 
   const checkedInCount = useMemo(() => rows.filter((row) => row.status === "CHECKIN").length, [rows]);
   const checkedOutCount = useMemo(() => rows.filter((row) => row.status === "CHECKOUT").length, [rows]);
   const loadedValue = useMemo(
-    () => rows.reduce((total, row) => total + Number(getMatchedOrderItem(row)?.total ?? 0), 0),
+    () => rows.reduce((total, row) => total + Number(getMatchedOrderItem(row, orderItemLookup)?.total ?? 0), 0),
     [rows, orderItemLookup],
   );
   const visibleServices = useMemo(
@@ -145,6 +218,67 @@ export function CheckInOutPage() {
       ).size,
     [rows],
   );
+
+  async function handleExport() {
+    if (!currentClinic?.id) {
+      return;
+    }
+
+    setExporting(true);
+
+    try {
+      const exportRows = await loadAllCheckInRows({
+        clinicId: currentClinic.id,
+        fromDate: range.fromDate,
+        toDate: range.toDate,
+        search,
+        status,
+      });
+      const exportOrderItems = await loadOrderItemsForCheckIns(exportRows);
+
+      await downloadExcelWorkbook({
+        fileName: buildDatedExportFileName("check-in-out", range.fromDate, range.toDate),
+        sheetName: "Check In Out",
+        headers: [
+          "Check-In Time",
+          "Check-Out Time",
+          "Order ID",
+          "Service",
+          "Therapist",
+          "Helper",
+          "Customer",
+          "Phone",
+          "Seller Name",
+          "Payment Method",
+          "Payment Status",
+          "Visit Status",
+          "Item Price",
+          "Total",
+        ],
+        rows: exportRows.map((row) => {
+          const item = getMatchedOrderItem(row, exportOrderItems);
+          return [
+            formatDateTime(row.in_time),
+            row.out_time ? formatDateTime(row.out_time) : "",
+            row.orders?.order_id || "",
+            row.service?.name || "",
+            row.practitioner?.name || "",
+            row.booking?.service_helper?.name || row.helper?.name || "",
+            resolveMemberName(row),
+            resolveMemberPhone(row),
+            row.orders?.seller?.display_name || "",
+            row.orders?.payment_method || "",
+            row.orders?.payment_status || "",
+            row.status,
+            item?.price == null ? "" : Number(item.price),
+            item?.total == null ? "" : Number(item.total),
+          ];
+        }),
+      });
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     <div className="page-stack page-stack--workspace analytics-report internal-workspace checkin-report">
@@ -224,20 +358,29 @@ export function CheckInOutPage() {
         title="Check in / out ledger"
         subtitle={`${totalCount.toLocaleString("en-US")} records matched · ${visibleServices.toLocaleString("en-US")} visible services on this page`}
         action={
-          <div className="pagination-controls">
-            <button className="button button--secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
-              Previous
-            </button>
-            <span>
-              Page {page} of {totalPages}
-            </span>
+          <div className="report-panel__actions">
             <button
               className="button button--secondary"
-              disabled={page >= totalPages}
-              onClick={() => setPage((value) => value + 1)}
+              disabled={loading || exporting || !currentClinic?.id || totalCount === 0}
+              onClick={() => void handleExport()}
             >
-              Next
+              {exporting ? "Exporting..." : "Export Excel"}
             </button>
+            <div className="pagination-controls">
+              <button className="button button--secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
+                Previous
+              </button>
+              <span>
+                Page {page} of {totalPages}
+              </span>
+              <button
+                className="button button--secondary"
+                disabled={page >= totalPages}
+                onClick={() => setPage((value) => value + 1)}
+              >
+                Next
+              </button>
+            </div>
           </div>
         }
       >
@@ -300,7 +443,7 @@ export function CheckInOutPage() {
                 key: "itemPrice",
                 header: "Item Price",
                 render: (row) => {
-                  const item = getMatchedOrderItem(row);
+                  const item = getMatchedOrderItem(row, orderItemLookup);
                   return item ? formatCurrency(item.price, currentClinic?.currency || "MMK") : "—";
                 },
               },
@@ -308,7 +451,7 @@ export function CheckInOutPage() {
                 key: "total",
                 header: "Total",
                 render: (row) => {
-                  const item = getMatchedOrderItem(row);
+                  const item = getMatchedOrderItem(row, orderItemLookup);
                   return item ? formatCurrency(item.total, currentClinic?.currency || "MMK") : "—";
                 },
               },

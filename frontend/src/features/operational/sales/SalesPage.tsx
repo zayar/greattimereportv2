@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@apollo/client";
+import { apolloClient } from "../../../api/apollo";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { DateRangeControls } from "../../../components/DateRangeControls";
 import { DataTable } from "../../../components/DataTable";
@@ -8,6 +9,7 @@ import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import { useAccess } from "../../access/AccessProvider";
 import { today } from "../../../utils/date";
+import { buildDatedExportFileName, downloadExcelWorkbook } from "../../../utils/exportExcel";
 import { formatCurrency, formatDate } from "../../../utils/format";
 import type { OrderRow } from "../../../types/domain";
 import { GET_SALES } from "./queries";
@@ -23,6 +25,7 @@ type SalesResponse = {
 };
 
 const PAGE_SIZE = 20;
+const EXPORT_BATCH_SIZE = 500;
 const ZERO_DECIMAL = "0";
 
 function buildOrderWhere(params: {
@@ -105,12 +108,52 @@ function parsePositivePage(value: string | null) {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
 }
 
+async function loadAllSales(params: {
+  where: Record<string, unknown>;
+  clinicId: string;
+}) {
+  const rows: OrderRow[] = [];
+  let totalCount = Number.POSITIVE_INFINITY;
+  let skip = 0;
+
+  while (skip < totalCount) {
+    const result = await apolloClient.query<SalesResponse>({
+      query: GET_SALES,
+      variables: {
+        where: params.where,
+        orderBy: [{ created_at: "desc" }],
+        take: EXPORT_BATCH_SIZE,
+        skip,
+        clinicMembersWhere2: { clinic_id: { equals: params.clinicId } },
+      },
+      fetchPolicy: "network-only",
+    });
+
+    const batch = result.data?.orders ?? [];
+    totalCount = result.data?.aggregateOrder?._count.id ?? 0;
+
+    if (batch.length === 0) {
+      break;
+    }
+
+    rows.push(...batch);
+    skip += batch.length;
+
+    if (batch.length < EXPORT_BATCH_SIZE) {
+      break;
+    }
+  }
+
+  return rows;
+}
+
 export function SalesPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { currentClinic } = useAccess();
   const [search, setSearch] = useState(() => searchParams.get("search") ?? "");
   const [page, setPage] = useState(() => parsePositivePage(searchParams.get("page")));
+  const [exporting, setExporting] = useState(false);
   const [showZeroValue, setShowZeroValue] = useState(() => parseBooleanSearchParam(searchParams.get("showZeroValue")));
   const [showCoOrders, setShowCoOrders] = useState(() => parseBooleanSearchParam(searchParams.get("showCoOrders")));
   const [range, setRange] = useState({
@@ -160,6 +203,56 @@ export function SalesPage() {
       ).size,
     [rows],
   );
+
+  async function handleExport() {
+    if (!currentClinic?.id || !where) {
+      return;
+    }
+
+    setExporting(true);
+
+    try {
+      const exportRows = await loadAllSales({
+        where,
+        clinicId: currentClinic.id,
+      });
+
+      await downloadExcelWorkbook({
+        fileName: buildDatedExportFileName("sales", range.fromDate, range.toDate),
+        sheetName: "Sales",
+        headers: [
+          "Date",
+          "Order",
+          "Member",
+          "Seller",
+          "Payment Method",
+          "Payment Status",
+          "Gross Total",
+          "Discount",
+          "Tax",
+          "Net Total",
+          "Balance",
+          "Credit Balance",
+        ],
+        rows: exportRows.map((row) => [
+          formatDate(row.created_at),
+          row.order_id,
+          row.member.clinic_members?.[0]?.name || row.member.name,
+          row.seller?.display_name || row.user?.name || "",
+          row.payment_method || "",
+          row.payment_status || "",
+          Number(row.total ?? 0),
+          Number(row.discount ?? 0),
+          Number(row.tax ?? 0),
+          Number(row.net_total ?? 0),
+          Number(row.balance ?? 0),
+          Number(row.credit_balance ?? 0),
+        ]),
+      });
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     <div className="page-stack page-stack--workspace analytics-report internal-workspace">
@@ -242,20 +335,29 @@ export function SalesPage() {
         title="Sales ledger"
         subtitle={`${totalCount.toLocaleString("en-US")} orders matched the current filters${!showZeroValue || !showCoOrders ? " · Default cleanup filters are active" : ""}`}
         action={
-          <div className="pagination-controls">
-            <button className="button button--secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
-              Previous
-            </button>
-            <span>
-              Page {page} of {totalPages}
-            </span>
+          <div className="report-panel__actions">
             <button
               className="button button--secondary"
-              disabled={page >= totalPages}
-              onClick={() => setPage((value) => value + 1)}
+              disabled={loading || exporting || !currentClinic?.id || !where || totalCount === 0}
+              onClick={() => void handleExport()}
             >
-              Next
+              {exporting ? "Exporting..." : "Export Excel"}
             </button>
+            <div className="pagination-controls">
+              <button className="button button--secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
+                Previous
+              </button>
+              <span>
+                Page {page} of {totalPages}
+              </span>
+              <button
+                className="button button--secondary"
+                disabled={page >= totalPages}
+                onClick={() => setPage((value) => value + 1)}
+              >
+                Next
+              </button>
+            </div>
           </div>
         }
       >

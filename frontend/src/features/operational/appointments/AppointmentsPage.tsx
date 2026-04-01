@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@apollo/client";
+import { apolloClient } from "../../../api/apollo";
 import { DateRangeControls } from "../../../components/DateRangeControls";
 import { DataTable } from "../../../components/DataTable";
 import { Panel } from "../../../components/Panel";
@@ -7,6 +8,7 @@ import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import { useAccess } from "../../access/AccessProvider";
 import { today } from "../../../utils/date";
+import { buildDatedExportFileName, downloadExcelWorkbook } from "../../../utils/exportExcel";
 import { formatDateTime } from "../../../utils/format";
 import type { AppointmentRow } from "../../../types/domain";
 import { GET_BOOKING_DETAILS } from "./queries";
@@ -20,11 +22,55 @@ type BookingDetailsResponse = {
 };
 
 const PAGE_SIZE = 20;
+const EXPORT_BATCH_SIZE = 500;
+
+async function loadAllAppointments(params: {
+  clinicCode: string;
+  fromDate: string;
+  toDate: string;
+  status: string;
+}) {
+  const rows: AppointmentRow[] = [];
+  let totalCount = Number.POSITIVE_INFINITY;
+  let skip = 0;
+
+  while (skip < totalCount) {
+    const result = await apolloClient.query<BookingDetailsResponse>({
+      query: GET_BOOKING_DETAILS,
+      variables: {
+        clinicCode: params.clinicCode,
+        startDate: new Date(`${params.fromDate}T00:00:00.000Z`).toISOString(),
+        endDate: new Date(`${params.toDate}T23:59:59.999Z`).toISOString(),
+        status: params.status || undefined,
+        skip,
+        take: EXPORT_BATCH_SIZE,
+      },
+      fetchPolicy: "network-only",
+    });
+
+    const batch = result.data?.getBookingDetails.data ?? [];
+    totalCount = result.data?.getBookingDetails.totalCount ?? 0;
+
+    if (batch.length === 0) {
+      break;
+    }
+
+    rows.push(...batch);
+    skip += batch.length;
+
+    if (batch.length < EXPORT_BATCH_SIZE) {
+      break;
+    }
+  }
+
+  return rows;
+}
 
 export function AppointmentsPage() {
   const { currentClinic } = useAccess();
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
+  const [exporting, setExporting] = useState(false);
   const [range, setRange] = useState({
     fromDate: today(),
     toDate: today(),
@@ -84,6 +130,42 @@ export function AppointmentsPage() {
   const selectedCustomerKey = selectedCustomer
     ? `${selectedCustomer.customerName}::${selectedCustomer.customerPhone}`
     : "";
+
+  async function handleExport() {
+    if (!currentClinic?.code) {
+      return;
+    }
+
+    setExporting(true);
+
+    try {
+      const exportRows = await loadAllAppointments({
+        clinicCode: currentClinic.code,
+        fromDate: range.fromDate,
+        toDate: range.toDate,
+        status,
+      });
+
+      await downloadExcelWorkbook({
+        fileName: buildDatedExportFileName("appointments", range.fromDate, range.toDate),
+        sheetName: "Appointments",
+        headers: ["Time", "End Time", "Member", "Phone", "Service", "Practitioner", "Status", "Helper", "Member note"],
+        rows: exportRows.map((row) => [
+          formatDateTime(row.FromTime),
+          formatDateTime(row.ToTime),
+          row.MemberName,
+          row.MemberPhoneNumber || "",
+          row.ServiceName,
+          row.PractitionerName,
+          row.status,
+          row.HelperName || "",
+          row.member_note || "",
+        ]),
+      });
+    } finally {
+      setExporting(false);
+    }
+  }
 
   return (
     <div className="page-stack page-stack--workspace analytics-report internal-workspace internal-workspace--soft appointments-report appointments-report--luxe">
@@ -147,20 +229,29 @@ export function AppointmentsPage() {
             title="Appointment ledger"
             subtitle={`${totalCount.toLocaleString("en-US")} records in the selected date window`}
             action={
-              <div className="pagination-controls">
-                <button className="button button--secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
-                  Previous
-                </button>
-                <span>
-                  Page {page} of {totalPages}
-                </span>
+              <div className="report-panel__actions">
                 <button
                   className="button button--secondary"
-                  disabled={page >= totalPages}
-                  onClick={() => setPage((value) => value + 1)}
+                  disabled={loading || exporting || !currentClinic?.code || totalCount === 0}
+                  onClick={() => void handleExport()}
                 >
-                  Next
+                  {exporting ? "Exporting..." : "Export Excel"}
                 </button>
+                <div className="pagination-controls">
+                  <button className="button button--secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
+                    Previous
+                  </button>
+                  <span>
+                    Page {page} of {totalPages}
+                  </span>
+                  <button
+                    className="button button--secondary"
+                    disabled={page >= totalPages}
+                    onClick={() => setPage((value) => value + 1)}
+                  >
+                    Next
+                  </button>
+                </div>
               </div>
             }
           >
