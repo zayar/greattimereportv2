@@ -200,6 +200,7 @@ export interface CheckInOutRow {
 export interface CheckInOrderItemRow {
   id: string;
   price: number | string;
+  total?: number | string | null;
   service_id: string;
   order_id: string;
 }

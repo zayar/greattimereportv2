@@ -116,7 +116,7 @@ export function CheckInOutPage() {
     return lookup;
   }, [orderItemsData?.orderItems]);
 
-  const getServiceAmount = (row: CheckInOutRow) => {
+  const getMatchedOrderItem = (row: CheckInOutRow) => {
     if (row.status !== "CHECKOUT" || !row.order_id || !row.service?.id) {
       return null;
     }
@@ -124,16 +124,16 @@ export function CheckInOutPage() {
     const matches = orderItemLookup.get(`${row.order_id}::${row.service.id}`) ?? [];
 
     if (row.isUsePurchaseService) {
-      return matches.find((item) => Number(item.price ?? 0) === 0)?.price ?? null;
+      return matches.find((item) => Number(item.price ?? 0) === 0) ?? null;
     }
 
-    return matches[0]?.price ?? null;
+    return matches[0] ?? null;
   };
 
   const checkedInCount = useMemo(() => rows.filter((row) => row.status === "CHECKIN").length, [rows]);
   const checkedOutCount = useMemo(() => rows.filter((row) => row.status === "CHECKOUT").length, [rows]);
   const loadedValue = useMemo(
-    () => rows.reduce((total, row) => total + Number(getServiceAmount(row) ?? 0), 0),
+    () => rows.reduce((total, row) => total + Number(getMatchedOrderItem(row)?.total ?? 0), 0),
     [rows, orderItemLookup],
   );
   const visibleServices = useMemo(
@@ -297,11 +297,19 @@ export function CheckInOutPage() {
                 render: (row) => <span className="chip">{row.orders?.payment_status || row.status || "—"}</span>,
               },
               {
+                key: "itemPrice",
+                header: "Item Price",
+                render: (row) => {
+                  const item = getMatchedOrderItem(row);
+                  return item ? formatCurrency(item.price, currentClinic?.currency || "MMK") : "—";
+                },
+              },
+              {
                 key: "total",
                 header: "Total",
                 render: (row) => {
-                  const amount = getServiceAmount(row);
-                  return amount == null ? "—" : formatCurrency(amount, currentClinic?.currency || "MMK");
+                  const item = getMatchedOrderItem(row);
+                  return item ? formatCurrency(item.total, currentClinic?.currency || "MMK") : "—";
                 },
               },
             ]}

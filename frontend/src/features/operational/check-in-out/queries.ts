@@ -69,6 +69,7 @@ export const GET_CHECKIN_ORDER_ITEMS = gql`
     orderItems(where: $where, orderBy: $orderBy) {
       id
       price
+      total
       service_id
       order_id
     }
