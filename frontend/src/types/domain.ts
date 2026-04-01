@@ -148,6 +148,62 @@ export interface AppointmentRow {
   member_note?: string | null;
 }
 
+export interface CheckInOutRow {
+  id: string;
+  in_time: string;
+  out_time?: string | null;
+  status: string;
+  created_at: string;
+  isUsePurchaseService?: boolean | null;
+  merchant_note?: string | null;
+  order_id?: string | null;
+  service?: {
+    id: string;
+    name: string;
+  } | null;
+  practitioner?: {
+    id: string;
+    name: string;
+  } | null;
+  member?: {
+    name: string;
+    phonenumber?: string | null;
+    clinic_members?: Array<{
+      name: string;
+      phonenumber?: string | null;
+      clinic_id: string;
+    }>;
+  } | null;
+  booking?: {
+    service_helper?: {
+      id: string;
+      name: string;
+    } | null;
+  } | null;
+  helper?: {
+    name: string;
+  } | null;
+  orders?: {
+    order_id?: string | null;
+    discount?: number | string | null;
+    tax?: number | string | null;
+    total?: number | string | null;
+    net_total?: number | string | null;
+    payment_method?: string | null;
+    payment_status?: string | null;
+    seller?: {
+      display_name?: string | null;
+    } | null;
+  } | null;
+}
+
+export interface CheckInOrderItemRow {
+  id: string;
+  price: number | string;
+  service_id: string;
+  order_id: string;
+}
+
 export interface OrderRow {
   id: string;
   order_id: string;

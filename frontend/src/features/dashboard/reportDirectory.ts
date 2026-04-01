@@ -119,6 +119,15 @@ export const directoryItems: DirectoryItem[] = [
     eyebrow: "Operations",
     window: "30d",
   },
+  {
+    id: "check-in-out",
+    title: "Check In/Out",
+    description: "Arrival-to-checkout treatment flow with therapist, helper, and order context.",
+    route: "/operational/check-in-out",
+    group: "Operations",
+    eyebrow: "Operations",
+    window: "30d",
+  },
 ];
 
 function getWindowRange(window: DirectoryWindow) {

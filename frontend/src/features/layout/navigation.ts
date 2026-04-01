@@ -21,6 +21,7 @@ export const navigationSections: NavigationSection[] = [
     title: "Operations",
     items: [
       { to: "/operational/appointments", label: "Appointments" },
+      { to: "/operational/check-in-out", label: "Check In/Out" },
       { to: "/operational/sales", label: "Sales" },
       { to: "/operational/members", label: "Members" },
     ],
