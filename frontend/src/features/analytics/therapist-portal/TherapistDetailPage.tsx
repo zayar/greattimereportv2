@@ -7,7 +7,6 @@ import {
 } from "../../../api/analytics";
 import { DataTable } from "../../../components/DataTable";
 import { DateRangeControls } from "../../../components/DateRangeControls";
-import { DualMetricBarChart } from "../../../components/DualMetricBarChart";
 import { HorizontalBarList } from "../../../components/HorizontalBarList";
 import { Panel } from "../../../components/Panel";
 import { PageHeader } from "../../../components/PageHeader";
@@ -48,18 +47,6 @@ function initialsFor(name: string) {
     .slice(0, 2)
     .map((part) => part[0]?.toUpperCase() ?? "")
     .join("");
-}
-
-function toneClass(tone: "positive" | "attention" | "neutral") {
-  if (tone === "positive") {
-    return "positive";
-  }
-
-  if (tone === "attention") {
-    return "attention";
-  }
-
-  return "neutral";
 }
 
 export function TherapistDetailPage() {
@@ -377,55 +364,6 @@ export function TherapistDetailPage() {
 
       {activeTab === "overview" ? (
         <div className="customer-detail__section-stack">
-          <div className="panel-grid panel-grid--split customer-detail__overview-grid">
-            <Panel
-              className="analytics-report__panel customer-detail__panel"
-              title="Treatment contribution trend"
-              subtitle="Treatment flow and estimated treatment value across the selected date range."
-            >
-              {overviewState.loading ? (
-                <div className="inline-note inline-note--loading">Loading therapist trend...</div>
-              ) : !overview || overview.trend.length === 0 ? (
-                <EmptyState label="No trend data found" detail="The current date range may not include completed treatment activity for this therapist." />
-              ) : (
-                <DualMetricBarChart
-                  items={overview.trend.map((row) => ({
-                    label: row.bucket,
-                    primary: row.estimatedTreatmentValue,
-                    secondary: row.treatmentsCompleted,
-                  }))}
-                  primaryLabel="Estimated treatment value"
-                  secondaryLabel="Treatments"
-                  formatPrimary={(value) => formatCurrency(value, currency)}
-                />
-              )}
-            </Panel>
-
-            <Panel
-              className="analytics-report__panel customer-detail__panel"
-              title="Business insights"
-              subtitle="Signal-first observations for growth, continuity, specialization, and workload balance."
-            >
-              {overviewState.loading ? (
-                <div className="inline-note inline-note--loading">Loading therapist insights...</div>
-              ) : !overview ? (
-                <EmptyState label="No insights available" />
-              ) : (
-                <div className="customer-detail__insight-list">
-                  {overview.insights.map((insight) => (
-                    <article
-                      key={insight.id}
-                      className={`customer-detail__insight customer-detail__insight--${toneClass(insight.tone)}`.trim()}
-                    >
-                      <strong>{insight.title}</strong>
-                      <p>{insight.detail}</p>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </Panel>
-          </div>
-
           <div className="panel-grid panel-grid--split customer-detail__overview-grid">
             <Panel
               className="analytics-report__panel customer-detail__panel"
