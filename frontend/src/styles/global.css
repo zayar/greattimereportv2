@@ -6068,6 +6068,24 @@ a {
   font-size: 1rem;
 }
 
+.package-portal__detail-metric--remaining {
+  border-color: rgba(182, 71, 45, 0.14);
+  background:
+    linear-gradient(180deg, rgba(255, 245, 242, 0.96), rgba(255, 239, 233, 0.88)),
+    radial-gradient(circle at top right, rgba(234, 122, 80, 0.14), transparent 48%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.56),
+    0 8px 18px rgba(178, 71, 45, 0.08);
+}
+
+.package-portal__detail-metric--remaining span {
+  color: #a24a31;
+}
+
+.package-portal__detail-metric--remaining strong {
+  color: #8f3522;
+}
+
 .package-portal__followup-stack {
   display: grid;
   gap: 10px;

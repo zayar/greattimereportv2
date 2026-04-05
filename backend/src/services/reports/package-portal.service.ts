@@ -9,9 +9,11 @@ import {
   type PackageUsageStatus,
 } from "./package-portal-status.js";
 
-const HOLDING_BATCH_SIZE = 200;
-const CHECKIN_BATCH_SIZE = 400;
-const MEMBER_CHUNK_SIZE = 150;
+const HOLDING_BATCH_SIZE = 500;
+const CHECKIN_BATCH_SIZE = 1000;
+const MEMBER_CHUNK_SIZE = 250;
+const CHECKIN_CHUNK_CONCURRENCY = 3;
+const PACKAGE_RECORD_CACHE_TTL_MS = 2 * 60 * 1000;
 
 const PACKAGE_HOLDINGS_QUERY = `
   query PackagePortalHoldings(
@@ -20,6 +22,8 @@ const PACKAGE_HOLDINGS_QUERY = `
     $take: Int
     $skip: Int
     $clinicMembersWhere: ClinicMemberWhereInput
+    $memberServiceBagsWhere: MemberServiceBagWhereInput
+    $orderItemsWhere: OrderItemWhereInput
   ) {
     memberServicePackages(where: $where, orderBy: $orderBy, take: $take, skip: $skip) {
       id
@@ -45,7 +49,7 @@ const PACKAGE_HOLDINGS_QUERY = `
         name
         status
       }
-      member_service_bags {
+      member_service_bags(where: $memberServiceBagsWhere) {
         id
         original_count
         remaining_count
@@ -55,7 +59,7 @@ const PACKAGE_HOLDINGS_QUERY = `
           name
         }
       }
-      order_items {
+      order_items(where: $orderItemsWhere) {
         id
         quantity
         created_at
@@ -198,6 +202,14 @@ type PackageCustomerRecord = {
   serviceNames: string[];
 };
 
+type PackageCustomerSeedCacheEntry = {
+  expiresAt: number;
+  value?: PackageCustomerRecord[];
+  promise?: Promise<PackageCustomerRecord[]>;
+};
+
+const packageCustomerSeedCache = new Map<string, PackageCustomerSeedCacheEntry>();
+
 function parseNumber(value: unknown) {
   if (typeof value === "number") {
     return value;
@@ -334,28 +346,115 @@ function chunkArray<T>(items: T[], chunkSize: number) {
   return chunks;
 }
 
+function buildPackageCustomerSeedCacheKey(params: Pick<PackagePortalParams, "clinicId" | "fromDate" | "toDate" | "onlyRemaining">) {
+  return JSON.stringify({
+    clinicId: params.clinicId,
+    fromDate: params.fromDate,
+    toDate: params.toDate,
+    onlyRemaining: params.onlyRemaining,
+  });
+}
+
+function prunePackageCustomerSeedCache(now = Date.now()) {
+  for (const [key, entry] of packageCustomerSeedCache.entries()) {
+    if (!entry.promise && entry.expiresAt <= now) {
+      packageCustomerSeedCache.delete(key);
+    }
+  }
+}
+
 async function fetchAllPackageHoldings(params: {
   clinicId: string;
+  fromDate: string;
+  toDate: string;
+  packageId: string;
+  onlyRemaining: boolean;
   authorizationHeader?: string;
 }) {
   const rows: MemberServicePackageNode[] = [];
   let skip = 0;
+  const fromDateIso = new Date(`${params.fromDate}T00:00:00.000Z`).toISOString();
+  const toDateIso = new Date(`${params.toDate}T23:59:59.999Z`).toISOString();
 
   while (true) {
     const data = await queryApicoreWithFallback<{ memberServicePackages?: MemberServicePackageNode[] | null }>({
       query: PACKAGE_HOLDINGS_QUERY,
       variables: {
         where: {
+          AND: [
+            {
+              OR: [
+                {
+                  order_items: {
+                    some: {
+                      order: {
+                        is: {
+                          created_at: {
+                            gte: fromDateIso,
+                            lte: toDateIso,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+                {
+                  AND: [
+                    {
+                      order_items: {
+                        none: {},
+                      },
+                    },
+                    {
+                      created_at: {
+                        gte: fromDateIso,
+                        lte: toDateIso,
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
           status: { notIn: ["CANCEL"] },
           service_package: {
             is: {
               clinic_id: { equals: params.clinicId },
               status: { notIn: ["CANCEL"] },
+              ...(params.packageId ? { id: { equals: params.packageId } } : {}),
             },
           },
+          ...(params.onlyRemaining
+            ? {
+                member_service_bags: {
+                  some: {
+                    remaining_count: {
+                      gt: 0,
+                    },
+                  },
+                },
+              }
+            : {}),
         },
         clinicMembersWhere: {
           clinic_id: { equals: params.clinicId },
+        },
+        memberServiceBagsWhere: {
+          service: {
+            is: {
+              clinic_id: { equals: params.clinicId },
+            },
+          },
+        },
+        orderItemsWhere: {
+          order: {
+            is: {
+              created_at: {
+                gte: fromDateIso,
+                lte: toDateIso,
+              },
+            },
+          },
         },
         orderBy: [{ updated_at: "desc" }],
         take: HOLDING_BATCH_SIZE,
@@ -381,13 +480,14 @@ async function fetchAllPackageHoldings(params: {
 async function fetchPackageUsageCheckIns(params: {
   clinicId: string;
   memberIds: string[];
+  serviceIds: string[];
   minDate: string;
   authorizationHeader?: string;
 }) {
-  const rows: CheckInNode[] = [];
   const memberIdChunks = chunkArray(params.memberIds, MEMBER_CHUNK_SIZE);
 
-  for (const memberIds of memberIdChunks) {
+  async function loadChunk(memberIds: string[]) {
+    const chunkRows: CheckInNode[] = [];
     let skip = 0;
 
     while (true) {
@@ -398,6 +498,7 @@ async function fetchPackageUsageCheckIns(params: {
             clinic_id: { equals: params.clinicId },
             isUsePurchaseService: { equals: true },
             member_id: { in: memberIds },
+            service_id: { in: params.serviceIds },
             in_time: { gte: new Date(`${params.minDate}T00:00:00.000Z`).toISOString() },
           },
           orderBy: [{ in_time: "desc" }],
@@ -409,13 +510,26 @@ async function fetchPackageUsageCheckIns(params: {
       });
 
       const batch = data?.checkIns ?? [];
-      rows.push(...batch);
+      chunkRows.push(...batch);
 
       if (batch.length < CHECKIN_BATCH_SIZE) {
         break;
       }
 
       skip += batch.length;
+    }
+
+    return chunkRows;
+  }
+
+  const rows: CheckInNode[] = [];
+
+  for (let index = 0; index < memberIdChunks.length; index += CHECKIN_CHUNK_CONCURRENCY) {
+    const window = memberIdChunks.slice(index, index + CHECKIN_CHUNK_CONCURRENCY);
+    const results = await Promise.all(window.map((memberIds) => loadChunk(memberIds)));
+
+    for (const batch of results) {
+      rows.push(...batch);
     }
   }
 
@@ -574,9 +688,16 @@ function buildPackageFollowUpSummary(rows: PackageCustomerRecord[]) {
   return "Healthy";
 }
 
-async function buildPackageCustomerRecords(params: PackagePortalParams) {
+async function buildPackageCustomerSeed(params: Pick<
+  PackagePortalParams,
+  "clinicId" | "fromDate" | "toDate" | "packageId" | "category" | "salesperson" | "onlyRemaining" | "authorizationHeader"
+>) {
   const rawHoldings = await fetchAllPackageHoldings({
     clinicId: params.clinicId,
+    fromDate: params.fromDate,
+    toDate: params.toDate,
+    packageId: params.packageId,
+    onlyRemaining: params.onlyRemaining,
     authorizationHeader: params.authorizationHeader,
   });
 
@@ -609,29 +730,131 @@ async function buildPackageCustomerRecords(params: PackagePortalParams) {
   });
 
   if (dateScopedRows.length === 0) {
-    return {
-      records: [] as PackageCustomerRecord[],
-      filterSeed: [] as PackageCustomerRecord[],
-    };
+    return [] as PackageCustomerRecord[];
   }
 
   const minDate = dateScopedRows.reduce((earliest, row) => (row.purchaseDate < earliest ? row.purchaseDate : earliest), dateScopedRows[0]!.purchaseDate);
   const memberIds = Array.from(new Set(dateScopedRows.map((row) => row.internalMemberId)));
+  const serviceIds = Array.from(new Set(dateScopedRows.flatMap((row) => row.serviceIds)));
   const usageRows = await fetchPackageUsageCheckIns({
     clinicId: params.clinicId,
     memberIds,
+    serviceIds,
     minDate,
     authorizationHeader: params.authorizationHeader,
   });
   const usageLookup = buildLatestUsageLookup(usageRows);
   const todayDate = new Date().toISOString().slice(0, 10);
-  const filterSeed = dateScopedRows.map((row) =>
+  return dateScopedRows.map((row) =>
     buildPackageCustomerRecord({
       base: row,
       usageLookup,
       todayDate,
     }),
   );
+}
+
+async function getCachedPackageCustomerSeed(
+  params: Pick<PackagePortalParams, "clinicId" | "fromDate" | "toDate" | "onlyRemaining" | "authorizationHeader">,
+) {
+  const key = buildPackageCustomerSeedCacheKey(params);
+  const now = Date.now();
+  const cached = packageCustomerSeedCache.get(key);
+
+  if (cached) {
+    if (cached.value && cached.expiresAt > now) {
+      return cached.value;
+    }
+
+    if (cached.promise) {
+      return cached.promise;
+    }
+  }
+
+  prunePackageCustomerSeedCache(now);
+
+  const promise = buildPackageCustomerSeed({
+    clinicId: params.clinicId,
+    fromDate: params.fromDate,
+    toDate: params.toDate,
+    packageId: "",
+    category: "",
+    salesperson: "",
+    onlyRemaining: params.onlyRemaining,
+    authorizationHeader: params.authorizationHeader,
+  })
+    .then((rows) => {
+      packageCustomerSeedCache.set(key, {
+        value: rows,
+        expiresAt: Date.now() + PACKAGE_RECORD_CACHE_TTL_MS,
+      });
+      return rows;
+    })
+    .catch((error) => {
+      packageCustomerSeedCache.delete(key);
+      throw error;
+    });
+
+  packageCustomerSeedCache.set(key, {
+    promise,
+    expiresAt: now + PACKAGE_RECORD_CACHE_TTL_MS,
+  });
+
+  return promise;
+}
+
+function applyPackageScopeFilters(
+  rows: PackageCustomerRecord[],
+  params: Pick<PackagePortalParams, "packageId" | "category" | "salesperson" | "onlyRemaining">,
+) {
+  return rows.filter((row) => {
+    if (params.packageId && row.packageId !== params.packageId) {
+      return false;
+    }
+
+    if (params.category && row.category.toLowerCase() !== params.category.toLowerCase()) {
+      return false;
+    }
+
+    if (
+      params.salesperson &&
+      parseText(row.latestSalesperson, "").toLowerCase() !== params.salesperson.toLowerCase()
+    ) {
+      return false;
+    }
+
+    if (params.onlyRemaining && row.remainingUnits <= 0) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+async function buildPackageCustomerRecords(params: PackagePortalParams) {
+  const cacheKey = buildPackageCustomerSeedCacheKey(params);
+  const hasSharedSeedCache = packageCustomerSeedCache.has(cacheKey);
+  const shouldBuildSharedSeed = !params.packageId && !params.category && !params.salesperson;
+  const seedRows =
+    hasSharedSeedCache || shouldBuildSharedSeed
+      ? await getCachedPackageCustomerSeed({
+          clinicId: params.clinicId,
+          fromDate: params.fromDate,
+          toDate: params.toDate,
+          onlyRemaining: params.onlyRemaining,
+          authorizationHeader: params.authorizationHeader,
+        })
+      : await buildPackageCustomerSeed({
+          clinicId: params.clinicId,
+          fromDate: params.fromDate,
+          toDate: params.toDate,
+          packageId: params.packageId,
+          category: params.category,
+          salesperson: params.salesperson,
+          onlyRemaining: params.onlyRemaining,
+          authorizationHeader: params.authorizationHeader,
+        });
+  const filterSeed = applyPackageScopeFilters(seedRows, params);
 
   const records = filterSeed.filter((row) => {
     if (

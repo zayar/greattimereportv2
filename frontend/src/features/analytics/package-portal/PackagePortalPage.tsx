@@ -96,10 +96,10 @@ async function exportPerformanceRows(
     headers: [
       "Package",
       "Category",
-      "Sold Count",
+      "Packages Sold",
       "Total Units Sold",
       "Used Units",
-      "Remaining Units",
+      "Package Remaining",
       "Active Customers",
       "Completed Customers",
       "Inactive Customers",
@@ -353,7 +353,7 @@ function PackageDetailInspector({
           >
             <div className="package-portal__detail-metrics">
               <article className="package-portal__detail-metric">
-                <span>Sold count</span>
+                <span>Packages sold</span>
                 <strong>{data.package.soldCount.toLocaleString("en-US")}</strong>
               </article>
               <article className="package-portal__detail-metric">
@@ -364,8 +364,8 @@ function PackageDetailInspector({
                 <span>Used units</span>
                 <strong>{data.package.totalUsedUnits.toLocaleString("en-US")}</strong>
               </article>
-              <article className="package-portal__detail-metric">
-                <span>Remaining units</span>
+              <article className="package-portal__detail-metric package-portal__detail-metric--remaining">
+                <span>Package remaining</span>
                 <strong>{data.package.totalRemainingUnits.toLocaleString("en-US")}</strong>
               </article>
               <article className="package-portal__detail-metric">
@@ -810,7 +810,7 @@ export function PackagePortalPage() {
                     ),
                   },
                   { key: "category", header: "Category", render: (row) => row.category },
-                  { key: "sold", header: "Sold count", render: (row) => row.soldCount.toLocaleString("en-US") },
+                  { key: "sold", header: "Packages sold", render: (row) => row.soldCount.toLocaleString("en-US") },
                   {
                     key: "soldUnits",
                     header: "Units sold",
@@ -819,7 +819,7 @@ export function PackagePortalPage() {
                   { key: "used", header: "Used units", render: (row) => row.usedUnits.toLocaleString("en-US") },
                   {
                     key: "remaining",
-                    header: "Remaining units",
+                    header: "Package remaining",
                     render: (row) => row.remainingUnits.toLocaleString("en-US"),
                   },
                   {
