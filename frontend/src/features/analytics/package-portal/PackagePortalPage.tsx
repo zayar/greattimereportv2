@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { fetchPackagePortal, fetchPackagePortalDetail } from "../../../api/analytics";
 import { DataTable } from "../../../components/DataTable";
 import { DateRangeControls } from "../../../components/DateRangeControls";
@@ -12,6 +12,7 @@ import { startOfCurrentYear, today } from "../../../utils/date";
 import { buildDatedExportFileName, downloadExcelWorkbook } from "../../../utils/exportExcel";
 import { formatDate } from "../../../utils/format";
 import { useAccess } from "../../access/AccessProvider";
+import { buildCustomerPortalDetailPath } from "../customer-portal/customerPortalLink";
 
 function formatStatusTone(status: string) {
   if (status === "at_risk" || status.startsWith("inactive_")) {
@@ -83,6 +84,37 @@ function formatVisitLabel(row: {
   }
 
   return `${row.daysSinceActivity} days since purchase`;
+}
+
+type CustomerPortalLinkProps = {
+  customerName: string;
+  customerPhone: string;
+  fromDate: string;
+  toDate: string;
+  stopPropagation?: boolean;
+};
+
+function CustomerPortalLink({
+  customerName,
+  customerPhone,
+  fromDate,
+  toDate,
+  stopPropagation = false,
+}: CustomerPortalLinkProps) {
+  return (
+    <Link
+      to={buildCustomerPortalDetailPath({
+        customerName,
+        customerPhone,
+        fromDate,
+        toDate,
+      })}
+      className="entity-link-button entity-link-button--strong"
+      onClick={stopPropagation ? (event) => event.stopPropagation() : undefined}
+    >
+      {customerName || customerPhone || "Unknown customer"}
+    </Link>
+  );
 }
 
 async function exportPerformanceRows(
@@ -403,7 +435,12 @@ function PackageDetailInspector({
                 {followUpQueue.map((row) => (
                   <article key={row.id} className="package-portal__followup-card">
                     <div className="package-portal__followup-card-copy">
-                      <strong>{row.customerName}</strong>
+                      <CustomerPortalLink
+                        customerName={row.customerName}
+                        customerPhone={row.customerPhone}
+                        fromDate={fromDate}
+                        toDate={toDate}
+                      />
                       <p>
                         {row.remainingUnits.toLocaleString("en-US")} units remaining
                         {row.lastVisitDate ? ` • Last visit ${formatDate(row.lastVisitDate)}` : " • No visit yet"}
@@ -444,7 +481,13 @@ function PackageDetailInspector({
                     header: "Customer",
                     render: (row) => (
                       <div className="package-portal__customer-cell">
-                        <strong>{row.customerName}</strong>
+                        <CustomerPortalLink
+                          customerName={row.customerName}
+                          customerPhone={row.customerPhone}
+                          fromDate={fromDate}
+                          toDate={toDate}
+                          stopPropagation
+                        />
                         <span>{row.customerPhone || row.memberId || "No phone"}</span>
                       </div>
                     ),
@@ -892,7 +935,13 @@ export function PackagePortalPage() {
                     header: "Customer",
                     render: (row) => (
                       <div className="package-portal__customer-cell">
-                        <strong>{row.customerName}</strong>
+                        <CustomerPortalLink
+                          customerName={row.customerName}
+                          customerPhone={row.customerPhone}
+                          fromDate={range.fromDate}
+                          toDate={range.toDate}
+                          stopPropagation
+                        />
                         <span>{row.customerPhone || row.memberId || "No phone"}</span>
                       </div>
                     ),
