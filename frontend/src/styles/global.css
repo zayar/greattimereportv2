@@ -5972,8 +5972,16 @@ a {
 }
 
 .package-portal__workspace--split {
-  grid-template-columns: minmax(0, 1fr) minmax(480px, 560px);
+  grid-template-columns: minmax(0, 1fr) minmax(560px, 680px);
   align-items: start;
+}
+
+.package-portal__inspector.entity-inspector--pinned {
+  width: min(100%, 780px);
+}
+
+.package-portal__inspector.entity-inspector--overlay {
+  width: min(680px, calc(100vw - 24px));
 }
 
 .package-portal__main {
@@ -6023,20 +6031,9 @@ a {
 
 .package-portal__package-cell span,
 .package-portal__customer-cell span,
-.package-portal__assumptions p,
 .package-portal__followup-card-copy p {
   color: #667085;
   font-size: 0.87rem;
-}
-
-.package-portal__assumptions {
-  display: grid;
-  gap: 10px;
-}
-
-.package-portal__assumptions p {
-  margin: 0;
-  line-height: 1.55;
 }
 
 .package-portal__detail-panel .panel__body {

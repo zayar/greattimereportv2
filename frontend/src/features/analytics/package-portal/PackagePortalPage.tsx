@@ -175,6 +175,58 @@ async function exportFollowUpRows(
   });
 }
 
+async function exportPackageCustomerRows(
+  packageName: string,
+  rows: PackagePortalDetailResponse["customers"],
+  fromDate: string,
+  toDate: string,
+) {
+  const safePackageName = packageName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  await downloadExcelWorkbook({
+    fileName: buildDatedExportFileName(`package-customers-${safePackageName || "detail"}`, fromDate, toDate),
+    sheetName: "Package customers",
+    headers: [
+      "Customer",
+      "Phone",
+      "Member ID",
+      "Package",
+      "Category",
+      "Purchase Date",
+      "Last Visit Date",
+      "Purchased Qty",
+      "Used Qty",
+      "Remaining Qty",
+      "Therapist",
+      "Salesperson",
+      "Status",
+      "Days Inactive",
+      "Needs Follow-up",
+    ],
+    rows: rows.map((row) => [
+      row.customerName,
+      row.customerPhone,
+      row.memberId,
+      row.packageName,
+      row.category,
+      row.purchaseDate,
+      row.lastVisitDate || "No visit yet",
+      row.purchasedUnits,
+      row.usedUnits,
+      row.remainingUnits,
+      row.therapist || "",
+      row.salesperson || "",
+      row.statusLabel,
+      formatVisitLabel(row),
+      row.needsFollowUp ? "Yes" : "No",
+    ]),
+  });
+}
+
 type InspectorProps = {
   clinicId: string;
   clinicCode: string;
@@ -213,6 +265,7 @@ function PackageDetailInspector({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<PackagePortalDetailResponse | null>(null);
+  const [detailExporting, setDetailExporting] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -257,6 +310,20 @@ function PackageDetailInspector({
     () => (data?.customers ?? []).filter((row) => row.needsFollowUp).slice(0, 5),
     [data?.customers],
   );
+
+  async function handleDetailExport() {
+    if (!data?.package || data.customers.length === 0) {
+      return;
+    }
+
+    setDetailExporting(true);
+
+    try {
+      await exportPackageCustomerRows(data.package.packageName, data.customers, fromDate, toDate);
+    } finally {
+      setDetailExporting(false);
+    }
+  }
 
   return (
     <EntityInspectorPanel
@@ -355,6 +422,15 @@ function PackageDetailInspector({
             className="package-portal__detail-panel"
             title="Customers in this package"
             subtitle={`${data.customers.length.toLocaleString("en-US")} customer-package records matched the current filters`}
+            action={
+              <button
+                className="button button--secondary"
+                disabled={detailExporting || data.customers.length === 0}
+                onClick={() => void handleDetailExport()}
+              >
+                {detailExporting ? "Exporting..." : "Export Excel"}
+              </button>
+            }
           >
             {data.customers.length === 0 ? (
               <EmptyState label="No customers matched the current package filters" />
@@ -397,16 +473,6 @@ function PackageDetailInspector({
               />
             )}
           </Panel>
-
-          {data.assumptions.length > 0 ? (
-            <Panel className="package-portal__detail-panel" title="Data assumptions">
-              <div className="package-portal__assumptions">
-                {data.assumptions.map((assumption) => (
-                  <p key={assumption}>{assumption}</p>
-                ))}
-              </div>
-            </Panel>
-          ) : null}
         </>
       ) : null}
     </EntityInspectorPanel>
@@ -866,19 +932,6 @@ export function PackagePortalPage() {
             ) : null}
           </Panel>
 
-          {data?.assumptions.length ? (
-            <Panel
-              className="analytics-report__panel package-portal__assumption-panel"
-              title="Data assumptions"
-              subtitle="These rules keep V1 deterministic and easy to audit."
-            >
-              <div className="package-portal__assumptions">
-                {data.assumptions.map((assumption) => (
-                  <p key={assumption}>{assumption}</p>
-                ))}
-              </div>
-            </Panel>
-          ) : null}
         </div>
 
         {selectedPackageId && currentClinic ? (
