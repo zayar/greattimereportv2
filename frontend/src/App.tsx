@@ -25,6 +25,7 @@ import { BankingSummaryPage } from "./features/analytics/banking-summary/Banking
 import { CustomersBySalespersonPage } from "./features/analytics/customers-by-salesperson/CustomersBySalespersonPage";
 import { CustomerPortalPage } from "./features/analytics/customer-portal/CustomerPortalPage";
 import { CustomerDetailPage } from "./features/analytics/customer-portal/CustomerDetailPage";
+import { PackagePortalPage } from "./features/analytics/package-portal/PackagePortalPage";
 import { ServicePortalPage } from "./features/analytics/service-portal/ServicePortalPage";
 import { ServiceDetailPage } from "./features/analytics/service-portal/ServiceDetailPage";
 import { TherapistPortalPage } from "./features/analytics/therapist-portal/TherapistPortalPage";
@@ -86,6 +87,7 @@ export default function App() {
                     <Route path="analytics/therapists/:therapistSlug" element={<TherapistDetailPage />} />
                     <Route path="analytics/services" element={<ServicePortalPage />} />
                     <Route path="analytics/services/:serviceSlug" element={<ServiceDetailPage />} />
+                    <Route path="analytics/packages" element={<PackagePortalPage />} />
                     <Route path="analytics/payment-report" element={<PaymentReportPage />} />
                     <Route path="analytics/daily-treatment" element={<DailyTreatmentPage />} />
                     <Route path="analytics/sales-by-seller" element={<SalesBySellerPage />} />

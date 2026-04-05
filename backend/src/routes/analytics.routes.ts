@@ -24,6 +24,10 @@ import { getSalesReport } from "../services/reports/sales-report.service.js";
 import { getBankingSummary } from "../services/reports/banking-summary.service.js";
 import { getCustomersBySalespersonReport } from "../services/reports/customers-by-salesperson.service.js";
 import {
+  getPackagePortalDetail,
+  getPackagePortalReport,
+} from "../services/reports/package-portal.service.js";
+import {
   getCustomerPortalBookings,
   getCustomerPortalList,
   getCustomerQuickView,
@@ -89,6 +93,16 @@ const servicePagedDetailSchema = baseAnalyticsSchema.extend({
 
 const therapistDetailSchema = baseAnalyticsSchema.extend({
   therapistName: z.string().min(1),
+});
+
+const packagePortalSchema = baseAnalyticsSchema.extend({
+  packageId: z.string().default(""),
+  category: z.string().default(""),
+  therapist: z.string().default(""),
+  salesperson: z.string().default(""),
+  status: z.string().default(""),
+  inactivityBucket: z.string().default(""),
+  onlyRemaining: z.coerce.boolean().default(false),
 });
 
 const therapistPagedDetailSchema = therapistDetailSchema.extend({
@@ -235,6 +249,56 @@ router.get(
       .parse(req.query);
 
     const data = await getServiceBehaviorReport(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/packages",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = packagePortalSchema.parse(req.query);
+    const data = await getPackagePortalReport({
+      clinicId: params.clinicId,
+      fromDate: params.fromDate,
+      toDate: params.toDate,
+      packageId: params.packageId,
+      category: params.category,
+      therapist: params.therapist,
+      salesperson: params.salesperson,
+      status: params.status,
+      inactivityBucket: params.inactivityBucket,
+      onlyRemaining: params.onlyRemaining,
+      authorizationHeader: req.headers.authorization,
+    });
+
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/packages/detail",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = packagePortalSchema
+      .extend({
+        packageId: z.string().min(1),
+      })
+      .parse(req.query);
+    const data = await getPackagePortalDetail({
+      clinicId: params.clinicId,
+      fromDate: params.fromDate,
+      toDate: params.toDate,
+      packageId: params.packageId,
+      category: params.category,
+      therapist: params.therapist,
+      salesperson: params.salesperson,
+      status: params.status,
+      inactivityBucket: params.inactivityBucket,
+      onlyRemaining: params.onlyRemaining,
+      authorizationHeader: req.headers.authorization,
+    });
+
     res.json({ success: true, data });
   }),
 );

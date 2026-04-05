@@ -102,6 +102,15 @@ export const directoryItems: DirectoryItem[] = [
     window: "year",
   },
   {
+    id: "package-portal",
+    title: "Package portal",
+    description: "Outstanding package liability, follow-up customers, and package performance in one owner view.",
+    route: "/analytics/packages",
+    group: "Customers",
+    eyebrow: "Behavior",
+    window: "year",
+  },
+  {
     id: "daily-treatment",
     title: "Daily treatment",
     description: "Therapist-by-service treatment matrix for a single day.",

@@ -301,6 +301,24 @@ async function executeApicoreQueryWithFallback<T>(input: {
   return payload;
 }
 
+export async function queryApicoreWithFallback<T>(input: {
+  query: string;
+  variables?: Record<string, unknown>;
+  authorizationHeader?: string;
+  errorMessage: string;
+}) {
+  const payload = await executeApicoreQueryWithFallback<T>({
+    requestBody: {
+      query: input.query,
+      variables: input.variables ?? {},
+    },
+    authorizationHeader: input.authorizationHeader,
+    errorMessage: input.errorMessage,
+  });
+
+  return payload.data;
+}
+
 export async function exchangeGoogleCredentialForCustomToken(credential: string) {
   const payload = await postGraphql<{ gauth2?: { token?: string | null } | null }>({
     query: GAUTH_MUTATION,

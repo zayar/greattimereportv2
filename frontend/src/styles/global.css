@@ -5926,6 +5926,176 @@ a {
   font-size: 0.87rem;
 }
 
+.package-portal {
+  gap: 18px;
+}
+
+.package-portal__filter-panel .panel__body,
+.package-portal__table-panel .panel__body {
+  display: grid;
+  gap: 18px;
+}
+
+.package-portal__filter-grid {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(260px, 1.5fr) repeat(6, minmax(0, 1fr));
+  gap: 14px;
+  align-items: end;
+}
+
+.package-portal__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  background: rgba(255, 255, 255, 0.74);
+  color: #20242c;
+  font-weight: 500;
+}
+
+.package-portal__toggle input {
+  width: 18px;
+  height: 18px;
+}
+
+.package-portal__kpis {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.package-portal__workspace {
+  display: grid;
+  gap: 20px;
+}
+
+.package-portal__workspace--split {
+  grid-template-columns: minmax(0, 1fr) minmax(480px, 560px);
+  align-items: start;
+}
+
+.package-portal__main {
+  min-width: 0;
+  display: grid;
+  gap: 20px;
+}
+
+.package-portal__table-panel .table-wrap {
+  max-height: calc(100vh - 360px);
+  border-radius: 18px;
+  border: 1px solid var(--report-border);
+  background: var(--report-table-bg);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.44),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(12px);
+}
+
+.package-portal__table-panel .data-table {
+  width: 100%;
+  min-width: 1460px;
+}
+
+.package-portal__table-panel .data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--report-table-head);
+  backdrop-filter: blur(8px);
+}
+
+.package-portal__row--attention td {
+  background: rgba(255, 247, 244, 0.72);
+}
+
+.package-portal__package-cell,
+.package-portal__customer-cell {
+  display: grid;
+  gap: 4px;
+}
+
+.package-portal__package-cell strong,
+.package-portal__customer-cell strong {
+  color: #141923;
+}
+
+.package-portal__package-cell span,
+.package-portal__customer-cell span,
+.package-portal__assumptions p,
+.package-portal__followup-card-copy p {
+  color: #667085;
+  font-size: 0.87rem;
+}
+
+.package-portal__assumptions {
+  display: grid;
+  gap: 10px;
+}
+
+.package-portal__assumptions p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.package-portal__detail-panel .panel__body {
+  display: grid;
+  gap: 16px;
+}
+
+.package-portal__detail-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.package-portal__detail-metric {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  background: rgba(248, 250, 252, 0.88);
+}
+
+.package-portal__detail-metric span {
+  color: #667085;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.package-portal__detail-metric strong {
+  color: #141923;
+  font-size: 1rem;
+}
+
+.package-portal__followup-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.package-portal__followup-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.package-portal__followup-card-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.package-portal__followup-card-copy strong {
+  color: #141923;
+}
+
 .service-detail {
   gap: 20px;
 }
@@ -7133,6 +7303,7 @@ a {
 
   .customer-portal__filter-grid,
   .service-portal__filter-grid,
+  .package-portal__filter-grid,
   .ai-panel__list-grid,
   .ai-panel__metric-grid,
   .customer-quick-panel__grid,
@@ -7140,6 +7311,7 @@ a {
   .customer-detail__hero,
   .customer-detail__recent-services,
   .customer-detail__mini-stats,
+  .package-portal__detail-metrics,
   .service-detail__peak-grid,
   .service-detail__customer-grid {
     grid-template-columns: 1fr;
@@ -7278,6 +7450,7 @@ a {
 
   .customer-portal__kpis,
   .service-portal__kpis,
+  .package-portal__kpis,
   .service-detail__kpis {
     grid-template-columns: 1fr;
   }

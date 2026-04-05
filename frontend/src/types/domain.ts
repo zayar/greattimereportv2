@@ -797,6 +797,92 @@ export interface ServicePortalPaymentsResponse {
   totalCount: number;
 }
 
+export interface PackagePortalResponse {
+  summary: {
+    totalPackagesSold: number;
+    activePackageCustomers: number;
+    totalUnitsSold: number;
+    totalUnitsUsed: number;
+    totalUnitsRemaining: number;
+    customersNeedingFollowUp: number;
+    inactive30Count: number;
+    inactive60Count: number;
+    inactive90Count: number;
+  };
+  filterOptions: {
+    packages: Array<{
+      id: string;
+      name: string;
+    }>;
+    categories: string[];
+    therapists: string[];
+    salespeople: string[];
+    statuses: string[];
+    inactivityBuckets: string[];
+  };
+  performanceRows: Array<{
+    packageId: string;
+    packageName: string;
+    category: string;
+    soldCount: number;
+    totalSoldUnits: number;
+    usedUnits: number;
+    remainingUnits: number;
+    activeCustomers: number;
+    completedCustomers: number;
+    inactiveCustomers: number;
+    latestPurchaseDate: string | null;
+    latestUsageDate: string | null;
+    usageRatePct: number;
+    followUpSummary: string;
+    followUpCount: number;
+    atRiskCount: number;
+  }>;
+  followUpRows: Array<{
+    id: string;
+    packageId: string;
+    customerName: string;
+    customerPhone: string;
+    memberId: string;
+    packageName: string;
+    category: string;
+    purchaseDate: string;
+    purchaseCount: number;
+    purchasedUnits: number;
+    usedUnits: number;
+    remainingUnits: number;
+    lastVisitDate: string | null;
+    daysSinceLastVisit: number | null;
+    daysSinceActivity: number;
+    therapist: string;
+    salesperson: string;
+    status: string;
+    statusLabel: string;
+    inactivityBucket: string;
+    inactivityLabel: string;
+    needsFollowUp: boolean;
+  }>;
+  assumptions: string[];
+}
+
+export interface PackagePortalDetailResponse {
+  package: {
+    packageId: string;
+    packageName: string;
+    category: string;
+    soldCount: number;
+    totalSoldUnits: number;
+    totalUsedUnits: number;
+    totalRemainingUnits: number;
+    averageUsageRatePct: number;
+    activeCustomers: number;
+    completedCustomers: number;
+    inactiveCustomers: number;
+  } | null;
+  customers: PackagePortalResponse["followUpRows"];
+  assumptions: string[];
+}
+
 export interface PaymentReportResponse {
   summary: {
     totalAmount: number;

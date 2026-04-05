@@ -12,6 +12,8 @@ import type {
   CustomerBehaviorResponse,
   DashboardResponse,
   DailyTreatmentResponse,
+  PackagePortalDetailResponse,
+  PackagePortalResponse,
   PaymentReportResponse,
   SalesReportResponse,
   SalesBySellerResponse,
@@ -161,6 +163,41 @@ export async function fetchServiceBehavior(
 ) {
   const response = await apiClient.get<{ success: true; data: ServiceBehaviorResponse }>(
     "/analytics/service-behavior",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchPackagePortal(
+  params: BaseParams & {
+    packageId: string;
+    category: string;
+    therapist: string;
+    salesperson: string;
+    status: string;
+    inactivityBucket: string;
+    onlyRemaining: boolean;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: PackagePortalResponse }>("/analytics/packages", {
+    params,
+  });
+  return response.data.data;
+}
+
+export async function fetchPackagePortalDetail(
+  params: BaseParams & {
+    packageId: string;
+    category: string;
+    therapist: string;
+    salesperson: string;
+    status: string;
+    inactivityBucket: string;
+    onlyRemaining: boolean;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: PackagePortalDetailResponse }>(
+    "/analytics/packages/detail",
     { params },
   );
   return response.data.data;
