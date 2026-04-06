@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom"
 import {
   createCommissionAdjustment,
   fetchCommissionOptions,
+  fetchCommissionRules,
   fetchCommissionRunDetail,
   fetchCommissionRuns,
   generateCommissionReport,
@@ -15,11 +16,13 @@ import { PageHeader } from "../../../components/PageHeader"
 import { useAccess } from "../../access/AccessProvider"
 import {
   endOfMonth,
+  formatCommissionFormulaSummary,
   monthInputFromDate,
   startOfMonth,
 } from "../../commission/commissionHelpers"
 import type {
   CommissionEventType,
+  CommissionRule,
   CommissionReportResult,
   CommissionRun,
   CommissionSourceOptions,
@@ -36,6 +39,44 @@ type ReportLocationState = {
   }
 }
 
+function formatEventType(value: CommissionEventType) {
+  if (value === "sale_based") {
+    return "Sale based"
+  }
+  if (value === "payment_based") {
+    return "Payment based"
+  }
+  return "Treatment completed"
+}
+
+function formatRuleStaffScope(rule: CommissionRule) {
+  if (rule.appliesToStaffIds.length > 0) {
+    return `${rule.appliesToStaffIds.length.toLocaleString("en-US")} selected staff`
+  }
+
+  return rule.appliesToRole || "All matching staff"
+}
+
+function formatRuleServiceScope(rule: CommissionRule) {
+  if (rule.conditions.serviceNames.length > 0) {
+    if (rule.conditions.serviceNames.length === 1) {
+      return rule.conditions.serviceNames[0]
+    }
+
+    return `${rule.conditions.serviceNames.length.toLocaleString("en-US")} selected services`
+  }
+
+  if (rule.conditions.categoryNames.length > 0) {
+    if (rule.conditions.categoryNames.length === 1) {
+      return `${rule.conditions.categoryNames[0]} services`
+    }
+
+    return `${rule.conditions.categoryNames.length.toLocaleString("en-US")} categories`
+  }
+
+  return "All eligible services"
+}
+
 export function CommissionReportPage() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -47,17 +88,16 @@ export function CommissionReportPage() {
     fromDate: startOfMonth(),
     toDate: endOfMonth(monthInputFromDate(startOfMonth())),
   })
-  const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([])
-  const [selectedStaffRole, setSelectedStaffRole] = useState("")
   const [selectedRuleId, setSelectedRuleId] = useState(preselectedRule?.ruleId ?? "")
-  const [showScopeEditor, setShowScopeEditor] = useState(false)
   const [options, setOptions] = useState<CommissionSourceOptions | null>(null)
+  const [rules, setRules] = useState<CommissionRule[]>([])
   const [runs, setRuns] = useState<CommissionRun[]>([])
   const [selectedRunId, setSelectedRunId] = useState("")
   const [selectedRun, setSelectedRun] = useState<CommissionRun | null>(null)
   const [results, setResults] = useState<CommissionReportResult[]>([])
   const [selectedSummaryStaffId, setSelectedSummaryStaffId] = useState<string | null>(null)
   const [loadingOptions, setLoadingOptions] = useState(false)
+  const [loadingRules, setLoadingRules] = useState(false)
   const [loadingRuns, setLoadingRuns] = useState(false)
   const [loadingRunDetail, setLoadingRunDetail] = useState(false)
   const [generating, setGenerating] = useState(false)
@@ -79,38 +119,29 @@ export function CommissionReportPage() {
   )
   const monthKey = range.fromDate.slice(0, 7) === range.toDate.slice(0, 7) ? range.fromDate.slice(0, 7) : undefined
 
-  const sourceStaffOptions = useMemo(
-    () => (selectedStaffRole ? (options?.staff ?? []).filter((staff) => staff.role === selectedStaffRole) : options?.staff ?? []),
-    [options?.staff, selectedStaffRole],
-  )
-
-  const ruleOptions = useMemo(
+  const activeRules = useMemo(
     () =>
-      Array.from(
-        new Map(
-          results.map((row) => [
-            row.ruleId,
-            {
-              id: row.ruleId,
-              label: `${row.ruleName} v${row.ruleVersion}`,
-            },
-          ]),
-        ).values(),
-      ).sort((left, right) => left.label.localeCompare(right.label)),
-    [results],
+      rules
+        .filter((rule) => rule.status === "active")
+        .sort((left, right) => left.ruleName.localeCompare(right.ruleName)),
+    [rules],
   )
 
-  const activeRuleLabel = useMemo(() => {
-    if (!selectedRuleId) {
-      return null
-    }
+  const focusedRule = useMemo(
+    () => activeRules.find((rule) => rule.id === selectedRuleId) ?? null,
+    [activeRules, selectedRuleId],
+  )
 
-    return ruleOptions.find((rule) => rule.id === selectedRuleId)?.label ?? preselectedRule?.ruleName ?? null
-  }, [preselectedRule?.ruleName, ruleOptions, selectedRuleId])
+  const activeRuleLabel = focusedRule ? `${focusedRule.ruleName} v${focusedRule.version}` : preselectedRule?.ruleName ?? null
 
   const filteredResults = useMemo(
-    () => (selectedRuleId ? results.filter((row) => row.ruleId === selectedRuleId) : results),
-    [results, selectedRuleId],
+    () => (focusedRule ? results.filter((row) => row.ruleId === focusedRule.id) : []),
+    [focusedRule, results],
+  )
+
+  const filteredRuns = useMemo(
+    () => (focusedRule ? runs.filter((run) => run.selectedRuleIds.includes(focusedRule.id)) : []),
+    [focusedRule, runs],
   )
 
   const detailRows = useMemo(() => {
@@ -181,15 +212,15 @@ export function CommissionReportPage() {
         appliedRuleNames: [...row.appliedRuleNames],
       }))
       .sort((left, right) => right.commissionAmount - left.commissionAmount)
-  }, [filteredResults, selectedRuleId, selectedRun])
+  }, [filteredResults, focusedRule, selectedRun])
 
   const displayedTotals = useMemo(() => {
     if (!selectedRun) {
       return null
     }
 
-    if (!selectedRuleId) {
-      return selectedRun.summaryTotals
+    if (!focusedRule) {
+      return null
     }
 
     return {
@@ -204,7 +235,7 @@ export function CommissionReportPage() {
       missingDataRowCount: 0,
       bonusRowCount: 0,
     }
-  }, [filteredResults, selectedRuleId, selectedRun])
+  }, [filteredResults, focusedRule, selectedRun])
 
   const selectedStaffNameMap = useMemo(() => {
     const entries = new Map<string, string>()
@@ -220,24 +251,19 @@ export function CommissionReportPage() {
     return entries
   }, [options?.staff, selectedRun?.staffSummaries])
 
-  const snapshotStaffLabels = useMemo(() => {
-    const staffIds = selectedRun?.filters.staffIds ?? []
+  const focusedRuleStaffLabels = useMemo(() => {
+    const staffIds = focusedRule?.appliesToStaffIds ?? []
     return staffIds.map((staffId) => selectedStaffNameMap.get(staffId) ?? staffId)
-  }, [selectedRun?.filters.staffIds, selectedStaffNameMap])
+  }, [focusedRule?.appliesToStaffIds, selectedStaffNameMap])
 
-  function handleOpenNewReport() {
-    if (preselectedRule) {
-      navigate("/analytics/commission", { replace: true })
-    }
-
+  function handleReturnToReportList() {
     setSelectedRuleId("")
-    setShowScopeEditor(true)
-    setNotice("Set the scope below to generate a new commission snapshot.")
-  }
-
-  function handleBackToSnapshot() {
-    setShowScopeEditor(false)
-    setNotice("Showing the saved commission snapshot.")
+    setSelectedRunId("")
+    setSelectedRun(null)
+    setResults([])
+    setSelectedSummaryStaffId(null)
+    setNotice("Choose a configured rule to open its report.")
+    navigate("/analytics/commission", { replace: true })
   }
 
   useEffect(() => {
@@ -246,19 +272,22 @@ export function CommissionReportPage() {
     }
 
     setSelectedRuleId(preselectedRule.ruleId)
-    if (preselectedRule.appliesToRole) {
-      setSelectedStaffRole(preselectedRule.appliesToRole)
-    }
-    setNotice(
-      `Report context loaded for ${preselectedRule.ruleName}. Generate a snapshot to validate this rule, or use New report when you want to create a fresh report.`,
-    )
+    setNotice(`Report context loaded for ${preselectedRule.ruleName}.`)
   }, [preselectedRule])
 
   useEffect(() => {
-    if (selectedRuleId && results.length > 0 && !results.some((row) => row.ruleId === selectedRuleId)) {
-      setSelectedRuleId("")
+    if (focusedRule) {
+      setNotice(`${focusedRule.ruleName} v${focusedRule.version} uses the saved rule scope below. Choose a month and generate a snapshot when needed.`)
+      return
     }
-  }, [results, selectedRuleId])
+
+    if (activeRules.length > 0) {
+      setNotice("Choose a configured rule to open its report.")
+      return
+    }
+
+    setNotice(null)
+  }, [activeRules.length, focusedRule])
 
   useEffect(() => {
     if (summaryRows.length === 0) {
@@ -316,6 +345,42 @@ export function CommissionReportPage() {
     }
 
     let active = true
+    setLoadingRules(true)
+
+    fetchCommissionRules({
+      clinicId: currentClinic.id,
+      merchantId: currentBusiness.id,
+      merchantName: currentBusiness.name,
+      branchIds: branchOptions.map((branch) => branch.id),
+      branchCodes: branchOptions.map((branch) => branch.code),
+    })
+      .then((nextRules) => {
+        if (active) {
+          setRules(nextRules)
+        }
+      })
+      .catch((loadError) => {
+        if (active) {
+          setError(loadError instanceof Error ? loadError.message : "Commission report rules could not be loaded.")
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoadingRules(false)
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [branchOptions, currentBusiness, currentClinic])
+
+  useEffect(() => {
+    if (!currentBusiness || !currentClinic) {
+      return
+    }
+
+    let active = true
     setLoadingRuns(true)
 
     fetchCommissionRuns({
@@ -329,9 +394,6 @@ export function CommissionReportPage() {
       .then((nextRuns) => {
         if (active) {
           setRuns(nextRuns)
-          if (!selectedRunId || (selectedRunId && !nextRuns.some((run) => run.id === selectedRunId))) {
-            setSelectedRunId(nextRuns[0]?.id ?? "")
-          }
         }
       })
       .catch((loadError) => {
@@ -351,6 +413,21 @@ export function CommissionReportPage() {
   }, [branchOptions, currentBusiness, currentClinic, monthKey])
 
   useEffect(() => {
+    if (!focusedRule) {
+      setSelectedRunId("")
+      setSelectedRun(null)
+      setResults([])
+      return
+    }
+
+    if (selectedRunId && filteredRuns.some((run) => run.id === selectedRunId)) {
+      return
+    }
+
+    setSelectedRunId(filteredRuns[0]?.id ?? "")
+  }, [filteredRuns, focusedRule, selectedRunId])
+
+  useEffect(() => {
     if (!selectedRunId || !currentClinic) {
       setSelectedRun(null)
       setResults([])
@@ -365,9 +442,6 @@ export function CommissionReportPage() {
         if (active) {
           setSelectedRun(detail.run)
           setResults(detail.results)
-          setSelectedStaffIds(detail.run.filters.staffIds)
-          setSelectedStaffRole(detail.run.filters.staffRoles[0] ?? "")
-          setShowScopeEditor(false)
           setSelectedSummaryStaffId((current) =>
             current && detail.run.staffSummaries.some((summary) => summary.staffId === current)
               ? current
@@ -392,7 +466,7 @@ export function CommissionReportPage() {
   }, [currentClinic, selectedRunId])
 
   async function handleGenerate() {
-    if (!currentBusiness || !currentClinic || selectedBranchIds.length === 0) {
+    if (!currentBusiness || !currentClinic || !focusedRule) {
       return
     }
 
@@ -405,20 +479,19 @@ export function CommissionReportPage() {
         clinicId: currentClinic.id,
         merchantId: currentBusiness.id,
         merchantName: currentBusiness.name,
-        branchIds: selectedBranchIds,
-        branchCodes: selectedBranchCodes,
+        branchIds: focusedRule.branchIds.length > 0 ? focusedRule.branchIds : selectedBranchIds,
+        branchCodes: focusedRule.branchCodes.length > 0 ? focusedRule.branchCodes : selectedBranchCodes,
         fromDate: range.fromDate,
         toDate: range.toDate,
-        staffIds: selectedStaffIds,
-        staffRoles: selectedStaffRole ? [selectedStaffRole] : [],
+        staffIds: focusedRule.appliesToStaffIds,
+        staffRoles: focusedRule.appliesToRole ? [focusedRule.appliesToRole] : [],
       })
       setSelectedRunId(generated.run.id)
       setSelectedRun(generated.run)
       setResults(generated.results)
       setRuns((current) => [generated.run, ...current.filter((run) => run.id !== generated.run.id)])
-      setShowScopeEditor(false)
       setSelectedSummaryStaffId(generated.run.staffSummaries[0]?.staffId ?? null)
-      setNotice("Commission snapshot generated successfully.")
+      setNotice(`Snapshot generated for ${focusedRule.ruleName} v${focusedRule.version}.`)
     } catch (generateError) {
       setError(generateError instanceof Error ? generateError.message : "Commission report generation failed.")
     } finally {
@@ -507,6 +580,15 @@ export function CommissionReportPage() {
     }
   }
 
+  const reportTitle =
+    focusedRule ? activeRuleLabel || focusedRule.ruleName : selectedRuleId && preselectedRule ? preselectedRule.ruleName : "Commission report"
+  const focusedRuleSpecificStaffSummary =
+    focusedRuleStaffLabels.length > 0
+      ? focusedRuleStaffLabels.slice(0, 4).join(", ")
+      : focusedRule?.appliesToRole
+        ? `All ${focusedRule.appliesToRole} staff in this rule`
+        : "All matching staff"
+
   if (!currentBusiness || !currentClinic) {
     return (
       <div className="page-stack page-stack--workspace analytics-report commission-report">
@@ -521,74 +603,117 @@ export function CommissionReportPage() {
   return (
     <div className="page-stack page-stack--workspace analytics-report commission-report">
       <PageHeader
-        title="Commission report"
+        title={reportTitle}
         actions={
-          <div className="commission-report__toolbar">
-            {selectedRun ? (
-              <button className="button button--ghost" onClick={showScopeEditor ? handleBackToSnapshot : handleOpenNewReport}>
-                {showScopeEditor ? "Back to snapshot" : "New report"}
-              </button>
-            ) : preselectedRule ? (
-              <button className="button button--ghost" onClick={handleOpenNewReport}>
+          focusedRule ? (
+            <div className="commission-report__toolbar">
+              <button className="button button--ghost" onClick={handleReturnToReportList}>
                 Back to report list
               </button>
-            ) : null}
-            {activeRuleLabel ? (
-              <div className="commission-report__context-pill">
-                <strong>Rule focus</strong>
-                <span>{activeRuleLabel}</span>
-              </div>
-            ) : null}
-            <label className="field field--compact">
-              <span>Month</span>
-              <input
-                type="month"
-                value={monthInput}
-                onChange={(event) => {
-                  const nextMonth = event.target.value
-                  setMonthInput(nextMonth)
-                  setRange({
-                    fromDate: `${nextMonth}-01`,
-                    toDate: endOfMonth(nextMonth),
-                  })
+              <label className="field field--compact">
+                <span>Month</span>
+                <input
+                  type="month"
+                  value={monthInput}
+                  onChange={(event) => {
+                    const nextMonth = event.target.value
+                    setMonthInput(nextMonth)
+                    setRange({
+                      fromDate: `${nextMonth}-01`,
+                      toDate: endOfMonth(nextMonth),
+                    })
+                  }}
+                />
+              </label>
+
+              <DateRangeControls
+                fromDate={range.fromDate}
+                toDate={range.toDate}
+                onChange={(next) => {
+                  setRange(next)
+                  setMonthInput(monthInputFromDate(next.fromDate))
                 }}
               />
-            </label>
 
-            <DateRangeControls
-              fromDate={range.fromDate}
-              toDate={range.toDate}
-              onChange={(next) => {
-                setRange(next)
-                setMonthInput(monthInputFromDate(next.fromDate))
-              }}
-            />
-
-            <button className="button button--secondary" disabled={generating || selectedBranchIds.length === 0} onClick={() => void handleGenerate()}>
-              {generating ? "Generating..." : "Generate snapshot"}
-            </button>
-            {selectedRuleId ? (
-              <button className="button button--ghost" onClick={() => setSelectedRuleId("")}>
-                Show full snapshot
+              <button className="button button--secondary" disabled={generating || selectedBranchIds.length === 0} onClick={() => void handleGenerate()}>
+                {generating ? "Generating..." : "Generate snapshot"}
               </button>
-            ) : null}
-          </div>
+            </div>
+          ) : null
         }
       />
 
       {notice ? <div className="inline-note">{notice}</div> : null}
       {error ? <ErrorState label="Commission report issue" detail={error} /> : null}
 
-      <Panel
-        className="commission-report__filter-panel"
-        title={selectedRun && !showScopeEditor ? "Snapshot scope" : "Generation scope"}
-        subtitle={
-          selectedRun && !showScopeEditor
-            ? "This snapshot already includes the saved staff scope. Open the scope editor only when you want to generate a new snapshot."
-            : "Choose the staff scope for the next snapshot. After generation, this page switches to a read-only snapshot view."
-        }
-      >
-        {selectedRun && !showScopeEditor ? (
+      {!focusedRule ? (
+        <Panel
+          className="commission-report__filter-panel"
+          title="Configured reports"
+          subtitle="Open an active commission rule to view its saved snapshots and generate a new monthly report from the rule setup."
+        >
+          {loadingRules ? <div className="inline-note inline-note--loading">Loading configured reports...</div> : null}
+          {!loadingRules && activeRules.length === 0 ? (
+            <EmptyState
+              label="No active commission reports yet"
+              detail="Create and activate a commission rule first, then it will appear here as a report."
+            />
+          ) : null}
+          {!loadingRules && activeRules.length > 0 ? (
+            <DataTable
+              columns={[
+                {
+                  key: "ruleName",
+                  header: "Report",
+                  render: (rule) => (
+                    <div className="commission-settings__rule-cell">
+                      <strong>{rule.ruleName}</strong>
+                      <span>v{rule.version}</span>
+                    </div>
+                  ),
+                },
+                {
+                  key: "eventType",
+                  header: "Trigger",
+                  render: (rule) => formatEventType(rule.eventType),
+                },
+                {
+                  key: "staffScope",
+                  header: "Staff scope",
+                  render: (rule) => formatRuleStaffScope(rule),
+                },
+                {
+                  key: "serviceScope",
+                  header: "Service scope",
+                  render: (rule) => formatRuleServiceScope(rule),
+                },
+                {
+                  key: "formula",
+                  header: "Formula",
+                  render: (rule) => formatCommissionFormulaSummary(rule.formulaType, rule.formulaConfig),
+                },
+                {
+                  key: "actions",
+                  header: "Actions",
+                  render: (rule) => (
+                    <button className="button button--ghost" onClick={() => setSelectedRuleId(rule.id)}>
+                      Open report
+                    </button>
+                  ),
+                },
+              ]}
+              rows={activeRules}
+              rowKey={(rule) => rule.id}
+              onRowClick={(rule) => setSelectedRuleId(rule.id)}
+            />
+          ) : null}
+        </Panel>
+      ) : (
+        <Panel
+          className="commission-report__filter-panel"
+          title="Rule scope"
+          subtitle="This report uses the saved rule configuration. You only choose the month and date range when generating a new snapshot."
+        >
           <div className="commission-report__scope-grid">
             <article className="commission-report__scope-card">
               <strong>Branch</strong>
@@ -597,90 +722,58 @@ export function CommissionReportPage() {
               </span>
             </article>
             <article className="commission-report__scope-card">
+              <strong>Trigger</strong>
+              <span>{formatEventType(focusedRule.eventType)}</span>
+            </article>
+            <article className="commission-report__scope-card">
+              <strong>Formula</strong>
+              <span>{formatCommissionFormulaSummary(focusedRule.formulaType, focusedRule.formulaConfig)}</span>
+            </article>
+            <article className="commission-report__scope-card">
               <strong>Staff role</strong>
-              <span>{selectedRun.filters.staffRoles[0] || "All roles"}</span>
+              <span>{focusedRule.appliesToRole || "All matching staff"}</span>
             </article>
             <article className="commission-report__scope-card">
               <strong>Specific staff</strong>
-              <span>
-                {snapshotStaffLabels.length > 0
-                  ? snapshotStaffLabels.slice(0, 4).join(", ")
-                  : "All staff matching the saved role scope"}
-              </span>
-              {snapshotStaffLabels.length > 4 ? (
-                <small>+{(snapshotStaffLabels.length - 4).toLocaleString("en-US")} more selected in this snapshot</small>
+              {loadingOptions ? <span>Loading staff scope...</span> : <span>{focusedRuleSpecificStaffSummary}</span>}
+              {focusedRuleStaffLabels.length > 4 ? (
+                <small>+{(focusedRuleStaffLabels.length - 4).toLocaleString("en-US")} more selected in this rule</small>
               ) : null}
             </article>
             <article className="commission-report__scope-card">
-              <strong>Rule view</strong>
-              <span>{activeRuleLabel || "Showing the full snapshot"}</span>
+              <strong>Service scope</strong>
+              <span>{formatRuleServiceScope(focusedRule)}</span>
             </article>
           </div>
-        ) : (
-          <div className="commission-report__filter-grid">
-            <div>
-              <strong>Branches</strong>
-              {branchOptions.length > 0 ? (
-                <div className="inline-note">
-                  Filtered to {branchOptions[0].name} ({branchOptions[0].code}).
-                </div>
-              ) : (
-                <div className="inline-note">No clinic is selected.</div>
-              )}
-            </div>
-
-            <label className="field">
-              <span>Staff role</span>
-              <select value={selectedStaffRole} onChange={(event) => setSelectedStaffRole(event.target.value)}>
-                <option value="">All roles</option>
-                {[...new Set((options?.staff ?? []).map((staff) => staff.role))].map((role) => (
-                  <option key={role} value={role}>
-                    {role}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <div>
-              <strong>Specific staff</strong>
-              {loadingOptions ? <div className="inline-note inline-note--loading">Loading staff...</div> : null}
-              <div className="commission-report__check-grid">
-                {sourceStaffOptions.map((staff) => (
-                  <label key={staff.id} className="commission-report__check-item">
-                    <input
-                      type="checkbox"
-                      checked={selectedStaffIds.includes(staff.id)}
-                      onChange={() =>
-                        setSelectedStaffIds((current) =>
-                          current.includes(staff.id) ? current.filter((entry) => entry !== staff.id) : [...current, staff.id],
-                        )
-                      }
-                    />
-                    <span>{staff.name}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-      </Panel>
+        </Panel>
+      )}
 
       <div className="commission-report__layout">
         <Panel
           className="commission-report__history-panel"
-          title="Snapshots"
-          subtitle="Every generation creates a new saved run so historical commission results stay stable."
+          title={focusedRule ? "Snapshots" : "How It Works"}
+          subtitle={
+            focusedRule
+              ? "Every generation creates a new saved run for this rule so historical commission results stay stable."
+              : "Commission reports come from your active commission rules. Open a rule first, then generate or review snapshots for that rule."
+          }
         >
-          {loadingRuns ? <div className="inline-note inline-note--loading">Loading snapshots...</div> : null}
-          {!loadingRuns && runs.length === 0 ? (
+          {!focusedRule ? (
             <EmptyState
-              label="No snapshots yet"
-              detail="Generate the first commission snapshot for the selected month."
+              label="Choose a report to continue"
+              detail="Select a configured report from the list above. The page will then show the rule title, saved scope, and snapshots for that report only."
             />
           ) : null}
-          {!loadingRuns && runs.length > 0 ? (
+          {focusedRule && loadingRuns ? <div className="inline-note inline-note--loading">Loading snapshots...</div> : null}
+          {focusedRule && !loadingRuns && filteredRuns.length === 0 ? (
+            <EmptyState
+              label="No snapshots yet for this report"
+              detail="Generate the first snapshot for this rule and selected month."
+            />
+          ) : null}
+          {focusedRule && !loadingRuns && filteredRuns.length > 0 ? (
             <div className="commission-report__snapshot-list">
-              {runs.map((run) => (
+              {filteredRuns.map((run) => (
                 <button
                   key={run.id}
                   className={`commission-report__snapshot-item ${selectedRunId === run.id ? "commission-report__snapshot-item--selected" : ""}`.trim()}
@@ -696,101 +789,111 @@ export function CommissionReportPage() {
         </Panel>
 
         <div className="commission-report__workspace">
-          <div className="report-kpi-strip">
-            <article className="report-kpi-strip__card">
-              <span className="report-kpi-strip__label">Total commission</span>
-              <strong className="report-kpi-strip__value">
-                {formatCurrency(displayedTotals?.totalCommissionAmount ?? 0, currentClinic.currency || "MMK")}
-              </strong>
-              <span className="report-kpi-strip__hint">
-                {selectedRuleId ? "Filtered to the selected rule." : "Generated commission across the current snapshot."}
-              </span>
-            </article>
-            <article className="report-kpi-strip__card">
-              <span className="report-kpi-strip__label">Adjustments</span>
-              <strong className="report-kpi-strip__value">
-                {formatCurrency(displayedTotals?.totalAdjustmentAmount ?? 0, currentClinic.currency || "MMK")}
-              </strong>
-              <span className="report-kpi-strip__hint">
-                {selectedRuleId
-                  ? "Adjustments stay at the snapshot level, so filtered rule views show 0 here."
-                  : "Manual adjustments captured inside this saved snapshot."}
-              </span>
-            </article>
-            <article className="report-kpi-strip__card">
-              <span className="report-kpi-strip__label">Final payout</span>
-              <strong className="report-kpi-strip__value">
-                {formatCurrency(displayedTotals?.finalPayoutAmount ?? 0, currentClinic.currency || "MMK")}
-              </strong>
-              <span className="report-kpi-strip__hint">
-                {displayedTotals?.matchedRowCount ?? 0} matched row(s)
-                {selectedRuleId ? "" : ` · ${displayedTotals?.skippedRowCount ?? 0} skipped`}
-              </span>
-            </article>
-          </div>
-
-          <Panel
-            className="commission-report__results-panel"
-            title="Staff payout summary"
-            subtitle="Click a staff row to inspect the exact transactions, rules, and explanations behind the payout."
-            action={
-              <div className="report-panel__actions">
-                <button className="button button--secondary" disabled={!selectedRun || exporting || filteredResults.length === 0} onClick={() => void handleExport()}>
-                  {exporting ? "Exporting..." : "Export Excel"}
-                </button>
-              </div>
-            }
-          >
-            {loadingRunDetail ? <div className="inline-note inline-note--loading">Loading snapshot details...</div> : null}
-            {!loadingRunDetail && !selectedRun ? (
+          {!focusedRule ? (
+            <Panel
+              className="commission-report__results-panel"
+              title="Report preview"
+              subtitle="After you open a configured report, this area will show the saved rule scope, snapshots, payout summary, and commission drilldown for that rule."
+            >
               <EmptyState
-                label="No snapshot selected"
-                detail="Pick a saved snapshot from the list or generate a new one."
+                label="No report selected"
+                detail="Choose a configured rule first. The report page will then use that rule name in the title and apply its saved staff and service setup automatically."
               />
-            ) : null}
-            {!loadingRunDetail && selectedRun ? (
-              <DataTable
-                columns={[
-                  { key: "staffName", header: "Staff", render: (row) => row.staffName },
-                  { key: "staffRole", header: "Role", render: (row) => row.staffRole },
-                  {
-                    key: "baseAmount",
-                    header: "Base amount",
-                    render: (row) => formatCurrency(row.baseAmount, currentClinic.currency || "MMK"),
-                  },
-                  {
-                    key: "commissionAmount",
-                    header: "Commission",
-                    render: (row) => formatCurrency(row.commissionAmount, currentClinic.currency || "MMK"),
-                  },
-                  {
-                    key: "adjustmentAmount",
-                    header: "Adjustments",
-                    render: (row) => formatCurrency(row.adjustmentAmount, currentClinic.currency || "MMK"),
-                  },
-                  {
-                    key: "finalPayoutAmount",
-                    header: "Final payout",
-                    render: (row) => formatCurrency(row.finalPayoutAmount, currentClinic.currency || "MMK"),
-                  },
-                  {
-                    key: "transactionCount",
-                    header: "Transactions",
-                    render: (row) => row.transactionCount.toLocaleString("en-US"),
-                  },
-                  {
-                    key: "appliedRuleNames",
-                    header: "Primary rules",
-                    render: (row) => row.appliedRuleNames.join(", "),
-                  },
-                ]}
-                rows={summaryRows}
-                rowKey={(row) => row.staffId}
-                onRowClick={(row) => setSelectedSummaryStaffId(row.staffId)}
-                rowClassName={(row) => (selectedSummaryStaffId === row.staffId ? "commission-report__selected-row" : undefined)}
-              />
-            ) : null}
-          </Panel>
+            </Panel>
+          ) : (
+            <>
+              <div className="report-kpi-strip">
+                <article className="report-kpi-strip__card">
+                  <span className="report-kpi-strip__label">Total commission</span>
+                  <strong className="report-kpi-strip__value">
+                    {formatCurrency(displayedTotals?.totalCommissionAmount ?? 0, currentClinic.currency || "MMK")}
+                  </strong>
+                  <span className="report-kpi-strip__hint">Showing only {activeRuleLabel}.</span>
+                </article>
+                <article className="report-kpi-strip__card">
+                  <span className="report-kpi-strip__label">Adjustments</span>
+                  <strong className="report-kpi-strip__value">
+                    {formatCurrency(displayedTotals?.totalAdjustmentAmount ?? 0, currentClinic.currency || "MMK")}
+                  </strong>
+                  <span className="report-kpi-strip__hint">
+                    Adjustments stay at the snapshot level, so this rule view shows only adjustments saved with the snapshot.
+                  </span>
+                </article>
+                <article className="report-kpi-strip__card">
+                  <span className="report-kpi-strip__label">Final payout</span>
+                  <strong className="report-kpi-strip__value">
+                    {formatCurrency(displayedTotals?.finalPayoutAmount ?? 0, currentClinic.currency || "MMK")}
+                  </strong>
+                  <span className="report-kpi-strip__hint">
+                    {displayedTotals?.matchedRowCount ?? 0} matched row(s) for this rule
+                  </span>
+                </article>
+              </div>
+
+              <Panel
+                className="commission-report__results-panel"
+                title={`${focusedRule.ruleName} payout summary`}
+                subtitle="Click a staff row to inspect the exact transactions and explanations behind this rule payout."
+                action={
+                  <div className="report-panel__actions">
+                    <button className="button button--secondary" disabled={!selectedRun || exporting || filteredResults.length === 0} onClick={() => void handleExport()}>
+                      {exporting ? "Exporting..." : "Export Excel"}
+                    </button>
+                  </div>
+                }
+              >
+                {loadingRunDetail ? <div className="inline-note inline-note--loading">Loading snapshot details...</div> : null}
+                {!loadingRunDetail && !selectedRun ? (
+                  <EmptyState
+                    label="No snapshot selected"
+                    detail="Pick a saved snapshot from the list or generate a new one for this rule."
+                  />
+                ) : null}
+                {!loadingRunDetail && selectedRun ? (
+                  <DataTable
+                    columns={[
+                      { key: "staffName", header: "Staff", render: (row) => row.staffName },
+                      { key: "staffRole", header: "Role", render: (row) => row.staffRole },
+                      {
+                        key: "baseAmount",
+                        header: "Base amount",
+                        render: (row) => formatCurrency(row.baseAmount, currentClinic.currency || "MMK"),
+                      },
+                      {
+                        key: "commissionAmount",
+                        header: "Commission",
+                        render: (row) => formatCurrency(row.commissionAmount, currentClinic.currency || "MMK"),
+                      },
+                      {
+                        key: "adjustmentAmount",
+                        header: "Adjustments",
+                        render: (row) => formatCurrency(row.adjustmentAmount, currentClinic.currency || "MMK"),
+                      },
+                      {
+                        key: "finalPayoutAmount",
+                        header: "Final payout",
+                        render: (row) => formatCurrency(row.finalPayoutAmount, currentClinic.currency || "MMK"),
+                      },
+                      {
+                        key: "transactionCount",
+                        header: "Transactions",
+                        render: (row) => row.transactionCount.toLocaleString("en-US"),
+                      },
+                      {
+                        key: "appliedRuleNames",
+                        header: "Primary rules",
+                        render: (row) => row.appliedRuleNames.join(", "),
+                      },
+                    ]}
+                    rows={summaryRows}
+                    rowKey={(row) => row.staffId}
+                    onRowClick={(row) => setSelectedSummaryStaffId(row.staffId)}
+                    rowClassName={(row) => (selectedSummaryStaffId === row.staffId ? "commission-report__selected-row" : undefined)}
+                  />
+                ) : null}
+              </Panel>
+            </>
+          )}
 
           {selectedRun ? (
             <Panel

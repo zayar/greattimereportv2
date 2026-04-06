@@ -274,6 +274,15 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
   }, [branches])
 
   const staffOptions = useMemo(() => filterStaffOptions(options, draft.eventType), [options, draft.eventType])
+  const staffItems = useMemo(
+    () =>
+      staffOptions.map((staff) => ({
+        value: staff.id,
+        label: staff.name,
+        hint: staff.role,
+      })),
+    [staffOptions],
+  )
   const supportedRoles = useMemo(() => deriveSupportedRoles(draft.eventType), [draft.eventType])
   const serviceItems = useMemo(
     () =>
@@ -384,6 +393,7 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
   const preview = buildRulePreview(draft)
   const formulaSummary = formatCommissionFormulaSummary(draft.formulaType, draft.formulaConfig)
   const triggerDescription = describeEventTrigger(draft.eventType)
+  const allSpecificStaffSelected = staffItems.length > 0 && staffItems.every((staff) => draft.appliesToStaffIds.includes(staff.value))
 
   return (
     <div className="page-stack page-stack--workspace analytics-report commission-editor">
@@ -489,12 +499,28 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
             <strong>Specific staff</strong>
             <span>Leave this empty to include everyone in the selected role. This list updates based on the trigger selected above.</span>
           </div>
+          {staffItems.length > 0 ? (
+            <div className="commission-form__selection-actions">
+              <button
+                className="button button--ghost"
+                type="button"
+                onClick={() => updateDraft({ appliesToStaffIds: staffItems.map((staff) => staff.value) })}
+                disabled={allSpecificStaffSelected}
+              >
+                Select all
+              </button>
+              <button
+                className="button button--ghost"
+                type="button"
+                onClick={() => updateDraft({ appliesToStaffIds: [] })}
+                disabled={draft.appliesToStaffIds.length === 0}
+              >
+                Clear all
+              </button>
+            </div>
+          ) : null}
           <CheckboxGrid
-            items={staffOptions.map((staff) => ({
-              value: staff.id,
-              label: staff.name,
-              hint: staff.role,
-            }))}
+            items={staffItems}
             selectedValues={draft.appliesToStaffIds}
             onToggle={(value) => updateDraft({ appliesToStaffIds: toggleValue(draft.appliesToStaffIds, value) })}
             emptyLabel="No matching staff were found in the current reporting data."
