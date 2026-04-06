@@ -174,6 +174,12 @@ export interface CommissionRun {
   selectedRuleIds: string[]
   summaryTotals: CommissionRunSummaryTotals
   staffSummaries: CommissionStaffSummary[]
+  filters: {
+    branchIds: string[]
+    branchCodes: string[]
+    staffIds: string[]
+    staffRoles: string[]
+  }
   warnings: string[]
   assumptions: string[]
   resultCount: number

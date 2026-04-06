@@ -49,6 +49,7 @@ export function CommissionReportPage() {
   const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([])
   const [selectedStaffRole, setSelectedStaffRole] = useState("")
   const [selectedRuleId, setSelectedRuleId] = useState(preselectedRule?.ruleId ?? "")
+  const [showScopeEditor, setShowScopeEditor] = useState(false)
   const [options, setOptions] = useState<CommissionSourceOptions | null>(null)
   const [runs, setRuns] = useState<CommissionRun[]>([])
   const [selectedRunId, setSelectedRunId] = useState("")
@@ -97,6 +98,14 @@ export function CommissionReportPage() {
       ).sort((left, right) => left.label.localeCompare(right.label)),
     [results],
   )
+
+  const activeRuleLabel = useMemo(() => {
+    if (!selectedRuleId) {
+      return null
+    }
+
+    return ruleOptions.find((rule) => rule.id === selectedRuleId)?.label ?? preselectedRule?.ruleName ?? null
+  }, [preselectedRule?.ruleName, ruleOptions, selectedRuleId])
 
   const filteredResults = useMemo(
     () => (selectedRuleId ? results.filter((row) => row.ruleId === selectedRuleId) : results),
@@ -195,6 +204,25 @@ export function CommissionReportPage() {
       bonusRowCount: 0,
     }
   }, [filteredResults, selectedRuleId, selectedRun])
+
+  const selectedStaffNameMap = useMemo(() => {
+    const entries = new Map<string, string>()
+
+    ;(options?.staff ?? []).forEach((staff) => {
+      entries.set(staff.id, staff.name)
+    })
+
+    selectedRun?.staffSummaries.forEach((staff) => {
+      entries.set(staff.staffId, staff.staffName)
+    })
+
+    return entries
+  }, [options?.staff, selectedRun?.staffSummaries])
+
+  const snapshotStaffLabels = useMemo(() => {
+    const staffIds = selectedRun?.filters.staffIds ?? []
+    return staffIds.map((staffId) => selectedStaffNameMap.get(staffId) ?? staffId)
+  }, [selectedRun?.filters.staffIds, selectedStaffNameMap])
 
   useEffect(() => {
     if (!preselectedRule) {
@@ -321,6 +349,9 @@ export function CommissionReportPage() {
         if (active) {
           setSelectedRun(detail.run)
           setResults(detail.results)
+          setSelectedStaffIds(detail.run.filters.staffIds)
+          setSelectedStaffRole(detail.run.filters.staffRoles[0] ?? "")
+          setShowScopeEditor(false)
           setSelectedSummaryStaffId((current) =>
             current && detail.run.staffSummaries.some((summary) => summary.staffId === current)
               ? current
@@ -369,6 +400,7 @@ export function CommissionReportPage() {
       setSelectedRun(generated.run)
       setResults(generated.results)
       setRuns((current) => [generated.run, ...current.filter((run) => run.id !== generated.run.id)])
+      setShowScopeEditor(false)
       setSelectedSummaryStaffId(generated.run.staffSummaries[0]?.staffId ?? null)
       setNotice("Commission snapshot generated successfully.")
     } catch (generateError) {
@@ -476,10 +508,10 @@ export function CommissionReportPage() {
         title="Commission report"
         actions={
           <div className="commission-report__toolbar">
-            {preselectedRule ? (
+            {activeRuleLabel ? (
               <div className="commission-report__context-pill">
-                <strong>Rule context</strong>
-                <span>{preselectedRule.ruleName}</span>
+                <strong>Rule focus</strong>
+                <span>{activeRuleLabel}</span>
               </div>
             ) : null}
             <label className="field field--compact">
@@ -510,6 +542,16 @@ export function CommissionReportPage() {
             <button className="button button--secondary" disabled={generating || selectedBranchIds.length === 0} onClick={() => void handleGenerate()}>
               {generating ? "Generating..." : "Generate snapshot"}
             </button>
+            {selectedRun ? (
+              <button className="button button--ghost" onClick={() => setShowScopeEditor((current) => !current)}>
+                {showScopeEditor ? "Hide scope editor" : "Adjust scope"}
+              </button>
+            ) : null}
+            {selectedRuleId ? (
+              <button className="button button--ghost" onClick={() => setSelectedRuleId("")}>
+                Show full snapshot
+              </button>
+            ) : null}
           </div>
         }
       />
@@ -519,66 +561,88 @@ export function CommissionReportPage() {
 
       <Panel
         className="commission-report__filter-panel"
-        title="Report filters"
-        subtitle="Select the branch, staff, and role scope before generating a new monthly commission snapshot."
+        title={selectedRun && !showScopeEditor ? "Snapshot scope" : "Generation scope"}
+        subtitle={
+          selectedRun && !showScopeEditor
+            ? "This snapshot already includes the saved staff scope. Open the scope editor only when you want to generate a new snapshot."
+            : "Choose the staff scope for the next snapshot. After generation, this page switches to a read-only snapshot view."
+        }
       >
-        <div className="commission-report__filter-grid">
-          <div>
-            <strong>Branches</strong>
-            {branchOptions.length > 0 ? (
-              <div className="inline-note">
-                Filtered to {branchOptions[0].name} ({branchOptions[0].code}).
-              </div>
-            ) : (
-              <div className="inline-note">No clinic is selected.</div>
-            )}
+        {selectedRun && !showScopeEditor ? (
+          <div className="commission-report__scope-grid">
+            <article className="commission-report__scope-card">
+              <strong>Branch</strong>
+              <span>
+                {branchOptions.length > 0 ? `${branchOptions[0].name} (${branchOptions[0].code})` : "No clinic selected"}
+              </span>
+            </article>
+            <article className="commission-report__scope-card">
+              <strong>Staff role</strong>
+              <span>{selectedRun.filters.staffRoles[0] || "All roles"}</span>
+            </article>
+            <article className="commission-report__scope-card">
+              <strong>Specific staff</strong>
+              <span>
+                {snapshotStaffLabels.length > 0
+                  ? snapshotStaffLabels.slice(0, 4).join(", ")
+                  : "All staff matching the saved role scope"}
+              </span>
+              {snapshotStaffLabels.length > 4 ? (
+                <small>+{(snapshotStaffLabels.length - 4).toLocaleString("en-US")} more selected in this snapshot</small>
+              ) : null}
+            </article>
+            <article className="commission-report__scope-card">
+              <strong>Rule view</strong>
+              <span>{activeRuleLabel || "Showing the full snapshot"}</span>
+            </article>
           </div>
+        ) : (
+          <div className="commission-report__filter-grid">
+            <div>
+              <strong>Branches</strong>
+              {branchOptions.length > 0 ? (
+                <div className="inline-note">
+                  Filtered to {branchOptions[0].name} ({branchOptions[0].code}).
+                </div>
+              ) : (
+                <div className="inline-note">No clinic is selected.</div>
+              )}
+            </div>
 
-          <label className="field">
-            <span>Staff role</span>
-            <select value={selectedStaffRole} onChange={(event) => setSelectedStaffRole(event.target.value)}>
-              <option value="">All roles</option>
-              {[...new Set((options?.staff ?? []).map((staff) => staff.role))].map((role) => (
-                <option key={role} value={role}>
-                  {role}
-                </option>
-              ))}
-            </select>
-          </label>
+            <label className="field">
+              <span>Staff role</span>
+              <select value={selectedStaffRole} onChange={(event) => setSelectedStaffRole(event.target.value)}>
+                <option value="">All roles</option>
+                {[...new Set((options?.staff ?? []).map((staff) => staff.role))].map((role) => (
+                  <option key={role} value={role}>
+                    {role}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label className="field">
-            <span>Rule filter</span>
-            <select value={selectedRuleId} onChange={(event) => setSelectedRuleId(event.target.value)}>
-              <option value="">All active rules</option>
-              {ruleOptions.map((rule) => (
-                <option key={rule.id} value={rule.id}>
-                  {rule.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <div>
-            <strong>Specific staff</strong>
-            {loadingOptions ? <div className="inline-note inline-note--loading">Loading staff...</div> : null}
-            <div className="commission-report__check-grid">
-              {sourceStaffOptions.map((staff) => (
-                <label key={staff.id} className="commission-report__check-item">
-                  <input
-                    type="checkbox"
-                    checked={selectedStaffIds.includes(staff.id)}
-                    onChange={() =>
-                      setSelectedStaffIds((current) =>
-                        current.includes(staff.id) ? current.filter((entry) => entry !== staff.id) : [...current, staff.id],
-                      )
-                    }
-                  />
-                  <span>{staff.name}</span>
-                </label>
-              ))}
+            <div>
+              <strong>Specific staff</strong>
+              {loadingOptions ? <div className="inline-note inline-note--loading">Loading staff...</div> : null}
+              <div className="commission-report__check-grid">
+                {sourceStaffOptions.map((staff) => (
+                  <label key={staff.id} className="commission-report__check-item">
+                    <input
+                      type="checkbox"
+                      checked={selectedStaffIds.includes(staff.id)}
+                      onChange={() =>
+                        setSelectedStaffIds((current) =>
+                          current.includes(staff.id) ? current.filter((entry) => entry !== staff.id) : [...current, staff.id],
+                        )
+                      }
+                    />
+                    <span>{staff.name}</span>
+                  </label>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </Panel>
 
       <div className="commission-report__layout">

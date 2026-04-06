@@ -350,6 +350,30 @@
   border: 1px solid rgba(135, 119, 96, 0.14);
 }
 
+.commission-report__scope-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.commission-report__scope-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(255, 252, 247, 0.9);
+  border: 1px solid rgba(135, 119, 96, 0.14);
+}
+
+.commission-report__scope-card strong {
+  color: var(--ink-strong);
+}
+
+.commission-report__scope-card span,
+.commission-report__scope-card small {
+  color: var(--ink-muted);
+}
+
 .commission-report__snapshot-list {
   display: grid;
   gap: 10px;
