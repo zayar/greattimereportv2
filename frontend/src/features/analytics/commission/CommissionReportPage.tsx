@@ -77,6 +77,19 @@ function formatRuleServiceScope(rule: CommissionRule) {
   return "All eligible services"
 }
 
+function formatResultEventType(value: CommissionReportResult["sourceType"]) {
+  if (value === "sale_based") {
+    return "Sale"
+  }
+  if (value === "payment_based") {
+    return "Payment"
+  }
+  if (value === "treatment_completed_based") {
+    return "Treatment completed"
+  }
+  return "Target bonus"
+}
+
 export function CommissionReportPage() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -513,7 +526,8 @@ export function CommissionReportPage() {
           "Staff",
           "Role",
           "Event Date",
-          "Source Ref",
+          "Invoice / Source Ref",
+          "Customer",
           "Event Type",
           "Service",
           "Category",
@@ -528,7 +542,8 @@ export function CommissionReportPage() {
           row.staffRole,
           row.sourceDate,
           row.sourceRef,
-          row.sourceType,
+          row.breakdown.customerName || "",
+          formatResultEventType(row.sourceType),
           row.breakdown.serviceName || "",
           row.breakdown.categoryName || "",
           row.baseAmount,
@@ -905,6 +920,10 @@ export function CommissionReportPage() {
                   : "Showing all explanation rows in the snapshot."
               }
             >
+              <div className="inline-note">
+                Sale and payment rows show invoice numbers here. Treatment completed rows use the reporting source reference, so customer name is included to make review easier.
+              </div>
+
               {selectedRun.warnings.length > 0 ? (
                 <div className="commission-report__warnings">
                   {selectedRun.warnings.map((warning) => (
@@ -916,8 +935,9 @@ export function CommissionReportPage() {
               <DataTable
                 columns={[
                   { key: "sourceDate", header: "Date", render: (row) => formatDate(row.sourceDate) },
-                  { key: "sourceRef", header: "Source ref", render: (row) => row.sourceRef },
-                  { key: "sourceType", header: "Event", render: (row) => row.sourceType },
+                  { key: "sourceRef", header: "Invoice / Source", render: (row) => row.sourceRef || "—" },
+                  { key: "customerName", header: "Customer", render: (row) => row.breakdown.customerName || "—" },
+                  { key: "sourceType", header: "Event", render: (row) => formatResultEventType(row.sourceType) },
                   { key: "service", header: "Service", render: (row) => row.breakdown.serviceName || "—" },
                   { key: "category", header: "Category", render: (row) => row.breakdown.categoryName || "—" },
                   {
