@@ -64,6 +64,7 @@ export const navigationSections: NavigationSection[] = [
         children: [
           { to: "/analytics/payment-report", label: "Sales details" },
           { to: "/analytics/banking-summary", label: "Payment report" },
+          { to: "/analytics/commission", label: "Commission report" },
           { to: "/analytics/sales-by-seller", label: "Sales by sales person" },
           { to: "/analytics/customers-by-salesperson", label: "Customer by salesperson" },
         ],
@@ -85,6 +86,7 @@ export const navigationSections: NavigationSection[] = [
   {
     title: "Settings",
     items: [
+      { to: "/settings/commission", label: "Commission rules" },
       { to: "/settings/telegram", label: "Telegram" },
       { to: "/settings/sales-document", label: "Sales document designer" },
     ],

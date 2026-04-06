@@ -75,6 +75,15 @@ export const directoryItems: DirectoryItem[] = [
     window: "month",
   },
   {
+    id: "commission-report",
+    title: "Commission report",
+    description: "Rule-based monthly commission snapshots with staff payout drilldown.",
+    route: "/analytics/commission",
+    group: "Revenue",
+    eyebrow: "Revenue",
+    window: "month",
+  },
+  {
     id: "customer-by-salesperson",
     title: "Customer by salesperson",
     description: "Customers attributed to each sales person and their spend.",

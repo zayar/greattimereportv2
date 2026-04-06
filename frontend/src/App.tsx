@@ -22,6 +22,7 @@ import { PaymentReportPage } from "./features/analytics/payment-report/PaymentRe
 import { SalesBySellerPage } from "./features/analytics/sales-by-seller/SalesBySellerPage";
 import { DailyTreatmentPage } from "./features/analytics/daily-treatment/DailyTreatmentPage";
 import { BankingSummaryPage } from "./features/analytics/banking-summary/BankingSummaryPage";
+import { CommissionReportPage } from "./features/analytics/commission/CommissionReportPage";
 import { CustomersBySalespersonPage } from "./features/analytics/customers-by-salesperson/CustomersBySalespersonPage";
 import { CustomerPortalPage } from "./features/analytics/customer-portal/CustomerPortalPage";
 import { CustomerDetailPage } from "./features/analytics/customer-portal/CustomerDetailPage";
@@ -42,6 +43,8 @@ import { InventoryReportPage } from "./features/core/inventory/InventoryReportPa
 import { StockSummaryPage } from "./features/core/inventory/StockSummaryPage";
 import { SalesDocumentSettingsPage } from "./features/settings/sales-document/SalesDocumentSettingsPage";
 import { TelegramSettingsPage } from "./features/settings/telegram/TelegramSettingsPage";
+import { CommissionSettingsPage } from "./features/settings/commission/CommissionSettingsPage";
+import { CommissionRuleEditorPage } from "./features/settings/commission/CommissionRuleEditorPage";
 
 export default function App() {
   return (
@@ -89,12 +92,16 @@ export default function App() {
                     <Route path="analytics/services/:serviceSlug" element={<ServiceDetailPage />} />
                     <Route path="analytics/packages" element={<PackagePortalPage />} />
                     <Route path="analytics/payment-report" element={<PaymentReportPage />} />
+                    <Route path="analytics/commission" element={<CommissionReportPage />} />
                     <Route path="analytics/daily-treatment" element={<DailyTreatmentPage />} />
                     <Route path="analytics/sales-by-seller" element={<SalesBySellerPage />} />
                     <Route path="analytics/customers-by-salesperson" element={<CustomersBySalespersonPage />} />
                     <Route path="analytics/customers" element={<CustomerPortalPage />} />
                     <Route path="analytics/customers/:customerSlug" element={<CustomerDetailPage />} />
                     <Route path="settings/sales-document" element={<SalesDocumentSettingsPage />} />
+                    <Route path="settings/commission" element={<CommissionSettingsPage />} />
+                    <Route path="settings/commission/rules/new" element={<CommissionRuleEditorPage />} />
+                    <Route path="settings/commission/rules/:ruleId" element={<CommissionRuleEditorPage />} />
                     <Route path="settings/telegram" element={<TelegramSettingsPage />} />
                   </Route>
                 </Routes>

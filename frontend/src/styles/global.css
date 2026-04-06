@@ -58,6 +58,189 @@
   --luxe-divider: rgba(17, 24, 39, 0.048);
 }
 
+.commission-settings__actions,
+.commission-form__actions,
+.commission-report__toolbar,
+.commission-settings__table-actions,
+.commission-report__toolbar {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.commission-settings__panel .panel__body,
+.commission-editor__panel .panel__body,
+.commission-report__filter-panel .panel__body,
+.commission-report__detail-panel .panel__body {
+  gap: 18px;
+}
+
+.commission-settings__rule-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.status-pill--draft {
+  background: rgba(186, 169, 115, 0.18);
+  color: #705b26;
+}
+
+.status-pill--active {
+  background: rgba(91, 157, 119, 0.18);
+  color: #1b6b44;
+}
+
+.status-pill--archived {
+  background: rgba(153, 143, 134, 0.18);
+  color: #6d6258;
+}
+
+.commission-editor__layout,
+.commission-form__stack,
+.commission-report__workspace {
+  display: grid;
+  gap: 18px;
+}
+
+.commission-form__grid {
+  display: grid;
+  gap: 14px;
+}
+
+.commission-form__grid--two,
+.commission-report__filter-grid,
+.commission-report__adjustment-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.commission-form__subsection {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.commission-form__subsection strong,
+.commission-form__formula-summary strong {
+  color: var(--ink-strong);
+}
+
+.commission-form__subsection span,
+.commission-form__formula-summary span,
+.commission-form__preview,
+.commission-report__snapshot-item small {
+  color: var(--ink-muted);
+}
+
+.commission-form__option-grid,
+.commission-report__check-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.commission-form__check-card,
+.commission-report__check-item {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid rgba(135, 119, 96, 0.18);
+  border-radius: 16px;
+  background: rgba(255, 252, 247, 0.9);
+}
+
+.commission-form__check-card input,
+.commission-report__check-item input {
+  margin: 0;
+}
+
+.commission-form__check-card--selected {
+  border-color: rgba(117, 95, 63, 0.38);
+  box-shadow: 0 16px 28px rgba(117, 95, 63, 0.08);
+}
+
+.commission-form__check-card small {
+  color: var(--ink-faint);
+}
+
+.commission-form__segmented {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.commission-form__tier-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(255, 252, 247, 0.8);
+  border: 1px solid rgba(135, 119, 96, 0.14);
+}
+
+.commission-form__formula-summary,
+.commission-report__warnings {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(252, 247, 236, 0.9);
+  border: 1px solid rgba(135, 119, 96, 0.14);
+}
+
+.commission-form__preview {
+  margin: 0;
+  font-size: 1.02rem;
+  line-height: 1.7;
+}
+
+.commission-report__layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  align-items: start;
+}
+
+.commission-report__history-panel .panel__body {
+  gap: 12px;
+}
+
+.commission-report__snapshot-list {
+  display: grid;
+  gap: 10px;
+}
+
+.commission-report__snapshot-item {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  text-align: left;
+  border-radius: 16px;
+  border: 1px solid rgba(135, 119, 96, 0.16);
+  background: rgba(255, 252, 247, 0.85);
+}
+
+.commission-report__snapshot-item--selected {
+  border-color: rgba(117, 95, 63, 0.38);
+  box-shadow: 0 18px 32px rgba(117, 95, 63, 0.08);
+}
+
+.commission-report__selected-row td {
+  background: rgba(247, 237, 220, 0.7);
+}
+
+.commission-editor__error-banner {
+  margin-bottom: 16px;
+}
+
+@media (max-width: 1080px) {
+  .commission-report__layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 .entity-link-button {
   padding: 0;
   border: none;
