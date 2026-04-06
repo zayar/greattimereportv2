@@ -56,6 +56,18 @@ function normalizeSearchText(value: string) {
   return value.trim().toLocaleLowerCase()
 }
 
+function describeEventTrigger(eventType: CommissionRulePayload["eventType"]) {
+  if (eventType === "payment_based") {
+    return "Commission is created from collected payments and uses sales staff attribution from payment data."
+  }
+
+  if (eventType === "treatment_completed_based") {
+    return "Commission is created only when treatments are completed and uses practitioner attribution from treatment data."
+  }
+
+  return "Commission is created from sold services or packages and uses sales staff attribution from sale data."
+}
+
 type SearchableSelectionListProps = {
   items: SelectionItem[]
   selectedValues: string[]
@@ -265,12 +277,19 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
   const supportedRoles = useMemo(() => deriveSupportedRoles(draft.eventType), [draft.eventType])
   const serviceItems = useMemo(
     () =>
-      (options?.services ?? []).map((service) => ({
-        value: service.name,
-        label: service.name,
-        hint: service.categoryName,
-      })),
-    [options?.services],
+      (options?.services ?? [])
+        .filter((service) => service.eventTypes.includes(draft.eventType))
+        .filter((service) =>
+          draft.conditions.categoryNames.length > 0
+            ? draft.conditions.categoryNames.some((category) => service.categoryName.includes(category))
+            : true,
+        )
+        .map((service) => ({
+          value: service.name,
+          label: service.name,
+          hint: service.categoryName,
+        })),
+    [draft.conditions.categoryNames, draft.eventType, options?.services],
   )
 
   function toggleValue(values: string[], value: string) {
@@ -364,6 +383,7 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
 
   const preview = buildRulePreview(draft)
   const formulaSummary = formatCommissionFormulaSummary(draft.formulaType, draft.formulaConfig)
+  const triggerDescription = describeEventTrigger(draft.eventType)
 
   return (
     <div className="page-stack page-stack--workspace analytics-report commission-editor">
@@ -383,13 +403,18 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
             ].map((option) => (
               <button
                 key={option.value}
-                className={`button ${draft.eventType === option.value ? "button--secondary" : "button--ghost"}`.trim()}
+                className={`button commission-form__trigger-option ${draft.eventType === option.value ? "commission-form__trigger-option--selected" : "commission-form__trigger-option--idle"}`.trim()}
                 onClick={() => updateEventType(option.value as CommissionRulePayload["eventType"])}
                 type="button"
               >
                 {option.label}
               </button>
             ))}
+          </div>
+
+          <div className="commission-form__trigger-summary">
+            <strong>Selected trigger</strong>
+            <span>{triggerDescription}</span>
           </div>
         </Panel>
 

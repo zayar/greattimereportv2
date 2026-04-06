@@ -79,6 +79,7 @@ export interface CommissionSourceOptions {
   services: Array<{
     name: string
     categoryName: string
+    eventTypes: CommissionEventType[]
   }>
   staff: Array<{
     id: string

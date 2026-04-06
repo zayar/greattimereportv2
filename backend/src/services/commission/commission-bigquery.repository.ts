@@ -558,17 +558,57 @@ export async function fetchCommissionSourceOptions(scope: CommissionBigQueryScop
     ),
   ])
 
-  const services = serviceRows.map((row) => ({
-    name: normalizeText(row.serviceName),
-    categoryName: normalizeText(row.categoryName) || "Other",
+  const servicesMap = new Map<
+    string,
+    {
+      name: string
+      categories: Set<string>
+      eventTypes: Set<CommissionEventType>
+    }
+  >()
+
+  serviceRows.forEach((row) => {
+    const serviceName = normalizeText(row.serviceName)
+    if (!serviceName) {
+      return
+    }
+
+    const key = normalizeLower(serviceName)
+    const existing =
+      servicesMap.get(key) ??
+      {
+        name: serviceName,
+        categories: new Set<string>(),
+        eventTypes: new Set<CommissionEventType>(),
+      }
+
+    existing.categories.add(normalizeText(row.categoryName) || "Other")
+
+    if (normalizeLower(row.sourceType) === "treatment") {
+      existing.eventTypes.add("treatment_completed_based")
+    } else {
+      existing.eventTypes.add("sale_based")
+      existing.eventTypes.add("payment_based")
+    }
+
+    servicesMap.set(key, existing)
+  })
+
+  const services = [...servicesMap.values()].map((service) => ({
+    name: service.name,
+    categoryName:
+      service.categories.size === 1
+        ? [...service.categories][0]
+        : [...service.categories].sort((left, right) => left.localeCompare(right)).join(" / "),
+    eventTypes: [...service.eventTypes].sort((left, right) => left.localeCompare(right)),
   }))
 
   return {
     paymentStatuses: dedupeStrings(paymentStatusRows.map((row) => row.paymentStatus)),
     itemTypes: serviceRows.some((row) => normalizeLower(row.sourceType) === "payment") ? ["service", "package"] : ["service"],
-    categories: dedupeStrings(services.map((service) => service.categoryName)).sort((left, right) =>
-      left.localeCompare(right),
-    ),
+    categories: dedupeStrings(
+      services.flatMap((service) => service.categoryName.split("/").map((category) => normalizeText(category) || "Other")),
+    ).sort((left, right) => left.localeCompare(right)),
     services: services.sort((left, right) => left.name.localeCompare(right.name)),
     staff: [
       ...sellerRows.map((row) => ({

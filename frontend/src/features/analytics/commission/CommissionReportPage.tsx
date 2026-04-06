@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
+import { useLocation } from "react-router-dom"
 import {
   createCommissionAdjustment,
   fetchCommissionOptions,
@@ -18,6 +19,7 @@ import {
   startOfMonth,
 } from "../../commission/commissionHelpers"
 import type {
+  CommissionEventType,
   CommissionReportResult,
   CommissionRun,
   CommissionSourceOptions,
@@ -25,7 +27,19 @@ import type {
 import { buildDatedExportFileName, downloadExcelWorkbook } from "../../../utils/exportExcel"
 import { formatCurrency, formatDate, formatDateTime } from "../../../utils/format"
 
+type ReportLocationState = {
+  preselectedRule?: {
+    ruleId: string
+    ruleName: string
+    appliesToRole: string | null
+    eventType: CommissionEventType
+  }
+}
+
 export function CommissionReportPage() {
+  const location = useLocation()
+  const routeState = (location.state ?? null) as ReportLocationState | null
+  const preselectedRule = routeState?.preselectedRule ?? null
   const { currentBusiness, currentClinic } = useAccess()
   const [monthInput, setMonthInput] = useState(monthInputFromDate(startOfMonth()))
   const [range, setRange] = useState({
@@ -34,6 +48,7 @@ export function CommissionReportPage() {
   })
   const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([])
   const [selectedStaffRole, setSelectedStaffRole] = useState("")
+  const [selectedRuleId, setSelectedRuleId] = useState(preselectedRule?.ruleId ?? "")
   const [options, setOptions] = useState<CommissionSourceOptions | null>(null)
   const [runs, setRuns] = useState<CommissionRun[]>([])
   const [selectedRunId, setSelectedRunId] = useState("")
@@ -67,13 +82,152 @@ export function CommissionReportPage() {
     [options?.staff, selectedStaffRole],
   )
 
+  const ruleOptions = useMemo(
+    () =>
+      Array.from(
+        new Map(
+          results.map((row) => [
+            row.ruleId,
+            {
+              id: row.ruleId,
+              label: `${row.ruleName} v${row.ruleVersion}`,
+            },
+          ]),
+        ).values(),
+      ).sort((left, right) => left.label.localeCompare(right.label)),
+    [results],
+  )
+
+  const filteredResults = useMemo(
+    () => (selectedRuleId ? results.filter((row) => row.ruleId === selectedRuleId) : results),
+    [results, selectedRuleId],
+  )
+
   const detailRows = useMemo(() => {
     if (!selectedSummaryStaffId) {
-      return results
+      return filteredResults
     }
 
-    return results.filter((row) => row.staffId === selectedSummaryStaffId)
-  }, [results, selectedSummaryStaffId])
+    return filteredResults.filter((row) => row.staffId === selectedSummaryStaffId)
+  }, [filteredResults, selectedSummaryStaffId])
+
+  const summaryRows = useMemo(() => {
+    if (!selectedRun) {
+      return []
+    }
+
+    if (!selectedRuleId) {
+      return selectedRun.staffSummaries
+    }
+
+    const grouped = new Map<
+      string,
+      {
+        staffId: string
+        staffName: string
+        staffRole: string
+        branchCodes: Set<string>
+        baseAmount: number
+        commissionAmount: number
+        adjustmentAmount: number
+        finalPayoutAmount: number
+        transactionCount: number
+        completedTreatmentCount: number
+        appliedRuleNames: Set<string>
+      }
+    >()
+
+    filteredResults.forEach((row) => {
+      const existing =
+        grouped.get(row.staffId) ??
+        {
+          staffId: row.staffId,
+          staffName: row.staffName,
+          staffRole: row.staffRole,
+          branchCodes: new Set<string>(),
+          baseAmount: 0,
+          commissionAmount: 0,
+          adjustmentAmount: 0,
+          finalPayoutAmount: 0,
+          transactionCount: 0,
+          completedTreatmentCount: 0,
+          appliedRuleNames: new Set<string>(),
+        }
+
+      existing.branchCodes.add(row.branchCode)
+      existing.baseAmount += row.baseAmount
+      existing.commissionAmount += row.commissionAmount
+      existing.finalPayoutAmount += row.commissionAmount
+      existing.transactionCount += 1
+      existing.completedTreatmentCount += row.breakdown.completedTreatmentCount
+      existing.appliedRuleNames.add(`${row.ruleName} v${row.ruleVersion}`)
+      grouped.set(row.staffId, existing)
+    })
+
+    return [...grouped.values()]
+      .map((row) => ({
+        ...row,
+        branchCodes: [...row.branchCodes],
+        appliedRuleNames: [...row.appliedRuleNames],
+      }))
+      .sort((left, right) => right.commissionAmount - left.commissionAmount)
+  }, [filteredResults, selectedRuleId, selectedRun])
+
+  const displayedTotals = useMemo(() => {
+    if (!selectedRun) {
+      return null
+    }
+
+    if (!selectedRuleId) {
+      return selectedRun.summaryTotals
+    }
+
+    return {
+      totalBaseAmount: filteredResults.reduce((sum, row) => sum + row.baseAmount, 0),
+      totalCommissionAmount: filteredResults.reduce((sum, row) => sum + row.commissionAmount, 0),
+      totalAdjustmentAmount: 0,
+      finalPayoutAmount: filteredResults.reduce((sum, row) => sum + row.commissionAmount, 0),
+      sourceRowCount: filteredResults.length,
+      matchedRowCount: filteredResults.length,
+      skippedRowCount: 0,
+      conflictRowCount: 0,
+      missingDataRowCount: 0,
+      bonusRowCount: 0,
+    }
+  }, [filteredResults, selectedRuleId, selectedRun])
+
+  useEffect(() => {
+    if (!preselectedRule) {
+      return
+    }
+
+    setSelectedRuleId(preselectedRule.ruleId)
+    if (preselectedRule.appliesToRole) {
+      setSelectedStaffRole(preselectedRule.appliesToRole)
+    }
+    setNotice(
+      `Report context loaded for ${preselectedRule.ruleName}. Generate a snapshot to validate this rule, then use the rule filter to inspect matching rows.`,
+    )
+  }, [preselectedRule])
+
+  useEffect(() => {
+    if (selectedRuleId && results.length > 0 && !results.some((row) => row.ruleId === selectedRuleId)) {
+      setSelectedRuleId("")
+    }
+  }, [results, selectedRuleId])
+
+  useEffect(() => {
+    if (summaryRows.length === 0) {
+      setSelectedSummaryStaffId(null)
+      return
+    }
+
+    if (selectedSummaryStaffId && summaryRows.some((row) => row.staffId === selectedSummaryStaffId)) {
+      return
+    }
+
+    setSelectedSummaryStaffId(summaryRows[0]?.staffId ?? null)
+  }, [selectedSummaryStaffId, summaryRows])
 
   useEffect(() => {
     if (!currentBusiness || !currentClinic || selectedBranchIds.length === 0) {
@@ -225,7 +379,7 @@ export function CommissionReportPage() {
   }
 
   async function handleExport() {
-    if (!selectedRun || results.length === 0) {
+    if (!selectedRun || filteredResults.length === 0) {
       return
     }
 
@@ -248,7 +402,7 @@ export function CommissionReportPage() {
           "Rule",
           "Explanation",
         ],
-        rows: results.map((row) => [
+        rows: filteredResults.map((row) => [
           row.staffName,
           row.staffRole,
           row.sourceDate,
@@ -322,6 +476,12 @@ export function CommissionReportPage() {
         title="Commission report"
         actions={
           <div className="commission-report__toolbar">
+            {preselectedRule ? (
+              <div className="commission-report__context-pill">
+                <strong>Rule context</strong>
+                <span>{preselectedRule.ruleName}</span>
+              </div>
+            ) : null}
             <label className="field field--compact">
               <span>Month</span>
               <input
@@ -386,6 +546,18 @@ export function CommissionReportPage() {
             </select>
           </label>
 
+          <label className="field">
+            <span>Rule filter</span>
+            <select value={selectedRuleId} onChange={(event) => setSelectedRuleId(event.target.value)}>
+              <option value="">All active rules</option>
+              {ruleOptions.map((rule) => (
+                <option key={rule.id} value={rule.id}>
+                  {rule.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <div>
             <strong>Specific staff</strong>
             {loadingOptions ? <div className="inline-note inline-note--loading">Loading staff...</div> : null}
@@ -444,24 +616,31 @@ export function CommissionReportPage() {
             <article className="report-kpi-strip__card">
               <span className="report-kpi-strip__label">Total commission</span>
               <strong className="report-kpi-strip__value">
-                {formatCurrency(selectedRun?.summaryTotals.totalCommissionAmount ?? 0, currentClinic.currency || "MMK")}
+                {formatCurrency(displayedTotals?.totalCommissionAmount ?? 0, currentClinic.currency || "MMK")}
               </strong>
-              <span className="report-kpi-strip__hint">Generated commission across the current snapshot.</span>
+              <span className="report-kpi-strip__hint">
+                {selectedRuleId ? "Filtered to the selected rule." : "Generated commission across the current snapshot."}
+              </span>
             </article>
             <article className="report-kpi-strip__card">
               <span className="report-kpi-strip__label">Adjustments</span>
               <strong className="report-kpi-strip__value">
-                {formatCurrency(selectedRun?.summaryTotals.totalAdjustmentAmount ?? 0, currentClinic.currency || "MMK")}
+                {formatCurrency(displayedTotals?.totalAdjustmentAmount ?? 0, currentClinic.currency || "MMK")}
               </strong>
-              <span className="report-kpi-strip__hint">Manual adjustments captured inside this saved snapshot.</span>
+              <span className="report-kpi-strip__hint">
+                {selectedRuleId
+                  ? "Adjustments stay at the snapshot level, so filtered rule views show 0 here."
+                  : "Manual adjustments captured inside this saved snapshot."}
+              </span>
             </article>
             <article className="report-kpi-strip__card">
               <span className="report-kpi-strip__label">Final payout</span>
               <strong className="report-kpi-strip__value">
-                {formatCurrency(selectedRun?.summaryTotals.finalPayoutAmount ?? 0, currentClinic.currency || "MMK")}
+                {formatCurrency(displayedTotals?.finalPayoutAmount ?? 0, currentClinic.currency || "MMK")}
               </strong>
               <span className="report-kpi-strip__hint">
-                {selectedRun?.summaryTotals.matchedRowCount ?? 0} matched row(s) · {selectedRun?.summaryTotals.skippedRowCount ?? 0} skipped
+                {displayedTotals?.matchedRowCount ?? 0} matched row(s)
+                {selectedRuleId ? "" : ` · ${displayedTotals?.skippedRowCount ?? 0} skipped`}
               </span>
             </article>
           </div>
@@ -472,7 +651,7 @@ export function CommissionReportPage() {
             subtitle="Click a staff row to inspect the exact transactions, rules, and explanations behind the payout."
             action={
               <div className="report-panel__actions">
-                <button className="button button--secondary" disabled={!selectedRun || exporting || results.length === 0} onClick={() => void handleExport()}>
+                <button className="button button--secondary" disabled={!selectedRun || exporting || filteredResults.length === 0} onClick={() => void handleExport()}>
                   {exporting ? "Exporting..." : "Export Excel"}
                 </button>
               </div>
@@ -521,7 +700,7 @@ export function CommissionReportPage() {
                     render: (row) => row.appliedRuleNames.join(", "),
                   },
                 ]}
-                rows={selectedRun.staffSummaries}
+                rows={summaryRows}
                 rowKey={(row) => row.staffId}
                 onRowClick={(row) => setSelectedSummaryStaffId(row.staffId)}
                 rowClassName={(row) => (selectedSummaryStaffId === row.staffId ? "commission-report__selected-row" : undefined)}

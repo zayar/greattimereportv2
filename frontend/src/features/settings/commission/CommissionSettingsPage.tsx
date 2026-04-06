@@ -136,6 +136,9 @@ export function CommissionSettingsPage() {
         title="Commission rules"
         actions={
           <div className="commission-settings__actions">
+            <button className="button button--ghost" onClick={() => navigate("/analytics/commission")}>
+              View report
+            </button>
             <button className="button button--secondary" onClick={() => navigate("/settings/commission/rules/new")}>
               Create new rule
             </button>
@@ -224,6 +227,24 @@ export function CommissionSettingsPage() {
                 header: "Actions",
                 render: (rule) => (
                   <div className="commission-settings__table-actions">
+                    <button
+                      className="button button--ghost"
+                      disabled={rule.status !== "active"}
+                      onClick={() =>
+                        navigate("/analytics/commission", {
+                          state: {
+                            preselectedRule: {
+                              ruleId: rule.id,
+                              ruleName: rule.ruleName,
+                              appliesToRole: rule.appliesToRole,
+                              eventType: rule.eventType,
+                            },
+                          },
+                        })
+                      }
+                    >
+                      View report
+                    </button>
                     <button className="button button--ghost" onClick={() => navigate(`/settings/commission/rules/${rule.id}`)}>
                       Edit
                     </button>
