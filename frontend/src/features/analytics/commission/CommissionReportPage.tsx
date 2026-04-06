@@ -225,14 +225,19 @@ export function CommissionReportPage() {
     return staffIds.map((staffId) => selectedStaffNameMap.get(staffId) ?? staffId)
   }, [selectedRun?.filters.staffIds, selectedStaffNameMap])
 
-  function handleReturnToReportList() {
+  function handleOpenNewReport() {
     if (preselectedRule) {
       navigate("/analytics/commission", { replace: true })
     }
 
     setSelectedRuleId("")
     setShowScopeEditor(true)
-    setNotice("Showing the full commission report workspace. Choose the scope below to generate a new snapshot.")
+    setNotice("Set the scope below to generate a new commission snapshot.")
+  }
+
+  function handleBackToSnapshot() {
+    setShowScopeEditor(false)
+    setNotice("Showing the saved commission snapshot.")
   }
 
   useEffect(() => {
@@ -245,7 +250,7 @@ export function CommissionReportPage() {
       setSelectedStaffRole(preselectedRule.appliesToRole)
     }
     setNotice(
-      `Report context loaded for ${preselectedRule.ruleName}. Generate a snapshot to validate this rule, or use Back to report list when you want to create a fresh report.`,
+      `Report context loaded for ${preselectedRule.ruleName}. Generate a snapshot to validate this rule, or use New report when you want to create a fresh report.`,
     )
   }, [preselectedRule])
 
@@ -519,8 +524,12 @@ export function CommissionReportPage() {
         title="Commission report"
         actions={
           <div className="commission-report__toolbar">
-            {preselectedRule ? (
-              <button className="button button--ghost" onClick={handleReturnToReportList}>
+            {selectedRun ? (
+              <button className="button button--ghost" onClick={showScopeEditor ? handleBackToSnapshot : handleOpenNewReport}>
+                {showScopeEditor ? "Back to snapshot" : "New report"}
+              </button>
+            ) : preselectedRule ? (
+              <button className="button button--ghost" onClick={handleOpenNewReport}>
                 Back to report list
               </button>
             ) : null}
@@ -558,11 +567,6 @@ export function CommissionReportPage() {
             <button className="button button--secondary" disabled={generating || selectedBranchIds.length === 0} onClick={() => void handleGenerate()}>
               {generating ? "Generating..." : "Generate snapshot"}
             </button>
-            {selectedRun ? (
-              <button className="button button--ghost" onClick={() => setShowScopeEditor((current) => !current)}>
-                {showScopeEditor ? "Hide scope editor" : "Adjust scope"}
-              </button>
-            ) : null}
             {selectedRuleId ? (
               <button className="button button--ghost" onClick={() => setSelectedRuleId("")}>
                 Show full snapshot
