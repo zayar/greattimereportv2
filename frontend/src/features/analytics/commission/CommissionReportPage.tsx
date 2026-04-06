@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
+import { apolloClient } from "../../../api/apollo"
 import {
   createCommissionAdjustment,
   fetchCommissionOptions,
@@ -13,6 +14,8 @@ import { DateRangeControls } from "../../../components/DateRangeControls"
 import { EmptyState, ErrorState } from "../../../components/StatusViews"
 import { Panel } from "../../../components/Panel"
 import { PageHeader } from "../../../components/PageHeader"
+import type { CheckInOutRow } from "../../../types/domain"
+import { buildCheckInOutVariables, GET_CHECKIN_OUT_DATA } from "../../operational/check-in-out/queries"
 import { useAccess } from "../../access/AccessProvider"
 import {
   endOfMonth,
@@ -38,6 +41,17 @@ type ReportLocationState = {
     eventType: CommissionEventType
   }
 }
+
+type CheckInOutResponse = {
+  checkIns: CheckInOutRow[]
+  aggregateCheckIn: {
+    _count: {
+      _all: number
+    }
+  }
+}
+
+const CHECKIN_EXPORT_BATCH_SIZE = 500
 
 function formatEventType(value: CommissionEventType) {
   if (value === "sale_based") {
@@ -90,6 +104,89 @@ function formatResultEventType(value: CommissionReportResult["sourceType"]) {
   return "Target bonus"
 }
 
+function normalizeLookupText(value: string | null | undefined) {
+  return value?.trim().toLocaleLowerCase() ?? ""
+}
+
+function toIsoDateOnly(value: string | null | undefined) {
+  if (!value) {
+    return ""
+  }
+
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return value.slice(0, 10)
+  }
+
+  return parsed.toISOString().slice(0, 10)
+}
+
+function shiftDate(dateValue: string, offsetDays: number) {
+  const parsed = new Date(`${dateValue}T00:00:00.000Z`)
+  parsed.setUTCDate(parsed.getUTCDate() + offsetDays)
+  return parsed.toISOString().slice(0, 10)
+}
+
+function resolveCheckInCustomerName(row: CheckInOutRow) {
+  return row.member?.clinic_members?.[0]?.name || row.member?.name || ""
+}
+
+function buildTreatmentLookupKey(input: {
+  sourceDate: string
+  customerName: string | null | undefined
+  serviceName: string | null | undefined
+  staffName: string | null | undefined
+}) {
+  return [
+    normalizeLookupText(input.sourceDate),
+    normalizeLookupText(input.customerName),
+    normalizeLookupText(input.serviceName),
+    normalizeLookupText(input.staffName),
+  ].join("|")
+}
+
+async function loadAllCommissionCheckOutRows(params: {
+  clinicId: string
+  fromDate: string
+  toDate: string
+}) {
+  const rows: CheckInOutRow[] = []
+  let totalCount = Number.POSITIVE_INFINITY
+  let skip = 0
+
+  while (skip < totalCount) {
+    const result = await apolloClient.query<CheckInOutResponse>({
+      query: GET_CHECKIN_OUT_DATA,
+      variables: buildCheckInOutVariables({
+        clinicId: params.clinicId,
+        fromDate: params.fromDate,
+        toDate: params.toDate,
+        search: "",
+        status: "",
+        take: CHECKIN_EXPORT_BATCH_SIZE,
+        skip,
+      }),
+      fetchPolicy: "network-only",
+    })
+
+    const batch = result.data?.checkIns ?? []
+    totalCount = result.data?.aggregateCheckIn?._count._all ?? 0
+
+    if (batch.length === 0) {
+      break
+    }
+
+    rows.push(...batch)
+    skip += batch.length
+
+    if (batch.length < CHECKIN_EXPORT_BATCH_SIZE) {
+      break
+    }
+  }
+
+  return rows
+}
+
 export function CommissionReportPage() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -109,10 +206,12 @@ export function CommissionReportPage() {
   const [selectedRun, setSelectedRun] = useState<CommissionRun | null>(null)
   const [results, setResults] = useState<CommissionReportResult[]>([])
   const [selectedSummaryStaffId, setSelectedSummaryStaffId] = useState<string | null>(null)
+  const [treatmentOrderIdByResultId, setTreatmentOrderIdByResultId] = useState<Record<string, string>>({})
   const [loadingOptions, setLoadingOptions] = useState(false)
   const [loadingRules, setLoadingRules] = useState(false)
   const [loadingRuns, setLoadingRuns] = useState(false)
   const [loadingRunDetail, setLoadingRunDetail] = useState(false)
+  const [loadingTreatmentOrderIds, setLoadingTreatmentOrderIds] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -150,6 +249,11 @@ export function CommissionReportPage() {
   const filteredResults = useMemo(
     () => (focusedRule ? results.filter((row) => row.ruleId === focusedRule.id) : []),
     [focusedRule, results],
+  )
+
+  const treatmentResults = useMemo(
+    () => results.filter((row) => row.sourceType === "treatment_completed_based"),
+    [results],
   )
 
   const filteredRuns = useMemo(
@@ -268,6 +372,14 @@ export function CommissionReportPage() {
     const staffIds = focusedRule?.appliesToStaffIds ?? []
     return staffIds.map((staffId) => selectedStaffNameMap.get(staffId) ?? staffId)
   }, [focusedRule?.appliesToStaffIds, selectedStaffNameMap])
+
+  function getDisplaySourceRef(row: CommissionReportResult) {
+    if (row.sourceType === "treatment_completed_based") {
+      return treatmentOrderIdByResultId[row.id] || row.sourceRef || "—"
+    }
+
+    return row.sourceRef || "—"
+  }
 
   function handleReturnToReportList() {
     setSelectedRuleId("")
@@ -478,6 +590,89 @@ export function CommissionReportPage() {
     }
   }, [currentClinic, selectedRunId])
 
+  useEffect(() => {
+    if (!currentClinic?.id || !selectedRun || treatmentResults.length === 0) {
+      setTreatmentOrderIdByResultId({})
+      setLoadingTreatmentOrderIds(false)
+      return
+    }
+
+    let active = true
+    setLoadingTreatmentOrderIds(true)
+
+    loadAllCommissionCheckOutRows({
+      clinicId: currentClinic.id,
+      fromDate: shiftDate(selectedRun.dateFrom, -1),
+      toDate: shiftDate(selectedRun.dateTo, 1),
+    })
+      .then((rows) => {
+        if (!active) {
+          return
+        }
+
+        const groupedOrderIds = new Map<string, string[]>()
+
+        rows.forEach((row) => {
+          const orderId = row.orders?.order_id || row.order_id || ""
+          if (!orderId) {
+            return
+          }
+
+          const key = buildTreatmentLookupKey({
+            sourceDate: toIsoDateOnly(row.out_time ?? row.in_time),
+            customerName: resolveCheckInCustomerName(row),
+            serviceName: row.service?.name,
+            staffName: row.practitioner?.name,
+          })
+
+          if (!key) {
+            return
+          }
+
+          const current = groupedOrderIds.get(key) ?? []
+          current.push(orderId)
+          groupedOrderIds.set(key, current)
+        })
+
+        const nextMapping: Record<string, string> = {}
+        const counters = new Map<string, number>()
+
+        treatmentResults.forEach((row) => {
+          const key = buildTreatmentLookupKey({
+            sourceDate: row.sourceDate,
+            customerName: row.breakdown.customerName,
+            serviceName: row.breakdown.serviceName,
+            staffName: row.staffName,
+          })
+          const matches = groupedOrderIds.get(key) ?? []
+          const nextIndex = counters.get(key) ?? 0
+          const matchedOrderId = matches[nextIndex]
+
+          if (matchedOrderId) {
+            nextMapping[row.id] = matchedOrderId
+            counters.set(key, nextIndex + 1)
+          }
+        })
+
+        setTreatmentOrderIdByResultId(nextMapping)
+      })
+      .catch((loadError) => {
+        console.warn("[commission-report] could not enrich treatment rows with order IDs", loadError)
+        if (active) {
+          setTreatmentOrderIdByResultId({})
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setLoadingTreatmentOrderIds(false)
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [currentClinic?.id, selectedRun, treatmentResults])
+
   async function handleGenerate() {
     if (!currentBusiness || !currentClinic || !focusedRule) {
       return
@@ -512,21 +707,24 @@ export function CommissionReportPage() {
     }
   }
 
-  async function handleExport() {
-    if (!selectedRun || filteredResults.length === 0) {
+  async function exportCommissionRows(input: {
+    rows: CommissionReportResult[]
+    filePrefix: string
+  }) {
+    if (!selectedRun || input.rows.length === 0) {
       return
     }
 
     setExporting(true)
     try {
       await downloadExcelWorkbook({
-        fileName: buildDatedExportFileName("commission-report", selectedRun.dateFrom, selectedRun.dateTo),
+        fileName: buildDatedExportFileName(input.filePrefix, selectedRun.dateFrom, selectedRun.dateTo),
         sheetName: "Commission",
         headers: [
           "Staff",
           "Role",
           "Event Date",
-          "Invoice / Source Ref",
+          "Order / Invoice / Source Ref",
           "Customer",
           "Event Type",
           "Service",
@@ -537,11 +735,11 @@ export function CommissionReportPage() {
           "Rule",
           "Explanation",
         ],
-        rows: filteredResults.map((row) => [
+        rows: input.rows.map((row) => [
           row.staffName,
           row.staffRole,
           row.sourceDate,
-          row.sourceRef,
+          getDisplaySourceRef(row),
           row.breakdown.customerName || "",
           formatResultEventType(row.sourceType),
           row.breakdown.serviceName || "",
@@ -556,6 +754,20 @@ export function CommissionReportPage() {
     } finally {
       setExporting(false)
     }
+  }
+
+  async function handleExportSnapshot() {
+    await exportCommissionRows({
+      rows: filteredResults,
+      filePrefix: "commission-report",
+    })
+  }
+
+  async function handleExportDetail() {
+    await exportCommissionRows({
+      rows: detailRows,
+      filePrefix: "commission-details",
+    })
   }
 
   async function handleAdjustmentSave() {
@@ -851,8 +1063,8 @@ export function CommissionReportPage() {
                 subtitle="Click a staff row to inspect the exact transactions and explanations behind this rule payout."
                 action={
                   <div className="report-panel__actions">
-                    <button className="button button--secondary" disabled={!selectedRun || exporting || filteredResults.length === 0} onClick={() => void handleExport()}>
-                      {exporting ? "Exporting..." : "Export Excel"}
+                    <button className="button button--secondary" disabled={!selectedRun || exporting || filteredResults.length === 0} onClick={() => void handleExportSnapshot()}>
+                      {exporting ? "Exporting..." : "Export Snapshot"}
                     </button>
                   </div>
                 }
@@ -919,10 +1131,19 @@ export function CommissionReportPage() {
                   ? `Showing ${detailRows.length.toLocaleString("en-US")} explanation row(s) for the selected staff member.`
                   : "Showing all explanation rows in the snapshot."
               }
+              action={
+                <div className="report-panel__actions">
+                  <button className="button button--secondary" disabled={!selectedRun || exporting || detailRows.length === 0} onClick={() => void handleExportDetail()}>
+                    {exporting ? "Exporting..." : "Export Detail Excel"}
+                  </button>
+                </div>
+              }
             >
               <div className="inline-note">
-                Sale and payment rows show invoice numbers here. Treatment completed rows use the reporting source reference, so customer name is included to make review easier.
+                Sale and payment rows show invoice numbers here. Treatment completed rows try to show the operational order ID from Check In / Out and fall back to the reporting source reference when no match is available.
               </div>
+
+              {loadingTreatmentOrderIds ? <div className="inline-note inline-note--loading">Matching treatment rows to operational order IDs...</div> : null}
 
               {selectedRun.warnings.length > 0 ? (
                 <div className="commission-report__warnings">
@@ -935,7 +1156,7 @@ export function CommissionReportPage() {
               <DataTable
                 columns={[
                   { key: "sourceDate", header: "Date", render: (row) => formatDate(row.sourceDate) },
-                  { key: "sourceRef", header: "Invoice / Source", render: (row) => row.sourceRef || "—" },
+                  { key: "sourceRef", header: "Order / Invoice / Source", render: (row) => getDisplaySourceRef(row) },
                   { key: "customerName", header: "Customer", render: (row) => row.breakdown.customerName || "—" },
                   { key: "sourceType", header: "Event", render: (row) => formatResultEventType(row.sourceType) },
                   { key: "service", header: "Service", render: (row) => row.breakdown.serviceName || "—" },
