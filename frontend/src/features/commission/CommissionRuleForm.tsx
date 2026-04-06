@@ -88,6 +88,24 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
     setDraft(initialValue)
   }, [initialValue])
 
+  useEffect(() => {
+    if (branches.length !== 1) {
+      return
+    }
+
+    const [branch] = branches
+    setDraft((current) => ({
+      ...current,
+      branchIds: [branch.id],
+      branchCodes: [branch.code],
+      conditions: {
+        ...current.conditions,
+        branchIds: [branch.id],
+        branchCodes: [branch.code],
+      },
+    }))
+  }, [branches])
+
   const staffOptions = useMemo(() => filterStaffOptions(options, draft.eventType), [options, draft.eventType])
   const supportedRoles = useMemo(() => deriveSupportedRoles(draft.eventType), [draft.eventType])
   const serviceItems = useMemo(
@@ -310,18 +328,28 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
         >
           <div className="commission-form__subsection">
             <strong>Branches</strong>
-            <span>Selected branches define the rule scope inside this merchant.</span>
+            <span>
+              {branches.length === 1
+                ? "The current clinic is applied automatically to keep this rule inside the selected clinic."
+                : "Selected branches define the rule scope inside this merchant."}
+            </span>
           </div>
-          <CheckboxGrid
-            items={branches.map((branch) => ({
-              value: branch.id,
-              label: branch.name,
-              hint: branch.code,
-            }))}
-            selectedValues={draft.branchIds}
-            onToggle={(value) => updateBranchSelection(toggleValue(draft.branchIds, value))}
-            emptyLabel="No branches are available under the current merchant."
-          />
+          {branches.length === 1 ? (
+            <div className="inline-note">
+              {branches[0].name} ({branches[0].code})
+            </div>
+          ) : (
+            <CheckboxGrid
+              items={branches.map((branch) => ({
+                value: branch.id,
+                label: branch.name,
+                hint: branch.code,
+              }))}
+              selectedValues={draft.branchIds}
+              onToggle={(value) => updateBranchSelection(toggleValue(draft.branchIds, value))}
+              emptyLabel="No branches are available under the current merchant."
+            />
+          )}
 
           <div className="commission-form__subsection">
             <strong>Service categories</strong>

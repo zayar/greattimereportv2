@@ -32,7 +32,6 @@ export function CommissionReportPage() {
     fromDate: startOfMonth(),
     toDate: endOfMonth(monthInputFromDate(startOfMonth())),
   })
-  const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>([])
   const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([])
   const [selectedStaffRole, setSelectedStaffRole] = useState("")
   const [options, setOptions] = useState<CommissionSourceOptions | null>(null)
@@ -53,9 +52,10 @@ export function CommissionReportPage() {
   const [savingAdjustment, setSavingAdjustment] = useState(false)
 
   const branchOptions = useMemo(
-    () => currentBusiness?.clinics.map((clinic) => ({ id: clinic.id, code: clinic.code, name: clinic.name })) ?? [],
-    [currentBusiness?.clinics],
+    () => (currentClinic ? [{ id: currentClinic.id, code: currentClinic.code, name: currentClinic.name }] : []),
+    [currentClinic],
   )
+  const selectedBranchIds = useMemo(() => branchOptions.map((branch) => branch.id), [branchOptions])
   const selectedBranchCodes = useMemo(
     () => branchOptions.filter((branch) => selectedBranchIds.includes(branch.id)).map((branch) => branch.code),
     [branchOptions, selectedBranchIds],
@@ -74,14 +74,6 @@ export function CommissionReportPage() {
 
     return results.filter((row) => row.staffId === selectedSummaryStaffId)
   }, [results, selectedSummaryStaffId])
-
-  useEffect(() => {
-    if (!currentClinic) {
-      return
-    }
-
-    setSelectedBranchIds([currentClinic.id])
-  }, [currentClinic?.id])
 
   useEffect(() => {
     if (!currentBusiness || !currentClinic || selectedBranchIds.length === 0) {
@@ -373,22 +365,13 @@ export function CommissionReportPage() {
         <div className="commission-report__filter-grid">
           <div>
             <strong>Branches</strong>
-            <div className="commission-report__check-grid">
-              {branchOptions.map((branch) => (
-                <label key={branch.id} className="commission-report__check-item">
-                  <input
-                    type="checkbox"
-                    checked={selectedBranchIds.includes(branch.id)}
-                    onChange={() =>
-                      setSelectedBranchIds((current) =>
-                        current.includes(branch.id) ? current.filter((entry) => entry !== branch.id) : [...current, branch.id],
-                      )
-                    }
-                  />
-                  <span>{branch.name}</span>
-                </label>
-              ))}
-            </div>
+            {branchOptions.length > 0 ? (
+              <div className="inline-note">
+                Filtered to {branchOptions[0].name} ({branchOptions[0].code}).
+              </div>
+            ) : (
+              <div className="inline-note">No clinic is selected.</div>
+            )}
           </div>
 
           <label className="field">

@@ -49,8 +49,8 @@ export function CommissionSettingsPage() {
   const [busyRuleId, setBusyRuleId] = useState<string | null>(null)
 
   const branchOptions = useMemo(
-    () => currentBusiness?.clinics.map((clinic) => ({ id: clinic.id, code: clinic.code, name: clinic.name })) ?? [],
-    [currentBusiness?.clinics],
+    () => (currentClinic ? [{ id: currentClinic.id, code: currentClinic.code, name: currentClinic.name }] : []),
+    [currentClinic],
   )
 
   const loadRules = useCallback(async () => {
@@ -147,7 +147,7 @@ export function CommissionSettingsPage() {
         <article className="report-kpi-strip__card">
           <span className="report-kpi-strip__label">Merchant</span>
           <strong className="report-kpi-strip__value">{currentBusiness.name}</strong>
-          <span className="report-kpi-strip__hint">{branchOptions.length} branch scope(s) available in this business context.</span>
+          <span className="report-kpi-strip__hint">Filtered to {currentClinic.name}.</span>
         </article>
         <article className="report-kpi-strip__card">
           <span className="report-kpi-strip__label">Active rules</span>

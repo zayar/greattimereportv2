@@ -20,6 +20,7 @@ import {
 import type {
   CommissionAdjustmentSnapshot,
   CommissionGenerateInput,
+  CommissionRuleRecord,
   CommissionRuleWriteInput,
   CommissionRunRecord,
 } from "./commission.types.js"
@@ -54,6 +55,38 @@ function mapAdjustmentSnapshots(adjustments: Awaited<ReturnType<typeof listCommi
   }))
 }
 
+function normalizeBranchScope(branchIds: string[]) {
+  return Array.from(new Set(branchIds.map((branchId) => normalizeText(branchId)).filter(Boolean)))
+}
+
+function ruleMatchesBranchScope(rule: CommissionRuleRecord, branchIds: string[]) {
+  const normalizedScope = normalizeBranchScope(branchIds)
+  if (normalizedScope.length === 0) {
+    return true
+  }
+
+  const ruleBranchIds = normalizeBranchScope(rule.branchIds)
+  if (ruleBranchIds.length === 0) {
+    return true
+  }
+
+  return ruleBranchIds.some((branchId) => normalizedScope.includes(branchId))
+}
+
+function runMatchesBranchScope(run: Pick<CommissionRunRecord, "branchIds">, branchIds: string[]) {
+  const normalizedScope = normalizeBranchScope(branchIds)
+  if (normalizedScope.length === 0) {
+    return true
+  }
+
+  const runBranchIds = normalizeBranchScope(run.branchIds)
+  if (runBranchIds.length === 0) {
+    return false
+  }
+
+  return runBranchIds.every((branchId) => normalizedScope.includes(branchId))
+}
+
 export async function getCommissionOptions(input: {
   merchantId: string
   merchantName: string
@@ -70,8 +103,8 @@ export async function getCommissionOptions(input: {
   })
 }
 
-export async function getCommissionRules(merchantId: string) {
-  return listCommissionRules(merchantId)
+export async function getCommissionRules(input: { merchantId: string; branchIds: string[] }) {
+  return (await listCommissionRules(input.merchantId)).filter((rule) => ruleMatchesBranchScope(rule, input.branchIds))
 }
 
 export async function saveCommissionRule(input: {
@@ -107,6 +140,7 @@ export async function disableCommissionRule(ruleId: string, actor: { userId?: st
 }
 
 export async function addCommissionAdjustment(input: {
+  clinicId: string
   merchantId: string
   merchantName: string
   monthKey: string
@@ -118,6 +152,7 @@ export async function addCommissionAdjustment(input: {
 }) {
   return createCommissionAdjustment(
     {
+      clinicId: input.clinicId,
       merchantId: input.merchantId,
       merchantName: input.merchantName,
       monthKey: input.monthKey,
@@ -134,7 +169,10 @@ export async function generateCommissionReport(input: CommissionGenerateInput) {
   const monthKey = resolveMonthKey(input.fromDate, input.toDate)
   const runId = await createCommissionRunId()
   const activeRules = (await listCommissionRules(input.merchantId)).filter(
-    (rule) => rule.status === "active" && ruleOverlapsDateRange(rule, input.fromDate, input.toDate),
+    (rule) =>
+      rule.status === "active" &&
+      ruleOverlapsDateRange(rule, input.fromDate, input.toDate) &&
+      ruleMatchesBranchScope(rule, input.branchIds),
   )
 
   if (activeRules.length === 0) {
@@ -186,7 +224,7 @@ export async function generateCommissionReport(input: CommissionGenerateInput) {
 
   try {
     const sourceRows = await fetchCommissionSourceRows(input)
-    const adjustmentSnapshots = mapAdjustmentSnapshots(await listCommissionAdjustments(input.merchantId, monthKey))
+    const adjustmentSnapshots = mapAdjustmentSnapshots(await listCommissionAdjustments(input.merchantId, input.clinicId, monthKey))
 
     console.info("[commission] generate:start", {
       merchantId: input.merchantId,
@@ -266,14 +304,19 @@ export async function generateCommissionReport(input: CommissionGenerateInput) {
   }
 }
 
-export async function getCommissionReportRuns(input: { merchantId: string; monthKey?: string }) {
-  return listCommissionRuns(input.merchantId, input.monthKey)
+export async function getCommissionReportRuns(input: { merchantId: string; monthKey?: string; branchIds: string[] }) {
+  return (await listCommissionRuns(input.merchantId, input.monthKey)).filter((run) => runMatchesBranchScope(run, input.branchIds))
 }
 
-export async function getCommissionRunDetail(runId: string) {
+export async function getCommissionRunDetail(input: { runId: string; branchIds: string[] }) {
+  const runId = input.runId
   const run = await getCommissionRun(runId)
   if (!run) {
     throw new HttpError(404, "Commission report run not found.")
+  }
+
+  if (!runMatchesBranchScope(run, input.branchIds)) {
+    throw new HttpError(404, "Commission report run not found in the selected clinic scope.")
   }
 
   const results = await getCommissionResults(runId)

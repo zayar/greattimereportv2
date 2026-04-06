@@ -26,8 +26,8 @@ export function CommissionRuleEditorPage() {
   const [options, setOptions] = useState<CommissionSourceOptions | null>(null)
 
   const branchOptions = useMemo(
-    () => currentBusiness?.clinics.map((clinic) => ({ id: clinic.id, code: clinic.code, name: clinic.name })) ?? [],
-    [currentBusiness?.clinics],
+    () => (currentClinic ? [{ id: currentClinic.id, code: currentClinic.code, name: currentClinic.name }] : []),
+    [currentClinic],
   )
 
   const initialValue = useMemo(() => {
@@ -36,7 +36,7 @@ export function CommissionRuleEditorPage() {
     }
 
     if (rule) {
-      return mapRuleToPayload(rule, currentClinic.id)
+      return mapRuleToPayload(rule, currentClinic.id, branchOptions)
     }
 
     return buildCommissionRuleDraft({

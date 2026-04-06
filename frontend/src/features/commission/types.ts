@@ -110,6 +110,7 @@ export interface CommissionRulePayload {
 
 export interface CommissionAdjustment {
   id: string
+  clinicId: string
   merchantId: string
   merchantName: string
   monthKey: string

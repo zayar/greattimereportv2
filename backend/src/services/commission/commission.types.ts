@@ -87,6 +87,7 @@ export interface CommissionRuleRecord {
 
 export interface CommissionAdjustmentRecord {
   id: string
+  clinicId: string
   merchantId: string
   merchantName: string
   monthKey: string
@@ -259,6 +260,7 @@ export interface CommissionRuleWriteInput {
 }
 
 export interface CommissionGenerateInput extends CommissionBigQueryScope {
+  clinicId: string
   staffIds: string[]
   staffRoles: string[]
   generatedByUserId: string | null

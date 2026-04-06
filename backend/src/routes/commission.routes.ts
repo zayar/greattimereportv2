@@ -177,7 +177,10 @@ router.get(
   asyncHandler(async (req, res) => {
     const params = merchantQuerySchema.parse(req.query)
     assertBranchAccess(req.user?.clinicIds ?? [], params.branchIds, params.clinicId)
-    const data = await getCommissionRules(params.merchantId)
+    const data = await getCommissionRules({
+      merchantId: params.merchantId,
+      branchIds: params.branchIds.length > 0 ? params.branchIds : [params.clinicId],
+    })
     res.json({ success: true, data })
   }),
 )
@@ -301,6 +304,7 @@ router.post(
     const params = reportGenerateSchema.parse(req.body)
     assertBranchAccess(req.user?.clinicIds ?? [], params.branchIds, params.clinicId)
     const data = await generateCommissionReport({
+      clinicId: params.clinicId,
       merchantId: params.merchantId,
       merchantName: params.merchantName,
       branchIds: params.branchIds,
@@ -325,6 +329,7 @@ router.get(
     const data = await getCommissionReportRuns({
       merchantId: params.merchantId,
       monthKey: params.monthKey,
+      branchIds: params.branchIds.length > 0 ? params.branchIds : [params.clinicId],
     })
     res.json({ success: true, data })
   }),
@@ -337,7 +342,10 @@ router.get(
     const params = z.object({ clinicId: z.string().min(1) }).parse(req.query)
     const runId = z.string().min(1).parse(req.params.runId)
     assertBranchAccess(req.user?.clinicIds ?? [], [], params.clinicId)
-    const data = await getCommissionRunDetail(runId)
+    const data = await getCommissionRunDetail({
+      runId,
+      branchIds: [params.clinicId],
+    })
     res.json({ success: true, data })
   }),
 )
@@ -349,6 +357,7 @@ router.post(
     const params = adjustmentSchema.parse(req.body)
     assertBranchAccess(req.user?.clinicIds ?? [], [params.clinicId], params.clinicId)
     const data = await addCommissionAdjustment({
+      clinicId: params.clinicId,
       merchantId: params.merchantId,
       merchantName: params.merchantName,
       monthKey: params.monthKey,

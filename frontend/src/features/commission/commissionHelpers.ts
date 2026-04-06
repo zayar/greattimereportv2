@@ -10,6 +10,24 @@ import type {
   CommissionTier,
 } from "./types"
 
+function resolveScopedBranches(input: {
+  clinicId: string
+  branches: CommissionBranchOption[]
+  selectedBranchIds: string[]
+  selectedBranchCodes: string[]
+}) {
+  const matchedBranches = input.branches.filter(
+    (branch) => input.selectedBranchIds.includes(branch.id) || input.selectedBranchCodes.includes(branch.code),
+  )
+
+  if (matchedBranches.length > 0) {
+    return matchedBranches
+  }
+
+  const fallbackBranch = input.branches.find((branch) => branch.id === input.clinicId) ?? input.branches[0]
+  return fallbackBranch ? [fallbackBranch] : []
+}
+
 export function startOfMonth(date = new Date()) {
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, "0")
@@ -123,20 +141,41 @@ export function buildCommissionRuleDraft(input: {
   }
 }
 
-export function mapRuleToPayload(rule: CommissionRule, clinicId: string): CommissionRulePayload {
+export function mapRuleToPayload(rule: CommissionRule, clinicId: string, branches: CommissionBranchOption[] = []): CommissionRulePayload {
+  const scopedBranches =
+    branches.length > 0
+      ? resolveScopedBranches({
+          clinicId,
+          branches,
+          selectedBranchIds: rule.branchIds,
+          selectedBranchCodes: rule.branchCodes,
+        })
+      : []
+  const selectedBranches = scopedBranches.length > 0 ? scopedBranches : rule.branchIds.map((branchId, index) => ({
+    id: branchId,
+    code: rule.branchCodes[index] ?? "",
+    name: branchId,
+  }))
+  const selectedBranchIds = selectedBranches.map((branch) => branch.id)
+  const selectedBranchCodes = selectedBranches.map((branch) => branch.code)
+
   return {
     clinicId,
     merchantId: rule.merchantId,
     merchantName: rule.merchantName,
-    branchIds: rule.branchIds,
-    branchCodes: rule.branchCodes,
+    branchIds: selectedBranchIds,
+    branchCodes: selectedBranchCodes,
     ruleName: rule.ruleName,
     description: rule.description,
     status: rule.status,
     appliesToRole: rule.appliesToRole || "",
     appliesToStaffIds: rule.appliesToStaffIds,
     eventType: rule.eventType,
-    conditions: rule.conditions,
+    conditions: {
+      ...rule.conditions,
+      branchIds: selectedBranchIds,
+      branchCodes: selectedBranchCodes,
+    },
     formulaType: rule.formulaType,
     formulaConfig: rule.formulaConfig,
     priority: rule.priority,

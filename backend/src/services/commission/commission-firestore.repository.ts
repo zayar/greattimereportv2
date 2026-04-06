@@ -135,6 +135,7 @@ function normalizeRunRecord(id: string, data: Record<string, unknown> | undefine
 function normalizeAdjustmentRecord(id: string, data: Record<string, unknown> | undefined): CommissionAdjustmentRecord {
   return {
     id,
+    clinicId: normalizeText(data?.clinicId),
     merchantId: normalizeText(data?.merchantId),
     merchantName: normalizeText(data?.merchantName),
     monthKey: normalizeText(data?.monthKey),
@@ -315,10 +316,11 @@ export async function archiveCommissionRule(ruleId: string, actor: { userId?: st
   )
 }
 
-export async function listCommissionAdjustments(merchantId: string, monthKey?: string) {
+export async function listCommissionAdjustments(merchantId: string, clinicId?: string, monthKey?: string) {
   const snapshot = await adjustmentsCollection().where("merchantId", "==", merchantId).get()
   return snapshot.docs
     .map((doc) => normalizeAdjustmentRecord(doc.id, doc.data()))
+    .filter((record) => (clinicId ? record.clinicId === clinicId : true))
     .filter((record) => (monthKey ? record.monthKey === monthKey : true))
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
 }
@@ -331,6 +333,7 @@ export async function createCommissionAdjustment(
   const docRef = adjustmentsCollection().doc()
   const adjustment: CommissionAdjustmentRecord = {
     id: docRef.id,
+    clinicId: input.clinicId,
     merchantId: input.merchantId,
     merchantName: input.merchantName,
     monthKey: input.monthKey,
