@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
+import { isAxiosError } from "axios"
 import {
   createCommissionRule,
   fetchCommissionOptions,
@@ -14,6 +15,15 @@ import {
   mapRuleToPayload,
 } from "../../commission/commissionHelpers"
 import type { CommissionRule, CommissionRulePayload, CommissionSourceOptions } from "../../commission/types"
+
+function getApiErrorMessage(error: unknown, fallback: string) {
+  if (isAxiosError(error)) {
+    const apiMessage = typeof error.response?.data?.error === "string" ? error.response.data.error : null
+    return apiMessage || error.message || fallback
+  }
+
+  return error instanceof Error ? error.message : fallback
+}
 
 export function CommissionRuleEditorPage() {
   const navigate = useNavigate()
@@ -84,7 +94,7 @@ export function CommissionRuleEditorPage() {
       })
       .catch((loadError) => {
         if (active) {
-          setError(loadError instanceof Error ? loadError.message : "Commission rule editor could not be loaded.")
+          setError(getApiErrorMessage(loadError, "Commission rule editor could not be loaded."))
         }
       })
       .finally(() => {
@@ -110,7 +120,7 @@ export function CommissionRuleEditorPage() {
       }
       navigate("/settings/commission")
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Commission rule could not be saved.")
+      setError(getApiErrorMessage(saveError, "Commission rule could not be saved."))
     } finally {
       setSaving(false)
     }

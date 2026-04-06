@@ -19,6 +19,7 @@ import {
 } from "./commission-firestore.repository.js"
 import type {
   CommissionAdjustmentSnapshot,
+  CommissionEventType,
   CommissionGenerateInput,
   CommissionRuleRecord,
   CommissionRuleWriteInput,
@@ -87,6 +88,37 @@ function runMatchesBranchScope(run: Pick<CommissionRunRecord, "branchIds">, bran
   return runBranchIds.every((branchId) => normalizedScope.includes(branchId))
 }
 
+function toTitleCase(value: string) {
+  return value
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ")
+}
+
+function formatEventTypeLabel(eventType: CommissionEventType) {
+  if (eventType === "payment_based") {
+    return "payment"
+  }
+
+  if (eventType === "treatment_completed_based") {
+    return "treatment completed"
+  }
+
+  return "sale"
+}
+
+function buildFallbackRuleName(rule: Pick<CommissionRuleWriteInput, "status" | "appliesToRole" | "eventType">) {
+  const roleLabel = toTitleCase(normalizeText(rule.appliesToRole) || "staff")
+  const eventLabel = formatEventTypeLabel(rule.eventType)
+  const prefix = rule.status === "draft" ? "Draft " : ""
+  return `${prefix}${roleLabel} ${eventLabel} commission`
+}
+
+function resolveRuleName(rule: CommissionRuleWriteInput) {
+  return normalizeText(rule.ruleName) || buildFallbackRuleName(rule)
+}
+
 export async function getCommissionOptions(input: {
   merchantId: string
   merchantName: string
@@ -112,15 +144,20 @@ export async function saveCommissionRule(input: {
   rule: CommissionRuleWriteInput
   actor: { userId?: string; email?: string }
 }) {
+  const normalizedRule: CommissionRuleWriteInput = {
+    ...input.rule,
+    ruleName: resolveRuleName(input.rule),
+  }
+
   if (input.ruleId) {
-    const updated = await updateCommissionRule(input.ruleId, input.rule, input.actor)
+    const updated = await updateCommissionRule(input.ruleId, normalizedRule, input.actor)
     if (!updated) {
       throw new HttpError(404, "Commission rule not found.")
     }
     return updated
   }
 
-  return createCommissionRule(input.rule, input.actor)
+  return createCommissionRule(normalizedRule, input.actor)
 }
 
 export async function copyCommissionRule(ruleId: string, actor: { userId?: string; email?: string }) {

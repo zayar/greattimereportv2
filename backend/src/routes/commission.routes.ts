@@ -76,7 +76,7 @@ const ruleBodySchema = z.object({
   merchantName: z.string().min(1),
   branchIds: bodyStringArraySchema,
   branchCodes: bodyStringArraySchema,
-  ruleName: z.string().min(1),
+  ruleName: z.string().default(""),
   description: z.string().default(""),
   status: z.enum(["draft", "active", "archived"]),
   appliesToRole: z.string().default(""),

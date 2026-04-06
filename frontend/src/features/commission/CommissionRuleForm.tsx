@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useDeferredValue, useEffect, useMemo, useState } from "react"
 import { Panel } from "../../components/Panel"
 import type { CommissionBranchOption, CommissionRulePayload, CommissionSourceOptions, CommissionTier } from "./types"
 import {
@@ -25,6 +25,12 @@ type CheckboxGridProps = {
   emptyLabel: string
 }
 
+type SelectionItem = {
+  value: string
+  label: string
+  hint?: string
+}
+
 function CheckboxGrid({ items, selectedValues, onToggle, emptyLabel }: CheckboxGridProps) {
   if (items.length === 0) {
     return <div className="inline-note">{emptyLabel}</div>
@@ -42,6 +48,155 @@ function CheckboxGrid({ items, selectedValues, onToggle, emptyLabel }: CheckboxG
           </label>
         )
       })}
+    </div>
+  )
+}
+
+function normalizeSearchText(value: string) {
+  return value.trim().toLocaleLowerCase()
+}
+
+type SearchableSelectionListProps = {
+  items: SelectionItem[]
+  selectedValues: string[]
+  onToggle: (value: string) => void
+  onReplaceSelected: (values: string[]) => void
+  emptyLabel: string
+  title: string
+  searchPlaceholder: string
+}
+
+function SearchableSelectionList({
+  items,
+  selectedValues,
+  onToggle,
+  onReplaceSelected,
+  emptyLabel,
+  title,
+  searchPlaceholder,
+}: SearchableSelectionListProps) {
+  const [searchText, setSearchText] = useState("")
+  const deferredSearchText = useDeferredValue(searchText)
+
+  const filteredItems = useMemo(() => {
+    const normalizedQuery = normalizeSearchText(deferredSearchText)
+    const matchedItems =
+      normalizedQuery.length === 0
+        ? items
+        : items.filter((item) => {
+            const label = normalizeSearchText(item.label)
+            const hint = normalizeSearchText(item.hint ?? "")
+            return label.includes(normalizedQuery) || hint.includes(normalizedQuery)
+          })
+
+    return [...matchedItems].sort((left, right) => {
+      const leftSelected = selectedValues.includes(left.value)
+      const rightSelected = selectedValues.includes(right.value)
+      if (leftSelected !== rightSelected) {
+        return leftSelected ? -1 : 1
+      }
+
+      const hintCompare = (left.hint ?? "").localeCompare(right.hint ?? "")
+      if (hintCompare !== 0) {
+        return hintCompare
+      }
+
+      return left.label.localeCompare(right.label)
+    })
+  }, [deferredSearchText, items, selectedValues])
+
+  const visibleValues = filteredItems.map((item) => item.value)
+  const visibleSelectedCount = visibleValues.filter((value) => selectedValues.includes(value)).length
+  const totalSelectedCount = selectedValues.length
+
+  function selectVisible() {
+    onReplaceSelected(Array.from(new Set([...selectedValues, ...visibleValues])))
+  }
+
+  function clearVisible() {
+    onReplaceSelected(selectedValues.filter((value) => !visibleValues.includes(value)))
+  }
+
+  function clearAll() {
+    onReplaceSelected([])
+  }
+
+  if (items.length === 0) {
+    return <div className="inline-note">{emptyLabel}</div>
+  }
+
+  return (
+    <div className="commission-form__selection-list">
+      <div className="commission-form__selection-toolbar">
+        <label className="field field--compact">
+          <span>{title}</span>
+          <input
+            type="search"
+            value={searchText}
+            onChange={(event) => setSearchText(event.target.value)}
+            placeholder={searchPlaceholder}
+          />
+        </label>
+
+        <div className="commission-form__selection-meta">
+          <strong>{totalSelectedCount.toLocaleString("en-US")} selected</strong>
+          <span>
+            {filteredItems.length.toLocaleString("en-US")} visible
+            {searchText.trim() ? ` • ${visibleSelectedCount.toLocaleString("en-US")} checked in results` : ""}
+          </span>
+        </div>
+      </div>
+
+      <div className="commission-form__selection-actions">
+        <button className="button button--ghost" type="button" onClick={selectVisible} disabled={filteredItems.length === 0}>
+          Select visible
+        </button>
+        <button className="button button--ghost" type="button" onClick={clearVisible} disabled={visibleSelectedCount === 0}>
+          Clear visible
+        </button>
+        <button className="button button--ghost" type="button" onClick={clearAll} disabled={totalSelectedCount === 0}>
+          Clear all
+        </button>
+      </div>
+
+      {totalSelectedCount > 0 ? (
+        <div className="commission-form__selection-summary">
+          {items
+            .filter((item) => selectedValues.includes(item.value))
+            .slice(0, 8)
+            .map((item) => (
+              <button key={item.value} className="commission-form__selection-pill" type="button" onClick={() => onToggle(item.value)}>
+                <span>{item.label}</span>
+                <small>{item.hint || "Service"}</small>
+              </button>
+            ))}
+          {totalSelectedCount > 8 ? (
+            <span className="commission-form__selection-overflow">+{(totalSelectedCount - 8).toLocaleString("en-US")} more</span>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="commission-form__selection-listbox" role="list">
+        {filteredItems.length === 0 ? (
+          <div className="inline-note">No services match the current search.</div>
+        ) : (
+          filteredItems.map((item) => {
+            const selected = selectedValues.includes(item.value)
+            return (
+              <label
+                key={item.value}
+                className={`commission-form__selection-row ${selected ? "commission-form__selection-row--selected" : ""}`.trim()}
+              >
+                <input type="checkbox" checked={selected} onChange={() => onToggle(item.value)} />
+                <div className="commission-form__selection-content">
+                  <strong>{item.label}</strong>
+                  <span>{item.hint || "Other"}</span>
+                </div>
+              </label>
+            )
+          })
+        )}
+      </div>
     </div>
   )
 }
@@ -217,8 +372,31 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
       <div className="commission-editor__layout">
         <Panel
           className="commission-editor__panel"
-          title="Step 1. Who gets commission?"
-          subtitle="Pick the eligible staff role first, then narrow it to specific people only if needed."
+          title="Step 1. What triggers commission?"
+          subtitle="Choose the reporting event first because it determines which staff roles and people can receive commission."
+        >
+          <div className="commission-form__segmented">
+            {[
+              { value: "sale_based", label: "Sale based" },
+              { value: "payment_based", label: "Payment based" },
+              { value: "treatment_completed_based", label: "Treatment completed" },
+            ].map((option) => (
+              <button
+                key={option.value}
+                className={`button ${draft.eventType === option.value ? "button--secondary" : "button--ghost"}`.trim()}
+                onClick={() => updateEventType(option.value as CommissionRulePayload["eventType"])}
+                type="button"
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </Panel>
+
+        <Panel
+          className="commission-editor__panel"
+          title="Step 2. Who gets commission?"
+          subtitle="Pick the eligible staff role for this trigger, then narrow it to specific people only if needed."
         >
           <div className="commission-form__grid commission-form__grid--two">
             <label className="field">
@@ -284,7 +462,7 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
 
           <div className="commission-form__subsection">
             <strong>Specific staff</strong>
-            <span>Leave this empty to include everyone in the selected role.</span>
+            <span>Leave this empty to include everyone in the selected role. This list updates based on the trigger selected above.</span>
           </div>
           <CheckboxGrid
             items={staffOptions.map((staff) => ({
@@ -296,29 +474,6 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
             onToggle={(value) => updateDraft({ appliesToStaffIds: toggleValue(draft.appliesToStaffIds, value) })}
             emptyLabel="No matching staff were found in the current reporting data."
           />
-        </Panel>
-
-        <Panel
-          className="commission-editor__panel"
-          title="Step 2. What triggers commission?"
-          subtitle="Choose the reporting event that should create commission rows."
-        >
-          <div className="commission-form__segmented">
-            {[
-              { value: "sale_based", label: "Sale based" },
-              { value: "payment_based", label: "Payment based" },
-              { value: "treatment_completed_based", label: "Treatment completed" },
-            ].map((option) => (
-              <button
-                key={option.value}
-                className={`button ${draft.eventType === option.value ? "button--secondary" : "button--ghost"}`.trim()}
-                onClick={() => updateEventType(option.value as CommissionRulePayload["eventType"])}
-                type="button"
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
         </Panel>
 
         <Panel
@@ -367,13 +522,16 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
 
           <div className="commission-form__subsection">
             <strong>Specific services</strong>
-            <span>Leave empty to keep the rule broad.</span>
+            <span>Use search to find services quickly, then check the exact ones to include. Leave empty to keep the rule broad.</span>
           </div>
-          <CheckboxGrid
+          <SearchableSelectionList
             items={serviceItems}
             selectedValues={draft.conditions.serviceNames}
             onToggle={(value) => updateConditions("serviceNames", toggleValue(draft.conditions.serviceNames, value))}
+            onReplaceSelected={(values) => updateConditions("serviceNames", values)}
             emptyLabel="No services were found in the current reporting scope."
+            title="Search services"
+            searchPlaceholder="Search by service name or category"
           />
 
           <div className="commission-form__subsection">
