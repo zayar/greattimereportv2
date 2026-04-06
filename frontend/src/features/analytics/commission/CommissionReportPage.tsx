@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { useLocation } from "react-router-dom"
+import { useLocation, useNavigate } from "react-router-dom"
 import {
   createCommissionAdjustment,
   fetchCommissionOptions,
@@ -37,6 +37,7 @@ type ReportLocationState = {
 }
 
 export function CommissionReportPage() {
+  const navigate = useNavigate()
   const location = useLocation()
   const routeState = (location.state ?? null) as ReportLocationState | null
   const preselectedRule = routeState?.preselectedRule ?? null
@@ -224,6 +225,16 @@ export function CommissionReportPage() {
     return staffIds.map((staffId) => selectedStaffNameMap.get(staffId) ?? staffId)
   }, [selectedRun?.filters.staffIds, selectedStaffNameMap])
 
+  function handleReturnToReportList() {
+    if (preselectedRule) {
+      navigate("/analytics/commission", { replace: true })
+    }
+
+    setSelectedRuleId("")
+    setShowScopeEditor(true)
+    setNotice("Showing the full commission report workspace. Choose the scope below to generate a new snapshot.")
+  }
+
   useEffect(() => {
     if (!preselectedRule) {
       return
@@ -234,7 +245,7 @@ export function CommissionReportPage() {
       setSelectedStaffRole(preselectedRule.appliesToRole)
     }
     setNotice(
-      `Report context loaded for ${preselectedRule.ruleName}. Generate a snapshot to validate this rule, then use the rule filter to inspect matching rows.`,
+      `Report context loaded for ${preselectedRule.ruleName}. Generate a snapshot to validate this rule, or use Back to report list when you want to create a fresh report.`,
     )
   }, [preselectedRule])
 
@@ -508,6 +519,11 @@ export function CommissionReportPage() {
         title="Commission report"
         actions={
           <div className="commission-report__toolbar">
+            {preselectedRule ? (
+              <button className="button button--ghost" onClick={handleReturnToReportList}>
+                Back to report list
+              </button>
+            ) : null}
             {activeRuleLabel ? (
               <div className="commission-report__context-pill">
                 <strong>Rule focus</strong>
