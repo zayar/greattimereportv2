@@ -275,6 +275,7 @@ export interface CommissionGenerateInput extends CommissionBigQueryScope {
   clinicId: string
   staffIds: string[]
   staffRoles: string[]
+  selectedRuleIds: string[]
   generatedByUserId: string | null
   generatedByEmail: string | null
 }

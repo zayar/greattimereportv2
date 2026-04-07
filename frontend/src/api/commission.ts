@@ -70,6 +70,14 @@ export async function archiveCommissionRule(ruleId: string, clinicId: string) {
   return response.data.data
 }
 
+export async function deleteCommissionRule(ruleId: string, clinicId: string) {
+  const response = await apiClient.post<{ success: true; data: { ruleId: string } }>(
+    `/commission/rules/${ruleId}/delete`,
+    { clinicId },
+  )
+  return response.data.data
+}
+
 export async function fetchCommissionRuns(params: MerchantScopedParams & { monthKey?: string }) {
   const response = await apiClient.get<{ success: true; data: CommissionRun[] }>("/commission/runs", {
     params: buildQueryParams(params),

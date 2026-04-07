@@ -335,6 +335,84 @@ export async function archiveCommissionRule(ruleId: string, actor: { userId?: st
   )
 }
 
+async function deleteResultsForRun(runId: string) {
+  const snapshot = await resultsCollection().where("runId", "==", runId).get()
+  if (snapshot.empty) {
+    return 0
+  }
+
+  const docs = snapshot.docs
+  const chunkSize = 400
+
+  for (let index = 0; index < docs.length; index += chunkSize) {
+    const batch = firestoreDb().batch()
+    docs.slice(index, index + chunkSize).forEach((doc) => {
+      batch.delete(doc.ref)
+    })
+    await batch.commit()
+  }
+
+  return docs.length
+}
+
+async function deleteRuleVersions(ruleId: string) {
+  const snapshot = await rulesCollection().doc(ruleId).collection(RULE_VERSION_SUBCOLLECTION).get()
+  if (snapshot.empty) {
+    return 0
+  }
+
+  const docs = snapshot.docs
+  const chunkSize = 400
+
+  for (let index = 0; index < docs.length; index += chunkSize) {
+    const batch = firestoreDb().batch()
+    docs.slice(index, index + chunkSize).forEach((doc) => {
+      batch.delete(doc.ref)
+    })
+    await batch.commit()
+  }
+
+  return docs.length
+}
+
+export async function deleteCommissionRule(ruleId: string) {
+  const existing = await getCommissionRule(ruleId)
+  if (!existing) {
+    return null
+  }
+
+  const runsSnapshot = await runsCollection().where("merchantId", "==", existing.merchantId).get()
+  const dedicatedRuns = runsSnapshot.docs
+    .map((doc) => normalizeRunRecord(doc.id, doc.data()))
+    .filter((run) => run.selectedRuleIds.length === 1 && run.selectedRuleIds[0] === ruleId)
+
+  let deletedResultCount = 0
+  for (const run of dedicatedRuns) {
+    deletedResultCount += await deleteResultsForRun(run.id)
+  }
+
+  if (dedicatedRuns.length > 0) {
+    const chunkSize = 400
+    for (let index = 0; index < dedicatedRuns.length; index += chunkSize) {
+      const batch = firestoreDb().batch()
+      dedicatedRuns.slice(index, index + chunkSize).forEach((run) => {
+        batch.delete(runsCollection().doc(run.id))
+      })
+      await batch.commit()
+    }
+  }
+
+  const deletedVersionCount = await deleteRuleVersions(ruleId)
+  await rulesCollection().doc(ruleId).delete()
+
+  return {
+    ruleId,
+    deletedRunCount: dedicatedRuns.length,
+    deletedResultCount,
+    deletedVersionCount,
+  }
+}
+
 export async function listCommissionAdjustments(merchantId: string, clinicId?: string, monthKey?: string) {
   const snapshot = await adjustmentsCollection().where("merchantId", "==", merchantId).get()
   return snapshot.docs

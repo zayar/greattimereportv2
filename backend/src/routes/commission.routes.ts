@@ -13,6 +13,7 @@ import {
   getCommissionReportRuns,
   getCommissionRules,
   getCommissionRunDetail,
+  permanentlyDeleteCommissionRule,
   saveCommissionRule,
 } from "../services/commission/commission.service.js"
 
@@ -152,6 +153,7 @@ const reportGenerateSchema = z.object({
   toDate: z.string().min(1),
   staffIds: bodyStringArraySchema,
   staffRoles: bodyStringArraySchema,
+  selectedRuleIds: bodyStringArraySchema,
 })
 
 const adjustmentSchema = z.object({
@@ -332,6 +334,18 @@ router.post(
 )
 
 router.post(
+  "/rules/:ruleId/delete",
+  requireClinicAccess("body", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = z.object({ clinicId: z.string().min(1) }).parse(req.body)
+    const ruleId = z.string().min(1).parse(req.params.ruleId)
+    assertBranchAccess(req.user?.clinicIds ?? [], [], params.clinicId)
+    const data = await permanentlyDeleteCommissionRule(ruleId)
+    res.json({ success: true, data })
+  }),
+)
+
+router.post(
   "/reports/generate",
   requireClinicAccess("body", "clinicId"),
   asyncHandler(async (req, res) => {
@@ -347,6 +361,7 @@ router.post(
       toDate: params.toDate,
       staffIds: params.staffIds,
       staffRoles: params.staffRoles,
+      selectedRuleIds: params.selectedRuleIds,
       generatedByUserId: req.user?.userId ?? null,
       generatedByEmail: req.user?.email ?? null,
     })

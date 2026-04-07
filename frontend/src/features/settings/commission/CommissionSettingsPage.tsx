@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import {
   archiveCommissionRule,
+  deleteCommissionRule,
   duplicateCommissionRule,
   fetchCommissionRules,
 } from "../../../api/commission"
@@ -114,6 +115,27 @@ export function CommissionSettingsPage() {
       await loadRules()
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Rule archival failed.")
+    } finally {
+      setBusyRuleId(null)
+    }
+  }
+
+  async function handleDelete(ruleId: string) {
+    if (
+      !currentClinic ||
+      !window.confirm(
+        "Delete this rule permanently? Its dedicated report snapshots will also be removed. Older shared snapshots from previous multi-rule runs will be kept.",
+      )
+    ) {
+      return
+    }
+
+    setBusyRuleId(ruleId)
+    try {
+      await deleteCommissionRule(ruleId, currentClinic.id)
+      await loadRules()
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Rule deletion failed.")
     } finally {
       setBusyRuleId(null)
     }
@@ -253,6 +275,9 @@ export function CommissionSettingsPage() {
                     </button>
                     <button className="button button--ghost" disabled={busyRuleId === rule.id || rule.status === "archived"} onClick={() => void handleArchive(rule.id)}>
                       Archive
+                    </button>
+                    <button className="button button--ghost" disabled={busyRuleId === rule.id} onClick={() => void handleDelete(rule.id)}>
+                      Delete
                     </button>
                   </div>
                 ),

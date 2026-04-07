@@ -249,6 +249,7 @@ export interface CommissionGeneratePayload {
   toDate: string
   staffIds: string[]
   staffRoles: string[]
+  selectedRuleIds?: string[]
 }
 
 export interface CommissionGenerateResponse {

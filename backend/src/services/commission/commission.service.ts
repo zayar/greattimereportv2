@@ -8,6 +8,7 @@ import {
   createCommissionRun,
   createCommissionRunId,
   duplicateCommissionRule,
+  deleteCommissionRule as removeCommissionRule,
   getCommissionResults,
   getCommissionRun,
   listCommissionAdjustments,
@@ -193,6 +194,15 @@ export async function disableCommissionRule(ruleId: string, actor: { userId?: st
   return archived
 }
 
+export async function permanentlyDeleteCommissionRule(ruleId: string) {
+  const deleted = await removeCommissionRule(ruleId)
+  if (!deleted) {
+    throw new HttpError(404, "Commission rule not found.")
+  }
+
+  return deleted
+}
+
 export async function addCommissionAdjustment(input: {
   clinicId: string
   merchantId: string
@@ -222,15 +232,22 @@ export async function addCommissionAdjustment(input: {
 export async function generateCommissionReport(input: CommissionGenerateInput) {
   const monthKey = resolveMonthKey(input.fromDate, input.toDate)
   const runId = await createCommissionRunId()
+  const requestedRuleIds = Array.from(new Set(input.selectedRuleIds.map((ruleId) => normalizeText(ruleId)).filter(Boolean)))
   const activeRules = (await listCommissionRules(input.merchantId)).filter(
     (rule) =>
       rule.status === "active" &&
       ruleOverlapsDateRange(rule, input.fromDate, input.toDate) &&
-      ruleMatchesBranchScope(rule, input.branchIds),
+      ruleMatchesBranchScope(rule, input.branchIds) &&
+      (requestedRuleIds.length === 0 || requestedRuleIds.includes(rule.id)),
   )
 
   if (activeRules.length === 0) {
-    throw new HttpError(400, "No active commission rules overlap the selected date range.")
+    throw new HttpError(
+      400,
+      requestedRuleIds.length > 0
+        ? "The selected commission rule is not active for the chosen clinic scope or date range."
+        : "No active commission rules overlap the selected date range.",
+    )
   }
 
   const pendingRun: CommissionRunRecord = {

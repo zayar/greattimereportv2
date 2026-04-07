@@ -257,7 +257,10 @@ export function CommissionReportPage() {
   )
 
   const filteredRuns = useMemo(
-    () => (focusedRule ? runs.filter((run) => run.selectedRuleIds.includes(focusedRule.id)) : []),
+    () =>
+      focusedRule
+        ? runs.filter((run) => run.selectedRuleIds.length === 1 && run.selectedRuleIds[0] === focusedRule.id)
+        : [],
     [focusedRule, runs],
   )
 
@@ -693,6 +696,7 @@ export function CommissionReportPage() {
         toDate: range.toDate,
         staffIds: focusedRule.appliesToStaffIds,
         staffRoles: focusedRule.appliesToRole ? [focusedRule.appliesToRole] : [],
+        selectedRuleIds: [focusedRule.id],
       })
       setSelectedRunId(generated.run.id)
       setSelectedRun(generated.run)
