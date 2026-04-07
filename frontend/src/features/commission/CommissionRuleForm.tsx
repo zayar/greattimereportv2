@@ -276,7 +276,7 @@ function FixedAmountPerServiceEditor({
     <div className="commission-form__stack">
       <div className="commission-form__trigger-summary">
         <strong>Service-specific fixed amounts</strong>
-        <span>This formula pays a separate MMK amount for each selected service and only supports service item type in V1.</span>
+        <span>This formula pays a separate MMK amount for each selected service name, including completed treatments delivered from package usage.</span>
       </div>
 
       <div className="commission-form__service-amount-toolbar">
@@ -438,7 +438,7 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
       formulaConfig: syncedConfig,
       conditions: {
         ...current.conditions,
-        itemTypes: ["service"],
+        itemTypes: [],
       },
     }))
   }, [draft.formulaConfig, draft.formulaType, selectedServiceDescriptors])
@@ -461,7 +461,7 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
     setDraft((current) => {
       const nextValue =
         current.formulaType === "fixed_amount_per_service" && key === "itemTypes"
-          ? (["service"] as CommissionRulePayload["conditions"][K])
+          ? ([] as CommissionRulePayload["conditions"][K])
           : value
 
       return {
@@ -509,7 +509,7 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
       formulaType: nextFormulaType,
       conditions: {
         ...current.conditions,
-        itemTypes: nextFormulaType === "fixed_amount_per_service" ? ["service"] : current.conditions.itemTypes,
+        itemTypes: nextFormulaType === "fixed_amount_per_service" ? [] : current.conditions.itemTypes,
       },
       formulaConfig: buildDefaultFormulaConfig(nextFormulaType),
     }))
@@ -749,8 +749,8 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
           </div>
           {draft.formulaType === "fixed_amount_per_service" ? (
             <div className="commission-form__formula-summary">
-              <strong>Locked to service</strong>
-              <span>Fixed amount per service only supports service item type in V1, so package and product rows are excluded automatically.</span>
+              <strong>Item type filter not used</strong>
+              <span>Fixed amount per service matches the selected service names directly, so treatments from both direct services and package usage can qualify.</span>
             </div>
           ) : (
             <CheckboxGrid

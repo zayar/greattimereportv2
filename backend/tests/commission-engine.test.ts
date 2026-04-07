@@ -160,7 +160,32 @@ test("service-specific fixed amounts multiply by completed treatment count when 
   assert.match(result.results[0]?.explanation ?? "", /2 service occurrence/)
 })
 
-test("service-specific validation rejects missing amounts and non-service item types", () => {
+test("service-specific rules still match package-origin treatment rows when the service name matches", () => {
+  const result = calculateCommissionReport({
+    sourceRows: [
+      buildSourceRow({
+        sourceId: "source-3",
+        sourceRef: "CO-1003",
+        serviceName: "Laser",
+        categoryName: "Laser",
+        itemType: "package",
+        packageUsageCount: 1,
+      }),
+    ],
+    rules: [buildRule()],
+    adjustmentSnapshots: [],
+    filters: {
+      staffIds: [],
+      staffRoles: [],
+    },
+  })
+
+  assert.equal(result.results.length, 1)
+  assert.equal(result.results[0]?.commissionAmount, 8000)
+  assert.equal(result.summaryTotals.matchedRowCount, 1)
+})
+
+test("service-specific validation rejects missing amounts", () => {
   const errors = validateCommissionRuleWriteInput({
     merchantId: "merchant-1",
     merchantName: "Merchant One",
@@ -190,7 +215,6 @@ test("service-specific validation rejects missing amounts and non-service item t
   })
 
   assert.deepEqual(errors, [
-    "Fixed amount per service only supports service item type in V1.",
     "Every selected service needs its own fixed amount.",
     "Each selected service amount must be greater than 0 MMK.",
   ])

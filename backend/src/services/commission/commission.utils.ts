@@ -258,11 +258,6 @@ export function validateCommissionRuleWriteInput(rule: CommissionRuleWriteInput)
     errors.push("Fixed amount per service requires at least one selected service.")
   }
 
-  const unsupportedItemTypes = rule.conditions.itemTypes.filter((itemType) => itemType !== "service")
-  if (unsupportedItemTypes.length > 0) {
-    errors.push("Fixed amount per service only supports service item type in V1.")
-  }
-
   const serviceAmountMap = new Map(
     normalizeServiceAmounts("serviceAmounts" in rule.formulaConfig ? rule.formulaConfig.serviceAmounts : []).map((entry) => [
       normalizeLower(entry.serviceName),

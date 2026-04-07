@@ -152,7 +152,7 @@ export async function saveCommissionRule(input: {
       ...input.rule.conditions,
       itemTypes:
         input.rule.formulaType === "fixed_amount_per_service"
-          ? ["service"]
+          ? []
           : input.rule.conditions.itemTypes,
     },
     formulaConfig: normalizeFormulaConfig(

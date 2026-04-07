@@ -194,11 +194,6 @@ export function validateCommissionRulePayload(rule: CommissionRulePayload) {
     errors.push("Select at least one service before using Fixed amount per service.")
   }
 
-  const unsupportedItemTypes = rule.conditions.itemTypes.filter((itemType) => itemType !== "service")
-  if (unsupportedItemTypes.length > 0) {
-    errors.push("Fixed amount per service only supports service item type in V1.")
-  }
-
   const serviceAmounts = getFixedAmountPerServiceConfig(rule.formulaConfig).serviceAmounts
   const serviceAmountMap = new Map(serviceAmounts.map((entry) => [normalizeKey(entry.serviceName), parseAmount(entry.amount)]))
 

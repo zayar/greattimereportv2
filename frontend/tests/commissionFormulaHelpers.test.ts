@@ -109,10 +109,7 @@ test("validates service-specific rules and preserves saved mappings in edit hydr
     },
   }
 
-  assert.deepEqual(validateCommissionRulePayload(invalidRule), [
-    "Fixed amount per service only supports service item type in V1.",
-    "Each selected service must have an amount greater than 0 MMK.",
-  ])
+  assert.deepEqual(validateCommissionRulePayload(invalidRule), ["Each selected service must have an amount greater than 0 MMK."])
 
   const savedRule: CommissionRule = {
     id: "rule-1",

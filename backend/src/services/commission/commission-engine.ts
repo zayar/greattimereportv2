@@ -78,8 +78,9 @@ function matchesRule(row: CommissionSourceRow, rule: CommissionRuleRecord) {
     return false
   }
 
+  const shouldApplyItemTypeFilter = rule.formulaType !== "fixed_amount_per_service" && rule.conditions.itemTypes.length > 0
   if (
-    rule.conditions.itemTypes.length > 0 &&
+    shouldApplyItemTypeFilter &&
     (!row.itemType || !rule.conditions.itemTypes.some((itemType) => normalizeLower(itemType) === normalizeLower(row.itemType)))
   ) {
     return false
@@ -143,10 +144,6 @@ function calculateFormula(row: CommissionSourceRow, rule: CommissionRuleRecord) 
     const serviceName = String(row.serviceName ?? "").trim()
     if (!serviceName) {
       return { skipped: "Service name is required for service-specific commission." }
-    }
-
-    if (row.itemType && normalizeLower(row.itemType) !== "service") {
-      return { skipped: "Fixed amount per service only applies to service rows." }
     }
 
     const serviceAmount = normalizeServiceAmounts(
