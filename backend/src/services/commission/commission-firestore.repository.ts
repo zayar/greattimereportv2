@@ -7,7 +7,14 @@ import type {
   CommissionRuleWriteInput,
   CommissionRunRecord,
 } from "./commission.types.js"
-import { normalizeConditions, normalizeRole, normalizeText, nowIso, parseNumber } from "./commission.utils.js"
+import {
+  normalizeConditions,
+  normalizeFormulaConfig,
+  normalizeRole,
+  normalizeText,
+  nowIso,
+  parseNumber,
+} from "./commission.utils.js"
 
 const RULES_COLLECTION = "commission_rules"
 const RUNS_COLLECTION = "commission_report_runs"
@@ -59,14 +66,26 @@ function normalizeRuleRecord(id: string, data: Record<string, unknown> | undefin
       data?.formulaType === "percentage_of_amount" ||
       data?.formulaType === "fixed_amount_per_item" ||
       data?.formulaType === "fixed_amount_per_completed_treatment" ||
+      data?.formulaType === "fixed_amount_per_service" ||
       data?.formulaType === "tiered_percentage" ||
       data?.formulaType === "target_bonus"
         ? data.formulaType
         : "percentage_of_amount",
-    formulaConfig: (data?.formulaConfig as CommissionRuleRecord["formulaConfig"] | undefined) ?? {
-      baseField: "netAmount",
-      value: 0,
-    },
+    formulaConfig: normalizeFormulaConfig(
+      (data?.formulaType === "percentage_of_amount" ||
+      data?.formulaType === "fixed_amount_per_item" ||
+      data?.formulaType === "fixed_amount_per_completed_treatment" ||
+      data?.formulaType === "fixed_amount_per_service" ||
+      data?.formulaType === "tiered_percentage" ||
+      data?.formulaType === "target_bonus"
+        ? data.formulaType
+        : "percentage_of_amount") as CommissionRuleRecord["formulaType"],
+      ((data?.formulaConfig as CommissionRuleRecord["formulaConfig"] | undefined) ?? {
+        baseField: "netAmount",
+        value: 0,
+      }) as CommissionRuleRecord["formulaConfig"],
+      conditions.serviceNames,
+    ),
     priority: parseNumber(data?.priority),
     effectiveFrom: normalizeText(data?.effectiveFrom) || null,
     effectiveTo: normalizeText(data?.effectiveTo) || null,
@@ -200,7 +219,7 @@ export async function createCommissionRule(input: CommissionRuleWriteInput, acto
     eventType: input.eventType,
     conditions: normalizeConditions(input.conditions),
     formulaType: input.formulaType,
-    formulaConfig: input.formulaConfig,
+    formulaConfig: normalizeFormulaConfig(input.formulaType, input.formulaConfig, input.conditions.serviceNames),
     priority: input.priority,
     effectiveFrom: input.effectiveFrom,
     effectiveTo: input.effectiveTo,
@@ -242,7 +261,7 @@ export async function updateCommissionRule(
     eventType: input.eventType,
     conditions: normalizeConditions(input.conditions),
     formulaType: input.formulaType,
-    formulaConfig: input.formulaConfig,
+    formulaConfig: normalizeFormulaConfig(input.formulaType, input.formulaConfig, input.conditions.serviceNames),
     priority: input.priority,
     effectiveFrom: input.effectiveFrom,
     effectiveTo: input.effectiveTo,

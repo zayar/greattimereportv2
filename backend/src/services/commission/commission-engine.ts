@@ -17,6 +17,7 @@ import {
   matchesRuleCollectionFilter,
   normalizeLower,
   normalizeRole,
+  normalizeServiceAmounts,
   nowIso,
   parseNumber,
   roundMoney,
@@ -135,6 +136,55 @@ function calculateFormula(row: CommissionSourceRow, rule: CommissionRuleRecord) 
       commissionAmount,
       formulaSummary: summary,
       explanation: `${rule.ruleName} v${rule.version} matched. ${completedCount} completed treatment(s) x ${formatMoney(parseNumber(config.value))} = ${formatMoney(commissionAmount)}.`,
+    }
+  }
+
+  if (rule.formulaType === "fixed_amount_per_service") {
+    const serviceName = String(row.serviceName ?? "").trim()
+    if (!serviceName) {
+      return { skipped: "Service name is required for service-specific commission." }
+    }
+
+    if (row.itemType && normalizeLower(row.itemType) !== "service") {
+      return { skipped: "Fixed amount per service only applies to service rows." }
+    }
+
+    const serviceAmount = normalizeServiceAmounts(
+      "serviceAmounts" in rule.formulaConfig ? rule.formulaConfig.serviceAmounts : [],
+    ).find((entry) => normalizeLower(entry.serviceName) === normalizeLower(serviceName))
+
+    if (!serviceAmount) {
+      return { skipped: `No configured service amount matched ${serviceName}.` }
+    }
+
+    const configuredAmount = parseNumber(serviceAmount.amount)
+    if (configuredAmount <= 0) {
+      return { skipped: `Configured service amount for ${serviceName} must be greater than 0.` }
+    }
+
+    const units =
+      row.eventType === "treatment_completed_based"
+        ? parseNumber(row.completedTreatmentCount)
+        : Math.max(1, parseNumber(row.quantity))
+
+    if (row.eventType === "treatment_completed_based" && units <= 0) {
+      return { skipped: "Completed treatment count is required for service-specific treatment commission." }
+    }
+
+    const commissionAmount = roundMoney(units * configuredAmount)
+    const rowSummary =
+      units > 1
+        ? `${formatMoney(configuredAmount)} per ${serviceName} x ${formatMoney(units)}`
+        : `${formatMoney(configuredAmount)} for ${serviceName}`
+
+    return {
+      baseAmount: roundMoney(row.netAmount),
+      commissionAmount,
+      formulaSummary: rowSummary,
+      explanation:
+        units > 1
+          ? `${rule.ruleName} v${rule.version} matched ${serviceName}. ${formatMoney(units)} service occurrence(s) x ${formatMoney(configuredAmount)} = ${formatMoney(commissionAmount)}.`
+          : `${rule.ruleName} v${rule.version} matched ${serviceName}. Configured fixed amount ${formatMoney(configuredAmount)} was applied.`,
     }
   }
 

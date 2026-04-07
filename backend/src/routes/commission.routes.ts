@@ -50,6 +50,18 @@ const fixedAmountConfigSchema = z.object({
   value: z.coerce.number().finite(),
 })
 
+const fixedAmountPerServiceFormulaConfigSchema = z.object({
+  serviceAmounts: z
+    .array(
+      z.object({
+        serviceName: z.string().min(1),
+        categoryName: z.string().default(""),
+        amount: z.coerce.number().finite(),
+      }),
+    )
+    .default([]),
+})
+
 const tieredFormulaConfigSchema = z.object({
   baseField: z.enum(["grossAmount", "netAmount", "collectedAmount"]),
   tiers: z
@@ -70,43 +82,65 @@ const targetBonusFormulaConfigSchema = z.object({
   value: z.coerce.number().finite(),
 })
 
-const ruleBodySchema = z.object({
-  clinicId: z.string().min(1),
-  merchantId: z.string().min(1),
-  merchantName: z.string().min(1),
-  branchIds: bodyStringArraySchema,
-  branchCodes: bodyStringArraySchema,
-  ruleName: z.string().default(""),
-  description: z.string().default(""),
-  status: z.enum(["draft", "active", "archived"]),
-  appliesToRole: z.string().default(""),
-  appliesToStaffIds: bodyStringArraySchema,
-  eventType: z.enum(["sale_based", "payment_based", "treatment_completed_based"]),
-  conditions: conditionsSchema.default({
-    branchIds: [],
-    branchCodes: [],
-    categoryNames: [],
-    serviceNames: [],
-    itemTypes: [],
-    paymentStatuses: [],
-  }),
-  formulaType: z.enum([
-    "percentage_of_amount",
-    "fixed_amount_per_item",
-    "fixed_amount_per_completed_treatment",
-    "tiered_percentage",
-    "target_bonus",
-  ]),
-  formulaConfig: z.union([
-    percentageFormulaConfigSchema,
-    fixedAmountConfigSchema,
-    tieredFormulaConfigSchema,
-    targetBonusFormulaConfigSchema,
-  ]),
-  priority: z.coerce.number().int().min(0).default(0),
-  effectiveFrom: z.string().default(""),
-  effectiveTo: z.string().default(""),
-})
+const ruleBodySchema = z
+  .object({
+    clinicId: z.string().min(1),
+    merchantId: z.string().min(1),
+    merchantName: z.string().min(1),
+    branchIds: bodyStringArraySchema,
+    branchCodes: bodyStringArraySchema,
+    ruleName: z.string().default(""),
+    description: z.string().default(""),
+    status: z.enum(["draft", "active", "archived"]),
+    appliesToRole: z.string().default(""),
+    appliesToStaffIds: bodyStringArraySchema,
+    eventType: z.enum(["sale_based", "payment_based", "treatment_completed_based"]),
+    conditions: conditionsSchema.default({
+      branchIds: [],
+      branchCodes: [],
+      categoryNames: [],
+      serviceNames: [],
+      itemTypes: [],
+      paymentStatuses: [],
+    }),
+    formulaType: z.enum([
+      "percentage_of_amount",
+      "fixed_amount_per_item",
+      "fixed_amount_per_completed_treatment",
+      "fixed_amount_per_service",
+      "tiered_percentage",
+      "target_bonus",
+    ]),
+    formulaConfig: z.union([
+      percentageFormulaConfigSchema,
+      fixedAmountConfigSchema,
+      fixedAmountPerServiceFormulaConfigSchema,
+      tieredFormulaConfigSchema,
+      targetBonusFormulaConfigSchema,
+    ]),
+    priority: z.coerce.number().int().min(0).default(0),
+    effectiveFrom: z.string().default(""),
+    effectiveTo: z.string().default(""),
+  })
+  .superRefine((value, ctx) => {
+    if (value.formulaType === "fixed_amount_per_service") {
+      if (!("serviceAmounts" in value.formulaConfig)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["formulaConfig"],
+          message: "Fixed amount per service requires service amount rows.",
+        })
+      }
+
+      if (value.conditions.serviceNames.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["conditions", "serviceNames"],
+          message: "Select at least one service for Fixed amount per service.",
+        })
+      }
+    }
+  })
 
 const reportGenerateSchema = z.object({
   clinicId: z.string().min(1),

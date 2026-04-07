@@ -7,6 +7,7 @@ export type CommissionFormulaType =
   | "percentage_of_amount"
   | "fixed_amount_per_item"
   | "fixed_amount_per_completed_treatment"
+  | "fixed_amount_per_service"
   | "tiered_percentage"
   | "target_bonus"
 
@@ -30,6 +31,12 @@ export interface CommissionTier {
   value: number
 }
 
+export interface CommissionServiceAmount {
+  serviceName: string
+  categoryName: string
+  amount: number
+}
+
 export type CommissionFormulaConfig =
   | {
       baseField: CommissionBaseField
@@ -37,6 +44,9 @@ export type CommissionFormulaConfig =
     }
   | {
       value: number
+    }
+  | {
+      serviceAmounts: CommissionServiceAmount[]
     }
   | {
       baseField: CommissionBaseField

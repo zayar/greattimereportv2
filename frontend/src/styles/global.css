@@ -269,6 +269,52 @@
   flex-wrap: wrap;
 }
 
+.commission-form__service-amount-toolbar {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(280px, 1fr) auto;
+  align-items: end;
+}
+
+.commission-form__service-amount-inline {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.commission-form__service-amount-inline input {
+  min-width: 0;
+}
+
+.commission-form__service-amount-list {
+  display: grid;
+  gap: 10px;
+}
+
+.commission-form__service-amount-row {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 220px);
+  align-items: center;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(135, 119, 96, 0.14);
+  background: rgba(255, 252, 247, 0.92);
+}
+
+.commission-form__service-amount-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.commission-form__service-amount-copy strong {
+  color: var(--ink-strong);
+}
+
+.commission-form__service-amount-copy span {
+  color: var(--ink-muted);
+}
+
 .commission-form__selection-pill {
   display: grid;
   gap: 2px;
@@ -402,6 +448,26 @@
   margin-bottom: 16px;
 }
 
+.commission-form__validation-list {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(191, 98, 77, 0.24);
+  background: rgba(255, 244, 240, 0.94);
+}
+
+.commission-form__validation-list strong {
+  color: var(--ink-strong);
+}
+
+.commission-form__validation-list ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-muted);
+}
+
 @media (max-width: 1080px) {
   .commission-report__layout {
     grid-template-columns: 1fr;
@@ -409,6 +475,16 @@
 
   .commission-form__selection-toolbar {
     grid-template-columns: 1fr;
+  }
+
+  .commission-form__service-amount-toolbar,
+  .commission-form__service-amount-row {
+    grid-template-columns: 1fr;
+  }
+
+  .commission-form__service-amount-inline {
+    flex-direction: column;
+    align-items: stretch;
   }
 }
 

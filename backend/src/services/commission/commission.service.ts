@@ -25,7 +25,7 @@ import type {
   CommissionRuleWriteInput,
   CommissionRunRecord,
 } from "./commission.types.js"
-import { monthKeyFromDate, nowIso, normalizeText } from "./commission.utils.js"
+import { monthKeyFromDate, normalizeFormulaConfig, nowIso, normalizeText, validateCommissionRuleWriteInput } from "./commission.utils.js"
 
 function resolveMonthKey(fromDate: string, toDate: string) {
   const fromKey = monthKeyFromDate(fromDate)
@@ -147,6 +147,23 @@ export async function saveCommissionRule(input: {
   const normalizedRule: CommissionRuleWriteInput = {
     ...input.rule,
     ruleName: resolveRuleName(input.rule),
+    conditions: {
+      ...input.rule.conditions,
+      itemTypes:
+        input.rule.formulaType === "fixed_amount_per_service"
+          ? ["service"]
+          : input.rule.conditions.itemTypes,
+    },
+    formulaConfig: normalizeFormulaConfig(
+      input.rule.formulaType,
+      input.rule.formulaConfig,
+      input.rule.conditions.serviceNames,
+    ),
+  }
+
+  const validationErrors = validateCommissionRuleWriteInput(normalizedRule)
+  if (validationErrors.length > 0) {
+    throw new HttpError(400, validationErrors[0])
   }
 
   if (input.ruleId) {

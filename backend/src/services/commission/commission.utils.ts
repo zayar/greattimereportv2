@@ -4,6 +4,8 @@ import type {
   CommissionFormulaType,
   CommissionItemType,
   CommissionRuleConditions,
+  CommissionRuleWriteInput,
+  CommissionServiceAmount,
   CommissionSourceRow,
   CommissionTier,
 } from "./commission.types.js"
@@ -124,6 +126,45 @@ export function getTierForValue(tiers: CommissionTier[], value: number) {
     })
 }
 
+export function normalizeServiceAmounts(values: Array<Partial<CommissionServiceAmount> | null | undefined>) {
+  const normalizedMap = new Map<string, CommissionServiceAmount>()
+
+  values.forEach((value) => {
+    const serviceName = normalizeText(value?.serviceName)
+    if (!serviceName) {
+      return
+    }
+
+    const key = normalizeLower(serviceName)
+    normalizedMap.set(key, {
+      serviceName,
+      categoryName: normalizeText(value?.categoryName) || "Other",
+      amount: roundMoney(parseNumber(value?.amount)),
+    })
+  })
+
+  return [...normalizedMap.values()]
+}
+
+export function normalizeFormulaConfig(
+  formulaType: CommissionFormulaType,
+  formulaConfig: CommissionFormulaConfig,
+  selectedServiceNames: string[] = [],
+) {
+  if (formulaType === "fixed_amount_per_service") {
+    const selectedKeys = new Set(selectedServiceNames.map((serviceName) => normalizeLower(serviceName)).filter(Boolean))
+    const normalizedServiceAmounts = normalizeServiceAmounts(
+      "serviceAmounts" in formulaConfig ? formulaConfig.serviceAmounts : [],
+    ).filter((entry) => selectedKeys.size === 0 || selectedKeys.has(normalizeLower(entry.serviceName)))
+
+    return {
+      serviceAmounts: normalizedServiceAmounts,
+    } satisfies CommissionFormulaConfig
+  }
+
+  return formulaConfig
+}
+
 export function buildFormulaSummary(formulaType: CommissionFormulaType, formulaConfig: CommissionFormulaConfig) {
   if (formulaType === "percentage_of_amount") {
     const config = formulaConfig as { baseField: CommissionBaseField; value: number }
@@ -138,6 +179,14 @@ export function buildFormulaSummary(formulaType: CommissionFormulaType, formulaC
   if (formulaType === "fixed_amount_per_completed_treatment") {
     const config = formulaConfig as { value: number }
     return `${formatMoney(config.value)} per completed treatment`
+  }
+
+  if (formulaType === "fixed_amount_per_service") {
+    const config = formulaConfig as { serviceAmounts: CommissionServiceAmount[] }
+    const configuredCount = normalizeServiceAmounts(config.serviceAmounts).filter((entry) => parseNumber(entry.amount) > 0).length
+    const totalCount = normalizeServiceAmounts(config.serviceAmounts).length
+    const count = configuredCount > 0 ? configuredCount : totalCount
+    return `${count.toLocaleString("en-US")} service-specific amount${count === 1 ? "" : "s"} configured`
   }
 
   if (formulaType === "tiered_percentage") {
@@ -168,6 +217,7 @@ export function buildRulePreviewSentence(input: {
   serviceCount: number
   categoryCount: number
   formulaSummary: string
+  formulaType?: CommissionFormulaType
 }) {
   const roleLabel = input.role || "matching staff"
   const trigger =
@@ -190,7 +240,51 @@ export function buildRulePreviewSentence(input: {
     scopeParts.push(`${input.branchCount} branch${input.branchCount === 1 ? "" : "es"}`)
   }
 
+  if (input.formulaType === "fixed_amount_per_service") {
+    return `For ${trigger}, ${roleLabel} receive the configured fixed amount for each matching selected service.`
+  }
+
   return `For ${trigger}, ${roleLabel} receive ${input.formulaSummary} across ${scopeParts.join(" and ")}.`
+}
+
+export function validateCommissionRuleWriteInput(rule: CommissionRuleWriteInput) {
+  if (rule.formulaType !== "fixed_amount_per_service") {
+    return []
+  }
+
+  const errors: string[] = []
+  const selectedServiceNames = rule.conditions.serviceNames.map(normalizeText).filter(Boolean)
+  if (selectedServiceNames.length === 0) {
+    errors.push("Fixed amount per service requires at least one selected service.")
+  }
+
+  const unsupportedItemTypes = rule.conditions.itemTypes.filter((itemType) => itemType !== "service")
+  if (unsupportedItemTypes.length > 0) {
+    errors.push("Fixed amount per service only supports service item type in V1.")
+  }
+
+  const serviceAmountMap = new Map(
+    normalizeServiceAmounts("serviceAmounts" in rule.formulaConfig ? rule.formulaConfig.serviceAmounts : []).map((entry) => [
+      normalizeLower(entry.serviceName),
+      parseNumber(entry.amount),
+    ]),
+  )
+
+  const missingAmounts = selectedServiceNames.filter((serviceName) => !serviceAmountMap.has(normalizeLower(serviceName)))
+  if (missingAmounts.length > 0) {
+    errors.push("Every selected service needs its own fixed amount.")
+  }
+
+  const invalidAmounts = selectedServiceNames.filter((serviceName) => {
+    const amount = serviceAmountMap.get(normalizeLower(serviceName)) ?? 0
+    return amount <= 0
+  })
+
+  if (invalidAmounts.length > 0) {
+    errors.push("Each selected service amount must be greater than 0 MMK.")
+  }
+
+  return Array.from(new Set(errors))
 }
 
 export function matchesRuleCollectionFilter(values: string[], candidate: string | null | undefined) {

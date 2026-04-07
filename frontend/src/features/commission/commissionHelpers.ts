@@ -6,6 +6,7 @@ import type {
   CommissionFormulaType,
   CommissionRule,
   CommissionRulePayload,
+  CommissionServiceAmount,
   CommissionSourceOptions,
   CommissionTier,
 } from "./types"
@@ -62,6 +63,14 @@ export function formatCommissionFormulaSummary(formulaType: CommissionFormulaTyp
     return `${config.value.toLocaleString("en-US")} per completed treatment`
   }
 
+  if (formulaType === "fixed_amount_per_service") {
+    const config = formulaConfig as { serviceAmounts: CommissionServiceAmount[] }
+    const configuredCount = config.serviceAmounts.filter((entry) => Number(entry.amount) > 0).length
+    const totalCount = config.serviceAmounts.length
+    const count = configuredCount > 0 ? configuredCount : totalCount
+    return `${count.toLocaleString("en-US")} service-specific amount${count === 1 ? "" : "s"} configured`
+  }
+
   if (formulaType === "tiered_percentage") {
     const config = formulaConfig as { baseField: CommissionBaseField; tiers: CommissionTier[] }
     const tierSummary = config.tiers
@@ -96,6 +105,10 @@ export function buildRulePreview(rule: Pick<CommissionRulePayload, "eventType" |
       : rule.conditions.categoryNames.length > 0
         ? `${rule.conditions.categoryNames.length} categor${rule.conditions.categoryNames.length === 1 ? "y" : "ies"}`
         : "all eligible services"
+
+  if (rule.formulaType === "fixed_amount_per_service") {
+    return `For ${eventLabel}, ${roleLabel} receive the configured fixed amount for each matching selected service.`
+  }
 
   return `For ${eventLabel}, ${roleLabel} receive ${formatCommissionFormulaSummary(rule.formulaType, rule.formulaConfig)} across ${scopeLabel}.`
 }

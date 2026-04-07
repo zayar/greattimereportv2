@@ -1,12 +1,28 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react"
 import { Panel } from "../../components/Panel"
-import type { CommissionBranchOption, CommissionRulePayload, CommissionSourceOptions, CommissionTier } from "./types"
+import type {
+  CommissionBranchOption,
+  CommissionFormulaConfig,
+  CommissionRulePayload,
+  CommissionSourceOptions,
+  CommissionTier,
+} from "./types"
 import {
   buildRulePreview,
   deriveSupportedRoles,
   filterStaffOptions,
   formatCommissionFormulaSummary,
 } from "./commissionHelpers"
+import {
+  applyFixedAmountToAllServices,
+  areServiceAmountsEqual,
+  buildDefaultFormulaConfig,
+  clearFixedAmountPerServiceAmounts,
+  getFixedAmountPerServiceConfig,
+  syncFixedAmountPerServiceConfig,
+  updateFixedAmountPerServiceValue,
+  validateCommissionRulePayload,
+} from "./commissionFormulaHelpers"
 
 type Props = {
   branches: CommissionBranchOption[]
@@ -29,6 +45,11 @@ type SelectionItem = {
   value: string
   label: string
   hint?: string
+}
+
+type SelectedServiceDescriptor = {
+  serviceName: string
+  categoryName: string
 }
 
 function CheckboxGrid({ items, selectedValues, onToggle, emptyLabel }: CheckboxGridProps) {
@@ -213,46 +234,128 @@ function SearchableSelectionList({
   )
 }
 
-function buildDefaultFormulaConfig(formulaType: CommissionRulePayload["formulaType"]) {
-  if (formulaType === "fixed_amount_per_item" || formulaType === "fixed_amount_per_completed_treatment") {
-    return {
-      value: 0,
-    }
+type FixedAmountPerServiceEditorProps = {
+  selectedServices: SelectedServiceDescriptor[]
+  formulaConfig: CommissionFormulaConfig
+  onChange: (nextConfig: CommissionFormulaConfig) => void
+}
+
+function FixedAmountPerServiceEditor({
+  selectedServices,
+  formulaConfig,
+  onChange,
+}: FixedAmountPerServiceEditorProps) {
+  const [bulkAmount, setBulkAmount] = useState("")
+  const serviceAmounts = getFixedAmountPerServiceConfig(formulaConfig).serviceAmounts
+
+  if (selectedServices.length === 0) {
+    return (
+      <div className="commission-form__formula-summary">
+        <strong>No services selected yet</strong>
+        <span>Select at least one service in Step 3 before configuring service-specific commission amounts.</span>
+      </div>
+    )
   }
 
-  if (formulaType === "tiered_percentage") {
-    return {
-      baseField: "netAmount" as const,
-      tiers: [
-        {
-          min: 0,
-          max: null,
-          value: 0,
-        },
-      ],
+  function applyToAll() {
+    const parsed = Number(bulkAmount)
+    if (!Number.isFinite(parsed)) {
+      return
     }
+
+    onChange(
+      applyFixedAmountToAllServices({
+        formulaConfig,
+        selectedServices,
+        amount: parsed,
+      }),
+    )
   }
 
-  if (formulaType === "target_bonus") {
-    return {
-      baseField: "netAmount" as const,
-      threshold: 0,
-      bonusType: "fixed" as const,
-      value: 0,
-    }
-  }
+  return (
+    <div className="commission-form__stack">
+      <div className="commission-form__trigger-summary">
+        <strong>Service-specific fixed amounts</strong>
+        <span>This formula pays a separate MMK amount for each selected service and only supports service item type in V1.</span>
+      </div>
 
-  return {
-    baseField: "netAmount" as const,
-    value: 0,
-  }
+      <div className="commission-form__service-amount-toolbar">
+        <label className="field field--compact">
+          <span>Apply same amount to all selected services</span>
+          <div className="commission-form__service-amount-inline">
+            <input
+              type="number"
+              min={0}
+              step="0.01"
+              value={bulkAmount}
+              onChange={(event) => setBulkAmount(event.target.value)}
+              placeholder="MMK amount"
+            />
+            <button className="button button--ghost" type="button" onClick={applyToAll} disabled={bulkAmount.trim() === ""}>
+              Apply to all
+            </button>
+          </div>
+        </label>
+
+        <button
+          className="button button--ghost"
+          type="button"
+          onClick={() =>
+            onChange(
+              clearFixedAmountPerServiceAmounts({
+                formulaConfig,
+                selectedServices,
+              }),
+            )
+          }
+          disabled={serviceAmounts.every((entry) => Number(entry.amount) <= 0)}
+        >
+          Clear all amounts
+        </button>
+      </div>
+
+      <div className="commission-form__service-amount-list" role="list">
+        {serviceAmounts.map((entry) => (
+          <div key={entry.serviceName} className="commission-form__service-amount-row" role="listitem">
+            <div className="commission-form__service-amount-copy">
+              <strong>{entry.serviceName}</strong>
+              <span>{entry.categoryName || "Other"}</span>
+            </div>
+
+            <label className="field field--compact">
+              <span>Amount (MMK)</span>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={entry.amount === 0 ? "" : entry.amount}
+                onChange={(event) =>
+                  onChange(
+                    updateFixedAmountPerServiceValue({
+                      formulaConfig,
+                      serviceName: entry.serviceName,
+                      categoryName: entry.categoryName,
+                      amount: Number(event.target.value),
+                    }),
+                  )
+                }
+                placeholder="Enter amount"
+              />
+            </label>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 export function CommissionRuleForm({ branches, options, initialValue, saving, title, onCancel, onSave }: Props) {
   const [draft, setDraft] = useState(initialValue)
+  const [submitAttempted, setSubmitAttempted] = useState(false)
 
   useEffect(() => {
     setDraft(initialValue)
+    setSubmitAttempted(false)
   }, [initialValue])
 
   useEffect(() => {
@@ -284,10 +387,13 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
     [staffOptions],
   )
   const supportedRoles = useMemo(() => deriveSupportedRoles(draft.eventType), [draft.eventType])
+  const eventScopedServices = useMemo(
+    () => (options?.services ?? []).filter((service) => service.eventTypes.includes(draft.eventType)),
+    [draft.eventType, options?.services],
+  )
   const serviceItems = useMemo(
     () =>
-      (options?.services ?? [])
-        .filter((service) => service.eventTypes.includes(draft.eventType))
+      eventScopedServices
         .filter((service) =>
           draft.conditions.categoryNames.length > 0
             ? draft.conditions.categoryNames.some((category) => service.categoryName.includes(category))
@@ -298,8 +404,44 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
           label: service.name,
           hint: service.categoryName,
         })),
-    [draft.conditions.categoryNames, draft.eventType, options?.services],
+    [draft.conditions.categoryNames, eventScopedServices],
   )
+  const selectedServiceDescriptors = useMemo<SelectedServiceDescriptor[]>(
+    () =>
+      draft.conditions.serviceNames.map((serviceName) => {
+        const matched = eventScopedServices.find((service) => service.name === serviceName)
+        return {
+          serviceName,
+          categoryName: matched?.categoryName || "Other",
+        }
+      }),
+    [draft.conditions.serviceNames, eventScopedServices],
+  )
+  const validationMessages = useMemo(() => validateCommissionRulePayload(draft), [draft])
+
+  useEffect(() => {
+    if (draft.formulaType !== "fixed_amount_per_service") {
+      return
+    }
+
+    const syncedConfig = syncFixedAmountPerServiceConfig({
+      selectedServices: selectedServiceDescriptors,
+      formulaConfig: draft.formulaConfig,
+    })
+
+    if (areServiceAmountsEqual(draft.formulaConfig, syncedConfig)) {
+      return
+    }
+
+    setDraft((current) => ({
+      ...current,
+      formulaConfig: syncedConfig,
+      conditions: {
+        ...current.conditions,
+        itemTypes: ["service"],
+      },
+    }))
+  }, [draft.formulaConfig, draft.formulaType, selectedServiceDescriptors])
 
   function toggleValue(values: string[], value: string) {
     return values.includes(value) ? values.filter((entry) => entry !== value) : [...values, value]
@@ -316,13 +458,20 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
     key: K,
     value: CommissionRulePayload["conditions"][K],
   ) {
-    setDraft((current) => ({
-      ...current,
-      conditions: {
-        ...current.conditions,
-        [key]: value,
-      },
-    }))
+    setDraft((current) => {
+      const nextValue =
+        current.formulaType === "fixed_amount_per_service" && key === "itemTypes"
+          ? (["service"] as CommissionRulePayload["conditions"][K])
+          : value
+
+      return {
+        ...current,
+        conditions: {
+          ...current.conditions,
+          [key]: nextValue,
+        },
+      }
+    })
   }
 
   function updateBranchSelection(nextBranchIds: string[]) {
@@ -358,6 +507,10 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
     setDraft((current) => ({
       ...current,
       formulaType: nextFormulaType,
+      conditions: {
+        ...current.conditions,
+        itemTypes: nextFormulaType === "fixed_amount_per_service" ? ["service"] : current.conditions.itemTypes,
+      },
       formulaConfig: buildDefaultFormulaConfig(nextFormulaType),
     }))
   }
@@ -384,6 +537,12 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
   }
 
   async function submit(nextStatus: CommissionRulePayload["status"]) {
+    setSubmitAttempted(true)
+
+    if (validationMessages.length > 0) {
+      return
+    }
+
     await onSave({
       ...draft,
       status: nextStatus,
@@ -588,17 +747,27 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
           <div className="commission-form__subsection">
             <strong>Item types</strong>
           </div>
-          <CheckboxGrid
-            items={(options?.itemTypes ?? []).map((itemType) => ({
-              value: itemType,
-              label: itemType,
-            }))}
-            selectedValues={draft.conditions.itemTypes}
-            onToggle={(value) =>
-              updateConditions("itemTypes", toggleValue(draft.conditions.itemTypes, value) as CommissionRulePayload["conditions"]["itemTypes"])
-            }
-            emptyLabel="No item types are available."
-          />
+          {draft.formulaType === "fixed_amount_per_service" ? (
+            <div className="commission-form__formula-summary">
+              <strong>Locked to service</strong>
+              <span>Fixed amount per service only supports service item type in V1, so package and product rows are excluded automatically.</span>
+            </div>
+          ) : (
+            <CheckboxGrid
+              items={(options?.itemTypes ?? []).map((itemType) => ({
+                value: itemType,
+                label: itemType,
+              }))}
+              selectedValues={draft.conditions.itemTypes}
+              onToggle={(value) =>
+                updateConditions(
+                  "itemTypes",
+                  toggleValue(draft.conditions.itemTypes, value) as CommissionRulePayload["conditions"]["itemTypes"],
+                )
+              }
+              emptyLabel="No item types are available."
+            />
+          )}
 
           {draft.eventType === "payment_based" ? (
             <>
@@ -629,6 +798,7 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
               <option value="percentage_of_amount">Percentage of amount</option>
               <option value="fixed_amount_per_item">Fixed amount per item</option>
               <option value="fixed_amount_per_completed_treatment">Fixed amount per completed treatment</option>
+              <option value="fixed_amount_per_service">Fixed amount per service</option>
               <option value="tiered_percentage">Tiered percentage</option>
               <option value="target_bonus">Target bonus</option>
             </select>
@@ -685,6 +855,14 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
                 onChange={(event) => updateDraft({ formulaConfig: { value: Number(event.target.value) } })}
               />
             </label>
+          ) : null}
+
+          {draft.formulaType === "fixed_amount_per_service" ? (
+            <FixedAmountPerServiceEditor
+              selectedServices={selectedServiceDescriptors}
+              formulaConfig={draft.formulaConfig}
+              onChange={(nextConfig) => updateDraft({ formulaConfig: nextConfig })}
+            />
           ) : null}
 
           {draft.formulaType === "tiered_percentage" ? (
@@ -875,6 +1053,17 @@ export function CommissionRuleForm({ branches, options, initialValue, saving, ti
           title="Step 6. Save"
           subtitle="Save as draft if the merchant is still reviewing it, or activate it when it is ready to participate in report generation."
         >
+          {submitAttempted && validationMessages.length > 0 ? (
+            <div className="commission-form__validation-list" role="alert">
+              <strong>Check this rule before saving</strong>
+              <ul>
+                {validationMessages.map((message) => (
+                  <li key={message}>{message}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           <div className="commission-form__actions">
             <button className="button button--ghost" type="button" onClick={onCancel}>
               Cancel

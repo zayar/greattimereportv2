@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "test": "tsx --test tests/**/*.test.ts"
   },
   "dependencies": {
     "@google-cloud/bigquery": "^7.9.4",
@@ -24,4 +25,3 @@
     "typescript": "^5.8.2"
   }
 }
-
