@@ -96,20 +96,20 @@ function getPreferredBusiness(businesses: Business[]) {
 
 function getInitialSelection(clinics: Clinic[], businesses: Business[]) {
   const persisted = readPersistedSelection();
+  const persistedClinic = clinics.find((clinic) => clinic.id === persisted?.clinicId) ?? null;
+
+  if (persistedClinic) {
+    return {
+      business: businesses.find((business) => business.id === persistedClinic.company_id) ?? null,
+      clinic: persistedClinic,
+    };
+  }
+
   const preferredBusiness =
     getPreferredBusiness(businesses) ??
     (persisted?.businessId
       ? businesses.find((business) => business.id === persisted.businessId) ?? null
       : null);
-  const persistedClinic = clinics.find((clinic) => clinic.id === persisted?.clinicId) ?? null;
-
-  if (persistedClinic && persistedClinic.company_id === preferredBusiness?.id) {
-    return {
-      business: preferredBusiness,
-      clinic: persistedClinic,
-    };
-  }
-
   const preferredClinic = preferredBusiness?.clinics[0] ?? clinics[0] ?? null;
 
   return {
@@ -210,7 +210,7 @@ export function AccessProvider({ children }: PropsWithChildren) {
       loading,
       error,
       clinics,
-      canSwitchClinics: (currentBusiness?.clinics.length ?? 0) > 1,
+      canSwitchClinics: clinics.length > 1,
       currentBusiness,
       currentClinic,
       selectClinic: (clinicId: string) => {

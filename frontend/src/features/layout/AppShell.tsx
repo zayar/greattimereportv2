@@ -20,7 +20,7 @@ function isNavigationItemActive(item: NavigationItem, pathname: string): boolean
 }
 
 export function AppShell() {
-  const { loading, error, canSwitchClinics, currentBusiness, currentClinic, selectClinic } = useAccess();
+  const { loading, error, clinics, canSwitchClinics, currentBusiness, currentClinic, selectClinic } = useAccess();
   const { gtUser, logout } = useSession();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
@@ -152,9 +152,9 @@ export function AppShell() {
               <label className="field field--compact topbar__clinic-field">
                 <span>Clinic</span>
                 <select value={currentClinic.id} onChange={(event) => selectClinic(event.target.value)}>
-                  {currentBusiness.clinics.map((clinic) => (
+                  {clinics.map((clinic) => (
                     <option key={clinic.id} value={clinic.id}>
-                      {clinic.name}
+                      {clinic.code ? `${clinic.name} (${clinic.code})` : clinic.name}
                     </option>
                   ))}
                 </select>
