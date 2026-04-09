@@ -13,6 +13,7 @@ import { buildDatedExportFileName, downloadExcelWorkbook } from "../../../utils/
 import { formatCurrency, formatDate } from "../../../utils/format";
 import type { OrderRow } from "../../../types/domain";
 import { GET_SALES } from "./queries";
+import { buildSalesOrderWhere } from "./salesFilters";
 import { buildSalesDetailPath } from "./salesDetailLink";
 
 type SalesResponse = {
@@ -26,78 +27,6 @@ type SalesResponse = {
 
 const PAGE_SIZE = 20;
 const EXPORT_BATCH_SIZE = 500;
-const ZERO_DECIMAL = "0";
-
-function buildOrderWhere(params: {
-  clinicId: string;
-  fromDate: string;
-  toDate: string;
-  search: string;
-  showZeroValue: boolean;
-  showCoOrders: boolean;
-}) {
-  const search = params.search.trim();
-  const where: Record<string, unknown> = {
-    clinic_id: { equals: params.clinicId },
-    created_at: {
-      gte: new Date(`${params.fromDate}T00:00:00.000Z`).toISOString(),
-      lte: new Date(`${params.toDate}T23:59:59.999Z`).toISOString(),
-    },
-  };
-  const andClauses: Record<string, unknown>[] = [];
-
-  if (!params.showZeroValue) {
-    andClauses.push({
-      net_total: {
-        not: {
-          equals: ZERO_DECIMAL,
-        },
-      },
-    });
-  }
-
-  if (!params.showCoOrders) {
-    andClauses.push({
-      order_id: {
-        not: {
-          startsWith: "CO-",
-        },
-      },
-    });
-  }
-
-  if (search) {
-    andClauses.push({
-      OR: [
-        {
-          member: {
-            is: {
-              OR: [{ name: { contains: search } }, { phonenumber: { contains: search } }],
-            },
-          },
-        },
-        {
-          user: {
-            is: {
-              name: { contains: search },
-            },
-          },
-        },
-        {
-          order_id: {
-            contains: search,
-          },
-        },
-      ],
-    });
-  }
-
-  if (andClauses.length > 0) {
-    where.AND = andClauses;
-  }
-
-  return where;
-}
 
 function parseBooleanSearchParam(value: string | null) {
   return value === "1" || value === "true";
@@ -166,7 +95,7 @@ export function SalesPage() {
       return undefined;
     }
 
-    return buildOrderWhere({
+    return buildSalesOrderWhere({
       clinicId: currentClinic.id,
       fromDate: range.fromDate,
       toDate: range.toDate,
