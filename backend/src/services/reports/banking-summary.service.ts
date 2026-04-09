@@ -1,5 +1,6 @@
 import { analyticsTables } from "../../config/bigquery.js";
 import { runAnalyticsQuery } from "../bigquery.service.js";
+import { bankingSummaryCommonWhere } from "./banking-summary.query.js";
 
 function parseNumber(value: unknown) {
   if (typeof value === "number") {
@@ -14,14 +15,6 @@ function parseNumber(value: unknown) {
   return Number(value ?? 0);
 }
 
-const walletTopupExpression = `
-  (
-    STARTS_WITH(COALESCE(InvoiceNumber, ''), 'TO')
-    OR LOWER(COALESCE(CAST(WalletTopUp AS STRING), '')) LIKE '%point%'
-    OR LOWER(COALESCE(CAST(WalletTopUp AS STRING), '')) LIKE '%topup%'
-  )
-`;
-
 export async function getBankingSummary(params: {
   clinicCode: string;
   fromDate: string;
@@ -32,30 +25,8 @@ export async function getBankingSummary(params: {
   limit: number;
   offset: number;
 }) {
-  const commonWhere = `
-    DATE(OrderCreatedDate) BETWEEN @fromDate AND @toDate
-      AND PaymentStatus = 'PAID'
-      AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
-      AND LOWER(ClinicCode) = LOWER(@clinicCode)
-      AND (
-        @search = ''
-        OR LOWER(COALESCE(InvoiceNumber, '')) LIKE LOWER(CONCAT('%', @search, '%'))
-        OR LOWER(COALESCE(CustomerName, '')) LIKE LOWER(CONCAT('%', @search, '%'))
-        OR LOWER(COALESCE(CustomerPhoneNumber, '')) LIKE LOWER(CONCAT('%', @search, '%'))
-        OR LOWER(COALESCE(MemberId, '')) LIKE LOWER(CONCAT('%', @search, '%'))
-        OR LOWER(COALESCE(SellerName, '')) LIKE LOWER(CONCAT('%', @search, '%'))
-        OR LOWER(COALESCE(ServiceName, '')) LIKE LOWER(CONCAT('%', @search, '%'))
-        OR LOWER(COALESCE(ServicePackageName, '')) LIKE LOWER(CONCAT('%', @search, '%'))
-      )
-      AND (
-        @walletTopupFilter = 'all'
-        OR (@walletTopupFilter = 'hide' AND NOT ${walletTopupExpression})
-        OR (@walletTopupFilter = 'only' AND ${walletTopupExpression})
-      )
-  `;
-
   const detailWhere = `
-    ${commonWhere}
+    ${bankingSummaryCommonWhere}
       AND (
         @paymentMethod = ''
         OR LOWER(COALESCE(PaymentMethod, 'Unknown')) = LOWER(@paymentMethod)
@@ -93,7 +64,7 @@ export async function getBankingSummary(params: {
           COUNT(*) AS transactionCount,
           COALESCE(AVG(CAST(NetTotal AS FLOAT64)), 0) AS averageTicket
         FROM ${analyticsTables.mainPaymentView}
-        WHERE ${commonWhere}
+        WHERE ${bankingSummaryCommonWhere}
         GROUP BY paymentMethod
         ORDER BY totalAmount DESC, paymentMethod ASC
       `,
