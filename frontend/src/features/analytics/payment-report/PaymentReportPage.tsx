@@ -9,14 +9,14 @@ import { useAccess } from "../../access/AccessProvider";
 import { startOfCurrentMonth, today, daysAgo } from "../../../utils/date";
 import { formatCurrency } from "../../../utils/format";
 import type { PaymentReportResponse } from "../../../types/domain";
+import {
+  buildSalesDetailsCsvRows,
+  buildSalesDetailRows,
+  getGroupedInvoiceValue,
+  type SalesDetailRow,
+} from "./paymentReportRows";
 
 const PAGE_SIZE = 30;
-
-type SalesDetailRow = PaymentReportResponse["rows"][number] & {
-  rowId: string;
-  showInvoiceValues: boolean;
-  walletLabel: string;
-};
 
 function formatOptionalCurrency(value: number | null | undefined, currency: string) {
   if (value == null) {
@@ -24,18 +24,6 @@ function formatOptionalCurrency(value: number | null | undefined, currency: stri
   }
 
   return formatCurrency(value, currency);
-}
-
-function formatWalletLabel(value: string | number | null | undefined) {
-  if (value == null || value === "") {
-    return "—";
-  }
-
-  if (typeof value === "number") {
-    return value > 0 ? "Topup" : "—";
-  }
-
-  return value.includes("*Point") ? "Topup" : value;
 }
 
 function formatCsvValue(value: unknown) {
@@ -73,34 +61,7 @@ function downloadSalesDetails(rows: SalesDetailRow[], currency: string) {
     "Payment Type",
   ];
 
-  const body = rows.map((row) =>
-    [
-      row.dateLabel,
-      row.invoiceNumber,
-      row.customerName,
-      row.memberId || "",
-      row.salePerson || "",
-      row.serviceName || "",
-      row.servicePackageName || "",
-      row.walletLabel,
-      row.itemQuantity ?? "",
-      row.itemPrice == null ? "" : formatCurrency(row.itemPrice, currency),
-      row.itemTotal == null ? "" : formatCurrency(row.itemTotal, currency),
-      row.subTotal == null ? "" : formatCurrency(row.subTotal, currency),
-      row.total == null ? "" : formatCurrency(row.total, currency),
-      row.discount == null ? "" : formatCurrency(row.discount, currency),
-      row.netTotal == null ? "" : formatCurrency(row.netTotal, currency),
-      row.orderBalance == null ? "" : formatCurrency(row.orderBalance, currency),
-      row.orderCreditBalance == null ? "" : formatCurrency(row.orderCreditBalance, currency),
-      row.tax == null ? "" : formatCurrency(row.tax, currency),
-      formatCurrency(row.invoiceNetTotal, currency),
-      row.paymentStatus || "",
-      row.paymentMethod || "",
-      row.paymentType || "",
-    ]
-      .map(formatCsvValue)
-      .join(","),
-  );
+  const body = buildSalesDetailsCsvRows(rows, currency).map((row) => row.map(formatCsvValue).join(","));
 
   const csv = [headers.join(","), ...body].join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -183,19 +144,7 @@ export function PaymentReportPage() {
       return [];
     }
 
-    let previousInvoice = "";
-
-    return data.rows.map((row, index) => {
-      const showInvoiceValues = row.invoiceNumber !== previousInvoice;
-      previousInvoice = row.invoiceNumber;
-
-      return {
-        ...row,
-        rowId: `${row.invoiceNumber}-${row.serviceName ?? "item"}-${index}`,
-        showInvoiceValues,
-        walletLabel: formatWalletLabel(row.walletTopUp),
-      };
-    });
+    return buildSalesDetailRows(data.rows);
   }, [data]);
 
   function applyPreset(type: "today" | "7d" | "30d" | "month") {
@@ -401,56 +350,62 @@ export function PaymentReportPage() {
               {
                 key: "total",
                 header: "Total",
-                render: (row) =>
-                  row.showInvoiceValues ? formatOptionalCurrency(row.total, currency) : <span className="sales-details-report__muted">—</span>,
+                render: (row) => {
+                  const value = getGroupedInvoiceValue(row, row.total);
+                  return value == null ? <span className="sales-details-report__muted">—</span> : formatOptionalCurrency(value, currency);
+                },
               },
               {
                 key: "discount",
                 header: "Discount",
-                render: (row) =>
-                  row.showInvoiceValues
-                    ? formatOptionalCurrency(row.discount, currency)
-                    : <span className="sales-details-report__muted">—</span>,
+                render: (row) => {
+                  const value = getGroupedInvoiceValue(row, row.discount);
+                  return value == null ? <span className="sales-details-report__muted">—</span> : formatOptionalCurrency(value, currency);
+                },
               },
               {
                 key: "netTotal",
                 header: "Net Total",
-                render: (row) =>
-                  row.showInvoiceValues
-                    ? formatOptionalCurrency(row.netTotal, currency)
-                    : <span className="sales-details-report__muted">—</span>,
+                render: (row) => {
+                  const value = getGroupedInvoiceValue(row, row.netTotal);
+                  return value == null ? <span className="sales-details-report__muted">—</span> : formatOptionalCurrency(value, currency);
+                },
               },
               {
                 key: "balance",
                 header: "Order Balance",
-                render: (row) =>
-                  row.showInvoiceValues
-                    ? formatOptionalCurrency(row.orderBalance, currency)
-                    : <span className="sales-details-report__muted">—</span>,
+                render: (row) => {
+                  const value = getGroupedInvoiceValue(row, row.orderBalance);
+                  return value == null ? <span className="sales-details-report__muted">—</span> : formatOptionalCurrency(value, currency);
+                },
               },
               {
                 key: "creditBalance",
                 header: "Order Credit",
-                render: (row) =>
-                  row.showInvoiceValues
-                    ? formatOptionalCurrency(row.orderCreditBalance, currency)
-                    : <span className="sales-details-report__muted">—</span>,
+                render: (row) => {
+                  const value = getGroupedInvoiceValue(row, row.orderCreditBalance);
+                  return value == null ? <span className="sales-details-report__muted">—</span> : formatOptionalCurrency(value, currency);
+                },
               },
               {
                 key: "tax",
                 header: "Tax",
-                render: (row) =>
-                  row.showInvoiceValues ? formatOptionalCurrency(row.tax, currency) : <span className="sales-details-report__muted">—</span>,
+                render: (row) => {
+                  const value = getGroupedInvoiceValue(row, row.tax);
+                  return value == null ? <span className="sales-details-report__muted">—</span> : formatOptionalCurrency(value, currency);
+                },
               },
               {
                 key: "invoiceTotal",
                 header: "Invoice Total",
-                render: (row) =>
-                  row.showInvoiceValues ? (
-                    <span className="sales-details-report__strong">{formatCurrency(row.invoiceNetTotal, currency)}</span>
-                  ) : (
+                render: (row) => {
+                  const value = getGroupedInvoiceValue(row, row.invoiceNetTotal);
+                  return value == null ? (
                     <span className="sales-details-report__muted">—</span>
-                  ),
+                  ) : (
+                    <span className="sales-details-report__strong">{formatCurrency(value, currency)}</span>
+                  );
+                },
               },
               {
                 key: "paymentStatus",
