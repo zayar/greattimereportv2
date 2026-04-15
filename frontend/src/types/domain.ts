@@ -924,6 +924,56 @@ export interface PaymentReportResponse {
   totalCount: number;
 }
 
+export interface WalletAccountSummaryRow {
+  name: string;
+  phoneNumber: string;
+  balance: number;
+  transactionCount: number;
+}
+
+export interface WalletAccountsResponse {
+  summary: {
+    accountCount: number;
+    totalBalance: number;
+    totalTransactionCount: number;
+    averageBalance: number;
+    highestBalance: number;
+  };
+  rows: WalletAccountSummaryRow[];
+  totalCount: number;
+}
+
+export interface WalletTransactionRow {
+  dateLabel: string;
+  transactionNumber: string;
+  type: string;
+  status: string;
+  amount: number;
+  balance: number;
+  comment: string;
+  accountName: string;
+  senderName: string;
+  senderPhone: string;
+  recipientName: string;
+  recipientPhone: string;
+}
+
+export interface WalletAccountTransactionsResponse {
+  rows: WalletTransactionRow[];
+  totalCount: number;
+}
+
+export interface WalletTransactionsResponse {
+  summary: {
+    totalIn: number;
+    totalOut: number;
+    transactionCount: number;
+    netMovement: number;
+  };
+  rows: WalletTransactionRow[];
+  totalCount: number;
+}
+
 export interface SalesBySellerResponse {
   sellers: Array<{
     sellerName: string;

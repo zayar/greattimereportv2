@@ -24,6 +24,8 @@ export const navigationSections: NavigationSection[] = [
       { to: "/operational/check-in-out", label: "Check In/Out" },
       { to: "/operational/sales", label: "Sales" },
       { to: "/operational/members", label: "Members" },
+      { to: "/operational/wallets", label: "Wallets" },
+      { to: "/operational/transactions", label: "Transactions" },
     ],
   },
   {

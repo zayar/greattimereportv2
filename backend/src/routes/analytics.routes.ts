@@ -24,6 +24,11 @@ import { getSalesReport } from "../services/reports/sales-report.service.js";
 import { getBankingSummary } from "../services/reports/banking-summary.service.js";
 import { getCustomersBySalespersonReport } from "../services/reports/customers-by-salesperson.service.js";
 import {
+  getWalletAccountTransactions,
+  getWalletAccountsReport,
+  getWalletTransactionsReport,
+} from "../services/reports/wallet-report.service.js";
+import {
   getPackagePortalDetail,
   getPackagePortalReport,
 } from "../services/reports/package-portal.service.js";
@@ -109,6 +114,26 @@ const therapistPagedDetailSchema = therapistDetailSchema.extend({
   search: z.string().default(""),
   page: z.coerce.number().min(1).default(1),
   pageSize: z.coerce.number().min(1).max(100).default(20),
+});
+
+const walletAccountsSchema = z.object({
+  clinicId: z.string().min(1),
+  clinicCode: z.string().min(1),
+  search: z.string().default(""),
+  page: z.coerce.number().min(1).default(1),
+  pageSize: z.coerce.number().min(1).max(200).default(25),
+});
+
+const walletAccountTransactionsSchema = walletAccountsSchema.extend({
+  accountName: z.string().min(1),
+  accountPhone: z.string().default(""),
+  pageSize: z.coerce.number().min(1).max(100).default(10),
+});
+
+const walletTransactionsSchema = baseAnalyticsSchema.extend({
+  search: z.string().default(""),
+  page: z.coerce.number().min(1).default(1),
+  pageSize: z.coerce.number().min(1).max(500).default(25),
 });
 
 router.use(verifyFirebaseToken);
@@ -488,6 +513,58 @@ router.get(
     const data = await getDailyTreatmentReport({
       clinicCode: params.clinicCode,
       date: params.date,
+    });
+
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/wallets",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = walletAccountsSchema.parse(req.query);
+    const data = await getWalletAccountsReport({
+      clinicCode: params.clinicCode,
+      search: params.search,
+      limit: params.pageSize,
+      offset: (params.page - 1) * params.pageSize,
+    });
+
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/wallets/detail",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = walletAccountTransactionsSchema.parse(req.query);
+    const data = await getWalletAccountTransactions({
+      clinicCode: params.clinicCode,
+      accountName: params.accountName,
+      accountPhone: params.accountPhone,
+      search: params.search,
+      limit: params.pageSize,
+      offset: (params.page - 1) * params.pageSize,
+    });
+
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/wallet-transactions",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = walletTransactionsSchema.parse(req.query);
+    const data = await getWalletTransactionsReport({
+      clinicCode: params.clinicCode,
+      fromDate: params.fromDate,
+      toDate: params.toDate,
+      search: params.search,
+      limit: params.pageSize,
+      offset: (params.page - 1) * params.pageSize,
     });
 
     res.json({ success: true, data });

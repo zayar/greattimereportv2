@@ -58,6 +58,195 @@
   --luxe-divider: rgba(17, 24, 39, 0.048);
 }
 
+.wallet-workspace {
+  position: relative;
+  isolation: isolate;
+}
+
+.wallet-workspace::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 10% 14%, rgba(241, 207, 169, 0.18), transparent 24%),
+    radial-gradient(circle at 84% 18%, rgba(122, 173, 165, 0.16), transparent 26%),
+    radial-gradient(circle at 56% 100%, rgba(210, 224, 239, 0.16), transparent 24%);
+  opacity: 0.92;
+}
+
+.wallet-workspace__filters,
+.wallet-workspace__toolbar {
+  padding: 14px;
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(255, 255, 255, 0.34)),
+    radial-gradient(circle at top right, rgba(122, 173, 165, 0.12), transparent 44%);
+  border: 1px solid rgba(17, 24, 39, 0.05);
+  box-shadow:
+    0 12px 28px rgba(15, 23, 42, 0.028),
+    inset 0 1px 0 rgba(255, 255, 255, 0.52);
+  backdrop-filter: blur(12px);
+}
+
+.wallet-workspace__toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.wallet-workspace__toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.wallet-workspace__toolbar-group--filters {
+  flex: 1;
+}
+
+.wallet-workspace__toolbar-group--actions {
+  justify-content: flex-end;
+}
+
+.wallet-workspace__preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.wallet-workspace__search {
+  min-width: min(360px, 100%);
+}
+
+.wallet-workspace__panel .panel__body {
+  display: grid;
+  gap: 18px;
+}
+
+.wallet-workspace__accounts-wrap {
+  max-height: 760px;
+}
+
+.wallet-workspace__accounts-table,
+.wallet-workspace__nested-table {
+  width: 100%;
+}
+
+.wallet-workspace__expand-column,
+.wallet-workspace__expand-cell {
+  width: 52px;
+  text-align: center;
+}
+
+.wallet-workspace__expand-button {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--ink);
+  cursor: pointer;
+  transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease;
+}
+
+.wallet-workspace__expand-button:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.9);
+  border-color: rgba(7, 65, 66, 0.16);
+}
+
+.wallet-workspace__account-row--expanded {
+  background: rgba(255, 249, 244, 0.92) !important;
+}
+
+.wallet-workspace__expanded-row td {
+  padding: 0;
+  border-bottom: none;
+}
+
+.wallet-workspace__expanded-panel {
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(252, 248, 243, 0.42)),
+    radial-gradient(circle at top right, rgba(241, 207, 169, 0.12), transparent 44%);
+  border-top: 1px solid rgba(17, 24, 39, 0.05);
+}
+
+.wallet-workspace__expanded-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.wallet-workspace__expanded-header strong,
+.wallet-workspace__identity strong {
+  font-size: 0.96rem;
+}
+
+.wallet-workspace__expanded-header p,
+.wallet-workspace__identity span {
+  margin: 4px 0 0;
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+}
+
+.wallet-workspace__identity {
+  display: grid;
+  gap: 2px;
+}
+
+.wallet-workspace__identity--compact strong {
+  font-size: 0.9rem;
+}
+
+.wallet-workspace__amount,
+.wallet-workspace__transaction-id {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.wallet-workspace__nested-wrap {
+  max-height: 360px;
+}
+
+.wallet-workspace__nested-table thead th {
+  font-size: 0.72rem;
+}
+
+.wallet-workspace__comment {
+  display: block;
+  min-width: 220px;
+  color: #5d6773;
+}
+
+@media (max-width: 1100px) {
+  .wallet-workspace__toolbar {
+    flex-direction: column;
+  }
+
+  .wallet-workspace__toolbar-group--actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 840px) {
+  .wallet-workspace__expanded-header {
+    flex-direction: column;
+  }
+
+  .wallet-workspace__search {
+    min-width: 100%;
+  }
+}
+
 .commission-settings__actions,
 .commission-form__actions,
 .commission-report__toolbar,

@@ -16,6 +16,8 @@ import { CheckInOutPage } from "./features/operational/check-in-out/CheckInOutPa
 import { SalesPage } from "./features/operational/sales/SalesPage";
 import { SalesDetailPage } from "./features/operational/sales/SalesDetailPage";
 import { MembersPage } from "./features/operational/members/MembersPage";
+import { WalletsPage } from "./features/operational/wallets/WalletsPage";
+import { TransactionsPage } from "./features/operational/wallets/TransactionsPage";
 import { CustomerBehaviorPage } from "./features/analytics/customer-behavior/CustomerBehaviorPage";
 import { ServiceBehaviorPage } from "./features/analytics/service-behavior/ServiceBehaviorPage";
 import { PaymentReportPage } from "./features/analytics/payment-report/PaymentReportPage";
@@ -72,6 +74,8 @@ export default function App() {
                     <Route path="operational/sales" element={<SalesPage />} />
                     <Route path="operational/sales/:saleId" element={<SalesDetailPage />} />
                     <Route path="operational/members" element={<MembersPage />} />
+                    <Route path="operational/wallets" element={<WalletsPage />} />
+                    <Route path="operational/transactions" element={<TransactionsPage />} />
                     <Route path="core/services/list" element={<ServiceListPage />} />
                     <Route path="core/services/packages" element={<ServicePackagesPage />} />
                     <Route path="core/services/categories" element={<ServiceCategoriesPage />} />

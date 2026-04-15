@@ -22,6 +22,9 @@ import type {
   TherapistPortalOverviewResponse,
   TherapistPortalResponse,
   TherapistPortalTreatmentsResponse,
+  WalletAccountTransactionsResponse,
+  WalletAccountsResponse,
+  WalletTransactionsResponse,
   ServicePortalCustomersResponse,
   ServicePortalListResponse,
   ServicePortalOverviewResponse,
@@ -416,6 +419,49 @@ export async function fetchDailyTreatment(params: {
 }) {
   const response = await apiClient.get<{ success: true; data: DailyTreatmentResponse }>(
     "/analytics/daily-treatment",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchWalletAccounts(
+  params: Pick<BaseParams, "clinicId" | "clinicCode"> & {
+    search: string;
+    page: number;
+    pageSize: number;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: WalletAccountsResponse }>("/analytics/wallets", {
+    params,
+  });
+  return response.data.data;
+}
+
+export async function fetchWalletAccountTransactions(
+  params: Pick<BaseParams, "clinicId" | "clinicCode"> & {
+    accountName: string;
+    accountPhone: string;
+    search: string;
+    page: number;
+    pageSize: number;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: WalletAccountTransactionsResponse }>(
+    "/analytics/wallets/detail",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchWalletTransactions(
+  params: BaseParams & {
+    search: string;
+    page: number;
+    pageSize: number;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: WalletTransactionsResponse }>(
+    "/analytics/wallet-transactions",
     { params },
   );
   return response.data.data;
