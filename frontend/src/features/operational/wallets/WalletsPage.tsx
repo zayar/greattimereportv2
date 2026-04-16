@@ -180,6 +180,10 @@ export function WalletsPage() {
     }
 
     const cached = detailByKey[expandedAccountKey];
+    if (cached?.loading) {
+      return;
+    }
+
     if (
       cached &&
       cached.page === expandedPage &&
@@ -247,7 +251,7 @@ export function WalletsPage() {
     return () => {
       active = false;
     };
-  }, [detailByKey, expandedAccount, expandedAccountKey, expandedPage, passCode, passConfig]);
+  }, [expandedAccount, expandedAccountKey, expandedPage, passCode, passConfig]);
 
   async function handleExport() {
     if (!currentClinic || !passConfig) {
