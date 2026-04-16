@@ -4,6 +4,8 @@ import {
   createOfferCategoryDraft,
   createOfferDraft,
   excerptText,
+  filterOffers,
+  getOfferSortOrderOptions,
   sortOffersByCampaign,
   summarizeStatuses,
 } from "../src/features/offers/offerUtils"
@@ -133,4 +135,111 @@ test("sorts offers by created date newest first and keeps sort order inside a ba
     rows.map((row) => row.id),
     ["offer-latest-sort-1", "offer-latest-sort-2", "offer-mid-sort-2", "offer-older"],
   )
+})
+
+test("filters offers by status, category, search text, and sort order", () => {
+  const rows = filterOffers(
+    [
+      {
+        id: "offer-1",
+        name: "Thingyan Sale",
+        image: null,
+        sort_order: 3,
+        hight_light: "Water festival special",
+        expired_date: null,
+        description: "April campaign",
+        clinic_id: "clinic-1",
+        category_id: "cat-1",
+        category: { id: "cat-1", name: "Promo" },
+        term_and_condition: null,
+        status: "ACTIVE",
+        images: [],
+        metadata: null,
+        created_at: "2026-04-12T00:00:00.000Z",
+      },
+      {
+        id: "offer-2",
+        name: "Last Chance",
+        image: null,
+        sort_order: 1,
+        hight_light: "Final days",
+        expired_date: null,
+        description: "March campaign",
+        clinic_id: "clinic-1",
+        category_id: "cat-2",
+        category: { id: "cat-2", name: "Archive" },
+        term_and_condition: null,
+        status: "INACTIVE",
+        images: [],
+        metadata: null,
+        created_at: "2026-03-30T00:00:00.000Z",
+      },
+    ],
+    {
+      status: "ACTIVE",
+      categoryId: "cat-1",
+      search: "water",
+      sortOrder: "3",
+    },
+  )
+
+  assert.deepEqual(rows.map((row) => row.id), ["offer-1"])
+})
+
+test("builds unique sort order options in ascending order", () => {
+  const options = getOfferSortOrderOptions([
+    {
+      id: "offer-1",
+      name: "A",
+      image: null,
+      sort_order: 3,
+      hight_light: null,
+      expired_date: null,
+      description: null,
+      clinic_id: "clinic-1",
+      category_id: null,
+      category: null,
+      term_and_condition: null,
+      status: "ACTIVE",
+      images: [],
+      metadata: null,
+      created_at: "2026-04-01T00:00:00.000Z",
+    },
+    {
+      id: "offer-2",
+      name: "B",
+      image: null,
+      sort_order: 1,
+      hight_light: null,
+      expired_date: null,
+      description: null,
+      clinic_id: "clinic-1",
+      category_id: null,
+      category: null,
+      term_and_condition: null,
+      status: "ACTIVE",
+      images: [],
+      metadata: null,
+      created_at: "2026-04-02T00:00:00.000Z",
+    },
+    {
+      id: "offer-3",
+      name: "C",
+      image: null,
+      sort_order: 3,
+      hight_light: null,
+      expired_date: null,
+      description: null,
+      clinic_id: "clinic-1",
+      category_id: null,
+      category: null,
+      term_and_condition: null,
+      status: "ACTIVE",
+      images: [],
+      metadata: null,
+      created_at: "2026-04-03T00:00:00.000Z",
+    },
+  ])
+
+  assert.deepEqual(options, ["1", "3"])
 })

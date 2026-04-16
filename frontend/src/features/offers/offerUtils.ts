@@ -1,5 +1,12 @@
 import type { OfferCategoryRow, OfferRow } from "../../types/domain";
 
+export type OfferFilters = {
+  status: string;
+  categoryId: string;
+  search: string;
+  sortOrder: string;
+};
+
 export type OfferCategoryDraft = {
   name: string;
   image: string;
@@ -92,4 +99,41 @@ export function sortOffersByCampaign(rows: OfferRow[]) {
 
     return left.name.localeCompare(right.name);
   });
+}
+
+export function filterOffers(rows: OfferRow[], filters: OfferFilters) {
+  return rows.filter((row) => {
+    if (filters.status && row.status !== filters.status) {
+      return false;
+    }
+
+    if (filters.categoryId && (row.category?.id ?? row.category_id ?? "") !== filters.categoryId) {
+      return false;
+    }
+
+    if (filters.sortOrder && String(Number(row.sort_order ?? 0)) !== filters.sortOrder) {
+      return false;
+    }
+
+    if (!filters.search) {
+      return true;
+    }
+
+    const haystack = [
+      row.name,
+      row.category?.name ?? "",
+      row.hight_light ?? "",
+      row.description ?? "",
+      row.term_and_condition ?? "",
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    return haystack.includes(filters.search);
+  });
+}
+
+export function getOfferSortOrderOptions(rows: OfferRow[]) {
+  return [...new Set(rows.map((row) => String(Number(row.sort_order ?? 0))))]
+    .sort((left, right) => Number(left) - Number(right));
 }

@@ -23,6 +23,8 @@ import {
 import {
   createOfferDraft,
   excerptText,
+  filterOffers,
+  getOfferSortOrderOptions,
   sortOffersByCampaign,
   summarizeStatuses,
   type OfferDraft,
@@ -52,6 +54,7 @@ export function OfferListPage() {
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
   const [statusFilter, setStatusFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [sortOrderFilter, setSortOrderFilter] = useState("");
   const [scope, setScope] = useState<OfferLoadScope>("month");
   const [mode, setMode] = useState<EditorMode>({ type: "new" });
   const [draft, setDraft] = useState<OfferDraft>(() => createOfferDraft());
@@ -73,33 +76,15 @@ export function OfferListPage() {
   const allRows = offersQuery.data?.offers ?? [];
   const sortedAllRows = useMemo(() => sortOffersByCampaign(allRows), [allRows]);
   const categories = categoriesQuery.data?.offerCategories ?? [];
+  const sortOrderOptions = useMemo(() => getOfferSortOrderOptions(sortedAllRows), [sortedAllRows]);
   const rows = useMemo(() => {
-    return sortedAllRows.filter((row) => {
-      if (statusFilter && row.status !== statusFilter) {
-        return false;
-      }
-
-      if (categoryFilter && (row.category?.id ?? row.category_id ?? "") !== categoryFilter) {
-        return false;
-      }
-
-      if (!deferredSearch) {
-        return true;
-      }
-
-      const haystack = [
-        row.name,
-        row.category?.name ?? "",
-        row.hight_light ?? "",
-        row.description ?? "",
-        row.term_and_condition ?? "",
-      ]
-        .join(" ")
-        .toLowerCase();
-
-      return haystack.includes(deferredSearch);
+    return filterOffers(sortedAllRows, {
+      status: statusFilter,
+      categoryId: categoryFilter,
+      search: deferredSearch,
+      sortOrder: sortOrderFilter,
     });
-  }, [categoryFilter, deferredSearch, sortedAllRows, statusFilter]);
+  }, [categoryFilter, deferredSearch, sortedAllRows, sortOrderFilter, statusFilter]);
 
   const selectedRow = mode.type === "existing" ? allRows.find((row) => row.id === mode.id) ?? null : null;
   const statusSummary = useMemo(() => summarizeStatuses(allRows), [allRows]);
@@ -113,6 +98,8 @@ export function OfferListPage() {
     scope === "month"
       ? "Only this month's offers are loaded first so the gallery opens faster."
       : "Showing the full created-date archive for this clinic.";
+  const selectedCountLabel =
+    rows.length === allRows.length ? `${rows.length.toLocaleString("en-US")} visible` : `${rows.length.toLocaleString("en-US")} filtered`;
 
   useEffect(() => {
     if (allRows.length === 0) {
@@ -305,6 +292,17 @@ export function OfferListPage() {
                 ))}
               </select>
             </label>
+            <label className="field field--compact">
+              <span>Sort order</span>
+              <select value={sortOrderFilter} onChange={(event) => setSortOrderFilter(event.target.value)}>
+                <option value="">All sort orders</option>
+                {sortOrderOptions.map((option) => (
+                  <option key={option} value={option}>
+                    Sort {option}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button type="button" className="button button--secondary" onClick={beginCreate}>
               Create Offer
             </button>
@@ -338,18 +336,18 @@ export function OfferListPage() {
       <div className="offer-admin__layout offer-admin__layout--offers">
         <Panel
           className="offer-admin__list-panel"
-          title="Offer gallery"
-          subtitle={`${rows.length.toLocaleString("en-US")} offer cards in ${scopeLabel.toLowerCase()} view`}
+          title="Offer list"
+          subtitle={`${rows.length.toLocaleString("en-US")} offers in ${scopeLabel.toLowerCase()} view`}
         >
-          <div className="offer-admin__gallery-banner">
+          <div className="offer-admin__gallery-banner offer-admin__list-banner">
             <div className="offer-admin__gallery-copy">
               <span className="offer-admin__eyebrow">Created Date Order</span>
               <strong>{scope === "month" ? "Newest offers this month" : "Newest offers in the archive"}</strong>
-              <p>{scopeHint} Cards stay ordered by created date, with sort order only used inside the same creation batch.</p>
+              <p>{scopeHint} Use the sort-order filter to narrow the list to a specific campaign slot.</p>
             </div>
             <div className="offer-admin__gallery-stats">
               <span>{allRows.length.toLocaleString("en-US")} loaded</span>
-              <span>{rows.length.toLocaleString("en-US")} visible</span>
+              <span>{selectedCountLabel}</span>
             </div>
           </div>
 
@@ -365,37 +363,47 @@ export function OfferListPage() {
           ) : null}
 
           {rows.length > 0 ? (
-            <div className="offer-admin__card-grid offer-admin__card-grid--offers">
+            <div className="offer-list">
+              <div className="offer-list__header">
+                <span>Offer</span>
+                <span>Category</span>
+                <span>Status</span>
+                <span>Sort order</span>
+                <span>Created</span>
+                <span>Actions</span>
+              </div>
               {rows.map((row, index) => {
                 const selected = mode.type === "existing" && mode.id === row.id;
                 const featured = index === 0;
 
                 return (
-                  <article
+                  <div
                     key={row.id}
-                    className={`offer-card offer-card--offer ${selected ? "offer-card--selected" : ""} ${featured ? "offer-card--featured" : ""}`.trim()}
+                    className={`offer-list__row ${selected ? "offer-list__row--selected" : ""}`.trim()}
                   >
-                    <button type="button" className="offer-card__surface" onClick={() => selectExisting(row)}>
-                      <div className="offer-card__media">
-                        {featured ? <span className="offer-card__badge">Newest created</span> : null}
-                        {row.image ? <img src={row.image} alt={row.name} /> : <span>Offer Artwork</span>}
-                      </div>
-                      <div className="offer-card__body">
-                        <div className="offer-card__meta">
-                          <span className={`status-pill ${(row.status ?? "").toUpperCase() === "ACTIVE" ? "status-pill--active" : "status-pill--archived"}`}>
-                            {row.status}
-                          </span>
-                          <span>{row.category?.name || "Uncategorized"}</span>
+                    <button type="button" className="offer-list__summary" onClick={() => selectExisting(row)}>
+                      <div className="offer-list__identity">
+                        <div className="offer-list__thumb">
+                          {row.image ? <img src={row.image} alt={row.name} /> : <span>Offer</span>}
                         </div>
-                        <strong>{row.name}</strong>
-                        <p>{excerptText(row.hight_light || row.description, 110)}</p>
-                        <div className="offer-card__footer">
-                          <span>Sort {Number(row.sort_order ?? 0)}</span>
-                          <span>Created {formatDate(row.created_at)}</span>
+                        <div className="offer-list__copy">
+                          <div className="offer-list__title-row">
+                            <strong>{row.name}</strong>
+                            {featured ? <span className="offer-list__badge">Newest</span> : null}
+                          </div>
+                          <p>{excerptText(row.hight_light || row.description, 120)}</p>
                         </div>
                       </div>
                     </button>
-                    <div className="offer-card__actions">
+                    <div className="offer-list__cell offer-list__cell--category">{row.category?.name || "Uncategorized"}</div>
+                    <div className="offer-list__cell">
+                      <span className={`status-pill ${(row.status ?? "").toUpperCase() === "ACTIVE" ? "status-pill--active" : "status-pill--archived"}`}>
+                        {row.status}
+                      </span>
+                    </div>
+                    <div className="offer-list__cell offer-list__cell--number">{Number(row.sort_order ?? 0)}</div>
+                    <div className="offer-list__cell">{formatDate(row.created_at)}</div>
+                    <div className="offer-list__actions">
                       <button type="button" className="button button--secondary" onClick={() => selectExisting(row)}>
                         Edit
                       </button>
@@ -403,7 +411,7 @@ export function OfferListPage() {
                         Delete
                       </button>
                     </div>
-                  </article>
+                  </div>
                 );
               })}
             </div>
