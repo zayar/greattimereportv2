@@ -78,28 +78,14 @@ function toTimestamp(value: string | null | undefined) {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
-function getCampaignTimestamp(row: OfferRow) {
-  const expiredTimestamp = toTimestamp(row.expired_date);
-  if (expiredTimestamp > 0) {
-    return expiredTimestamp;
-  }
-
-  return toTimestamp(row.created_at);
-}
-
 export function sortOffersByCampaign(rows: OfferRow[]) {
   return [...rows].sort((left, right) => {
-    const recencyDelta = getCampaignTimestamp(right) - getCampaignTimestamp(left);
+    const recencyDelta = toTimestamp(right.created_at) - toTimestamp(left.created_at);
     if (recencyDelta !== 0) {
       return recencyDelta;
     }
 
-    const createdDelta = toTimestamp(right.created_at) - toTimestamp(left.created_at);
-    if (createdDelta !== 0) {
-      return createdDelta;
-    }
-
-    const sortOrderDelta = Number(right.sort_order ?? 0) - Number(left.sort_order ?? 0);
+    const sortOrderDelta = Number(left.sort_order ?? 0) - Number(right.sort_order ?? 0);
     if (sortOrderDelta !== 0) {
       return sortOrderDelta;
     }
