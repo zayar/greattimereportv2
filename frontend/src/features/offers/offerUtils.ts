@@ -85,9 +85,12 @@ function toTimestamp(value: string | null | undefined) {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
-export function sortOffersByCampaign(rows: OfferRow[]) {
+export function sortOffersByCampaign(rows: OfferRow[], direction: "desc" | "asc" = "desc") {
   return [...rows].sort((left, right) => {
-    const createdDelta = toTimestamp(right.created_at) - toTimestamp(left.created_at);
+    const createdDelta =
+      direction === "desc"
+        ? toTimestamp(right.created_at) - toTimestamp(left.created_at)
+        : toTimestamp(left.created_at) - toTimestamp(right.created_at);
     if (createdDelta !== 0) {
       return createdDelta;
     }

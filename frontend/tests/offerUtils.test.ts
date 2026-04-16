@@ -137,6 +137,50 @@ test("sorts offers by created date newest first and keeps sort order inside a ba
   )
 })
 
+test("can sort offers by created date oldest first when requested", () => {
+  const rows = sortOffersByCampaign(
+    [
+      {
+        id: "offer-newer",
+        name: "Newer",
+        image: null,
+        sort_order: 2,
+        hight_light: null,
+        expired_date: null,
+        description: null,
+        clinic_id: "clinic-1",
+        category_id: null,
+        category: null,
+        term_and_condition: null,
+        status: "ACTIVE",
+        images: [],
+        metadata: null,
+        created_at: "2026-04-15T00:00:00.000Z",
+      },
+      {
+        id: "offer-older",
+        name: "Older",
+        image: null,
+        sort_order: 1,
+        hight_light: null,
+        expired_date: null,
+        description: null,
+        clinic_id: "clinic-1",
+        category_id: null,
+        category: null,
+        term_and_condition: null,
+        status: "ACTIVE",
+        images: [],
+        metadata: null,
+        created_at: "2026-04-01T00:00:00.000Z",
+      },
+    ],
+    "asc",
+  )
+
+  assert.deepEqual(rows.map((row) => row.id), ["offer-older", "offer-newer"])
+})
+
 test("filters offers by status, category, search text, and sort order", () => {
   const rows = filterOffers(
     [

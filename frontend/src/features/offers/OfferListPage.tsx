@@ -48,6 +48,8 @@ type EditorMode =
   | { type: "new" }
   | { type: "existing"; id: string };
 
+type CreatedSortDirection = "desc" | "asc";
+
 export function OfferListPage() {
   const { currentClinic } = useAccess();
   const [search, setSearch] = useState("");
@@ -56,6 +58,8 @@ export function OfferListPage() {
   const [categoryFilter, setCategoryFilter] = useState("");
   const [sortOrderFilter, setSortOrderFilter] = useState("");
   const [scope, setScope] = useState<OfferLoadScope>("month");
+  const [createdSortDirection, setCreatedSortDirection] = useState<CreatedSortDirection>("desc");
+  const [editorOpen, setEditorOpen] = useState(false);
   const [mode, setMode] = useState<EditorMode>({ type: "new" });
   const [draft, setDraft] = useState<OfferDraft>(() => createOfferDraft());
   const [feedback, setFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
@@ -74,7 +78,10 @@ export function OfferListPage() {
   const [deleteOffer, { loading: deleting }] = useMutation<MutationResponse>(DELETE_OFFER);
 
   const allRows = offersQuery.data?.offers ?? [];
-  const sortedAllRows = useMemo(() => sortOffersByCampaign(allRows), [allRows]);
+  const sortedAllRows = useMemo(
+    () => sortOffersByCampaign(allRows, createdSortDirection),
+    [allRows, createdSortDirection],
+  );
   const categories = categoriesQuery.data?.offerCategories ?? [];
   const sortOrderOptions = useMemo(() => getOfferSortOrderOptions(sortedAllRows), [sortedAllRows]);
   const rows = useMemo(() => {
@@ -88,56 +95,52 @@ export function OfferListPage() {
 
   const selectedRow = mode.type === "existing" ? allRows.find((row) => row.id === mode.id) ?? null : null;
   const statusSummary = useMemo(() => summarizeStatuses(allRows), [allRows]);
-  const illustratedCount = useMemo(() => allRows.filter((row) => Boolean(row.image)).length, [allRows]);
-  const categoryCoverage = useMemo(
-    () => new Set(allRows.map((row) => row.category?.id).filter(Boolean)).size,
-    [allRows],
-  );
   const scopeLabel = scope === "month" ? "This month" : "All campaigns";
-  const scopeHint =
-    scope === "month"
-      ? "Only this month's offers are loaded first so the gallery opens faster."
-      : "Showing the full created-date archive for this clinic.";
   const selectedCountLabel =
     rows.length === allRows.length ? `${rows.length.toLocaleString("en-US")} visible` : `${rows.length.toLocaleString("en-US")} filtered`;
+  const createdSortLabel = createdSortDirection === "desc" ? "Newest first" : "Oldest first";
+  const busy = creating || updating || deleting;
 
   useEffect(() => {
-    if (allRows.length === 0) {
-      setMode({ type: "new" });
-      setDraft(createOfferDraft());
+    setEditorOpen(false);
+    setMode({ type: "new" });
+    setDraft(createOfferDraft());
+    setFeedback(null);
+  }, [currentClinic?.id]);
+
+  useEffect(() => {
+    if (!editorOpen) {
       return;
     }
 
-    if (mode.type === "existing") {
-      const nextSelected = allRows.find((row) => row.id === mode.id);
-      if (nextSelected) {
-        setDraft(createOfferDraft(nextSelected));
-        return;
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape" && !busy) {
+        setEditorOpen(false);
       }
     }
 
-    if (mode.type === "new") {
-      return;
-    }
-
-    const firstRow = sortedAllRows[0];
-    setMode({ type: "existing", id: firstRow.id });
-    setDraft(createOfferDraft(firstRow));
-  }, [allRows, mode, sortedAllRows]);
-
-  const busy = creating || updating || deleting;
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [busy, editorOpen]);
   const currentCategoryName =
     categories.find((category) => category.id === draft.category_id)?.name || "Uncategorized";
 
-  function selectExisting(row: OfferRow) {
+  function openEditModal(row: OfferRow) {
     setMode({ type: "existing", id: row.id });
     setDraft(createOfferDraft(row));
+    setEditorOpen(true);
     setFeedback(null);
   }
 
   function beginCreate() {
     setMode({ type: "new" });
     setDraft(createOfferDraft());
+    setEditorOpen(true);
+    setFeedback(null);
+  }
+
+  function closeEditor() {
+    setEditorOpen(false);
     setFeedback(null);
   }
 
@@ -153,17 +156,14 @@ export function OfferListPage() {
 
     try {
       if (mode.type === "new") {
-        const result = await createOffer({
+        await createOffer({
           variables: buildCreateOfferVariables(currentClinic.id, draft),
         });
-        const createdId = result.data?.createOneOffer?.id;
-
         await offersQuery.refetch();
 
-        if (createdId) {
-          setMode({ type: "existing", id: createdId });
-        }
-
+        setEditorOpen(false);
+        setMode({ type: "new" });
+        setDraft(createOfferDraft());
         setFeedback({ tone: "success", message: "Offer created." });
         return;
       }
@@ -172,6 +172,7 @@ export function OfferListPage() {
         variables: buildUpdateOfferVariables(mode.id, draft),
       });
       await offersQuery.refetch();
+      setEditorOpen(false);
       setFeedback({ tone: "success", message: "Offer updated." });
     } catch (mutationError) {
       setFeedback({
@@ -195,6 +196,7 @@ export function OfferListPage() {
         variables: buildDeleteOfferVariables(mode.id),
       });
       await offersQuery.refetch();
+      setEditorOpen(false);
       setMode({ type: "new" });
       setDraft(createOfferDraft());
       setFeedback({ tone: "success", message: "Offer deleted." });
@@ -217,7 +219,8 @@ export function OfferListPage() {
       });
       await offersQuery.refetch();
 
-      if (mode.type === "existing" && mode.id === row.id) {
+      if (editorOpen && mode.type === "existing" && mode.id === row.id) {
+        setEditorOpen(false);
         setMode({ type: "new" });
         setDraft(createOfferDraft());
       }
@@ -247,23 +250,7 @@ export function OfferListPage() {
       <PageHeader
         title="Offer List"
         actions={
-          <div className="offer-admin__toolbar offer-admin__toolbar--offers">
-            <div className="offer-admin__scope-switch" role="group" aria-label="Offer gallery scope">
-              <button
-                type="button"
-                className={`button ${scope === "month" ? "" : "button--secondary"}`.trim()}
-                onClick={() => setScope("month")}
-              >
-                This month
-              </button>
-              <button
-                type="button"
-                className={`button ${scope === "all" ? "" : "button--secondary"}`.trim()}
-                onClick={() => setScope("all")}
-              >
-                All time
-              </button>
-            </div>
+          <div className="offer-admin__header-actions">
             <label className="field field--compact field--search">
               <span>Search</span>
               <input
@@ -273,6 +260,36 @@ export function OfferListPage() {
                 onChange={(event) => setSearch(event.target.value)}
               />
             </label>
+            <button type="button" className="button" onClick={beginCreate}>
+              Create Offer
+            </button>
+          </div>
+        }
+      />
+
+      <Panel
+        className="offer-admin__list-panel offer-admin__list-panel--wide"
+        title="Offers"
+        subtitle={`${rows.length.toLocaleString("en-US")} offers in ${scopeLabel.toLowerCase()} view. ${createdSortLabel}.`}
+      >
+        <div className="offer-admin__filter-bar">
+          <div className="offer-admin__scope-switch" role="group" aria-label="Offer gallery scope">
+            <button
+              type="button"
+              className={`button ${scope === "month" ? "" : "button--secondary"}`.trim()}
+              onClick={() => setScope("month")}
+            >
+              This month
+            </button>
+            <button
+              type="button"
+              className={`button ${scope === "all" ? "" : "button--secondary"}`.trim()}
+              onClick={() => setScope("all")}
+            >
+              All time
+            </button>
+          </div>
+          <div className="offer-admin__filter-fields">
             <label className="field field--compact">
               <span>Status</span>
               <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
@@ -303,274 +320,288 @@ export function OfferListPage() {
                 ))}
               </select>
             </label>
-            <button type="button" className="button button--secondary" onClick={beginCreate}>
-              Create Offer
-            </button>
           </div>
-        }
-      />
-
-      <div className="report-kpi-strip">
-        <article className="report-kpi-strip__card">
-          <span className="report-kpi-strip__label">Offers</span>
-          <strong className="report-kpi-strip__value">{allRows.length.toLocaleString("en-US")}</strong>
-          <span className="report-kpi-strip__hint">All offers currently stored for the selected clinic.</span>
-        </article>
-        <article className="report-kpi-strip__card">
-          <span className="report-kpi-strip__label">Active</span>
-          <strong className="report-kpi-strip__value">{statusSummary.active.toLocaleString("en-US")}</strong>
-          <span className="report-kpi-strip__hint">Offers that are ready to surface in the customer experience.</span>
-        </article>
-        <article className="report-kpi-strip__card">
-          <span className="report-kpi-strip__label">With cover image</span>
-          <strong className="report-kpi-strip__value">{illustratedCount.toLocaleString("en-US")}</strong>
-          <span className="report-kpi-strip__hint">Offers with artwork already attached.</span>
-        </article>
-        <article className="report-kpi-strip__card">
-          <span className="report-kpi-strip__label">Categories used</span>
-          <strong className="report-kpi-strip__value">{categoryCoverage.toLocaleString("en-US")}</strong>
-          <span className="report-kpi-strip__hint">Distinct categories represented across the offer list.</span>
-        </article>
-      </div>
-
-      <div className="offer-admin__layout offer-admin__layout--offers">
-        <Panel
-          className="offer-admin__list-panel"
-          title="Offer list"
-          subtitle={`${rows.length.toLocaleString("en-US")} offers in ${scopeLabel.toLowerCase()} view`}
-        >
-          <div className="offer-admin__gallery-banner offer-admin__list-banner">
-            <div className="offer-admin__gallery-copy">
-              <span className="offer-admin__eyebrow">Created Date Order</span>
-              <strong>{scope === "month" ? "Newest offers this month" : "Newest offers in the archive"}</strong>
-              <p>{scopeHint} Use the sort-order filter to narrow the list to a specific campaign slot.</p>
-            </div>
-            <div className="offer-admin__gallery-stats">
-              <span>{allRows.length.toLocaleString("en-US")} loaded</span>
-              <span>{selectedCountLabel}</span>
-            </div>
+          <div className="offer-admin__gallery-stats">
+            <span>{allRows.length.toLocaleString("en-US")} loaded</span>
+            <span>{selectedCountLabel}</span>
+            <span>{statusSummary.active.toLocaleString("en-US")} active</span>
           </div>
+        </div>
 
-          {offersQuery.loading || categoriesQuery.loading ? (
-            <div className="inline-note inline-note--loading">Loading offers...</div>
-          ) : null}
-          {offersQuery.error ? <ErrorState label="Offers could not be loaded" detail={offersQuery.error.message} /> : null}
-          {categoriesQuery.error ? (
-            <ErrorState label="Offer categories could not be loaded" detail={categoriesQuery.error.message} />
-          ) : null}
-          {!offersQuery.loading && !offersQuery.error && rows.length === 0 ? (
-            <EmptyState label="No offers matched these filters" detail="Try clearing the filters or create a new offer." />
-          ) : null}
+        {feedback && !editorOpen ? (
+          <div className={`offer-admin__feedback offer-admin__feedback--${feedback.tone}`}>{feedback.message}</div>
+        ) : null}
 
-          {rows.length > 0 ? (
-            <div className="offer-list">
-              <div className="offer-list__header">
-                <span>Offer</span>
-                <span>Category</span>
-                <span>Status</span>
-                <span>Sort order</span>
-                <span>Created</span>
-                <span>Actions</span>
-              </div>
-              {rows.map((row, index) => {
-                const selected = mode.type === "existing" && mode.id === row.id;
-                const featured = index === 0;
+        {offersQuery.loading || categoriesQuery.loading ? (
+          <div className="inline-note inline-note--loading">Loading offers...</div>
+        ) : null}
+        {offersQuery.error ? <ErrorState label="Offers could not be loaded" detail={offersQuery.error.message} /> : null}
+        {categoriesQuery.error ? (
+          <ErrorState label="Offer categories could not be loaded" detail={categoriesQuery.error.message} />
+        ) : null}
+        {!offersQuery.loading && !offersQuery.error && rows.length === 0 ? (
+          <EmptyState label="No offers matched these filters" detail="Try clearing the filters or create a new offer." />
+        ) : null}
 
-                return (
-                  <div
-                    key={row.id}
-                    className={`offer-list__row ${selected ? "offer-list__row--selected" : ""}`.trim()}
-                  >
-                    <button type="button" className="offer-list__summary" onClick={() => selectExisting(row)}>
-                      <div className="offer-list__identity">
-                        <div className="offer-list__thumb">
-                          {row.image ? <img src={row.image} alt={row.name} /> : <span>Offer</span>}
-                        </div>
-                        <div className="offer-list__copy">
-                          <div className="offer-list__title-row">
-                            <strong>{row.name}</strong>
-                            {featured ? <span className="offer-list__badge">Newest</span> : null}
-                          </div>
-                          <p>{excerptText(row.hight_light || row.description, 120)}</p>
-                        </div>
-                      </div>
+        {rows.length > 0 ? (
+          <div className="offer-table-shell">
+            <table className="offer-table">
+              <thead>
+                <tr>
+                  <th>Photo</th>
+                  <th>Offer</th>
+                  <th>Category</th>
+                  <th>Status</th>
+                  <th>Sort Order</th>
+                  <th>
+                    <button
+                      type="button"
+                      className="offer-table__sort-button"
+                      onClick={() =>
+                        setCreatedSortDirection((previous) => (previous === "desc" ? "asc" : "desc"))
+                      }
+                    >
+                      <span>Created Date</span>
+                      <small>{createdSortDirection === "desc" ? "Desc" : "Asc"}</small>
                     </button>
-                    <div className="offer-list__cell offer-list__cell--category">{row.category?.name || "Uncategorized"}</div>
-                    <div className="offer-list__cell">
-                      <span className={`status-pill ${(row.status ?? "").toUpperCase() === "ACTIVE" ? "status-pill--active" : "status-pill--archived"}`}>
+                  </th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.id}>
+                    <td>
+                      <div className="offer-table__photo-frame">
+                        {row.image ? <img src={row.image} alt={row.name} /> : <span>Offer</span>}
+                      </div>
+                    </td>
+                    <td>
+                      <div className="offer-table__offer">
+                        <strong>{row.name}</strong>
+                        <span>{excerptText(row.hight_light, 88)}</span>
+                        <small>{excerptText(row.description, 110)}</small>
+                      </div>
+                    </td>
+                    <td>{row.category?.name || "Uncategorized"}</td>
+                    <td>
+                      <span
+                        className={`status-pill ${(row.status ?? "").toUpperCase() === "ACTIVE" ? "status-pill--active" : "status-pill--archived"}`}
+                      >
                         {row.status}
                       </span>
-                    </div>
-                    <div className="offer-list__cell offer-list__cell--number">{Number(row.sort_order ?? 0)}</div>
-                    <div className="offer-list__cell">{formatDate(row.created_at)}</div>
-                    <div className="offer-list__actions">
-                      <button type="button" className="button button--secondary" onClick={() => selectExisting(row)}>
-                        Edit
-                      </button>
-                      <button type="button" className="button button--ghost" onClick={() => void handleDeleteRow(row)}>
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : null}
-        </Panel>
+                    </td>
+                    <td className="offer-table__number">{Number(row.sort_order ?? 0)}</td>
+                    <td>{formatDate(row.created_at)}</td>
+                    <td>
+                      <div className="offer-table__actions">
+                        <button type="button" className="button button--secondary" onClick={() => openEditModal(row)}>
+                          Edit
+                        </button>
+                        <button type="button" className="button button--ghost" onClick={() => void handleDeleteRow(row)}>
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+      </Panel>
 
-        <Panel
-          className="offer-admin__editor-panel"
-          title={mode.type === "new" ? "Create offer" : "Edit offer"}
-          subtitle={
-            mode.type === "new"
-              ? "Create a new offer with image, highlight, and long-form copy."
-              : "Update or remove the selected offer with the same controls used in gt.report."
-          }
-        >
-          {feedback ? (
-            <div className={`offer-admin__feedback offer-admin__feedback--${feedback.tone}`}>{feedback.message}</div>
-          ) : null}
-
-          <div className="offer-editor">
-            <div className="offer-preview-card">
-              <div className="offer-preview-card__media">
-                {draft.image ? <img src={draft.image} alt={draft.name || "Offer preview"} /> : <span>Offer Preview</span>}
+      {editorOpen ? (
+        <div className="offer-editor-modal-shell" role="dialog" aria-modal="true" aria-labelledby="offer-editor-title">
+          <button type="button" className="offer-editor-modal__backdrop" aria-label="Close editor" onClick={closeEditor} />
+          <div className="offer-editor-modal">
+            <div className="offer-editor-modal__header">
+              <div className="offer-editor-modal__copy">
+                <span className="offer-admin__eyebrow">{mode.type === "new" ? "Create offer" : "Edit offer"}</span>
+                <h3 id="offer-editor-title">{mode.type === "new" ? "Create a new offer" : draft.name || "Edit offer"}</h3>
+                <p>
+                  {mode.type === "new"
+                    ? "Add the image, highlight, and offer details here, then save to publish it into the list."
+                    : "Update the selected offer in a focused editor without squeezing the main list page."}
+                </p>
               </div>
-              <div className="offer-preview-card__body">
-                <div className="offer-preview-card__meta">
-                  <span className={`status-pill ${draft.status === "ACTIVE" ? "status-pill--active" : "status-pill--archived"}`}>
-                    {draft.status}
-                  </span>
-                  <span>{currentCategoryName}</span>
-                </div>
-                <strong>{draft.name || "Untitled offer"}</strong>
-                <p>{excerptText(draft.hight_light || draft.description, 150)}</p>
-              </div>
-            </div>
-
-            <OfferArtworkField
-              clinicId={currentClinic?.id ?? "draft"}
-              label="Offer cover image"
-              hint="Use a bright, clean image that still reads well when cropped into a small card."
-              value={draft.image}
-              onChange={(image) => setDraft((previous) => ({ ...previous, image }))}
-            />
-
-            <div className="offer-editor__grid offer-editor__grid--three">
-              <label className="field">
-                <span>Name</span>
-                <input
-                  type="text"
-                  value={draft.name}
-                  placeholder="Example: Valentine's Special"
-                  onChange={(event) => setDraft((previous) => ({ ...previous, name: event.target.value }))}
-                />
-              </label>
-
-              <label className="field">
-                <span>Category</span>
-                <select
-                  value={draft.category_id}
-                  onChange={(event) => setDraft((previous) => ({ ...previous, category_id: event.target.value }))}
-                >
-                  <option value="">No category</option>
-                  {categories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="field">
-                <span>Status</span>
-                <select
-                  value={draft.status}
-                  onChange={(event) =>
-                    setDraft((previous) => ({
-                      ...previous,
-                      status: event.target.value === "INACTIVE" ? "INACTIVE" : "ACTIVE",
-                    }))
-                  }
-                >
-                  <option value="ACTIVE">Active</option>
-                  <option value="INACTIVE">Inactive</option>
-                </select>
-              </label>
-
-              <label className="field">
-                <span>Sort Order</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={draft.sort_order}
-                  onChange={(event) =>
-                    setDraft((previous) => ({
-                      ...previous,
-                      sort_order: Number(event.target.value || 0),
-                    }))
-                  }
-                />
-              </label>
-
-              <label className="field">
-                <span>Expired Date</span>
-                <input
-                  type="date"
-                  value={draft.expired_date}
-                  onChange={(event) => setDraft((previous) => ({ ...previous, expired_date: event.target.value }))}
-                />
-              </label>
-            </div>
-
-            <label className="field offer-editor__field">
-              <span>Highlight</span>
-              <textarea
-                rows={4}
-                value={draft.hight_light}
-                placeholder="Write the short hook that will stand out on the offer card."
-                onChange={(event) => setDraft((previous) => ({ ...previous, hight_light: event.target.value }))}
-              />
-            </label>
-
-            <label className="field offer-editor__field">
-              <span>Description</span>
-              <textarea
-                rows={6}
-                value={draft.description}
-                placeholder="Explain the experience, treatment combination, or customer benefit in more detail."
-                onChange={(event) => setDraft((previous) => ({ ...previous, description: event.target.value }))}
-              />
-            </label>
-
-            <label className="field offer-editor__field">
-              <span>Terms &amp; Conditions</span>
-              <textarea
-                rows={5}
-                value={draft.term_and_condition}
-                placeholder="Add validity, exclusions, redemption rules, or booking restrictions."
-                onChange={(event) =>
-                  setDraft((previous) => ({ ...previous, term_and_condition: event.target.value }))
-                }
-              />
-            </label>
-
-            <div className="offer-editor__actions">
-              <button type="button" className="button" disabled={busy} onClick={() => void handleSave()}>
-                {busy ? "Saving..." : mode.type === "new" ? "Create Offer" : "Save Changes"}
-              </button>
-              <button type="button" className="button button--secondary" disabled={busy} onClick={resetEditor}>
-                Reset
-              </button>
-              {mode.type === "existing" ? (
-                <button type="button" className="button button--ghost" disabled={busy} onClick={() => void handleDelete()}>
-                  Delete
+              <div className="offer-editor-modal__header-actions">
+                {mode.type === "existing" ? (
+                  <button type="button" className="button button--ghost" disabled={busy} onClick={() => void handleDelete()}>
+                    Delete
+                  </button>
+                ) : null}
+                <button type="button" className="button button--secondary" disabled={busy} onClick={closeEditor}>
+                  Close
                 </button>
-              ) : null}
+              </div>
+            </div>
+
+            {feedback ? (
+              <div className={`offer-admin__feedback offer-admin__feedback--${feedback.tone}`}>{feedback.message}</div>
+            ) : null}
+
+            <div className="offer-editor-modal__layout">
+              <div className="offer-editor">
+                <OfferArtworkField
+                  clinicId={currentClinic?.id ?? "draft"}
+                  label="Offer cover image"
+                  hint="Use a bright, clean image that still reads well when cropped into a small card."
+                  value={draft.image}
+                  onChange={(image) => setDraft((previous) => ({ ...previous, image }))}
+                />
+
+                <div className="offer-editor__grid offer-editor__grid--three">
+                  <label className="field">
+                    <span>Name</span>
+                    <input
+                      type="text"
+                      value={draft.name}
+                      placeholder="Example: Valentine's Special"
+                      onChange={(event) => setDraft((previous) => ({ ...previous, name: event.target.value }))}
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Category</span>
+                    <select
+                      value={draft.category_id}
+                      onChange={(event) => setDraft((previous) => ({ ...previous, category_id: event.target.value }))}
+                    >
+                      <option value="">No category</option>
+                      {categories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="field">
+                    <span>Status</span>
+                    <select
+                      value={draft.status}
+                      onChange={(event) =>
+                        setDraft((previous) => ({
+                          ...previous,
+                          status: event.target.value === "INACTIVE" ? "INACTIVE" : "ACTIVE",
+                        }))
+                      }
+                    >
+                      <option value="ACTIVE">Active</option>
+                      <option value="INACTIVE">Inactive</option>
+                    </select>
+                  </label>
+
+                  <label className="field">
+                    <span>Sort Order</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={draft.sort_order}
+                      onChange={(event) =>
+                        setDraft((previous) => ({
+                          ...previous,
+                          sort_order: Number(event.target.value || 0),
+                        }))
+                      }
+                    />
+                  </label>
+
+                  <label className="field">
+                    <span>Expired Date</span>
+                    <input
+                      type="date"
+                      value={draft.expired_date}
+                      onChange={(event) => setDraft((previous) => ({ ...previous, expired_date: event.target.value }))}
+                    />
+                  </label>
+                </div>
+
+                <label className="field offer-editor__field">
+                  <span>Highlight</span>
+                  <textarea
+                    rows={4}
+                    value={draft.hight_light}
+                    placeholder="Write the short hook that will stand out on the offer card."
+                    onChange={(event) => setDraft((previous) => ({ ...previous, hight_light: event.target.value }))}
+                  />
+                </label>
+
+                <label className="field offer-editor__field">
+                  <span>Description</span>
+                  <textarea
+                    rows={6}
+                    value={draft.description}
+                    placeholder="Explain the experience, treatment combination, or customer benefit in more detail."
+                    onChange={(event) => setDraft((previous) => ({ ...previous, description: event.target.value }))}
+                  />
+                </label>
+
+                <label className="field offer-editor__field">
+                  <span>Terms &amp; Conditions</span>
+                  <textarea
+                    rows={5}
+                    value={draft.term_and_condition}
+                    placeholder="Add validity, exclusions, redemption rules, or booking restrictions."
+                    onChange={(event) =>
+                      setDraft((previous) => ({ ...previous, term_and_condition: event.target.value }))
+                    }
+                  />
+                </label>
+
+                <div className="offer-editor__actions">
+                  <button type="button" className="button" disabled={busy} onClick={() => void handleSave()}>
+                    {busy ? "Saving..." : mode.type === "new" ? "Create Offer" : "Save Changes"}
+                  </button>
+                  <button type="button" className="button button--secondary" disabled={busy} onClick={resetEditor}>
+                    Reset
+                  </button>
+                </div>
+              </div>
+
+              <aside className="offer-editor-modal__preview">
+                <div className="offer-preview-card">
+                  <div className="offer-preview-card__media">
+                    {draft.image ? <img src={draft.image} alt={draft.name || "Offer preview"} /> : <span>Offer Preview</span>}
+                  </div>
+                  <div className="offer-preview-card__body">
+                    <div className="offer-preview-card__meta">
+                      <span
+                        className={`status-pill ${draft.status === "ACTIVE" ? "status-pill--active" : "status-pill--archived"}`}
+                      >
+                        {draft.status}
+                      </span>
+                      <span>{currentCategoryName}</span>
+                    </div>
+                    <strong>{draft.name || "Untitled offer"}</strong>
+                    <p>{excerptText(draft.hight_light || draft.description, 150)}</p>
+                  </div>
+                </div>
+
+                <div className="offer-editor-modal__facts">
+                  <div>
+                    <span>Created</span>
+                    <strong>{selectedRow ? formatDate(selectedRow.created_at) : "Will be set after save"}</strong>
+                  </div>
+                  <div>
+                    <span>Sort order</span>
+                    <strong>{Number(draft.sort_order ?? 0)}</strong>
+                  </div>
+                  <div>
+                    <span>Status</span>
+                    <strong>{draft.status}</strong>
+                  </div>
+                  <div>
+                    <span>Category</span>
+                    <strong>{currentCategoryName}</strong>
+                  </div>
+                </div>
+              </aside>
             </div>
           </div>
-        </Panel>
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }
