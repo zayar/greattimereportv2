@@ -20,7 +20,15 @@ import {
   GET_OFFERS,
   UPDATE_OFFER,
 } from "./queries";
-import { createOfferDraft, excerptText, sortOffersByCampaign, summarizeStatuses, type OfferDraft } from "./offerUtils";
+import {
+  createOfferDraft,
+  excerptText,
+  getOfferCampaignDate,
+  getOfferCampaignDateLabel,
+  sortOffersByCampaign,
+  summarizeStatuses,
+  type OfferDraft,
+} from "./offerUtils";
 
 type OffersResponse = {
   offers: OfferRow[];
@@ -338,6 +346,8 @@ export function OfferListPage() {
               {rows.map((row, index) => {
                 const selected = mode.type === "existing" && mode.id === row.id;
                 const featured = index === 0;
+                const campaignDate = getOfferCampaignDate(row);
+                const campaignDateLabel = getOfferCampaignDateLabel(row);
 
                 return (
                   <button
@@ -361,7 +371,9 @@ export function OfferListPage() {
                       <p>{excerptText(row.hight_light || row.description, 110)}</p>
                       <div className="offer-card__footer">
                         <span>Sort {Number(row.sort_order ?? 0)}</span>
-                        <span>Created {formatDate(row.created_at)}</span>
+                        <span>
+                          {campaignDateLabel} {formatDate(campaignDate)}
+                        </span>
                       </div>
                     </div>
                   </button>
