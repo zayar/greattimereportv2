@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { navigationSections, type NavigationItem } from "./navigation";
 import { useAccess } from "../access/AccessProvider";
@@ -7,8 +7,31 @@ import { useSession } from "../auth/SessionProvider";
 import { AiLanguageSelector } from "../ai/AiLanguageSelector";
 import { EmptyState, ErrorState, ScreenLoader } from "../../components/StatusViews";
 
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "gt-v2report-sidebar-collapsed";
+
 function flattenNavigationItems(items: NavigationItem[]): NavigationItem[] {
   return items.flatMap((item) => (item.children ? flattenNavigationItems(item.children) : [item]));
+}
+
+function getNavigationMonogram(label: string): string {
+  const tokens = label
+    .replace(/[^a-zA-Z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (tokens.length === 0) {
+    return "•";
+  }
+
+  if (tokens.length === 1) {
+    return tokens[0].slice(0, 2).toUpperCase();
+  }
+
+  return tokens
+    .slice(0, 2)
+    .map((token) => token[0]?.toUpperCase() ?? "")
+    .join("");
 }
 
 function isNavigationItemActive(item: NavigationItem, pathname: string): boolean {
@@ -23,6 +46,13 @@ export function AppShell() {
   const { loading, error, clinics, canSwitchClinics, currentBusiness, currentClinic, selectClinic } = useAccess();
   const { gtUser, logout } = useSession();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
+  });
   const location = useLocation();
 
   const pageTitle = useMemo(() => {
@@ -33,6 +63,14 @@ export function AppShell() {
 
     return currentItem?.label ?? "GT V2 Report";
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, String(sidebarCollapsed));
+  }, [sidebarCollapsed]);
 
   if (loading) {
     return <ScreenLoader label="Loading your clinic access..." />;
@@ -91,22 +129,41 @@ export function AppShell() {
             `nav-link ${depth > 0 ? "nav-link--nested" : ""} ${isActive ? "nav-link--active" : ""}`.trim()
           }
           onClick={() => setSidebarOpen(false)}
+          title={sidebarCollapsed ? item.label : undefined}
+          aria-label={item.label}
         >
-          <span>{item.label}</span>
+          <span className="nav-link__icon" aria-hidden="true">
+            {getNavigationMonogram(item.label)}
+          </span>
+          <span className="nav-link__text">{item.label}</span>
         </NavLink>
       );
     });
   }
 
   return (
-    <div className="shell">
-      <aside className={`shell__sidebar ${sidebarOpen ? "shell__sidebar--open" : ""}`.trim()}>
-        <div className="brand">
-          <div className="brand__mark">GT</div>
-          <div className="brand__copy">
-            <strong>GreatTime Reports</strong>
-            <span>Premium clinic systems</span>
+    <div className={`shell ${sidebarCollapsed ? "shell--sidebar-collapsed" : ""}`.trim()}>
+      <aside className={`shell__sidebar ${sidebarOpen ? "shell__sidebar--open" : ""}`.trim()} aria-label="Primary navigation">
+        <div className="sidebar-head">
+          <div className="brand">
+            <div className="brand__mark">GT</div>
+            <div className="brand__copy">
+              <strong>GreatTime Reports</strong>
+              <span>Premium clinic systems</span>
+            </div>
           </div>
+          <button
+            type="button"
+            className="sidebar-collapse"
+            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            <span className="sidebar-collapse__glyph" aria-hidden="true">
+              {sidebarCollapsed ? "›" : "‹"}
+            </span>
+            <span className="sidebar-collapse__label">{sidebarCollapsed ? "Expand" : "Collapse"}</span>
+          </button>
         </div>
 
         <div className="sidebar-context">
@@ -128,8 +185,16 @@ export function AppShell() {
             <strong>{gtUser?.name ?? gtUser?.email ?? "Authenticated user"}</strong>
             <span>{(gtUser?.roles ?? []).join(", ") || "Role not set"}</span>
           </div>
-          <button className="button button--ghost" onClick={() => void logout()}>
-            Sign out
+          <button
+            className="button button--ghost sidebar-signout"
+            onClick={() => void logout()}
+            aria-label="Sign out"
+            title="Sign out"
+          >
+            <span className="sidebar-signout__icon" aria-hidden="true">
+              ↩
+            </span>
+            <span className="sidebar-signout__label">Sign out</span>
           </button>
         </div>
       </aside>

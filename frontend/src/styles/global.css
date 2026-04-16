@@ -3185,11 +3185,17 @@ a {
 
 
 .shell {
+  --shell-sidebar-width: 252px;
   display: grid;
-  grid-template-columns: 252px minmax(0, 1fr);
+  grid-template-columns: var(--shell-sidebar-width) minmax(0, 1fr);
   min-height: 100vh;
   width: 100%;
   overflow-x: clip;
+  transition: grid-template-columns 180ms ease;
+}
+
+.shell--sidebar-collapsed {
+  --shell-sidebar-width: 92px;
 }
 
 .shell__sidebar {
@@ -3204,6 +3210,14 @@ a {
   gap: 18px;
   border-right: 1px solid var(--surface-border);
   backdrop-filter: blur(18px);
+  transition: padding 180ms ease, background-color 180ms ease, border-color 180ms ease;
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .brand {
@@ -3239,6 +3253,36 @@ a {
 .topbar__eyebrow,
 .sidebar-context span {
   color: #7b8089;
+}
+
+.sidebar-collapse {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(24, 29, 37, 0.08);
+  background: rgba(255, 255, 255, 0.84);
+  color: #39414b;
+  font-weight: 600;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+}
+
+.sidebar-collapse__glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(7, 65, 66, 0.08);
+  color: var(--brand);
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.sidebar-collapse__label {
+  white-space: nowrap;
 }
 
 .sidebar-context {
@@ -3312,11 +3356,32 @@ a {
   display: flex;
   justify-content: flex-start;
   align-items: center;
+  gap: 12px;
   color: #41464f;
   border: 1px solid transparent;
   font-weight: 500;
   transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease,
     box-shadow 140ms ease;
+}
+
+.nav-link__icon {
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  display: inline-grid;
+  place-items: center;
+  background: rgba(24, 29, 37, 0.05);
+  color: #5b6470;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  transition: background-color 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+.nav-link__text {
+  min-width: 0;
 }
 
 .nav-link:hover,
@@ -3336,6 +3401,13 @@ a {
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
 }
 
+.nav-link:hover .nav-link__icon,
+.nav-link--active .nav-link__icon {
+  background: rgba(7, 65, 66, 0.1);
+  color: var(--brand);
+  transform: translateY(-1px);
+}
+
 .nav-link--nested {
   padding: 10px 12px;
   border-radius: 14px;
@@ -3352,6 +3424,25 @@ a {
   width: 100%;
 }
 
+.sidebar-signout {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.sidebar-signout__icon {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(7, 65, 66, 0.08);
+  color: var(--brand);
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
 .identity-chip {
   display: grid;
   gap: 4px;
@@ -3366,6 +3457,75 @@ a {
   flex-direction: column;
   min-width: 0;
   overflow-x: clip;
+}
+
+@media (min-width: 961px) {
+  .shell--sidebar-collapsed .shell__sidebar {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .shell--sidebar-collapsed .sidebar-head {
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .shell--sidebar-collapsed .brand {
+    justify-content: center;
+  }
+
+  .shell--sidebar-collapsed .brand__copy,
+  .shell--sidebar-collapsed .sidebar-context,
+  .shell--sidebar-collapsed .nav-section__title,
+  .shell--sidebar-collapsed .nav-group__label,
+  .shell--sidebar-collapsed .identity-chip,
+  .shell--sidebar-collapsed .sidebar-collapse__label,
+  .shell--sidebar-collapsed .sidebar-signout__label {
+    display: none;
+  }
+
+  .shell--sidebar-collapsed .sidebar-collapse {
+    width: 100%;
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .shell--sidebar-collapsed .nav-sections {
+    gap: 14px;
+    padding-right: 0;
+  }
+
+  .shell--sidebar-collapsed .nav-group__children {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .shell--sidebar-collapsed .nav-link {
+    justify-content: center;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .shell--sidebar-collapsed .nav-link__text {
+    display: none;
+  }
+
+  .shell--sidebar-collapsed .sidebar-footer {
+    align-items: center;
+  }
+
+  .shell--sidebar-collapsed .sidebar-footer .button {
+    width: auto;
+  }
+
+  .shell--sidebar-collapsed .sidebar-signout {
+    min-width: 48px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
 }
 
 .topbar {
