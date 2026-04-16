@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { createOfferCategoryDraft, createOfferDraft, excerptText, summarizeStatuses } from "../src/features/offers/offerUtils"
+import { createOfferCategoryDraft, createOfferDraft, excerptText, sortOffersByCampaign, summarizeStatuses } from "../src/features/offers/offerUtils"
 
 test("creates a clean offer category draft from source data", () => {
   const draft = createOfferCategoryDraft({
@@ -49,4 +49,45 @@ test("builds readable excerpts and status summaries", () => {
 
   const summary = summarizeStatuses([{ status: "ACTIVE" }, { status: "INACTIVE" }, {}])
   assert.deepEqual(summary, { active: 1, inactive: 2 })
+})
+
+test("sorts offers by newest campaign first", () => {
+  const rows = sortOffersByCampaign([
+    {
+      id: "offer-older",
+      name: "Older",
+      image: null,
+      sort_order: 1,
+      hight_light: null,
+      expired_date: null,
+      description: null,
+      clinic_id: "clinic-1",
+      category_id: null,
+      category: null,
+      term_and_condition: null,
+      status: "ACTIVE",
+      images: [],
+      metadata: null,
+      created_at: "2026-04-01T00:00:00.000Z",
+    },
+    {
+      id: "offer-latest",
+      name: "Latest",
+      image: null,
+      sort_order: 9,
+      hight_light: null,
+      expired_date: null,
+      description: null,
+      clinic_id: "clinic-1",
+      category_id: null,
+      category: null,
+      term_and_condition: null,
+      status: "ACTIVE",
+      images: [],
+      metadata: null,
+      created_at: "2026-04-15T00:00:00.000Z",
+    },
+  ])
+
+  assert.equal(rows[0]?.id, "offer-latest")
 })

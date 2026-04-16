@@ -272,7 +272,20 @@
 }
 
 .offer-admin__toolbar--offers {
-  justify-content: flex-end;
+  justify-content: space-between;
+}
+
+.offer-admin__scope-switch {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(17, 24, 39, 0.06);
+  box-shadow:
+    0 12px 28px rgba(15, 23, 42, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.84);
 }
 
 .offer-admin__layout {
@@ -303,6 +316,63 @@
 
 .offer-admin__card-grid--offers {
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+.offer-admin__gallery-banner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding: 18px 20px;
+  border-radius: 22px;
+  border: 1px solid rgba(17, 24, 39, 0.06);
+  background:
+    linear-gradient(135deg, rgba(255, 251, 246, 0.96), rgba(255, 255, 255, 0.84)),
+    radial-gradient(circle at top right, rgba(249, 197, 180, 0.14), transparent 42%);
+}
+
+.offer-admin__gallery-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.offer-admin__eyebrow {
+  color: var(--ink-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.offer-admin__gallery-copy strong {
+  font-size: 1.08rem;
+  letter-spacing: -0.02em;
+}
+
+.offer-admin__gallery-copy p {
+  margin: 0;
+  color: var(--ink-muted);
+  line-height: 1.6;
+}
+
+.offer-admin__gallery-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.offer-admin__gallery-stats span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(17, 24, 39, 0.06);
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+  font-weight: 600;
 }
 
 .offer-card {
@@ -338,6 +408,10 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.84);
 }
 
+.offer-card--featured {
+  grid-column: span 2;
+}
+
 .offer-card__media,
 .offer-preview-card__media,
 .offer-artwork-field__surface {
@@ -356,6 +430,25 @@
   font-size: 0.9rem;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.offer-card__badge {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(255, 248, 236, 0.88);
+  color: #7a5422;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  box-shadow: 0 10px 18px rgba(122, 84, 34, 0.12);
 }
 
 .offer-card__media--compact {
@@ -568,6 +661,15 @@
   .offer-admin__toolbar > *,
   .offer-admin__toolbar--offers > * {
     flex: 1 1 100%;
+  }
+
+  .offer-admin__scope-switch {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .offer-card--featured {
+    grid-column: span 1;
   }
 
   .offer-card__footer {

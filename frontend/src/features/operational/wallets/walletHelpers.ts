@@ -1,5 +1,20 @@
 import type { WalletAccountSummaryRow, WalletTransactionRow } from "../../../types/domain";
 
+export const walletTransactionExportHeaders = [
+  "Date",
+  "Transaction Number",
+  "Type",
+  "Status",
+  "Amount",
+  "Balance",
+  "Comment",
+  "Wallet",
+  "Sender Name",
+  "Sender Phone",
+  "Recipient Name",
+  "Recipient Phone",
+];
+
 export function buildWalletAccountKey(account: Pick<WalletAccountSummaryRow, "name" | "phoneNumber">) {
   return `${account.name}::${account.phoneNumber}`;
 }

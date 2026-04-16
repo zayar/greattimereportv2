@@ -14,6 +14,7 @@ import {
   formatWalletValue,
   getWalletDirectionLabel,
   getWalletDirectionTone,
+  walletTransactionExportHeaders,
 } from "./walletHelpers";
 import {
   buildWalletSummaryVariables,
@@ -268,20 +269,7 @@ export function TransactionsPage() {
       await downloadExcelWorkbook({
         fileName: buildDatedExportFileName("wallet-transactions", range.fromDate, range.toDate),
         sheetName: "Transactions",
-        headers: [
-          "Date",
-          "Transaction Number",
-          "Type",
-          "Status",
-          "Amount",
-          "Balance",
-          "Comment",
-          "Wallet",
-          "Sender Name",
-          "Sender Phone",
-          "Recipient Name",
-          "Recipient Phone",
-        ],
+        headers: walletTransactionExportHeaders,
         rows: buildWalletTransactionsExportRows(filteredRows),
       });
     } finally {

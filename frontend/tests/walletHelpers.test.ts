@@ -5,6 +5,7 @@ import {
   buildWalletTransactionsExportRows,
   getWalletCounterpartyLabel,
   getWalletDirectionTone,
+  walletTransactionExportHeaders,
 } from "../src/features/operational/wallets/walletHelpers"
 
 test("builds stable wallet account keys from wallet identity", () => {
@@ -57,4 +58,5 @@ test("keeps export rows numeric for wallet amount columns", () => {
   assert.equal(getWalletDirectionTone("OUT"), "attention")
   assert.equal(typeof rows[0]?.[4], "number")
   assert.equal(typeof rows[0]?.[5], "number")
+  assert.equal(walletTransactionExportHeaders.length, rows[0]?.length)
 })

@@ -1,5 +1,8 @@
 import { gql } from "@apollo/client";
 import type { OfferCategoryDraft, OfferDraft } from "./offerUtils";
+import { startOfCurrentMonth } from "../../utils/date";
+
+export type OfferLoadScope = "month" | "all";
 
 export const GET_OFFER_CATEGORIES = gql`
   query OfferCategories(
@@ -110,14 +113,22 @@ export function buildOfferCategoriesVariables(clinicId: string) {
   };
 }
 
-export function buildOffersVariables(clinicId: string) {
-  return {
-    where: {
-      clinic_id: {
-        equals: clinicId,
-      },
+export function buildOffersVariables(clinicId: string, scope: OfferLoadScope = "month") {
+  const where: Record<string, unknown> = {
+    clinic_id: {
+      equals: clinicId,
     },
-    orderBy: [{ sort_order: "asc" }, { created_at: "desc" }],
+  };
+
+  if (scope === "month") {
+    where.created_at = {
+      gte: new Date(`${startOfCurrentMonth()}T00:00:00.000Z`).toISOString(),
+    };
+  }
+
+  return {
+    where,
+    orderBy: [{ created_at: "desc" }, { sort_order: "asc" }],
   };
 }
 

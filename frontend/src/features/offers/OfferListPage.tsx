@@ -12,6 +12,7 @@ import {
   buildDeleteOfferVariables,
   buildOfferCategoriesVariables,
   buildOffersVariables,
+  type OfferLoadScope,
   buildUpdateOfferVariables,
   CREATE_OFFER,
   DELETE_OFFER,
@@ -19,7 +20,7 @@ import {
   GET_OFFERS,
   UPDATE_OFFER,
 } from "./queries";
-import { createOfferDraft, excerptText, summarizeStatuses, type OfferDraft } from "./offerUtils";
+import { createOfferDraft, excerptText, sortOffersByCampaign, summarizeStatuses, type OfferDraft } from "./offerUtils";
 
 type OffersResponse = {
   offers: OfferRow[];
@@ -45,12 +46,13 @@ export function OfferListPage() {
   const deferredSearch = useDeferredValue(search.trim().toLowerCase());
   const [statusFilter, setStatusFilter] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [scope, setScope] = useState<OfferLoadScope>("month");
   const [mode, setMode] = useState<EditorMode>({ type: "new" });
   const [draft, setDraft] = useState<OfferDraft>(() => createOfferDraft());
   const [feedback, setFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
 
   const offersQuery = useQuery<OffersResponse>(GET_OFFERS, {
-    variables: currentClinic ? buildOffersVariables(currentClinic.id) : undefined,
+    variables: currentClinic ? buildOffersVariables(currentClinic.id, scope) : undefined,
     skip: !currentClinic,
   });
   const categoriesQuery = useQuery<OfferCategoriesResponse>(GET_OFFER_CATEGORIES, {
@@ -65,31 +67,33 @@ export function OfferListPage() {
   const allRows = offersQuery.data?.offers ?? [];
   const categories = categoriesQuery.data?.offerCategories ?? [];
   const rows = useMemo(() => {
-    return allRows.filter((row) => {
-      if (statusFilter && row.status !== statusFilter) {
-        return false;
-      }
+    return sortOffersByCampaign(
+      allRows.filter((row) => {
+        if (statusFilter && row.status !== statusFilter) {
+          return false;
+        }
 
-      if (categoryFilter && (row.category?.id ?? row.category_id ?? "") !== categoryFilter) {
-        return false;
-      }
+        if (categoryFilter && (row.category?.id ?? row.category_id ?? "") !== categoryFilter) {
+          return false;
+        }
 
-      if (!deferredSearch) {
-        return true;
-      }
+        if (!deferredSearch) {
+          return true;
+        }
 
-      const haystack = [
-        row.name,
-        row.category?.name ?? "",
-        row.hight_light ?? "",
-        row.description ?? "",
-        row.term_and_condition ?? "",
-      ]
-        .join(" ")
-        .toLowerCase();
+        const haystack = [
+          row.name,
+          row.category?.name ?? "",
+          row.hight_light ?? "",
+          row.description ?? "",
+          row.term_and_condition ?? "",
+        ]
+          .join(" ")
+          .toLowerCase();
 
-      return haystack.includes(deferredSearch);
-    });
+        return haystack.includes(deferredSearch);
+      }),
+    );
   }, [allRows, categoryFilter, deferredSearch, statusFilter]);
 
   const selectedRow = mode.type === "existing" ? allRows.find((row) => row.id === mode.id) ?? null : null;
@@ -99,6 +103,11 @@ export function OfferListPage() {
     () => new Set(allRows.map((row) => row.category?.id).filter(Boolean)).size,
     [allRows],
   );
+  const scopeLabel = scope === "month" ? "This month" : "All campaigns";
+  const scopeHint =
+    scope === "month"
+      ? "Only this month's offers are loaded first so the gallery opens faster."
+      : "Showing the full campaign archive for this clinic.";
 
   useEffect(() => {
     if (allRows.length === 0) {
@@ -222,6 +231,22 @@ export function OfferListPage() {
         title="Offer List"
         actions={
           <div className="offer-admin__toolbar offer-admin__toolbar--offers">
+            <div className="offer-admin__scope-switch" role="group" aria-label="Offer gallery scope">
+              <button
+                type="button"
+                className={`button ${scope === "month" ? "" : "button--secondary"}`.trim()}
+                onClick={() => setScope("month")}
+              >
+                This month
+              </button>
+              <button
+                type="button"
+                className={`button ${scope === "all" ? "" : "button--secondary"}`.trim()}
+                onClick={() => setScope("all")}
+              >
+                All time
+              </button>
+            </div>
             <label className="field field--compact field--search">
               <span>Search</span>
               <input
@@ -284,8 +309,20 @@ export function OfferListPage() {
         <Panel
           className="offer-admin__list-panel"
           title="Offer gallery"
-          subtitle={`${rows.length.toLocaleString("en-US")} offer cards in the current filter`}
+          subtitle={`${rows.length.toLocaleString("en-US")} offer cards in ${scopeLabel.toLowerCase()} view`}
         >
+          <div className="offer-admin__gallery-banner">
+            <div className="offer-admin__gallery-copy">
+              <span className="offer-admin__eyebrow">Campaign focus</span>
+              <strong>{scopeLabel} offers first</strong>
+              <p>{scopeHint}</p>
+            </div>
+            <div className="offer-admin__gallery-stats">
+              <span>{allRows.length.toLocaleString("en-US")} loaded</span>
+              <span>{rows.length.toLocaleString("en-US")} visible</span>
+            </div>
+          </div>
+
           {offersQuery.loading || categoriesQuery.loading ? (
             <div className="inline-note inline-note--loading">Loading offers...</div>
           ) : null}
@@ -299,17 +336,19 @@ export function OfferListPage() {
 
           {rows.length > 0 ? (
             <div className="offer-admin__card-grid offer-admin__card-grid--offers">
-              {rows.map((row) => {
+              {rows.map((row, index) => {
                 const selected = mode.type === "existing" && mode.id === row.id;
+                const featured = index === 0;
 
                 return (
                   <button
                     key={row.id}
                     type="button"
-                    className={`offer-card offer-card--offer ${selected ? "offer-card--selected" : ""}`.trim()}
+                    className={`offer-card offer-card--offer ${selected ? "offer-card--selected" : ""} ${featured ? "offer-card--featured" : ""}`.trim()}
                     onClick={() => selectExisting(row)}
                   >
                     <div className="offer-card__media">
+                      {featured ? <span className="offer-card__badge">Latest campaign</span> : null}
                       {row.image ? <img src={row.image} alt={row.name} /> : <span>Offer Artwork</span>}
                     </div>
                     <div className="offer-card__body">
@@ -323,7 +362,7 @@ export function OfferListPage() {
                       <p>{excerptText(row.hight_light || row.description, 110)}</p>
                       <div className="offer-card__footer">
                         <span>Sort {Number(row.sort_order ?? 0)}</span>
-                        <span>{formatDate(row.created_at)}</span>
+                        <span>Created {formatDate(row.created_at)}</span>
                       </div>
                     </div>
                   </button>

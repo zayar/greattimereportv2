@@ -68,3 +68,28 @@ export function summarizeStatuses<T extends { status?: string | null }>(rows: T[
     { active: 0, inactive: 0 },
   );
 }
+
+function toTimestamp(value: string | null | undefined) {
+  if (!value) {
+    return 0;
+  }
+
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+export function sortOffersByCampaign(rows: OfferRow[]) {
+  return [...rows].sort((left, right) => {
+    const recencyDelta = toTimestamp(right.created_at) - toTimestamp(left.created_at);
+    if (recencyDelta !== 0) {
+      return recencyDelta;
+    }
+
+    const sortOrderDelta = Number(left.sort_order ?? 0) - Number(right.sort_order ?? 0);
+    if (sortOrderDelta !== 0) {
+      return sortOrderDelta;
+    }
+
+    return left.name.localeCompare(right.name);
+  });
+}

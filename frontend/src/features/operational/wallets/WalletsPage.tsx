@@ -13,6 +13,8 @@ import {
   getWalletCounterpartyLabel,
   getWalletDirectionLabel,
   getWalletDirectionTone,
+  buildWalletTransactionsExportRows,
+  walletTransactionExportHeaders,
 } from "./walletHelpers";
 import {
   buildPassAccountsCountVariables,
@@ -78,6 +80,42 @@ async function loadAllWalletAccounts(
   return rows;
 }
 
+async function loadAllWalletAccountTransactions(
+  passConfig: ClinicPassConfig,
+  account: WalletAccountSummaryRow,
+) {
+  if (!account.id) {
+    return [];
+  }
+
+  const rows: WalletTransactionRow[] = [];
+  let skip = 0;
+  const totalCount = Math.max(Number(account.transactionCount ?? 0), 0);
+
+  while (rows.length < totalCount || (totalCount === 0 && skip === 0)) {
+    const result = await queryPassGraphql<PassTransactionsQueryResponse>({
+      query: GET_PASS_ACCOUNT_TRANSACTIONS,
+      variables: buildPassAccountTransactionsVariables({
+        accountId: account.id ?? "",
+        take: EXPORT_BATCH_SIZE,
+        skip,
+      }),
+      passConfig,
+    });
+
+    const mappedRows = (result.transactions ?? []).map((row) => mapPassTransactionRow(row, account));
+    rows.push(...mappedRows);
+
+    if (mappedRows.length < EXPORT_BATCH_SIZE) {
+      break;
+    }
+
+    skip += EXPORT_BATCH_SIZE;
+  }
+
+  return rows;
+}
+
 export function WalletsPage() {
   const { currentClinic } = useAccess();
   const [search, setSearch] = useState("");
@@ -87,6 +125,7 @@ export function WalletsPage() {
   const [error, setError] = useState<string | null>(null);
   const [allRows, setAllRows] = useState<WalletAccountSummaryRow[]>([]);
   const [exporting, setExporting] = useState(false);
+  const [detailExportingKey, setDetailExportingKey] = useState<string | null>(null);
   const [expandedAccountKey, setExpandedAccountKey] = useState<string | null>(null);
   const [detailPages, setDetailPages] = useState<Record<string, number>>({});
   const [detailByKey, setDetailByKey] = useState<Record<string, AccountDetailState>>({});
@@ -274,6 +313,26 @@ export function WalletsPage() {
     }
   }
 
+  async function handleDetailExport(account: WalletAccountSummaryRow, rowKey: string) {
+    if (!currentClinic || !passConfig) {
+      return;
+    }
+
+    setDetailExportingKey(rowKey);
+
+    try {
+      const exportRows = await loadAllWalletAccountTransactions(passConfig, account);
+      await downloadExcelWorkbook({
+        fileName: `wallet-history-${currentClinic.code}-${(account.name || "wallet").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "wallet"}-${new Date().toISOString().slice(0, 10)}`,
+        sheetName: "Wallet History",
+        headers: walletTransactionExportHeaders,
+        rows: buildWalletTransactionsExportRows(exportRows),
+      });
+    } finally {
+      setDetailExportingKey(null);
+    }
+  }
+
   return (
     <div className="page-stack page-stack--workspace analytics-report internal-workspace internal-workspace--soft wallet-workspace wallet-workspace--accounts">
       <PageHeader
@@ -441,6 +500,13 @@ export function WalletsPage() {
                                       <p>{row.phoneNumber || "Phone unavailable"}</p>
                                     </div>
                                     <div className="pagination-controls">
+                                      <button
+                                        className="button button--secondary"
+                                        disabled={detailState?.loading || detailExportingKey === rowKey}
+                                        onClick={() => void handleDetailExport(row, rowKey)}
+                                      >
+                                        {detailExportingKey === rowKey ? "Exporting..." : "Export history"}
+                                      </button>
                                       <button
                                         className="button button--secondary"
                                         disabled={detailPage <= 1}
