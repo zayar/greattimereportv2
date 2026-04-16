@@ -109,19 +109,22 @@ export function TransactionsPage() {
     setLoading(true);
     setError(null);
 
-    const summaryPromise = client.query<WalletSummaryQueryResponse>({
-      query: GET_WALLET_SUMMARY,
-      variables: buildWalletSummaryVariables({
-        clinicCode: passCode,
-        fromDate: range.fromDate,
-        toDate: range.toDate,
-      }),
-      fetchPolicy: "network-only",
-    });
+    const loadSummary = () =>
+      client
+        .query<WalletSummaryQueryResponse>({
+          query: GET_WALLET_SUMMARY,
+          variables: buildWalletSummaryVariables({
+            clinicCode: passCode,
+            fromDate: range.fromDate,
+            toDate: range.toDate,
+          }),
+          fetchPolicy: "network-only",
+        })
+        .then((summaryResult) => summaryResult.data.getWalletSummary)
+        .catch(() => null);
 
     if (!deferredSearch) {
       Promise.all([
-        summaryPromise,
         client.query<WalletTransactionsByClinicResponse>({
           query: GET_WALLET_TRANSACTIONS_BY_CLINIC,
           variables: buildWalletTransactionsVariables({
@@ -133,23 +136,25 @@ export function TransactionsPage() {
           }),
           fetchPolicy: "network-only",
         }),
+        loadSummary(),
       ])
-        .then(([summaryResult, rowsResult]) => {
+        .then(([rowsResult, summaryResult]) => {
           if (!active) {
             return;
           }
 
-          const summary = summaryResult.data.getWalletSummary;
           const response = rowsResult.data.getWalletTransactionsByClinic;
+          const mappedRows = (response?.data ?? []).map(mapLegacyWalletTransaction);
+          const fallbackSummary = summarizeWalletTransactions(mappedRows);
 
           setData({
             summary: {
-              totalIn: Number(summary?.totalIn ?? 0),
-              totalOut: Number(summary?.totalOut ?? 0),
-              transactionCount: Number(summary?.transactionCount ?? 0),
-              netMovement: Number(summary?.balance ?? 0),
+              totalIn: Number(summaryResult?.totalIn ?? fallbackSummary.totalIn),
+              totalOut: Number(summaryResult?.totalOut ?? fallbackSummary.totalOut),
+              transactionCount: Number(summaryResult?.transactionCount ?? fallbackSummary.transactionCount),
+              netMovement: Number(summaryResult?.balance ?? fallbackSummary.netMovement),
             },
-            rows: (response?.data ?? []).map(mapLegacyWalletTransaction),
+            rows: mappedRows,
             totalCount: Number(response?.totalCount ?? 0),
           });
         })
@@ -172,21 +177,18 @@ export function TransactionsPage() {
       };
     }
 
-    Promise.all([
-      summaryPromise,
-      loadAllWalletTransactions(client, passCode, range.fromDate, range.toDate),
-    ])
-      .then(([summaryResult, loadedRows]) => {
+    loadAllWalletTransactions(client, passCode, range.fromDate, range.toDate)
+      .then((loadedRows) => {
         if (!active) {
           return;
         }
 
         const filteredRows = loadedRows.filter((row) => matchesWalletTransactionSearch(row, deferredSearch));
-        const summary = summarizeWalletTransactions(filteredRows);
+        const fallbackSummary = summarizeWalletTransactions(filteredRows);
         const pagedRows = filteredRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
         setData({
-          summary,
+          summary: fallbackSummary,
           rows: pagedRows,
           totalCount: filteredRows.length,
         });

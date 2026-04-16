@@ -1,19 +1,47 @@
 import type { Clinic, WalletAccountSummaryRow, WalletTransactionRow, WalletTransactionsResponse } from "../../../types/domain";
 import type { LegacyWalletTransactionRow, PassAccountQueryRow, PassTransactionQueryRow } from "./queries";
 
-export function getClinicPassCode(clinic: Pick<Clinic, "pass"> | null | undefined) {
-  const raw = clinic?.pass;
+export type ClinicPassConfig = {
+  id: string;
+  refresh_token?: string | null;
+  refresh_token_url?: string | null;
+};
+
+export function getClinicPassConfig(clinic: Pick<Clinic, "pass"> | null | undefined): ClinicPassConfig | null {
+  const raw = clinic?.pass?.trim();
 
   if (!raw) {
-    return "";
+    return null;
   }
 
   try {
-    const parsed = JSON.parse(raw) as { id?: string | null };
-    return parsed?.id?.trim() ?? "";
+    const parsed = JSON.parse(raw) as {
+      id?: string | null;
+      refresh_token?: string | null;
+      refresh_token_url?: string | null;
+    };
+    const id = parsed?.id?.trim();
+
+    if (!id) {
+      return null;
+    }
+
+    return {
+      id,
+      refresh_token: parsed.refresh_token?.trim() || null,
+      refresh_token_url: parsed.refresh_token_url?.trim() || null,
+    };
   } catch {
-    return raw.trim();
+    return {
+      id: raw,
+      refresh_token: null,
+      refresh_token_url: null,
+    };
   }
+}
+
+export function getClinicPassCode(clinic: Pick<Clinic, "pass"> | null | undefined) {
+  return getClinicPassConfig(clinic)?.id ?? "";
 }
 
 export function mapPassAccountRow(row: PassAccountQueryRow): WalletAccountSummaryRow {

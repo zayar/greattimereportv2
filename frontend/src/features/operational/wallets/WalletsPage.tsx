@@ -1,5 +1,5 @@
-import { ApolloClient, useApolloClient } from "@apollo/client";
 import { Fragment, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { queryPassGraphql } from "../../../api/pass";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import { Panel } from "../../../components/Panel";
 import { PageHeader } from "../../../components/PageHeader";
@@ -25,7 +25,7 @@ import {
   type PassAccountsQueryResponse,
   type PassTransactionsQueryResponse,
 } from "./queries";
-import { getClinicPassCode, mapPassAccountRow, mapPassTransactionRow } from "./walletData";
+import { getClinicPassConfig, mapPassAccountRow, mapPassTransactionRow, type ClinicPassConfig } from "./walletData";
 
 const PAGE_SIZE = 25;
 const DETAIL_PAGE_SIZE = 10;
@@ -40,33 +40,32 @@ type AccountDetailState = {
 };
 
 async function loadAllWalletAccounts(
-  client: ApolloClient<object>,
-  passCode: string,
+  passConfig: ClinicPassConfig,
   searchText: string,
 ) {
-  const countResult = await client.query<PassAccountsCountResponse>({
+  const countResult = await queryPassGraphql<PassAccountsCountResponse>({
     query: GET_PASS_ACCOUNTS_COUNT,
-    variables: buildPassAccountsCountVariables(passCode, searchText),
-    fetchPolicy: "network-only",
+    variables: buildPassAccountsCountVariables(passConfig.id, searchText),
+    passConfig,
   });
 
-  const totalCount = Number(countResult.data.aggregateAccount?._count?.id ?? 0);
+  const totalCount = Number(countResult.aggregateAccount?._count?.id ?? 0);
   const rows: WalletAccountSummaryRow[] = [];
   let skip = 0;
 
   while (rows.length < totalCount) {
-    const result = await client.query<PassAccountsQueryResponse>({
+    const result = await queryPassGraphql<PassAccountsQueryResponse>({
       query: GET_PASS_ACCOUNTS,
       variables: buildPassAccountsVariables({
-        passCode,
+        passCode: passConfig.id,
         searchText,
         take: EXPORT_BATCH_SIZE,
         skip,
       }),
-      fetchPolicy: "network-only",
+      passConfig,
     });
 
-    const mappedRows = (result.data.accounts ?? []).map(mapPassAccountRow);
+    const mappedRows = (result.accounts ?? []).map(mapPassAccountRow);
     rows.push(...mappedRows);
 
     if (mappedRows.length < EXPORT_BATCH_SIZE) {
@@ -80,7 +79,6 @@ async function loadAllWalletAccounts(
 }
 
 export function WalletsPage() {
-  const client = useApolloClient();
   const { currentClinic } = useAccess();
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search.trim());
@@ -93,14 +91,18 @@ export function WalletsPage() {
   const [detailPages, setDetailPages] = useState<Record<string, number>>({});
   const [detailByKey, setDetailByKey] = useState<Record<string, AccountDetailState>>({});
 
-  const passCode = getClinicPassCode(currentClinic);
+  const passConfig = useMemo(
+    () => getClinicPassConfig(currentClinic),
+    [currentClinic?.id, currentClinic?.pass],
+  );
+  const passCode = passConfig?.id ?? "";
 
   useEffect(() => {
     setPage(1);
   }, [currentClinic?.id, deferredSearch]);
 
   useEffect(() => {
-    if (!currentClinic || !passCode) {
+    if (!currentClinic || !passConfig) {
       setAllRows([]);
       setError(null);
       setLoading(false);
@@ -111,7 +113,7 @@ export function WalletsPage() {
     setLoading(true);
     setError(null);
 
-    loadAllWalletAccounts(client, passCode, deferredSearch)
+    loadAllWalletAccounts(passConfig, deferredSearch)
       .then((rows) => {
         if (active) {
           setAllRows(rows);
@@ -132,7 +134,7 @@ export function WalletsPage() {
     return () => {
       active = false;
     };
-  }, [client, currentClinic, deferredSearch, passCode]);
+  }, [currentClinic, deferredSearch, passConfig]);
 
   const totalCount = allRows.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
@@ -199,15 +201,14 @@ export function WalletsPage() {
       },
     }));
 
-    client
-      .query<PassTransactionsQueryResponse>({
+    queryPassGraphql<PassTransactionsQueryResponse>({
         query: GET_PASS_ACCOUNT_TRANSACTIONS,
         variables: buildPassAccountTransactionsVariables({
           accountId: expandedAccount.id ?? "",
           take: DETAIL_PAGE_SIZE,
           skip: (expandedPage - 1) * DETAIL_PAGE_SIZE,
         }),
-        fetchPolicy: "network-only",
+        passConfig: passConfig ?? { id: passCode },
       })
       .then((result) => {
         if (!active) {
@@ -219,7 +220,7 @@ export function WalletsPage() {
           [expandedAccountKey]: {
             loading: false,
             error: null,
-            rows: (result.data.transactions ?? []).map((row) => mapPassTransactionRow(row, expandedAccount)),
+            rows: (result.transactions ?? []).map((row) => mapPassTransactionRow(row, expandedAccount)),
             totalCount: expandedAccount.transactionCount,
             page: expandedPage,
           },
@@ -246,17 +247,17 @@ export function WalletsPage() {
     return () => {
       active = false;
     };
-  }, [client, detailByKey, expandedAccount, expandedAccountKey, expandedPage]);
+  }, [detailByKey, expandedAccount, expandedAccountKey, expandedPage, passCode, passConfig]);
 
   async function handleExport() {
-    if (!currentClinic || !passCode) {
+    if (!currentClinic || !passConfig) {
       return;
     }
 
     setExporting(true);
 
     try {
-      const exportRows = allRows.length > 0 ? allRows : await loadAllWalletAccounts(client, passCode, deferredSearch);
+      const exportRows = allRows.length > 0 ? allRows : await loadAllWalletAccounts(passConfig, deferredSearch);
 
       await downloadExcelWorkbook({
         fileName: `wallets-${currentClinic.code}-${new Date().toISOString().slice(0, 10)}`,

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import {
+  getClinicPassConfig,
   getClinicPassCode,
   mapLegacyWalletTransaction,
   mapPassAccountRow,
@@ -9,6 +10,17 @@ import {
 } from "../src/features/operational/wallets/walletData"
 
 test("extracts pass code from clinic pass config JSON", () => {
+  assert.deepEqual(getClinicPassConfig({
+    pass: JSON.stringify({
+      id: "GTTHEQUEEN",
+      refresh_token: "refresh",
+      refresh_token_url: "https://example.com/refresh",
+    }),
+  }), {
+    id: "GTTHEQUEEN",
+    refresh_token: "refresh",
+    refresh_token_url: "https://example.com/refresh",
+  })
   assert.equal(getClinicPassCode({ pass: JSON.stringify({ id: "GTTHEQUEEN" }) }), "GTTHEQUEEN")
   assert.equal(getClinicPassCode({ pass: "DIRECTCODE" }), "DIRECTCODE")
   assert.equal(getClinicPassCode({ pass: "" }), "")
