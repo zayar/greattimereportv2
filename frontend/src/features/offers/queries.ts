@@ -47,7 +47,6 @@ export const GET_OFFERS = gql`
       }
       metadata
       created_at
-      updated_at
     }
   }
 `;

@@ -23,8 +23,6 @@ import {
 import {
   createOfferDraft,
   excerptText,
-  getOfferCampaignDate,
-  getOfferCampaignDateLabel,
   sortOffersByCampaign,
   summarizeStatuses,
   type OfferDraft,
@@ -114,7 +112,7 @@ export function OfferListPage() {
   const scopeHint =
     scope === "month"
       ? "Only this month's offers are loaded first so the gallery opens faster."
-      : "Showing the full campaign archive for this clinic.";
+      : "Showing the full created-date archive for this clinic.";
 
   useEffect(() => {
     if (allRows.length === 0) {
@@ -221,6 +219,31 @@ export function OfferListPage() {
     }
   }
 
+  async function handleDeleteRow(row: OfferRow) {
+    if (!window.confirm(`Delete "${row.name}"?`)) {
+      return;
+    }
+
+    try {
+      await deleteOffer({
+        variables: buildDeleteOfferVariables(row.id),
+      });
+      await offersQuery.refetch();
+
+      if (mode.type === "existing" && mode.id === row.id) {
+        setMode({ type: "new" });
+        setDraft(createOfferDraft());
+      }
+
+      setFeedback({ tone: "success", message: `Deleted "${row.name}".` });
+    } catch (mutationError) {
+      setFeedback({
+        tone: "error",
+        message: mutationError instanceof Error ? mutationError.message : "Could not delete the offer.",
+      });
+    }
+  }
+
   function resetEditor() {
     if (selectedRow) {
       setDraft(createOfferDraft(selectedRow));
@@ -283,7 +306,7 @@ export function OfferListPage() {
               </select>
             </label>
             <button type="button" className="button button--secondary" onClick={beginCreate}>
-              New Offer
+              Create Offer
             </button>
           </div>
         }
@@ -320,9 +343,9 @@ export function OfferListPage() {
         >
           <div className="offer-admin__gallery-banner">
             <div className="offer-admin__gallery-copy">
-              <span className="offer-admin__eyebrow">Campaign focus</span>
-              <strong>{scopeLabel} offers first</strong>
-              <p>{scopeHint}</p>
+              <span className="offer-admin__eyebrow">Created Date Order</span>
+              <strong>{scope === "month" ? "Newest offers this month" : "Newest offers in the archive"}</strong>
+              <p>{scopeHint} Cards stay ordered by created date, with sort order only used inside the same creation batch.</p>
             </div>
             <div className="offer-admin__gallery-stats">
               <span>{allRows.length.toLocaleString("en-US")} loaded</span>
@@ -346,37 +369,41 @@ export function OfferListPage() {
               {rows.map((row, index) => {
                 const selected = mode.type === "existing" && mode.id === row.id;
                 const featured = index === 0;
-                const campaignDate = getOfferCampaignDate(row);
-                const campaignDateLabel = getOfferCampaignDateLabel(row);
 
                 return (
-                  <button
+                  <article
                     key={row.id}
-                    type="button"
                     className={`offer-card offer-card--offer ${selected ? "offer-card--selected" : ""} ${featured ? "offer-card--featured" : ""}`.trim()}
-                    onClick={() => selectExisting(row)}
                   >
-                    <div className="offer-card__media">
-                      {featured ? <span className="offer-card__badge">Latest campaign</span> : null}
-                      {row.image ? <img src={row.image} alt={row.name} /> : <span>Offer Artwork</span>}
-                    </div>
-                    <div className="offer-card__body">
-                      <div className="offer-card__meta">
-                        <span className={`status-pill ${(row.status ?? "").toUpperCase() === "ACTIVE" ? "status-pill--active" : "status-pill--archived"}`}>
-                          {row.status}
-                        </span>
-                        <span>{row.category?.name || "Uncategorized"}</span>
+                    <button type="button" className="offer-card__surface" onClick={() => selectExisting(row)}>
+                      <div className="offer-card__media">
+                        {featured ? <span className="offer-card__badge">Newest created</span> : null}
+                        {row.image ? <img src={row.image} alt={row.name} /> : <span>Offer Artwork</span>}
                       </div>
-                      <strong>{row.name}</strong>
-                      <p>{excerptText(row.hight_light || row.description, 110)}</p>
-                      <div className="offer-card__footer">
-                        <span>Sort {Number(row.sort_order ?? 0)}</span>
-                        <span>
-                          {campaignDateLabel} {formatDate(campaignDate)}
-                        </span>
+                      <div className="offer-card__body">
+                        <div className="offer-card__meta">
+                          <span className={`status-pill ${(row.status ?? "").toUpperCase() === "ACTIVE" ? "status-pill--active" : "status-pill--archived"}`}>
+                            {row.status}
+                          </span>
+                          <span>{row.category?.name || "Uncategorized"}</span>
+                        </div>
+                        <strong>{row.name}</strong>
+                        <p>{excerptText(row.hight_light || row.description, 110)}</p>
+                        <div className="offer-card__footer">
+                          <span>Sort {Number(row.sort_order ?? 0)}</span>
+                          <span>Created {formatDate(row.created_at)}</span>
+                        </div>
                       </div>
+                    </button>
+                    <div className="offer-card__actions">
+                      <button type="button" className="button button--secondary" onClick={() => selectExisting(row)}>
+                        Edit
+                      </button>
+                      <button type="button" className="button button--ghost" onClick={() => void handleDeleteRow(row)}>
+                        Delete
+                      </button>
                     </div>
-                  </button>
+                  </article>
                 );
               })}
             </div>
@@ -386,7 +413,11 @@ export function OfferListPage() {
         <Panel
           className="offer-admin__editor-panel"
           title={mode.type === "new" ? "Create offer" : "Edit offer"}
-          subtitle="Shape the image, highlight, and long-form copy together so the offer feels intentional before it goes live."
+          subtitle={
+            mode.type === "new"
+              ? "Create a new offer with image, highlight, and long-form copy."
+              : "Update or remove the selected offer with the same controls used in gt.report."
+          }
         >
           {feedback ? (
             <div className={`offer-admin__feedback offer-admin__feedback--${feedback.tone}`}>{feedback.message}</div>

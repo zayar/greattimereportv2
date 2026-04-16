@@ -379,7 +379,6 @@
   display: grid;
   gap: 0;
   padding: 0;
-  text-align: left;
   border: 1px solid rgba(17, 24, 39, 0.06);
   border-radius: 22px;
   background:
@@ -388,7 +387,6 @@
   box-shadow:
     0 16px 36px rgba(15, 23, 42, 0.04),
     inset 0 1px 0 rgba(255, 255, 255, 0.72);
-  cursor: pointer;
   overflow: hidden;
   transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
 }
@@ -410,6 +408,17 @@
 
 .offer-card--featured {
   grid-column: span 2;
+}
+
+.offer-card__surface {
+  display: grid;
+  gap: 0;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
 }
 
 .offer-card__media,
@@ -501,6 +510,13 @@
   flex-wrap: wrap;
   color: var(--ink-muted);
   font-size: 0.8rem;
+}
+
+.offer-card__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 0 18px 18px;
 }
 
 .offer-admin__feedback {

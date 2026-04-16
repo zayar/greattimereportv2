@@ -78,35 +78,11 @@ function toTimestamp(value: string | null | undefined) {
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
 
-export function getOfferCampaignDate(row: OfferRow) {
-  if (toTimestamp(row.expired_date) > 0) {
-    return row.expired_date as string;
-  }
-
-  if (toTimestamp(row.updated_at) > 0) {
-    return row.updated_at as string;
-  }
-
-  return row.created_at;
-}
-
-export function getOfferCampaignDateLabel(row: OfferRow) {
-  if (toTimestamp(row.expired_date) > 0) {
-    return "Campaign";
-  }
-
-  if (toTimestamp(row.updated_at) > 0 && toTimestamp(row.updated_at) !== toTimestamp(row.created_at)) {
-    return "Updated";
-  }
-
-  return "Created";
-}
-
 export function sortOffersByCampaign(rows: OfferRow[]) {
   return [...rows].sort((left, right) => {
-    const campaignDelta = toTimestamp(getOfferCampaignDate(right)) - toTimestamp(getOfferCampaignDate(left));
-    if (campaignDelta !== 0) {
-      return campaignDelta;
+    const createdDelta = toTimestamp(right.created_at) - toTimestamp(left.created_at);
+    if (createdDelta !== 0) {
+      return createdDelta;
     }
 
     const sortOrderDelta = Number(left.sort_order ?? 0) - Number(right.sort_order ?? 0);

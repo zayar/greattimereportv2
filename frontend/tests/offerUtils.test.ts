@@ -4,8 +4,6 @@ import {
   createOfferCategoryDraft,
   createOfferDraft,
   excerptText,
-  getOfferCampaignDate,
-  getOfferCampaignDateLabel,
   sortOffersByCampaign,
   summarizeStatuses,
 } from "../src/features/offers/offerUtils"
@@ -59,7 +57,7 @@ test("builds readable excerpts and status summaries", () => {
   assert.deepEqual(summary, { active: 1, inactive: 2 })
 })
 
-test("sorts offers by newest campaign first", () => {
+test("sorts offers by created date newest first and keeps sort order inside a batch", () => {
   const rows = sortOffersByCampaign([
     {
       id: "offer-older",
@@ -77,33 +75,14 @@ test("sorts offers by newest campaign first", () => {
       images: [],
       metadata: null,
       created_at: "2026-04-01T00:00:00.000Z",
-      updated_at: "2026-04-01T00:00:00.000Z",
     },
     {
-      id: "offer-updated",
-      name: "Updated",
-      image: null,
-      sort_order: 4,
-      hight_light: null,
-      expired_date: null,
-      description: null,
-      clinic_id: "clinic-1",
-      category_id: null,
-      category: null,
-      term_and_condition: null,
-      status: "ACTIVE",
-      images: [],
-      metadata: null,
-      created_at: "2025-04-10T00:00:00.000Z",
-      updated_at: "2026-04-05T00:00:00.000Z",
-    },
-    {
-      id: "offer-campaign-sort-2",
-      name: "Campaign Sort 2",
+      id: "offer-mid-sort-2",
+      name: "Mid Sort 2",
       image: null,
       sort_order: 2,
       hight_light: null,
-      expired_date: "2026-04-10T00:00:00.000Z",
+      expired_date: "2027-01-01T00:00:00.000Z",
       description: null,
       clinic_id: "clinic-1",
       category_id: null,
@@ -112,16 +91,32 @@ test("sorts offers by newest campaign first", () => {
       status: "ACTIVE",
       images: [],
       metadata: null,
-      created_at: "2025-04-15T00:00:00.000Z",
-      updated_at: "2026-04-09T00:00:00.000Z",
+      created_at: "2026-04-10T00:00:00.000Z",
     },
     {
-      id: "offer-campaign-sort-1",
-      name: "Campaign Sort 1",
+      id: "offer-latest-sort-2",
+      name: "Latest Sort 2",
+      image: null,
+      sort_order: 2,
+      hight_light: null,
+      expired_date: "2025-04-10T00:00:00.000Z",
+      description: null,
+      clinic_id: "clinic-1",
+      category_id: null,
+      category: null,
+      term_and_condition: null,
+      status: "ACTIVE",
+      images: [],
+      metadata: null,
+      created_at: "2026-04-15T00:00:00.000Z",
+    },
+    {
+      id: "offer-latest-sort-1",
+      name: "Latest Sort 1",
       image: null,
       sort_order: 1,
       hight_light: null,
-      expired_date: "2026-04-10T00:00:00.000Z",
+      expired_date: "2025-01-01T00:00:00.000Z",
       description: null,
       clinic_id: "clinic-1",
       category_id: null,
@@ -130,53 +125,12 @@ test("sorts offers by newest campaign first", () => {
       status: "ACTIVE",
       images: [],
       metadata: null,
-      created_at: "2025-04-15T00:00:00.000Z",
-      updated_at: "2026-04-09T00:00:00.000Z",
+      created_at: "2026-04-15T00:00:00.000Z",
     },
   ])
 
   assert.deepEqual(
     rows.map((row) => row.id),
-    ["offer-campaign-sort-1", "offer-campaign-sort-2", "offer-updated", "offer-older"],
+    ["offer-latest-sort-1", "offer-latest-sort-2", "offer-mid-sort-2", "offer-older"],
   )
-})
-
-test("derives the visible campaign date from expiry, updated, then created timestamps", () => {
-  const expiryDriven = {
-    id: "offer-1",
-    name: "Expiry",
-    image: null,
-    sort_order: 1,
-    hight_light: null,
-    expired_date: "2026-04-10T00:00:00.000Z",
-    description: null,
-    clinic_id: "clinic-1",
-    category_id: null,
-    category: null,
-    term_and_condition: null,
-    status: "ACTIVE",
-    images: [],
-    metadata: null,
-    created_at: "2025-01-01T00:00:00.000Z",
-    updated_at: "2026-04-09T00:00:00.000Z",
-  }
-
-  const updatedDriven = {
-    ...expiryDriven,
-    id: "offer-2",
-    expired_date: null,
-  }
-
-  const createdDriven = {
-    ...updatedDriven,
-    id: "offer-3",
-    updated_at: null,
-  }
-
-  assert.equal(getOfferCampaignDate(expiryDriven), "2026-04-10T00:00:00.000Z")
-  assert.equal(getOfferCampaignDateLabel(expiryDriven), "Campaign")
-  assert.equal(getOfferCampaignDate(updatedDriven), "2026-04-09T00:00:00.000Z")
-  assert.equal(getOfferCampaignDateLabel(updatedDriven), "Updated")
-  assert.equal(getOfferCampaignDate(createdDriven), "2025-01-01T00:00:00.000Z")
-  assert.equal(getOfferCampaignDateLabel(createdDriven), "Created")
 })

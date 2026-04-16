@@ -1012,7 +1012,6 @@ export interface OfferRow {
   images?: OfferImageRow[];
   metadata?: string | null;
   created_at: string;
-  updated_at?: string | null;
 }
 
 export interface SalesBySellerResponse {
