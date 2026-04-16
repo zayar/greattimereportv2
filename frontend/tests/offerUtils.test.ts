@@ -69,6 +69,24 @@ test("sorts offers by newest campaign first", () => {
       images: [],
       metadata: null,
       created_at: "2026-04-01T00:00:00.000Z",
+      expired_date: "2026-04-05T00:00:00.000Z",
+    },
+    {
+      id: "offer-mid",
+      name: "Mid",
+      image: null,
+      sort_order: 2,
+      hight_light: null,
+      expired_date: null,
+      description: null,
+      clinic_id: "clinic-1",
+      category_id: null,
+      category: null,
+      term_and_condition: null,
+      status: "ACTIVE",
+      images: [],
+      metadata: null,
+      created_at: "2026-04-10T00:00:00.000Z",
     },
     {
       id: "offer-latest",
@@ -76,7 +94,7 @@ test("sorts offers by newest campaign first", () => {
       image: null,
       sort_order: 9,
       hight_light: null,
-      expired_date: null,
+      expired_date: "2026-04-20T00:00:00.000Z",
       description: null,
       clinic_id: "clinic-1",
       category_id: null,
@@ -90,4 +108,5 @@ test("sorts offers by newest campaign first", () => {
   ])
 
   assert.equal(rows[0]?.id, "offer-latest")
+  assert.equal(rows[1]?.id, "offer-mid")
 })

@@ -65,36 +65,35 @@ export function OfferListPage() {
   const [deleteOffer, { loading: deleting }] = useMutation<MutationResponse>(DELETE_OFFER);
 
   const allRows = offersQuery.data?.offers ?? [];
+  const sortedAllRows = useMemo(() => sortOffersByCampaign(allRows), [allRows]);
   const categories = categoriesQuery.data?.offerCategories ?? [];
   const rows = useMemo(() => {
-    return sortOffersByCampaign(
-      allRows.filter((row) => {
-        if (statusFilter && row.status !== statusFilter) {
-          return false;
-        }
+    return sortedAllRows.filter((row) => {
+      if (statusFilter && row.status !== statusFilter) {
+        return false;
+      }
 
-        if (categoryFilter && (row.category?.id ?? row.category_id ?? "") !== categoryFilter) {
-          return false;
-        }
+      if (categoryFilter && (row.category?.id ?? row.category_id ?? "") !== categoryFilter) {
+        return false;
+      }
 
-        if (!deferredSearch) {
-          return true;
-        }
+      if (!deferredSearch) {
+        return true;
+      }
 
-        const haystack = [
-          row.name,
-          row.category?.name ?? "",
-          row.hight_light ?? "",
-          row.description ?? "",
-          row.term_and_condition ?? "",
-        ]
-          .join(" ")
-          .toLowerCase();
+      const haystack = [
+        row.name,
+        row.category?.name ?? "",
+        row.hight_light ?? "",
+        row.description ?? "",
+        row.term_and_condition ?? "",
+      ]
+        .join(" ")
+        .toLowerCase();
 
-        return haystack.includes(deferredSearch);
-      }),
-    );
-  }, [allRows, categoryFilter, deferredSearch, statusFilter]);
+      return haystack.includes(deferredSearch);
+    });
+  }, [categoryFilter, deferredSearch, sortedAllRows, statusFilter]);
 
   const selectedRow = mode.type === "existing" ? allRows.find((row) => row.id === mode.id) ?? null : null;
   const statusSummary = useMemo(() => summarizeStatuses(allRows), [allRows]);
@@ -128,10 +127,10 @@ export function OfferListPage() {
       return;
     }
 
-    const firstRow = allRows[0];
+    const firstRow = sortedAllRows[0];
     setMode({ type: "existing", id: firstRow.id });
     setDraft(createOfferDraft(firstRow));
-  }, [allRows, mode]);
+  }, [allRows, mode, sortedAllRows]);
 
   const busy = creating || updating || deleting;
   const currentCategoryName =
