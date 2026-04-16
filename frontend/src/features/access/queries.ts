@@ -8,6 +8,7 @@ export const GET_ALLOWED_CLINICS = gql`
       name
       company_id
       code
+      pass
       currency
       company {
         name
@@ -20,4 +21,3 @@ export const GET_ALLOWED_CLINICS = gql`
     }
   }
 `;
-

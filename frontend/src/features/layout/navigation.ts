@@ -29,6 +29,13 @@ export const navigationSections: NavigationSection[] = [
     ],
   },
   {
+    title: "Offers",
+    items: [
+      { to: "/offers/categories", label: "Offer Category" },
+      { to: "/offers/list", label: "Offer List" },
+    ],
+  },
+  {
     title: "Core",
     items: [
       {

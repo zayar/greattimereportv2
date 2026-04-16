@@ -23,6 +23,7 @@ export interface Clinic {
   name: string;
   company_id: string;
   code: string;
+  pass?: string | null;
   currency?: string | null;
   company: Company;
   _count?: ClinicCounts;
@@ -925,6 +926,7 @@ export interface PaymentReportResponse {
 }
 
 export interface WalletAccountSummaryRow {
+  id?: string;
   name: string;
   phoneNumber: string;
   balance: number;
@@ -972,6 +974,44 @@ export interface WalletTransactionsResponse {
   };
   rows: WalletTransactionRow[];
   totalCount: number;
+}
+
+export interface OfferCategoryRow {
+  id: string;
+  image?: string | null;
+  name: string;
+  sort_order?: number | null;
+  status: string;
+  description?: string | null;
+  clinic_id: string;
+  created_at: string;
+}
+
+export interface OfferImageRow {
+  id: string;
+  name?: string | null;
+  image?: string | null;
+}
+
+export interface OfferRow {
+  id: string;
+  image?: string | null;
+  name: string;
+  sort_order?: number | null;
+  hight_light?: string | null;
+  expired_date?: string | null;
+  description?: string | null;
+  clinic_id: string;
+  category_id?: string | null;
+  category?: {
+    id: string;
+    name: string;
+  } | null;
+  term_and_condition?: string | null;
+  status: string;
+  images?: OfferImageRow[];
+  metadata?: string | null;
+  created_at: string;
 }
 
 export interface SalesBySellerResponse {
