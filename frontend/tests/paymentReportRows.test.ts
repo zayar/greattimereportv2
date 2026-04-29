@@ -1,6 +1,11 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { buildSalesDetailsCsvRows, buildSalesDetailRows, getGroupedInvoiceValue } from "../src/features/analytics/payment-report/paymentReportRows"
+import {
+  SALES_DETAILS_HEADERS,
+  buildSalesDetailsCsvRows,
+  buildSalesDetailRows,
+  getGroupedInvoiceValue,
+} from "../src/features/analytics/payment-report/paymentReportRows"
 import type { PaymentReportResponse } from "../src/types/domain"
 
 function buildRow(overrides: Partial<PaymentReportResponse["rows"][number]> = {}): PaymentReportResponse["rows"][number] {
@@ -62,7 +67,7 @@ test("marks only the first row in an invoice group for invoice summary values", 
   assert.equal(getGroupedInvoiceValue(rows[1]!, rows[1]!.total), null)
 })
 
-test("blanks invoice summary columns in CSV for repeated invoice rows while keeping service-line details", () => {
+test("exports sales details CSV with the same headers and placeholders as the table view", () => {
   const rows = buildSalesDetailRows([
     buildRow(),
     buildRow({
@@ -78,20 +83,27 @@ test("blanks invoice summary columns in CSV for repeated invoice rows while keep
 
   const csvRows = buildSalesDetailsCsvRows(rows, "MMK")
 
+  assert.equal(SALES_DETAILS_HEADERS[16], "Order Credit")
+  assert.equal(SALES_DETAILS_HEADERS[21], "Payment Type")
   assert.equal(csvRows[0]?.[12], "1,899,500 MMK")
   assert.equal(csvRows[0]?.[13], "0 MMK")
   assert.equal(csvRows[0]?.[18], "1,899,500 MMK")
+  assert.equal(csvRows[0]?.[5], "—")
+  assert.equal(csvRows[0]?.[7], "—")
+  assert.equal(csvRows[0]?.[19], "—")
+  assert.equal(csvRows[0]?.[20], "—")
+  assert.equal(csvRows[0]?.[21], "—")
 
   assert.equal(csvRows[1]?.[6], "Hair Removal Half Legs x 10 times")
   assert.equal(csvRows[1]?.[9], "1,200,000 MMK")
   assert.equal(csvRows[1]?.[10], "840,000 MMK")
-  assert.equal(csvRows[1]?.[12], "")
-  assert.equal(csvRows[1]?.[13], "")
-  assert.equal(csvRows[1]?.[14], "")
-  assert.equal(csvRows[1]?.[15], "")
-  assert.equal(csvRows[1]?.[16], "")
-  assert.equal(csvRows[1]?.[17], "")
-  assert.equal(csvRows[1]?.[18], "")
+  assert.equal(csvRows[1]?.[12], "—")
+  assert.equal(csvRows[1]?.[13], "—")
+  assert.equal(csvRows[1]?.[14], "—")
+  assert.equal(csvRows[1]?.[15], "—")
+  assert.equal(csvRows[1]?.[16], "—")
+  assert.equal(csvRows[1]?.[17], "—")
+  assert.equal(csvRows[1]?.[18], "—")
   assert.equal(csvRows[1]?.[19], "PAID")
   assert.equal(csvRows[1]?.[20], "VISA")
   assert.equal(csvRows[1]?.[21], "VISA")

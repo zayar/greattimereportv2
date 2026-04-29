@@ -10,6 +10,7 @@ import { startOfCurrentMonth, today, daysAgo } from "../../../utils/date";
 import { formatCurrency } from "../../../utils/format";
 import type { PaymentReportResponse } from "../../../types/domain";
 import {
+  SALES_DETAILS_HEADERS,
   buildSalesDetailsCsvRows,
   buildSalesDetailRows,
   getGroupedInvoiceValue,
@@ -17,6 +18,7 @@ import {
 } from "./paymentReportRows";
 
 const PAGE_SIZE = 30;
+const EXPORT_PAGE_SIZE = 100;
 
 function formatOptionalCurrency(value: number | null | undefined, currency: string) {
   if (value == null) {
@@ -36,34 +38,9 @@ function formatCsvValue(value: unknown) {
 }
 
 function downloadSalesDetails(rows: SalesDetailRow[], currency: string) {
-  const headers = [
-    "Date",
-    "Invoice Number",
-    "Customer Name",
-    "Member ID",
-    "Sale Person",
-    "Service Name",
-    "Service Package",
-    "Wallet",
-    "Qty",
-    "Item Price",
-    "Item Total",
-    "Sub Total",
-    "Total",
-    "Discount",
-    "Net Total",
-    "Order Balance",
-    "Order Credit Balance",
-    "Tax",
-    "Invoice Total",
-    "Payment Status",
-    "Payment Method",
-    "Payment Type",
-  ];
-
   const body = buildSalesDetailsCsvRows(rows, currency).map((row) => row.map(formatCsvValue).join(","));
 
-  const csv = [headers.join(","), ...body].join("\n");
+  const csv = [SALES_DETAILS_HEADERS.join(","), ...body].join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -87,6 +64,7 @@ export function PaymentReportPage() {
   });
   const deferredSearch = useDeferredValue(search.trim());
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<PaymentReportResponse | null>(null);
 
@@ -178,6 +156,57 @@ export function PaymentReportPage() {
     });
   }
 
+  async function loadExportRows() {
+    if (!currentClinic) {
+      return [];
+    }
+
+    const exportRows: PaymentReportResponse["rows"] = [];
+    let exportPage = 1;
+    let totalCount = Number.POSITIVE_INFINITY;
+
+    while (exportRows.length < totalCount) {
+      const result = await fetchPaymentReport({
+        clinicId: currentClinic.id,
+        clinicCode: currentClinic.code,
+        fromDate: range.fromDate,
+        toDate: range.toDate,
+        search: deferredSearch,
+        paymentMethod,
+        includeZeroValues,
+        page: exportPage,
+        pageSize: EXPORT_PAGE_SIZE,
+      });
+
+      exportRows.push(...result.rows);
+      totalCount = result.totalCount;
+
+      if (result.rows.length < EXPORT_PAGE_SIZE) {
+        break;
+      }
+
+      exportPage += 1;
+    }
+
+    return buildSalesDetailRows(exportRows);
+  }
+
+  async function exportSalesDetails() {
+    setExporting(true);
+    setError(null);
+
+    try {
+      const exportRows = await loadExportRows();
+      if (exportRows.length > 0) {
+        downloadSalesDetails(exportRows, currency);
+      }
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : "Failed to export sales details.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <div className="page-stack page-stack--workspace analytics-report sales-details-report">
       <PageHeader
@@ -259,10 +288,10 @@ export function PaymentReportPage() {
 
           <button
             className="button button--secondary"
-            disabled={rows.length === 0}
-            onClick={() => downloadSalesDetails(rows, currency)}
+            disabled={rows.length === 0 || exporting}
+            onClick={() => void exportSalesDetails()}
           >
-            Export CSV
+            {exporting ? "Exporting..." : "Export CSV"}
           </button>
         </div>
       </section>

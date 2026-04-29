@@ -7,13 +7,40 @@ export type SalesDetailRow = PaymentReportResponse["rows"][number] & {
   walletLabel: string;
 };
 
+export const SALES_DETAILS_HEADERS = [
+  "Date",
+  "Invoice Number",
+  "Customer Name",
+  "Member ID",
+  "Sale Person",
+  "Service Name",
+  "Service Package",
+  "Wallet",
+  "Qty",
+  "Item Price",
+  "Item Total",
+  "Sub Total",
+  "Total",
+  "Discount",
+  "Net Total",
+  "Order Balance",
+  "Order Credit",
+  "Tax",
+  "Invoice Total",
+  "Payment Status",
+  "Payment Method",
+  "Payment Type",
+];
+
+const EMPTY_VIEW_VALUE = "—";
+
 export function formatSalesDetailWalletLabel(value: string | number | null | undefined) {
   if (value == null || value === "") {
-    return "—";
+    return EMPTY_VIEW_VALUE;
   }
 
   if (typeof value === "number") {
-    return value > 0 ? "Topup" : "—";
+    return value > 0 ? "Topup" : EMPTY_VIEW_VALUE;
   }
 
   return value.includes("*Point") ? "Topup" : value;
@@ -40,7 +67,11 @@ export function getGroupedInvoiceValue<T>(row: Pick<SalesDetailRow, "showInvoice
 }
 
 function formatCsvCurrency(value: number | null | undefined, currency: string) {
-  return value == null ? "" : formatCurrency(value, currency);
+  return value == null ? EMPTY_VIEW_VALUE : formatCurrency(value, currency);
+}
+
+function formatCsvText(value: string | number | null | undefined) {
+  return value == null || value === "" ? EMPTY_VIEW_VALUE : value;
 }
 
 export function buildSalesDetailsCsvRows(rows: SalesDetailRow[], currency: string) {
@@ -48,12 +79,12 @@ export function buildSalesDetailsCsvRows(rows: SalesDetailRow[], currency: strin
     row.dateLabel,
     row.invoiceNumber,
     row.customerName,
-    row.memberId || "",
-    row.salePerson || "",
-    row.serviceName || "",
-    row.servicePackageName || "",
+    formatCsvText(row.memberId),
+    formatCsvText(row.salePerson),
+    formatCsvText(row.serviceName),
+    formatCsvText(row.servicePackageName),
     row.walletLabel,
-    row.itemQuantity ?? "",
+    row.itemQuantity ?? EMPTY_VIEW_VALUE,
     formatCsvCurrency(row.itemPrice, currency),
     formatCsvCurrency(row.itemTotal, currency),
     formatCsvCurrency(row.subTotal, currency),
@@ -64,8 +95,8 @@ export function buildSalesDetailsCsvRows(rows: SalesDetailRow[], currency: strin
     formatCsvCurrency(getGroupedInvoiceValue(row, row.orderCreditBalance), currency),
     formatCsvCurrency(getGroupedInvoiceValue(row, row.tax), currency),
     formatCsvCurrency(getGroupedInvoiceValue(row, row.invoiceNetTotal), currency),
-    row.paymentStatus || "",
-    row.paymentMethod || "",
-    row.paymentType || "",
+    formatCsvText(row.paymentStatus),
+    formatCsvText(row.paymentMethod),
+    formatCsvText(row.paymentType),
   ]);
 }

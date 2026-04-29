@@ -9,30 +9,15 @@ import { useAccess } from "../../access/AccessProvider";
 import type { BankingSummaryResponse } from "../../../types/domain";
 import { daysAgo, startOfCurrentMonth, today } from "../../../utils/date";
 import { formatCurrency } from "../../../utils/format";
+import {
+  BANKING_DETAILS_HEADERS,
+  buildBankingDetailsCsvRows,
+  buildBankingDetailRows,
+  type BankingDetailRow,
+} from "./bankingSummaryRows";
 
 const PAGE_SIZE = 50;
-
-type BankingDetailRow = BankingSummaryResponse["rows"][number] & {
-  rowId: string;
-  walletLabel: string;
-};
-
-function formatWalletLabel(value: string | number | null | undefined) {
-  if (value == null || value === "") {
-    return "—";
-  }
-
-  if (typeof value === "number") {
-    return value > 0 ? "Topup" : "—";
-  }
-
-  const normalized = value.toLowerCase();
-  if (normalized.includes("point") || normalized.includes("topup")) {
-    return "Topup";
-  }
-
-  return value;
-}
+const EXPORT_PAGE_SIZE = 100;
 
 function formatCsvValue(value: unknown) {
   const text = String(value ?? "");
@@ -44,39 +29,9 @@ function formatCsvValue(value: unknown) {
 }
 
 function downloadBankingDetails(rows: BankingDetailRow[], currency: string) {
-  const headers = [
-    "Date",
-    "Invoice Number",
-    "Customer Name",
-    "Member ID",
-    "Sale Person",
-    "Service Name",
-    "Service Package",
-    "Payment Method",
-    "Payment Status",
-    "Wallet",
-    "Invoice Net Total",
-  ];
+  const body = buildBankingDetailsCsvRows(rows, currency).map((row) => row.map(formatCsvValue).join(","));
 
-  const body = rows.map((row) =>
-    [
-      row.dateLabel,
-      row.invoiceNumber,
-      row.customerName,
-      row.memberId,
-      row.salePerson,
-      row.serviceName,
-      row.servicePackageName || "",
-      row.paymentMethod,
-      row.paymentStatus,
-      row.walletLabel,
-      formatCurrency(row.invoiceNetTotal, currency),
-    ]
-      .map(formatCsvValue)
-      .join(","),
-  );
-
-  const csv = [headers.join(","), ...body].join("\n");
+  const csv = [BANKING_DETAILS_HEADERS.join(","), ...body].join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -100,6 +55,7 @@ export function BankingSummaryPage() {
   });
   const deferredSearch = useDeferredValue(search.trim());
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<BankingSummaryResponse | null>(null);
 
@@ -152,12 +108,7 @@ export function BankingSummaryPage() {
   const totalPages = Math.max(1, Math.ceil((data?.totalCount ?? 0) / PAGE_SIZE));
 
   const rows = useMemo<BankingDetailRow[]>(
-    () =>
-      (data?.rows ?? []).map((row, index) => ({
-        ...row,
-        rowId: `${row.invoiceNumber}-${row.paymentMethod}-${index}`,
-        walletLabel: formatWalletLabel(row.walletTopUp),
-      })),
+    () => buildBankingDetailRows(data?.rows ?? []),
     [data?.rows],
   );
   const methodsGrandTotal = useMemo(
@@ -201,6 +152,57 @@ export function BankingSummaryPage() {
       fromDate: startOfCurrentMonth(),
       toDate: today(),
     });
+  }
+
+  async function loadExportRows() {
+    if (!currentClinic) {
+      return [];
+    }
+
+    const exportRows: BankingSummaryResponse["rows"] = [];
+    let exportPage = 1;
+    let totalCount = Number.POSITIVE_INFINITY;
+
+    while (exportRows.length < totalCount) {
+      const result = await fetchBankingDetails({
+        clinicId: currentClinic.id,
+        clinicCode: currentClinic.code,
+        fromDate: range.fromDate,
+        toDate: range.toDate,
+        search: deferredSearch,
+        paymentMethod,
+        walletTopupFilter,
+        page: exportPage,
+        pageSize: EXPORT_PAGE_SIZE,
+      });
+
+      exportRows.push(...result.rows);
+      totalCount = result.totalCount;
+
+      if (result.rows.length < EXPORT_PAGE_SIZE) {
+        break;
+      }
+
+      exportPage += 1;
+    }
+
+    return buildBankingDetailRows(exportRows);
+  }
+
+  async function exportBankingDetails() {
+    setExporting(true);
+    setError(null);
+
+    try {
+      const exportRows = await loadExportRows();
+      if (exportRows.length > 0) {
+        downloadBankingDetails(exportRows, currency);
+      }
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : "Failed to export payment report.");
+    } finally {
+      setExporting(false);
+    }
   }
 
   return (
@@ -296,10 +298,10 @@ export function BankingSummaryPage() {
 
           <button
             className="button button--secondary"
-            disabled={rows.length === 0}
-            onClick={() => downloadBankingDetails(rows, currency)}
+            disabled={rows.length === 0 || exporting}
+            onClick={() => void exportBankingDetails()}
           >
-            Export CSV
+            {exporting ? "Exporting..." : "Export CSV"}
           </button>
         </div>
       </section>
