@@ -58,6 +58,43 @@ const BOOKING_DETAILS_QUERY = `
   }
 `;
 
+const PAYMENT_REPORT_QUERY = `
+  query GetPaymentReport(
+    $clinicCode: String!
+    $filterType: String!
+    $startDate: DateTime
+    $endDate: DateTime
+    $selectedDate: DateTime
+    $skip: Int
+    $take: Int
+  ) {
+    getPaymentReport(
+      clinicCode: $clinicCode
+      filterType: $filterType
+      startDate: $startDate
+      endDate: $endDate
+      selectedDate: $selectedDate
+      skip: $skip
+      take: $take
+    ) {
+      data {
+        Date
+        InvoiceNumber
+        CustomerName
+        MemberId
+        SalePerson
+        ServiceName
+        ServicePackageName
+        PaymentMethod
+        PaymentStatus
+        WalletTopUp
+        InvoiceNetTotal
+      }
+      totalCount
+    }
+  }
+`;
+
 const TELEGRAM_PAYMENT_ORDERS_QUERY = `
   query TelegramPaymentOrders(
     $where: OrderWhereInput
@@ -130,6 +167,20 @@ export type ApicoreBookingDetailsRow = {
   member_note?: string | null;
 };
 
+export type ApicorePaymentReportRow = {
+  Date: string;
+  InvoiceNumber: string;
+  CustomerName: string;
+  MemberId: string;
+  SalePerson: string;
+  ServiceName: string;
+  ServicePackageName?: string | null;
+  PaymentMethod?: string | null;
+  PaymentStatus?: string | null;
+  WalletTopUp?: string | number | null;
+  InvoiceNetTotal: number | string;
+};
+
 export type ApicoreOrderPaymentRow = {
   payment_amount: number | string;
   payment_method?: string | null;
@@ -167,6 +218,13 @@ export type ApicoreOrderWithPaymentsRow = {
 type BookingDetailsPayload = {
   getBookingDetails?: {
     data?: ApicoreBookingDetailsRow[];
+    totalCount?: number;
+  } | null;
+};
+
+type PaymentReportPayload = {
+  getPaymentReport?: {
+    data?: ApicorePaymentReportRow[];
     totalCount?: number;
   } | null;
 };
@@ -452,6 +510,80 @@ export async function fetchApicoreBookingDetails(params: {
   return {
     data: payload.data?.getBookingDetails?.data ?? [],
     totalCount: payload.data?.getBookingDetails?.totalCount ?? 0,
+  };
+}
+
+async function executeLegacyPaymentReportQuery(params: {
+  variables: Record<string, unknown>;
+  authorizationHeader?: string;
+}) {
+  let payload: GraphQLResponse<PaymentReportPayload>;
+
+  try {
+    payload = await postGraphql<PaymentReportPayload>({
+      query: PAYMENT_REPORT_QUERY,
+      variables: params.variables,
+    });
+  } catch (error) {
+    if (
+      params.authorizationHeader &&
+      error instanceof HttpError &&
+      (error.statusCode === 401 || error.statusCode === 403)
+    ) {
+      payload = await executeApicoreQueryWithFallback<PaymentReportPayload>({
+        requestBody: {
+          query: PAYMENT_REPORT_QUERY,
+          variables: params.variables,
+        },
+        authorizationHeader: params.authorizationHeader,
+        errorMessage: "Payment report query failed.",
+      });
+    } else {
+      throw error;
+    }
+  }
+
+  if (payload.errors?.length && params.authorizationHeader) {
+    payload = await executeApicoreQueryWithFallback<PaymentReportPayload>({
+      requestBody: {
+        query: PAYMENT_REPORT_QUERY,
+        variables: params.variables,
+      },
+      authorizationHeader: params.authorizationHeader,
+      errorMessage: "Payment report query failed.",
+    });
+  }
+
+  if (payload.errors?.length) {
+    throw new HttpError(401, payload.errors[0]?.message || "Payment report query failed.");
+  }
+
+  return payload;
+}
+
+export async function fetchApicorePaymentReport(params: {
+  clinicCode: string;
+  startDate: string;
+  endDate: string;
+  skip?: number;
+  take?: number;
+  authorizationHeader?: string;
+}) {
+  const payload = await executeLegacyPaymentReportQuery({
+    variables: {
+      clinicCode: params.clinicCode,
+      filterType: "day",
+      startDate: params.startDate,
+      endDate: params.endDate,
+      skip: params.skip ?? 0,
+      take: params.take ?? 200,
+    },
+    authorizationHeader: params.authorizationHeader,
+  });
+
+  return {
+    data: payload.data?.getPaymentReport?.data ?? [],
+    totalCount: payload.data?.getPaymentReport?.totalCount ?? 0,
   };
 }
 

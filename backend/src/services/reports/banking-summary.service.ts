@@ -1,18 +1,60 @@
-import { analyticsTables } from "../../config/bigquery.js";
-import { runAnalyticsQuery } from "../bigquery.service.js";
-import { bankingSummaryCommonWhere } from "./banking-summary.query.js";
+import { fetchApicorePaymentReport, type ApicorePaymentReportRow } from "../apicore.service.js";
+import {
+  buildBankingSummaryFromPaymentReportRows,
+  type BankingSummaryWalletTopupFilter,
+} from "./banking-summary.transform.js";
 
-function parseNumber(value: unknown) {
-  if (typeof value === "number") {
-    return value;
+const PAYMENT_REPORT_BATCH_SIZE = 5000;
+
+function toUtcBoundaryIso(date: string, boundary: "start" | "end") {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+
+  if (!match) {
+    return new Date(date).toISOString();
   }
-  if (typeof value === "bigint") {
-    return Number(value);
+
+  const [, year, month, day] = match;
+  const hour = boundary === "start" ? 0 : 23;
+  const minute = boundary === "start" ? 0 : 59;
+  const second = boundary === "start" ? 0 : 59;
+  const millisecond = boundary === "start" ? 0 : 999;
+
+  return new Date(
+    Date.UTC(Number(year), Number(month) - 1, Number(day), hour, minute, second, millisecond),
+  ).toISOString();
+}
+
+async function fetchAllLegacyPaymentRows(params: {
+  clinicCode: string;
+  fromDate: string;
+  toDate: string;
+  authorizationHeader?: string;
+}) {
+  const rows: ApicorePaymentReportRow[] = [];
+  let totalCount = Number.POSITIVE_INFINITY;
+  let skip = 0;
+
+  while (rows.length < totalCount) {
+    const batch = await fetchApicorePaymentReport({
+      clinicCode: params.clinicCode,
+      startDate: toUtcBoundaryIso(params.fromDate, "start"),
+      endDate: toUtcBoundaryIso(params.toDate, "end"),
+      skip,
+      take: PAYMENT_REPORT_BATCH_SIZE,
+      authorizationHeader: params.authorizationHeader,
+    });
+
+    rows.push(...batch.data);
+    totalCount = batch.totalCount;
+
+    if (batch.data.length < PAYMENT_REPORT_BATCH_SIZE) {
+      break;
+    }
+
+    skip += batch.data.length;
   }
-  if (value && typeof value === "object" && "value" in value) {
-    return Number((value as { value: unknown }).value);
-  }
-  return Number(value ?? 0);
+
+  return rows;
 }
 
 export async function getBankingSummary(params: {
@@ -21,130 +63,23 @@ export async function getBankingSummary(params: {
   toDate: string;
   search: string;
   paymentMethod: string;
-  walletTopupFilter: "all" | "hide" | "only";
+  walletTopupFilter: BankingSummaryWalletTopupFilter;
   limit: number;
   offset: number;
+  authorizationHeader?: string;
 }) {
-  const detailWhere = `
-    ${bankingSummaryCommonWhere}
-      AND (
-        @paymentMethod = ''
-        OR LOWER(COALESCE(PaymentMethod, 'Unknown')) = LOWER(@paymentMethod)
-      )
-  `;
+  const legacyRows = await fetchAllLegacyPaymentRows({
+    clinicCode: params.clinicCode,
+    fromDate: params.fromDate,
+    toDate: params.toDate,
+    authorizationHeader: params.authorizationHeader,
+  });
 
-  const [summaryRows, methodRows, detailRows, totalRows] = await Promise.all([
-    runAnalyticsQuery<{
-      totalRevenue: number;
-      transactionCount: number;
-      methodsCount: number;
-      averageTicket: number;
-    }>(
-      `
-        SELECT
-          COALESCE(SUM(CAST(NetTotal AS FLOAT64)), 0) AS totalRevenue,
-          COUNT(*) AS transactionCount,
-          COUNT(DISTINCT COALESCE(PaymentMethod, 'Unknown')) AS methodsCount,
-          COALESCE(AVG(CAST(NetTotal AS FLOAT64)), 0) AS averageTicket
-        FROM ${analyticsTables.mainPaymentView}
-        WHERE ${detailWhere}
-      `,
-      params,
-    ),
-    runAnalyticsQuery<{
-      paymentMethod: string;
-      totalAmount: number;
-      transactionCount: number;
-      averageTicket: number;
-    }>(
-      `
-        SELECT
-          COALESCE(PaymentMethod, 'Unknown') AS paymentMethod,
-          COALESCE(SUM(CAST(NetTotal AS FLOAT64)), 0) AS totalAmount,
-          COUNT(*) AS transactionCount,
-          COALESCE(AVG(CAST(NetTotal AS FLOAT64)), 0) AS averageTicket
-        FROM ${analyticsTables.mainPaymentView}
-        WHERE ${bankingSummaryCommonWhere}
-        GROUP BY paymentMethod
-        ORDER BY totalAmount DESC, paymentMethod ASC
-      `,
-      params,
-    ),
-    runAnalyticsQuery<{
-      dateLabel: string;
-      invoiceNumber: string;
-      customerName: string;
-      memberId: string;
-      salePerson: string;
-      serviceName: string;
-      servicePackageName: string | null;
-      paymentMethod: string;
-      paymentStatus: string;
-      walletTopUp: string | number | null;
-      invoiceNetTotal: number;
-    }>(
-      `
-        SELECT
-          FORMAT_DATE('%Y-%m-%d', DATE(OrderCreatedDate)) AS dateLabel,
-          InvoiceNumber AS invoiceNumber,
-          CustomerName AS customerName,
-          COALESCE(MemberId, '') AS memberId,
-          COALESCE(SellerName, 'Unknown') AS salePerson,
-          COALESCE(ServiceName, '') AS serviceName,
-          ServicePackageName AS servicePackageName,
-          COALESCE(PaymentMethod, 'Unknown') AS paymentMethod,
-          COALESCE(PaymentStatus, '') AS paymentStatus,
-          WalletTopUp AS walletTopUp,
-          CAST(NetTotal AS FLOAT64) AS invoiceNetTotal
-        FROM ${analyticsTables.mainPaymentView}
-        WHERE ${detailWhere}
-        ORDER BY OrderCreatedDate DESC, InvoiceNumber DESC
-        LIMIT @limit
-        OFFSET @offset
-      `,
-      params,
-    ),
-    runAnalyticsQuery<{
-      totalCount: number;
-    }>(
-      `
-        SELECT COUNT(*) AS totalCount
-        FROM ${analyticsTables.mainPaymentView}
-        WHERE ${detailWhere}
-      `,
-      params,
-    ),
-  ]);
-
-  const summary = summaryRows[0];
-  const total = totalRows[0];
-
-  return {
-    summary: {
-      totalRevenue: parseNumber(summary?.totalRevenue),
-      transactionCount: parseNumber(summary?.transactionCount),
-      methodsCount: parseNumber(summary?.methodsCount),
-      averageTicket: parseNumber(summary?.averageTicket),
-    },
-    methods: methodRows.map((row) => ({
-      paymentMethod: row.paymentMethod,
-      totalAmount: parseNumber(row.totalAmount),
-      transactionCount: parseNumber(row.transactionCount),
-      averageTicket: parseNumber(row.averageTicket),
-    })),
-    rows: detailRows.map((row) => ({
-      dateLabel: row.dateLabel,
-      invoiceNumber: row.invoiceNumber,
-      customerName: row.customerName,
-      memberId: row.memberId,
-      salePerson: row.salePerson,
-      serviceName: row.serviceName,
-      servicePackageName: row.servicePackageName,
-      paymentMethod: row.paymentMethod,
-      paymentStatus: row.paymentStatus,
-      walletTopUp: row.walletTopUp,
-      invoiceNetTotal: parseNumber(row.invoiceNetTotal),
-    })),
-    totalCount: parseNumber(total?.totalCount),
-  };
+  return buildBankingSummaryFromPaymentReportRows(legacyRows, {
+    search: params.search,
+    paymentMethod: params.paymentMethod,
+    walletTopupFilter: params.walletTopupFilter,
+    limit: params.limit,
+    offset: params.offset,
+  });
 }

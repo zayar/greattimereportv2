@@ -594,6 +594,7 @@ router.get(
       walletTopupFilter: params.walletTopupFilter,
       limit: params.pageSize,
       offset: (params.page - 1) * params.pageSize,
+      authorizationHeader: req.headers.authorization,
     });
     res.json({ success: true, data });
   }),

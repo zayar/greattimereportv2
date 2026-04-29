@@ -160,6 +160,17 @@ export function BankingSummaryPage() {
       })),
     [data?.rows],
   );
+  const methodsGrandTotal = useMemo(
+    () =>
+      (data?.methods ?? []).reduce(
+        (total, row) => ({
+          transactionCount: total.transactionCount + row.transactionCount,
+          totalAmount: total.totalAmount + row.totalAmount,
+        }),
+        { transactionCount: 0, totalAmount: 0 },
+      ),
+    [data?.methods],
+  );
 
   function applyPreset(type: "today" | "7d" | "30d" | "month") {
     if (type === "today") {
@@ -316,7 +327,7 @@ export function BankingSummaryPage() {
 
       <Panel
         className="analytics-report__panel sales-details-report__panel banking-details-report__panel"
-        title="Payment methods summary"
+        title="Payment Methods Summary"
         subtitle={
           paymentMethod
             ? `Detail rows below are currently filtered to ${paymentMethod}.`
@@ -367,6 +378,11 @@ export function BankingSummaryPage() {
                     </tr>
                   );
                 })}
+                <tr className="banking-details-report__method-total-row">
+                  <td>Grand Total</td>
+                  <td>{methodsGrandTotal.transactionCount.toLocaleString("en-US")}</td>
+                  <td>{formatCurrency(methodsGrandTotal.totalAmount, currency)}</td>
+                </tr>
               </tbody>
             </table>
           </div>
@@ -375,7 +391,7 @@ export function BankingSummaryPage() {
 
       <Panel
         className="analytics-report__panel sales-details-report__panel banking-details-report__panel"
-        title={`${currentClinic?.name ?? "Clinic"} banking ledger`}
+        title="Detailed Transactions"
         subtitle={`${(data?.totalCount ?? 0).toLocaleString("en-US")} detailed transaction rows matched the current filters`}
         action={
           <div className="pagination-controls">

@@ -6533,6 +6533,14 @@ a {
   background: rgba(31, 78, 69, 0.1);
 }
 
+.banking-details-report__method-total-row {
+  font-weight: 700;
+}
+
+.banking-details-report__method-total-row td {
+  border-top: 1px solid var(--luxe-border-strong);
+}
+
 .banking-details-report__method-button {
   all: unset;
   cursor: pointer;
