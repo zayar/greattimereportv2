@@ -2,8 +2,11 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import {
   SALES_DETAILS_HEADERS,
+  SALES_SUMMARY_HEADERS,
   buildSalesDetailsCsvRows,
   buildSalesDetailRows,
+  buildSalesSummaryCsvRows,
+  buildSalesSummaryRows,
   getGroupedInvoiceValue,
 } from "../src/features/analytics/payment-report/paymentReportRows"
 import type { PaymentReportResponse } from "../src/types/domain"
@@ -115,4 +118,51 @@ test("exports sales details CSV with the same headers and placeholders as the ta
   assert.equal(csvRows[1]?.[21], "VISA")
   assert.equal(csvRows[1]?.[22], "840,000 MMK")
   assert.equal(csvRows[1]?.[23], "Full Payment")
+})
+
+test("builds invoice summary rows and exports them with grouped payment details", () => {
+  const rows = buildSalesDetailRows([
+    buildRow({
+      serviceName: "Exilis",
+      servicePackageName: "",
+      paymentStatus: "PARTIAL_PAID",
+      paymentMethod: "CASH",
+      paymentType: "CASH",
+      paymentAmount: 500000,
+      paymentNote: "Initial Payment",
+    }),
+    buildRow({
+      serviceName: "Laser",
+      servicePackageName: "Face Package",
+      paymentStatus: "PARTIAL_PAID",
+      paymentMethod: "KBZ",
+      paymentType: "KBZ",
+      paymentAmount: 250000,
+      paymentNote: "Second Payment",
+    }),
+    buildRow({
+      invoiceNumber: "SO-091608",
+      customerName: "Khaing Zin Naing ( E )",
+      serviceName: "Underarm",
+      total: 1560000,
+      discount: 510000,
+      netTotal: 1050000,
+      invoiceNetTotal: 1050000,
+    }),
+  ])
+
+  const summaryRows = buildSalesSummaryRows(rows)
+  const csvRows = buildSalesSummaryCsvRows(summaryRows, "MMK")
+
+  assert.equal(SALES_SUMMARY_HEADERS[5], "Services")
+  assert.equal(SALES_SUMMARY_HEADERS[19], "Payment Amount")
+  assert.equal(summaryRows.length, 2)
+  assert.equal(summaryRows[0]?.serviceNames, "Exilis, Laser")
+  assert.equal(summaryRows[0]?.servicePackageNames, "Face Package")
+  assert.equal(summaryRows[0]?.itemRows, 2)
+  assert.equal(summaryRows[0]?.paymentMethod, "CASH, KBZ")
+  assert.equal(summaryRows[0]?.paymentAmount, 750000)
+  assert.equal(summaryRows[0]?.paymentNote, "Initial Payment | Second Payment")
+  assert.equal(csvRows[0]?.[19], "750,000 MMK")
+  assert.equal(csvRows[1]?.[19], "—")
 })

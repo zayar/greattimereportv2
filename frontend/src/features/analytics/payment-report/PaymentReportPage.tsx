@@ -11,14 +11,19 @@ import { formatCurrency } from "../../../utils/format";
 import type { PaymentReportResponse } from "../../../types/domain";
 import {
   SALES_DETAILS_HEADERS,
+  SALES_SUMMARY_HEADERS,
   buildSalesDetailsCsvRows,
   buildSalesDetailRows,
+  buildSalesSummaryCsvRows,
+  buildSalesSummaryRows,
   getGroupedInvoiceValue,
   type SalesDetailRow,
+  type SalesSummaryRow,
 } from "./paymentReportRows";
 
 const PAGE_SIZE = 30;
 const EXPORT_PAGE_SIZE = 100;
+type ViewMode = "detail" | "summary";
 
 function formatOptionalCurrency(value: number | null | undefined, currency: string) {
   if (value == null) {
@@ -37,19 +42,75 @@ function formatCsvValue(value: unknown) {
   return text;
 }
 
-function downloadSalesDetails(rows: SalesDetailRow[], currency: string) {
-  const body = buildSalesDetailsCsvRows(rows, currency).map((row) => row.map(formatCsvValue).join(","));
-
-  const csv = [SALES_DETAILS_HEADERS.join(","), ...body].join("\n");
+function downloadCsv(params: { fileName: string; headers: string[]; rows: Array<Array<string | number>> }) {
+  const body = params.rows.map((row) => row.map(formatCsvValue).join(","));
+  const csv = [params.headers.join(","), ...body].join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `sales-details-${today()}.csv`;
+  link.download = params.fileName;
   document.body.append(link);
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function downloadSalesDetails(rows: SalesDetailRow[], currency: string) {
+  downloadCsv({
+    fileName: `sales-details-${today()}.csv`,
+    headers: SALES_DETAILS_HEADERS,
+    rows: buildSalesDetailsCsvRows(rows, currency),
+  });
+}
+
+function downloadSalesSummary(rows: SalesSummaryRow[], currency: string) {
+  downloadCsv({
+    fileName: `sales-summary-${today()}.csv`,
+    headers: SALES_SUMMARY_HEADERS,
+    rows: buildSalesSummaryCsvRows(rows, currency),
+  });
+}
+
+function ViewModeToggle({ value, onChange }: { value: ViewMode; onChange: (value: ViewMode) => void }) {
+  return (
+    <div className="sales-details-report__view-toggle" role="group" aria-label="Sales details view">
+      <button
+        type="button"
+        aria-label="Detailed rows"
+        title="Detailed rows"
+        className="sales-details-report__view-button"
+        data-active={value === "detail"}
+        onClick={() => onChange("detail")}
+      >
+        <span className="sales-details-report__view-icon sales-details-report__view-icon--list" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+          <span />
+          <span />
+          <span />
+        </span>
+      </button>
+      <button
+        type="button"
+        aria-label="Invoice summary"
+        title="Invoice summary"
+        className="sales-details-report__view-button"
+        data-active={value === "summary"}
+        onClick={() => onChange("summary")}
+      >
+        <span className="sales-details-report__view-icon sales-details-report__view-icon--grid" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+          <span />
+          <span />
+          <span />
+        </span>
+      </button>
+    </div>
+  );
 }
 
 export function PaymentReportPage() {
@@ -57,6 +118,7 @@ export function PaymentReportPage() {
   const [search, setSearch] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
   const [includeZeroValues, setIncludeZeroValues] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("detail");
   const [page, setPage] = useState(1);
   const [range, setRange] = useState({
     fromDate: today(),
@@ -124,6 +186,12 @@ export function PaymentReportPage() {
 
     return buildSalesDetailRows(data.rows);
   }, [data]);
+  const summaryRows = useMemo(() => buildSalesSummaryRows(rows), [rows]);
+  const panelTitle = viewMode === "detail" ? "Detailed Transactions" : "Invoice Summary";
+  const panelSubtitle =
+    viewMode === "detail"
+      ? `${(data?.totalCount ?? 0).toLocaleString("en-US")} item/payment rows matched the current filters.`
+      : `${summaryRows.length.toLocaleString("en-US")} invoice rows grouped from the current result page.`;
 
   function applyPreset(type: "today" | "7d" | "30d" | "month") {
     if (type === "today") {
@@ -198,7 +266,11 @@ export function PaymentReportPage() {
     try {
       const exportRows = await loadExportRows();
       if (exportRows.length > 0) {
-        downloadSalesDetails(exportRows, currency);
+        if (viewMode === "summary") {
+          downloadSalesSummary(buildSalesSummaryRows(exportRows), currency);
+        } else {
+          downloadSalesDetails(exportRows, currency);
+        }
       }
     } catch (exportError) {
       setError(exportError instanceof Error ? exportError.message : "Failed to export sales details.");
@@ -294,6 +366,10 @@ export function PaymentReportPage() {
             {exporting ? "Exporting..." : "Export CSV"}
           </button>
         </div>
+
+        <div className="sales-details-report__view-row">
+          <ViewModeToggle value={viewMode} onChange={setViewMode} />
+        </div>
       </section>
 
       {error ? <ErrorState label="Sales details could not be loaded" detail={error} /> : null}
@@ -319,8 +395,8 @@ export function PaymentReportPage() {
 
       <Panel
         className="analytics-report__panel sales-details-report__panel"
-        title="Detailed Transactions"
-        subtitle={`${(data?.totalCount ?? 0).toLocaleString("en-US")} item/payment rows matched the current filters.`}
+        title={panelTitle}
+        subtitle={panelSubtitle}
         action={
           <div className="pagination-controls">
             <button className="button button--secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
@@ -343,7 +419,7 @@ export function PaymentReportPage() {
         {!loading && !error && rows.length === 0 ? (
           <EmptyState label="No sales details matched these filters" detail="Try clearing the search or widening the date range." />
         ) : null}
-        {rows.length > 0 ? (
+        {rows.length > 0 && viewMode === "detail" ? (
           <DataTable
             rows={rows}
             rowKey={(row) => row.rowId}
@@ -449,6 +525,64 @@ export function PaymentReportPage() {
                 render: (row) => formatOptionalCurrency(row.paymentAmount, currency),
               },
               { key: "paymentNote", header: "Payment Note", render: (row) => row.paymentNote || "—" },
+            ]}
+          />
+        ) : null}
+        {rows.length > 0 && viewMode === "summary" ? (
+          <DataTable
+            rows={summaryRows}
+            rowKey={(row) => row.rowId}
+            columns={[
+              { key: "date", header: "Date", render: (row) => row.dateLabel },
+              {
+                key: "invoice",
+                header: "Invoice Number",
+                render: (row) => <span className="sales-details-report__strong">{row.invoiceNumber}</span>,
+              },
+              { key: "customer", header: "Customer Name", render: (row) => row.customerName },
+              { key: "member", header: "Member ID", render: (row) => row.memberId || "—" },
+              { key: "seller", header: "Sale Person", render: (row) => row.salePerson || "—" },
+              { key: "services", header: "Services", render: (row) => row.serviceNames },
+              { key: "packages", header: "Service Packages", render: (row) => row.servicePackageNames },
+              { key: "wallet", header: "Wallet", render: (row) => row.walletLabel },
+              { key: "items", header: "Item Rows", render: (row) => row.itemRows.toLocaleString("en-US") },
+              { key: "total", header: "Total", render: (row) => formatOptionalCurrency(row.total, currency) },
+              { key: "discount", header: "Discount", render: (row) => formatOptionalCurrency(row.discount, currency) },
+              { key: "netTotal", header: "Net Total", render: (row) => formatOptionalCurrency(row.netTotal, currency) },
+              {
+                key: "balance",
+                header: "Order Balance",
+                render: (row) => formatOptionalCurrency(row.orderBalance, currency),
+              },
+              {
+                key: "creditBalance",
+                header: "Order Credit Balance",
+                render: (row) => formatOptionalCurrency(row.orderCreditBalance, currency),
+              },
+              { key: "tax", header: "Tax", render: (row) => formatOptionalCurrency(row.tax, currency) },
+              {
+                key: "invoiceTotal",
+                header: "Invoice Total",
+                render: (row) =>
+                  row.invoiceNetTotal == null ? (
+                    "—"
+                  ) : (
+                    <span className="sales-details-report__strong">{formatCurrency(row.invoiceNetTotal, currency)}</span>
+                  ),
+              },
+              {
+                key: "paymentStatus",
+                header: "Payment Status",
+                render: (row) => (row.paymentStatus === "—" ? "—" : <span className="chip">{row.paymentStatus}</span>),
+              },
+              { key: "paymentMethod", header: "Payment Method", render: (row) => row.paymentMethod },
+              { key: "paymentType", header: "Payment Type", render: (row) => row.paymentType },
+              {
+                key: "paymentAmount",
+                header: "Payment Amount",
+                render: (row) => formatOptionalCurrency(row.paymentAmount, currency),
+              },
+              { key: "paymentNote", header: "Payment Note", render: (row) => row.paymentNote },
             ]}
           />
         ) : null}
