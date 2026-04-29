@@ -16,7 +16,7 @@ export const SALES_DETAILS_HEADERS = [
   "Service Name",
   "Service Package",
   "Wallet",
-  "Qty",
+  "Item Quantity",
   "Item Price",
   "Item Total",
   "Sub Total",
@@ -24,12 +24,14 @@ export const SALES_DETAILS_HEADERS = [
   "Discount",
   "Net Total",
   "Order Balance",
-  "Order Credit",
+  "Order Credit Balance",
   "Tax",
   "Invoice Total",
   "Payment Status",
   "Payment Method",
   "Payment Type",
+  "Payment Amount",
+  "Payment Note",
 ];
 
 const EMPTY_VIEW_VALUE = "—";
@@ -98,5 +100,7 @@ export function buildSalesDetailsCsvRows(rows: SalesDetailRow[], currency: strin
     formatCsvText(row.paymentStatus),
     formatCsvText(row.paymentMethod),
     formatCsvText(row.paymentType),
+    formatCsvCurrency(row.paymentAmount, currency),
+    formatCsvText(row.paymentNote),
   ]);
 }

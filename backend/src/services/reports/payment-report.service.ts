@@ -26,7 +26,7 @@ export async function getPaymentReport(params: {
 }) {
   const baseWhere = `
     DATE(OrderCreatedDate) BETWEEN @fromDate AND @toDate
-      AND PaymentStatus = 'PAID'
+      AND PaymentMethod != 'PASS'
       AND LOWER(ClinicCode) = LOWER(@clinicCode)
       AND (
         @search = ''
@@ -48,7 +48,7 @@ export async function getPaymentReport(params: {
 
   const methodWhere = `
     DATE(OrderCreatedDate) BETWEEN @fromDate AND @toDate
-      AND PaymentStatus = 'PAID'
+      AND PaymentMethod != 'PASS'
       AND LOWER(ClinicCode) = LOWER(@clinicCode)
       AND (
         @search = ''
@@ -369,7 +369,7 @@ export async function getPaymentReport(params: {
       `
         ${detailCte}
         ${detailSelect}
-        ORDER BY dateLabel DESC, invoiceNumber, serviceName
+        ORDER BY invoice.dateLabel DESC, invoice.invoiceNumber, service.itemRank
         LIMIT @limit
         OFFSET @offset
       `,

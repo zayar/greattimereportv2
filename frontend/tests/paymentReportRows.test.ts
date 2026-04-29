@@ -78,13 +78,17 @@ test("exports sales details CSV with the same headers and placeholders as the ta
       paymentStatus: "PAID",
       paymentMethod: "VISA",
       paymentType: "VISA",
+      paymentAmount: 840000,
+      paymentNote: "Full Payment",
     }),
   ])
 
   const csvRows = buildSalesDetailsCsvRows(rows, "MMK")
 
-  assert.equal(SALES_DETAILS_HEADERS[16], "Order Credit")
+  assert.equal(SALES_DETAILS_HEADERS[16], "Order Credit Balance")
   assert.equal(SALES_DETAILS_HEADERS[21], "Payment Type")
+  assert.equal(SALES_DETAILS_HEADERS[22], "Payment Amount")
+  assert.equal(SALES_DETAILS_HEADERS[23], "Payment Note")
   assert.equal(csvRows[0]?.[12], "1,899,500 MMK")
   assert.equal(csvRows[0]?.[13], "0 MMK")
   assert.equal(csvRows[0]?.[18], "1,899,500 MMK")
@@ -93,6 +97,8 @@ test("exports sales details CSV with the same headers and placeholders as the ta
   assert.equal(csvRows[0]?.[19], "—")
   assert.equal(csvRows[0]?.[20], "—")
   assert.equal(csvRows[0]?.[21], "—")
+  assert.equal(csvRows[0]?.[22], "—")
+  assert.equal(csvRows[0]?.[23], "—")
 
   assert.equal(csvRows[1]?.[6], "Hair Removal Half Legs x 10 times")
   assert.equal(csvRows[1]?.[9], "1,200,000 MMK")
@@ -107,4 +113,6 @@ test("exports sales details CSV with the same headers and placeholders as the ta
   assert.equal(csvRows[1]?.[19], "PAID")
   assert.equal(csvRows[1]?.[20], "VISA")
   assert.equal(csvRows[1]?.[21], "VISA")
+  assert.equal(csvRows[1]?.[22], "840,000 MMK")
+  assert.equal(csvRows[1]?.[23], "Full Payment")
 })

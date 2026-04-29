@@ -13,7 +13,6 @@ import { DashboardPage } from "./features/dashboard/DashboardPage";
 import { ExecutiveDashboardPage } from "./features/dashboard/ExecutiveDashboardPage";
 import { AppointmentsPage } from "./features/operational/appointments/AppointmentsPage";
 import { CheckInOutPage } from "./features/operational/check-in-out/CheckInOutPage";
-import { SalesPage } from "./features/operational/sales/SalesPage";
 import { SalesDetailPage } from "./features/operational/sales/SalesDetailPage";
 import { MembersPage } from "./features/operational/members/MembersPage";
 import { WalletsPage } from "./features/operational/wallets/WalletsPage";
@@ -73,7 +72,7 @@ export default function App() {
                     <Route path="dashboard/overview" element={<ExecutiveDashboardPage />} />
                     <Route path="operational/appointments" element={<AppointmentsPage />} />
                     <Route path="operational/check-in-out" element={<CheckInOutPage />} />
-                    <Route path="operational/sales" element={<SalesPage />} />
+                    <Route path="operational/sales" element={<PaymentReportPage />} />
                     <Route path="operational/sales/:saleId" element={<SalesDetailPage />} />
                     <Route path="operational/members" element={<MembersPage />} />
                     <Route path="operational/wallets" element={<WalletsPage />} />

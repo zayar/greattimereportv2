@@ -210,9 +210,9 @@ export function PaymentReportPage() {
   return (
     <div className="page-stack page-stack--workspace analytics-report sales-details-report">
       <PageHeader
-        eyebrow="Revenue"
-        title="Sales details"
-        description="Invoice-level sales detail with service lines, payment attribution, and quick filtering."
+        eyebrow="Great Time"
+        title="Sales Details"
+        description="Detailed payment and item-level sales report with service lines, payment attribution, and quick filtering."
       />
 
       <section className="sales-details-report__toolbar">
@@ -319,8 +319,8 @@ export function PaymentReportPage() {
 
       <Panel
         className="analytics-report__panel sales-details-report__panel"
-        title={`${currentClinic?.name ?? "Clinic"} ledger`}
-        subtitle="Service-level invoice detail inspired by GTDashboard_ST, rebuilt with server-side filtering."
+        title="Detailed Transactions"
+        subtitle={`${(data?.totalCount ?? 0).toLocaleString("en-US")} item/payment rows matched the current filters.`}
         action={
           <div className="pagination-controls">
             <button className="button button--secondary" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}>
@@ -360,7 +360,7 @@ export function PaymentReportPage() {
               { key: "service", header: "Service Name", render: (row) => row.serviceName || "—" },
               { key: "package", header: "Service Package", render: (row) => row.servicePackageName || "—" },
               { key: "wallet", header: "Wallet", render: (row) => row.walletLabel },
-              { key: "qty", header: "Qty", render: (row) => (row.itemQuantity == null ? "—" : row.itemQuantity) },
+              { key: "qty", header: "Item Quantity", render: (row) => (row.itemQuantity == null ? "—" : row.itemQuantity) },
               {
                 key: "itemPrice",
                 header: "Item Price",
@@ -410,7 +410,7 @@ export function PaymentReportPage() {
               },
               {
                 key: "creditBalance",
-                header: "Order Credit",
+                header: "Order Credit Balance",
                 render: (row) => {
                   const value = getGroupedInvoiceValue(row, row.orderCreditBalance);
                   return value == null ? <span className="sales-details-report__muted">—</span> : formatOptionalCurrency(value, currency);
@@ -443,6 +443,12 @@ export function PaymentReportPage() {
               },
               { key: "paymentMethod", header: "Payment Method", render: (row) => row.paymentMethod || "—" },
               { key: "paymentType", header: "Payment Type", render: (row) => row.paymentType || "—" },
+              {
+                key: "paymentAmount",
+                header: "Payment Amount",
+                render: (row) => formatOptionalCurrency(row.paymentAmount, currency),
+              },
+              { key: "paymentNote", header: "Payment Note", render: (row) => row.paymentNote || "—" },
             ]}
           />
         ) : null}
