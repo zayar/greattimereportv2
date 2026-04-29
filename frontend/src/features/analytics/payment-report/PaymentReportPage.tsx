@@ -346,6 +346,8 @@ export function PaymentReportPage() {
             </select>
           </label>
 
+          <ViewModeToggle value={viewMode} onChange={setViewMode} />
+
           <label className="sales-details-report__toggle">
             <input
               type="checkbox"
@@ -365,10 +367,6 @@ export function PaymentReportPage() {
           >
             {exporting ? "Exporting..." : "Export CSV"}
           </button>
-        </div>
-
-        <div className="sales-details-report__view-row">
-          <ViewModeToggle value={viewMode} onChange={setViewMode} />
         </div>
       </section>
 
