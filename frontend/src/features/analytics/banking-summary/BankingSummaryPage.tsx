@@ -95,7 +95,7 @@ export function BankingSummaryPage() {
   const [walletTopupFilter, setWalletTopupFilter] = useState<"all" | "hide" | "only">("all");
   const [page, setPage] = useState(1);
   const [range, setRange] = useState({
-    fromDate: startOfCurrentMonth(),
+    fromDate: today(),
     toDate: today(),
   });
   const deferredSearch = useDeferredValue(search.trim());

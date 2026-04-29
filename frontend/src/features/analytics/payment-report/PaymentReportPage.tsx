@@ -82,7 +82,7 @@ export function PaymentReportPage() {
   const [includeZeroValues, setIncludeZeroValues] = useState(false);
   const [page, setPage] = useState(1);
   const [range, setRange] = useState({
-    fromDate: startOfCurrentMonth(),
+    fromDate: today(),
     toDate: today(),
   });
   const deferredSearch = useDeferredValue(search.trim());
