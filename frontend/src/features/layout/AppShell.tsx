@@ -148,8 +148,11 @@ export function AppShell() {
           <div className="brand">
             <div className="brand__mark">GT</div>
             <div className="brand__copy">
-              <strong>GreatTime Reports</strong>
-              <span>Premium clinic systems</span>
+              <div className="brand__title">
+                <strong>GreatTime</strong>
+                <span className="brand__badge">Reports</span>
+              </div>
+              <span className="brand__subtitle">Clinic systems</span>
             </div>
           </div>
           <button

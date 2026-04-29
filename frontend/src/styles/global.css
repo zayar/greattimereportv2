@@ -3223,31 +3223,68 @@ a {
 .brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
+  min-width: 0;
+  padding: 6px 4px;
 }
 
 .brand__mark {
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border-radius: 15px;
   display: grid;
   place-items: center;
   background: linear-gradient(135deg, #0b5254, #074142);
-  box-shadow: 0 12px 24px rgba(7, 65, 66, 0.16);
+  box-shadow: 0 12px 22px rgba(7, 65, 66, 0.18);
   color: #fffdfa;
   font-weight: 700;
+  font-size: 1.08rem;
 }
 
 .brand__copy {
   display: grid;
-  gap: 2px;
+  gap: 3px;
+  min-width: 0;
+}
+
+.brand__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
 .brand__copy strong {
-  font-size: 0.98rem;
+  font-size: 1rem;
+  line-height: 1.05;
+  white-space: nowrap;
 }
 
-.brand__copy span,
+.brand__badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: rgba(7, 65, 66, 0.1);
+  color: var(--brand);
+  font-size: 0.64rem;
+  font-weight: 700;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.brand__subtitle {
+  display: block;
+  overflow: hidden;
+  color: #7b8089;
+  font-size: 0.78rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .identity-chip span,
 .nav-section__title,
 .topbar__eyebrow,
