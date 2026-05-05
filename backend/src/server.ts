@@ -32,7 +32,7 @@ app.use(express.json({ limit: "1mb" }));
 app.use("/api", routes);
 app.use(errorHandler);
 
-app.listen(env.PORT, () => {
-  console.log(`GT_V2Report backend listening on http://localhost:${env.PORT}`);
+app.listen(env.PORT, "0.0.0.0", () => {
+  console.log(`GT_V2Report backend listening on http://0.0.0.0:${env.PORT}`);
   void initializeTelegramRuntime();
 });

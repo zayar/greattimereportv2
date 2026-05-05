@@ -391,6 +391,7 @@ function buildStatus(
     botUsername: null,
     botUrl: null,
     botDeepLink: null,
+    botGroupDeepLink: null,
   };
 }
 

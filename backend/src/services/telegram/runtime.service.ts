@@ -14,6 +14,17 @@ import type { TelegramReportType, TelegramTargetRecord } from "./types.js";
 let schedulerStarted = false;
 let schedulerBusy = false;
 
+export type TelegramSchedulerRunSummary = {
+  startedAt: string;
+  finishedAt: string;
+  enabledTargets: number;
+  dueReports: number;
+  sentReports: number;
+  failedReports: number;
+  lockedReports: number;
+  skippedReports: number;
+};
+
 function isDueNow(reportTime: string, timezone: string, lastScheduledDateKey: string | null, now: Date) {
   const currentDateKey = formatDateKeyInTimeZone(now, timezone);
   const currentTimeKey = formatTimeKeyInTimeZone(now, timezone);
@@ -31,8 +42,20 @@ function isDueNow(reportTime: string, timezone: string, lastScheduledDateKey: st
 }
 
 async function runSchedulerTick() {
+  const summary: TelegramSchedulerRunSummary = {
+    startedAt: new Date().toISOString(),
+    finishedAt: "",
+    enabledTargets: 0,
+    dueReports: 0,
+    sentReports: 0,
+    failedReports: 0,
+    lockedReports: 0,
+    skippedReports: 0,
+  };
+
   if (schedulerBusy || !env.TELEGRAM_SCHEDULER_ENABLED || !isTelegramBotConfigured()) {
-    return;
+    summary.finishedAt = new Date().toISOString();
+    return summary;
   }
 
   schedulerBusy = true;
@@ -40,6 +63,7 @@ async function runSchedulerTick() {
   try {
     const records = await listTelegramIntegrationsForScheduling();
     const now = new Date();
+    summary.enabledTargets = records.length;
 
     for (const record of records) {
       if (!record.telegramChatId) {
@@ -78,8 +102,10 @@ async function runSchedulerTick() {
           now,
         );
         if (!dateKey) {
+          summary.skippedReports += 1;
           continue;
         }
+        summary.dueReports += 1;
 
         const lockId = await tryAcquireTelegramScheduleLock({
           clinicId: record.clinicId,
@@ -89,6 +115,7 @@ async function runSchedulerTick() {
         });
 
         if (!lockId) {
+          summary.lockedReports += 1;
           continue;
         }
 
@@ -96,11 +123,13 @@ async function runSchedulerTick() {
           const sent = await sendScheduledReport(record, scheduledReport.type, now);
 
           await markTelegramScheduleLockSent(lockId, sent.sentAt);
+          summary.sentReports += 1;
           console.log(
             `[telegram] scheduled ${scheduledReport.type} report sent clinicId=${record.clinicId} chatId=${record.telegramChatId} timezone=${record.timezone}`,
           );
         } catch (error) {
           await releaseTelegramScheduleLock(lockId);
+          summary.failedReports += 1;
           console.error(
             `[telegram] scheduled ${scheduledReport.type} report failed clinicId=${record.clinicId} chatId=${record.telegramChatId} timezone=${record.timezone}`,
             error,
@@ -112,7 +141,14 @@ async function runSchedulerTick() {
     console.error("[telegram] scheduler tick failed", error);
   } finally {
     schedulerBusy = false;
+    summary.finishedAt = new Date().toISOString();
   }
+
+  return summary;
+}
+
+export async function runTelegramSchedulerOnce() {
+  return runSchedulerTick();
 }
 
 async function sendScheduledReport(record: TelegramTargetRecord, reportType: TelegramReportType, referenceDate: Date) {

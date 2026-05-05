@@ -17,10 +17,23 @@ type TelegramMessage = {
   chat: TelegramChat;
 };
 
+type TelegramChatMember = {
+  status?: string;
+};
+
+type TelegramChatMemberUpdate = {
+  chat: TelegramChat;
+  old_chat_member?: TelegramChatMember;
+  new_chat_member?: TelegramChatMember;
+};
+
 export type TelegramUpdate = {
   update_id: number;
   message?: TelegramMessage;
+  edited_message?: TelegramMessage;
   channel_post?: TelegramMessage;
+  edited_channel_post?: TelegramMessage;
+  my_chat_member?: TelegramChatMemberUpdate;
 };
 
 type TelegramApiResponse<T> = {
@@ -91,7 +104,7 @@ function extractLinkCode(text: string) {
 async function sendUsageMessage(chatId: string) {
   await sendTelegramMessage(
     chatId,
-    "GT Telegram link ready.\n\nSend your link code here, or add this bot to a group and paste the code there to connect that target.",
+    "GT Telegram link ready.\n\nPrivate chat: send your link code here.\nGroup chat: send /link CODE after adding the bot to the group.",
   );
 }
 
@@ -125,6 +138,7 @@ export async function getTelegramBotLinkMetadata(linkCode?: string | null) {
       botUsername: null,
       botUrl: null,
       botDeepLink: null,
+      botGroupDeepLink: null,
     };
   }
 
@@ -133,6 +147,7 @@ export async function getTelegramBotLinkMetadata(linkCode?: string | null) {
     botUsername: username,
     botUrl,
     botDeepLink: linkCode ? `${botUrl}?start=${encodeURIComponent(linkCode)}` : botUrl,
+    botGroupDeepLink: linkCode ? `${botUrl}?startgroup=${encodeURIComponent(linkCode)}` : null,
   };
 }
 
@@ -145,7 +160,16 @@ export async function sendTelegramMessage(chatId: string, text: string) {
 }
 
 export async function handleTelegramUpdate(update: TelegramUpdate) {
-  const message = update.message ?? update.channel_post;
+  if (update.my_chat_member && didBotJoinChat(update.my_chat_member)) {
+    try {
+      await sendUsageMessage(String(update.my_chat_member.chat.id));
+    } catch (error) {
+      console.error("[telegram] failed to send group link instructions", error);
+    }
+    return;
+  }
+
+  const message = update.message ?? update.edited_message ?? update.channel_post ?? update.edited_channel_post;
   if (!message?.text || !message.chat) {
     return;
   }
@@ -181,6 +205,17 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
   }
 }
 
+function didBotJoinChat(update: TelegramChatMemberUpdate) {
+  const previousStatus = update.old_chat_member?.status;
+  const nextStatus = update.new_chat_member?.status;
+
+  return (
+    (nextStatus === "member" || nextStatus === "administrator") &&
+    previousStatus !== "member" &&
+    previousStatus !== "administrator"
+  );
+}
+
 export async function handleTelegramWebhook(update: TelegramUpdate, secretToken: string | undefined) {
   if (env.TELEGRAM_WEBHOOK_SECRET && secretToken !== env.TELEGRAM_WEBHOOK_SECRET) {
     throw new HttpError(401, "Invalid Telegram webhook secret.");
@@ -198,7 +233,7 @@ export async function ensureTelegramWebhook() {
   await callTelegramApi("setWebhook", {
     url: webhookUrl,
     secret_token: env.TELEGRAM_WEBHOOK_SECRET,
-    allowed_updates: ["message", "channel_post"],
+    allowed_updates: ["message", "edited_message", "channel_post", "edited_channel_post", "my_chat_member"],
   });
   console.log(`[telegram] webhook configured for ${webhookUrl}`);
 }
@@ -207,7 +242,7 @@ async function pollTelegramUpdates(offset: number) {
   return callTelegramApi<TelegramUpdate[]>("getUpdates", {
     offset,
     timeout: 0,
-    allowed_updates: ["message", "channel_post"],
+    allowed_updates: ["message", "edited_message", "channel_post", "edited_channel_post", "my_chat_member"],
   });
 }
 

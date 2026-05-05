@@ -44,6 +44,7 @@ const envSchema = z.object({
     .default("08:00"),
   TELEGRAM_SCHEDULER_ENABLED: booleanEnv(true),
   TELEGRAM_SCHEDULER_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+  TELEGRAM_SCHEDULER_SECRET: z.string().optional(),
   TELEGRAM_WEBHOOK_ENABLED: booleanEnv(true),
   TELEGRAM_WEBHOOK_SECRET: z.string().optional(),
   TELEGRAM_POLLING_ENABLED: booleanEnv(false),

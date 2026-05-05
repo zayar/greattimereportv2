@@ -262,6 +262,10 @@ export function TelegramSettingsPage() {
     return null;
   }, [status?.botDeepLink, status?.botUrl, status?.botUsername]);
   const qrBotUrl = useMemo(() => {
+    if (status?.botDeepLink) {
+      return status.botDeepLink;
+    }
+
     if (status?.botUrl) {
       return status.botUrl;
     }
@@ -271,7 +275,8 @@ export function TelegramSettingsPage() {
     }
 
     return null;
-  }, [status?.botUrl, status?.botUsername]);
+  }, [status?.botDeepLink, status?.botUrl, status?.botUsername]);
+  const botGroupTargetUrl = status?.botGroupDeepLink ?? null;
   const botDisplayUsername = status?.botUsername ? `@${status.botUsername.toUpperCase()}` : "Telegram bot";
 
   if (!clinic) {
@@ -621,6 +626,18 @@ export function TelegramSettingsPage() {
 
             <button
               className="button telegram-settings__button telegram-settings__button--secondary"
+              onClick={() => {
+                if (botGroupTargetUrl) {
+                  window.open(botGroupTargetUrl, "_blank", "noopener,noreferrer");
+                }
+              }}
+              disabled={!botGroupTargetUrl}
+            >
+              Add bot to group
+            </button>
+
+            <button
+              className="button telegram-settings__button telegram-settings__button--secondary"
               onClick={() => setIsQrOpen(true)}
               disabled={!qrBotUrl}
             >
@@ -933,7 +950,11 @@ export function TelegramSettingsPage() {
               <div>
                 <span className="telegram-settings__qr-eyebrow">Telegram quick access</span>
                 <h3 id="telegram-qr-title">Show Telegram QR</h3>
-                <p>Scan with your phone to open {botDisplayUsername} quickly in Telegram.</p>
+                <p>
+                  {pendingCodeActive
+                    ? `Scan with your phone to open ${botDisplayUsername} with this clinic's current link code.`
+                    : `Scan with your phone to open ${botDisplayUsername} quickly in Telegram.`}
+                </p>
               </div>
               <button
                 type="button"
@@ -967,12 +988,29 @@ export function TelegramSettingsPage() {
 
               <div className="telegram-settings__qr-copy">
                 <strong>{botDisplayUsername}</strong>
-                <p>Open Telegram and scan this QR to jump into the GT bot without typing the username manually.</p>
+                <p>
+                  {pendingCodeActive
+                    ? "Open Telegram and scan this QR to redeem the active clinic link code in a private chat."
+                    : "Open Telegram and scan this QR to jump into the GT bot without typing the username manually."}
+                </p>
                 <div className="telegram-settings__code-card">
-                  <span>Bot link</span>
+                  <span>{pendingCodeActive ? "Bot link with code" : "Bot link"}</span>
                   <strong>{qrBotUrl ?? "Telegram bot not configured"}</strong>
-                  <small>QR is intentionally generated from the direct bot link so it opens the official GT bot cleanly.</small>
+                  <small>
+                    {pendingCodeActive
+                      ? "QR includes the current code, so the chat can connect to this clinic automatically."
+                      : "Generate a link code first when this QR should connect a new Telegram target."}
+                  </small>
                 </div>
+                {botGroupTargetUrl ? (
+                  <button
+                    type="button"
+                    className="button telegram-settings__button telegram-settings__button--secondary"
+                    onClick={() => window.open(botGroupTargetUrl, "_blank", "noopener,noreferrer")}
+                  >
+                    Add bot to group
+                  </button>
+                ) : null}
                 {botTargetUrl ? (
                   <button
                     type="button"

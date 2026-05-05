@@ -41,6 +41,7 @@ Configured files:
 Required GitHub secret:
 - `GCP_SERVICE_ACCOUNT_KEY`
 - `FIREBASE_SERVICE_ACCOUNT_JSON`
+- `TELEGRAM_SCHEDULER_SECRET` if Cloud Scheduler will trigger Telegram sends
 
 `FIREBASE_SERVICE_ACCOUNT_JSON` can be the same JSON as `GCP_SERVICE_ACCOUNT_KEY` if that service account has both:
 - the deployment roles listed below
@@ -66,6 +67,11 @@ Optional GitHub repository variables for Cloud Run runtime sizing:
 - `CLOUD_RUN_CPU`
 - `CLOUD_RUN_MIN_INSTANCES`
 - `CLOUD_RUN_MAX_INSTANCES`
+
+Recommended Telegram scheduler setup:
+- Create a Cloud Scheduler HTTP job that calls `POST {APP_BASE_URL}/api/integrations/telegram/scheduler/run` every minute.
+- Add header `x-telegram-scheduler-secret` with the `TELEGRAM_SCHEDULER_SECRET` value.
+- Keep `TELEGRAM_SCHEDULER_ENABLED=true`. The backend still runs a local catch-up tick, but Cloud Scheduler is the reliable production trigger when Cloud Run scales down or CPU is throttled between requests.
 
 Recommended service account roles for `GCP_SERVICE_ACCOUNT_KEY`:
 - Cloud Run Admin

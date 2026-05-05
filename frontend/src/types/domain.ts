@@ -97,6 +97,7 @@ export interface TelegramIntegrationStatus extends TelegramTargetStatus {
   botUsername: string | null;
   botUrl: string | null;
   botDeepLink: string | null;
+  botGroupDeepLink: string | null;
 }
 
 export interface AiExecutiveSummaryResponse {

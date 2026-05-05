@@ -58,6 +58,7 @@ export interface TelegramIntegrationStatus extends TelegramIntegrationRecord {
   botUsername: string | null;
   botUrl: string | null;
   botDeepLink: string | null;
+  botGroupDeepLink: string | null;
 }
 
 export interface TelegramLinkCodeRecord {
