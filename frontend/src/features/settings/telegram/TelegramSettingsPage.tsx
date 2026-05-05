@@ -785,6 +785,13 @@ export function TelegramSettingsPage() {
 
           <div className="telegram-settings__button-row">
             <button
+              className="button telegram-settings__button telegram-settings__button--primary"
+              onClick={() => void handleSaveSettings()}
+              disabled={busyAction !== null || !hasChanges || !selectedTarget}
+            >
+              {busyAction === "save" ? "Saving..." : "Save appointment schedule"}
+            </button>
+            <button
               className="button telegram-settings__button telegram-settings__button--secondary"
               onClick={() => void handleSendTest("appointment")}
               disabled={!selectedTarget || busyAction !== null}
@@ -875,6 +882,13 @@ export function TelegramSettingsPage() {
           ) : null}
 
           <div className="telegram-settings__button-row">
+            <button
+              className="button telegram-settings__button telegram-settings__button--primary"
+              onClick={() => void handleSaveSettings()}
+              disabled={busyAction !== null || !hasChanges || !selectedTarget}
+            >
+              {busyAction === "save" ? "Saving..." : "Save payment schedule"}
+            </button>
             <button
               className="button telegram-settings__button telegram-settings__button--secondary"
               onClick={() => void handleSendTest("payment")}
