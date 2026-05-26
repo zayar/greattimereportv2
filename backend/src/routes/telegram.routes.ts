@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { env } from "../config/env.js";
 import { verifyFirebaseToken } from "../middleware/auth.js";
@@ -18,6 +19,17 @@ import { normalizeReportTime, normalizeTimeZone } from "../services/telegram/tim
 import type { TelegramReportType } from "../services/telegram/types.js";
 
 const router = Router();
+
+function isSecretMatch(provided: string, expected: string) {
+  const providedBuffer = Buffer.from(provided);
+  const expectedBuffer = Buffer.from(expected);
+
+  if (providedBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+
+  return timingSafeEqual(providedBuffer, expectedBuffer);
+}
 
 const clinicScopedBaseSchema = z.object({
   clinicId: z.string().min(1),
@@ -58,7 +70,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const secret = req.header("x-telegram-scheduler-secret") ?? "";
 
-    if (!env.TELEGRAM_SCHEDULER_SECRET || secret !== env.TELEGRAM_SCHEDULER_SECRET) {
+    if (!env.TELEGRAM_SCHEDULER_SECRET || !isSecretMatch(secret, env.TELEGRAM_SCHEDULER_SECRET)) {
       throw new HttpError(401, "Invalid Telegram scheduler secret.");
     }
 

@@ -42,13 +42,19 @@ const envSchema = z.object({
     .string()
     .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
     .default("08:00"),
+  TELEGRAM_API_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
   TELEGRAM_SCHEDULER_ENABLED: booleanEnv(true),
   TELEGRAM_SCHEDULER_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+  TELEGRAM_SCHEDULER_BUSY_TIMEOUT_MS: z.coerce.number().int().positive().default(4 * 60_000),
   TELEGRAM_SCHEDULER_SECRET: z.string().optional(),
   TELEGRAM_WEBHOOK_ENABLED: booleanEnv(true),
   TELEGRAM_WEBHOOK_SECRET: z.string().optional(),
+  TELEGRAM_WEBHOOK_WATCHDOG_ENABLED: booleanEnv(true),
+  TELEGRAM_WEBHOOK_WATCHDOG_INTERVAL_MS: z.coerce.number().int().positive().default(5 * 60_000),
   TELEGRAM_POLLING_ENABLED: booleanEnv(false),
   TELEGRAM_POLLING_INTERVAL_MS: z.coerce.number().int().positive().default(5_000),
+  APICORE_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
+  FIREBASE_AUTH_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
 });
 
 export const env = envSchema.parse(process.env);

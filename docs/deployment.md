@@ -41,7 +41,7 @@ Configured files:
 Required GitHub secret:
 - `GCP_SERVICE_ACCOUNT_KEY`
 - `FIREBASE_SERVICE_ACCOUNT_JSON`
-- `TELEGRAM_SCHEDULER_SECRET` if Cloud Scheduler will trigger Telegram sends
+- `TELEGRAM_SCHEDULER_SECRET` for Cloud Scheduler triggered Telegram sends
 
 `FIREBASE_SERVICE_ACCOUNT_JSON` can be the same JSON as `GCP_SERVICE_ACCOUNT_KEY` if that service account has both:
 - the deployment roles listed below
@@ -68,13 +68,25 @@ Optional GitHub repository variables for Cloud Run runtime sizing:
 - `CLOUD_RUN_MIN_INSTANCES`
 - `CLOUD_RUN_MAX_INSTANCES`
 
+Optional GitHub repository variables for Telegram reliability tuning:
+- `TELEGRAM_SCHEDULER_JOB_NAME`
+- `TELEGRAM_API_TIMEOUT_MS`
+- `TELEGRAM_SCHEDULER_BUSY_TIMEOUT_MS`
+- `TELEGRAM_WEBHOOK_WATCHDOG_ENABLED`
+- `TELEGRAM_WEBHOOK_WATCHDOG_INTERVAL_MS`
+- `APICORE_REQUEST_TIMEOUT_MS`
+- `FIREBASE_AUTH_REQUEST_TIMEOUT_MS`
+
 Recommended Telegram scheduler setup:
-- Create a Cloud Scheduler HTTP job that calls `POST {APP_BASE_URL}/api/integrations/telegram/scheduler/run` every minute.
-- Add header `x-telegram-scheduler-secret` with the `TELEGRAM_SCHEDULER_SECRET` value.
+- Set `APP_BASE_URL` to the public backend base URL and set the `TELEGRAM_SCHEDULER_SECRET` GitHub secret.
+- The backend deploy workflow creates or updates a Cloud Scheduler HTTP job that calls `POST {APP_BASE_URL}/api/integrations/telegram/scheduler/run` every minute with header `x-telegram-scheduler-secret`.
+- Optional variable: `TELEGRAM_SCHEDULER_JOB_NAME` (defaults to `gt-v2report-telegram-scheduler`).
 - Keep `TELEGRAM_SCHEDULER_ENABLED=true`. The backend still runs a local catch-up tick, but Cloud Scheduler is the reliable production trigger when Cloud Run scales down or CPU is throttled between requests.
+- Keep `TELEGRAM_WEBHOOK_WATCHDOG_ENABLED=true` unless intentionally disabled. The watchdog repairs the Telegram webhook if another process clears or replaces it.
 
 Recommended service account roles for `GCP_SERVICE_ACCOUNT_KEY`:
 - Cloud Run Admin
+- Cloud Scheduler Admin
 - Service Account User
 - Cloud Build Editor
 - Artifact Registry Writer

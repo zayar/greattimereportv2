@@ -288,6 +288,21 @@ function isGraphqlAuthError(message: string | undefined) {
   );
 }
 
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number, timeoutMessage: string) {
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) {
+      throw new HttpError(504, timeoutMessage);
+    }
+
+    throw error;
+  }
+}
+
 async function postGraphql<T>(body: Record<string, unknown>, authorization?: string) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -297,11 +312,16 @@ async function postGraphql<T>(body: Record<string, unknown>, authorization?: str
     headers.Authorization = authorization;
   }
 
-  const response = await fetch(resolveApicoreGraphqlUrl(), {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  });
+  const response = await fetchWithTimeout(
+    resolveApicoreGraphqlUrl(),
+    {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    },
+    env.APICORE_REQUEST_TIMEOUT_MS,
+    "gt.apicore GraphQL request timed out.",
+  );
 
   if (!response.ok) {
     throw new HttpError(response.status, "Failed to reach gt.apicore GraphQL endpoint.");
@@ -431,7 +451,7 @@ async function exchangeCustomTokenForIdToken(customToken: string) {
     );
   }
 
-  const response = await fetch(
+  const response = await fetchWithTimeout(
     `https://identitytoolkit.googleapis.com/v1/accounts:signInWithCustomToken?key=${encodeURIComponent(env.FIREBASE_WEB_API_KEY)}`,
     {
       method: "POST",
@@ -443,6 +463,8 @@ async function exchangeCustomTokenForIdToken(customToken: string) {
         returnSecureToken: true,
       }),
     },
+    env.FIREBASE_AUTH_REQUEST_TIMEOUT_MS,
+    "Firebase custom token exchange timed out.",
   );
 
   if (!response.ok) {

@@ -42,6 +42,13 @@ type TelegramApiResponse<T> = {
   description?: string;
 };
 
+export type TelegramWebhookInfo = {
+  url?: string;
+  pending_update_count?: number;
+  last_error_date?: number;
+  last_error_message?: string;
+};
+
 let cachedBotUsername: string | null | undefined;
 let pollingStarted = false;
 
@@ -54,15 +61,33 @@ function getTelegramApiUrl(method: string) {
 }
 
 async function callTelegramApi<T>(method: string, body?: Record<string, unknown>) {
-  const response = await fetch(getTelegramApiUrl(method), {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let response: Response;
 
-  const payload = (await response.json()) as TelegramApiResponse<T>;
+  try {
+    response = await fetch(getTelegramApiUrl(method), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(env.TELEGRAM_API_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) {
+      throw new HttpError(504, `Telegram API request timed out for ${method}.`);
+    }
+
+    throw error;
+  }
+
+  const responseText = await response.text();
+  let payload: TelegramApiResponse<T>;
+
+  try {
+    payload = responseText ? (JSON.parse(responseText) as TelegramApiResponse<T>) : { ok: false };
+  } catch {
+    throw new HttpError(502, `Telegram API returned an invalid response for ${method}.`);
+  }
 
   if (!response.ok) {
     throw new HttpError(response.status, payload.description || `Telegram API request failed for ${method}.`);
@@ -229,13 +254,23 @@ export async function ensureTelegramWebhook() {
     return;
   }
 
-  const webhookUrl = `${env.APP_BASE_URL.replace(/\/$/, "")}/api/integrations/telegram/webhook`;
+  const webhookUrl = getExpectedTelegramWebhookUrl();
   await callTelegramApi("setWebhook", {
     url: webhookUrl,
     secret_token: env.TELEGRAM_WEBHOOK_SECRET,
     allowed_updates: ["message", "edited_message", "channel_post", "edited_channel_post", "my_chat_member"],
   });
   console.log(`[telegram] webhook configured for ${webhookUrl}`);
+}
+
+export function getExpectedTelegramWebhookUrl() {
+  return env.APP_BASE_URL
+    ? `${env.APP_BASE_URL.replace(/\/$/, "")}/api/integrations/telegram/webhook`
+    : "";
+}
+
+export async function getTelegramWebhookInfo() {
+  return callTelegramApi<TelegramWebhookInfo>("getWebhookInfo");
 }
 
 async function pollTelegramUpdates(offset: number) {

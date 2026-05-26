@@ -1,7 +1,7 @@
 import { fetchApicoreBookingDetails, type ApicoreBookingDetailsRow } from "../apicore.service.js";
 import { sendTelegramMessage } from "./bot.service.js";
 import {
-  buildUtcDayRangeForDateKey,
+  buildUtcDayRangeForDateKeyInTimeZone,
   formatDateKeyInTimeZone,
   formatDisplayTimeInTimeZone,
   normalizeTimeZone,
@@ -93,7 +93,7 @@ async function fetchAllAppointmentsForToday(input: {
   referenceDate?: Date;
 }) {
   const dateKey = formatDateKeyInTimeZone(input.referenceDate ?? new Date(), input.timezone);
-  const { startIso, endIso } = buildUtcDayRangeForDateKey(dateKey);
+  const { startIso, endIso } = buildUtcDayRangeForDateKeyInTimeZone(dateKey, input.timezone);
 
   const rows: ApicoreBookingDetailsRow[] = [];
   let skip = 0;

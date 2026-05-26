@@ -1,5 +1,11 @@
 import { env } from "../../config/env.js";
-import { ensureTelegramWebhook, isTelegramBotConfigured, startTelegramPolling } from "./bot.service.js";
+import {
+  ensureTelegramWebhook,
+  getExpectedTelegramWebhookUrl,
+  getTelegramWebhookInfo,
+  isTelegramBotConfigured,
+  startTelegramPolling,
+} from "./bot.service.js";
 import { sendTrackedTelegramReport } from "./delivery.service.js";
 import { buildTodayAppointmentReport } from "./report.service.js";
 import {
@@ -13,6 +19,8 @@ import type { TelegramReportType, TelegramTargetRecord } from "./types.js";
 
 let schedulerStarted = false;
 let schedulerBusy = false;
+let schedulerBusyUntilMs = 0;
+let webhookWatchdogStarted = false;
 
 export type TelegramSchedulerRunSummary = {
   startedAt: string;
@@ -53,12 +61,23 @@ async function runSchedulerTick() {
     skippedReports: 0,
   };
 
-  if (schedulerBusy || !env.TELEGRAM_SCHEDULER_ENABLED || !isTelegramBotConfigured()) {
+  if (!env.TELEGRAM_SCHEDULER_ENABLED || !isTelegramBotConfigured()) {
     summary.finishedAt = new Date().toISOString();
     return summary;
   }
 
+  if (schedulerBusy) {
+    if (Date.now() < schedulerBusyUntilMs) {
+      summary.finishedAt = new Date().toISOString();
+      return summary;
+    }
+
+    console.warn("[telegram] scheduler busy guard expired; allowing a new tick");
+    schedulerBusy = false;
+  }
+
   schedulerBusy = true;
+  schedulerBusyUntilMs = Date.now() + env.TELEGRAM_SCHEDULER_BUSY_TIMEOUT_MS;
 
   try {
     const records = await listTelegramIntegrationsForScheduling();
@@ -141,6 +160,7 @@ async function runSchedulerTick() {
     console.error("[telegram] scheduler tick failed", error);
   } finally {
     schedulerBusy = false;
+    schedulerBusyUntilMs = 0;
     summary.finishedAt = new Date().toISOString();
   }
 
@@ -174,11 +194,68 @@ function startTelegramScheduler() {
   }
 
   schedulerStarted = true;
-  setInterval(() => {
+  const timer = setInterval(() => {
     void runSchedulerTick();
   }, env.TELEGRAM_SCHEDULER_INTERVAL_MS);
+  timer.unref?.();
   void runSchedulerTick();
   console.log("[telegram] scheduler started");
+}
+
+function normalizeWebhookUrl(value: string | null | undefined) {
+  return (value ?? "").trim().replace(/\/+$/, "");
+}
+
+async function checkTelegramWebhookOnce() {
+  if (!env.TELEGRAM_WEBHOOK_ENABLED || !env.TELEGRAM_WEBHOOK_WATCHDOG_ENABLED || !isTelegramBotConfigured()) {
+    return;
+  }
+
+  const expectedUrl = normalizeWebhookUrl(getExpectedTelegramWebhookUrl());
+  if (!expectedUrl) {
+    return;
+  }
+
+  try {
+    const info = await getTelegramWebhookInfo();
+    const actualUrl = normalizeWebhookUrl(info.url);
+
+    if (actualUrl === expectedUrl) {
+      return;
+    }
+
+    console.warn("[telegram] webhook mismatch detected; reconfiguring webhook", {
+      expectedUrl,
+      actualUrl,
+      pendingUpdateCount: info.pending_update_count ?? 0,
+      lastErrorDate: info.last_error_date ?? null,
+      lastErrorMessage: info.last_error_message ?? "",
+    });
+
+    await ensureTelegramWebhook();
+  } catch (error) {
+    console.warn("[telegram] webhook watchdog failed", error);
+  }
+}
+
+function startTelegramWebhookWatchdog() {
+  if (webhookWatchdogStarted || !env.TELEGRAM_WEBHOOK_ENABLED || !env.TELEGRAM_WEBHOOK_WATCHDOG_ENABLED) {
+    return;
+  }
+
+  const expectedUrl = getExpectedTelegramWebhookUrl();
+  if (!expectedUrl) {
+    console.log("[telegram] webhook watchdog skipped because APP_BASE_URL is not configured");
+    return;
+  }
+
+  webhookWatchdogStarted = true;
+  void checkTelegramWebhookOnce();
+  const timer = setInterval(() => {
+    void checkTelegramWebhookOnce();
+  }, env.TELEGRAM_WEBHOOK_WATCHDOG_INTERVAL_MS);
+  timer.unref?.();
+  console.log("[telegram] webhook watchdog started");
 }
 
 export async function previewTodayAppointmentReportForClinic(input: {
@@ -208,5 +285,6 @@ export async function initializeTelegramRuntime() {
     startTelegramPolling();
   }
 
+  startTelegramWebhookWatchdog();
   startTelegramScheduler();
 }
