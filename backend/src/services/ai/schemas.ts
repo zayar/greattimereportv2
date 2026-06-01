@@ -32,9 +32,21 @@ export const serviceInsightCoreSchema = z.object({
   recommendedActions: z.array(z.string().min(1).max(180)).max(3).default([]),
 });
 
+export const ownerAiReportCoreSchema = z.object({
+  reportTitle: z.string().min(1).max(120),
+  overallStatus: z.enum(["good", "normal", "watch", "no_data"]),
+  summaryText: z.string().min(1).max(420),
+  keyFindings: z.array(z.string().min(1).max(180)).max(4).default([]),
+  risksToWatch: z.array(z.string().min(1).max(180)).max(3).default([]),
+  recommendedActions: z.array(z.string().min(1).max(180)).max(3).default([]),
+  tomorrowFocus: z.string().min(1).max(180).nullable().default(null),
+  dataQualityNote: z.string().min(1).max(180).nullable().default(null),
+});
+
 export type ExecutiveSummaryCore = z.infer<typeof executiveSummaryCoreSchema>;
 export type CustomerInsightCore = z.infer<typeof customerInsightCoreSchema>;
 export type ServiceInsightCore = z.infer<typeof serviceInsightCoreSchema>;
+export type OwnerAiReportCore = z.infer<typeof ownerAiReportCoreSchema>;
 
 export type ExecutiveSummaryResponse = ExecutiveSummaryCore & {
   languageUsed: AiLanguage;
@@ -47,6 +59,11 @@ export type CustomerInsightResponse = CustomerInsightCore & {
 };
 
 export type ServiceInsightResponse = ServiceInsightCore & {
+  languageUsed: AiLanguage;
+  generatedAt: string;
+};
+
+export type OwnerAiReportResponse = OwnerAiReportCore & {
   languageUsed: AiLanguage;
   generatedAt: string;
 };

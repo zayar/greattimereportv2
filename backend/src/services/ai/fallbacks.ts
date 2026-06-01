@@ -3,6 +3,7 @@ import { isMyanmarLanguage, type AiLanguage } from "./language.js";
 import type {
   CustomerInsightCore,
   ExecutiveSummaryCore,
+  OwnerAiReportCore,
   ServiceInsightCore,
 } from "./schemas.js";
 import type { CustomerRiskSignals } from "./customer-risk.service.js";
@@ -21,6 +22,37 @@ function signedPercent(value: number) {
 
 function topServiceNames(services: DashboardResponse["topServices"]) {
   return services.slice(0, 2).map((service) => service.serviceName).filter(Boolean);
+}
+
+function readNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function readOwnerFacts(facts: unknown) {
+  const root = facts && typeof facts === "object" ? (facts as Record<string, unknown>) : {};
+  const appointments =
+    root.appointments && typeof root.appointments === "object"
+      ? (root.appointments as Record<string, unknown>)
+      : {};
+  const payments =
+    root.payments && typeof root.payments === "object"
+      ? (root.payments as Record<string, unknown>)
+      : {};
+  const dataQuality =
+    root.dataQuality && typeof root.dataQuality === "object"
+      ? (root.dataQuality as Record<string, unknown>)
+      : {};
+
+  return {
+    totalAppointments: readNumber(appointments.totalAppointments),
+    completedCount: readNumber(appointments.completedCount),
+    cancelledCount: readNumber(appointments.cancelledCount),
+    noShowCount: readNumber(appointments.noShowCount),
+    paymentCount: readNumber(payments.paymentCount),
+    totalPaymentAmount: readNumber(payments.totalPaymentAmount),
+    paidInvoiceCount: readNumber(payments.paidInvoiceCount),
+    dateKeysMatch: dataQuality.dateKeysMatch !== false,
+  };
 }
 
 export function buildExecutiveSummaryFallback(params: {
@@ -99,6 +131,76 @@ export function buildExecutiveSummaryFallback(params: {
         : "Keep a short weekly owner review on the key dashboard signals.",
     ]),
     warningText: warning,
+  };
+}
+
+export function buildOwnerAiReportFallback(params: {
+  aiLanguage: AiLanguage;
+  facts: unknown;
+}): OwnerAiReportCore {
+  const facts = readOwnerFacts(params.facts);
+  const hasAppointmentData = facts.totalAppointments > 0;
+  const hasPaymentData = facts.paymentCount > 0 || facts.totalPaymentAmount > 0;
+  const hasAnyData = hasAppointmentData || hasPaymentData;
+  const hasWatchSignal = facts.cancelledCount > 0 || facts.noShowCount > 0 || !facts.dateKeysMatch;
+  const amount = Math.round(facts.totalPaymentAmount).toLocaleString("en-US");
+
+  if (isMyanmarLanguage(params.aiLanguage)) {
+    return {
+      reportTitle: "AI Owner Report",
+      overallStatus: hasAnyData ? (hasWatchSignal ? "watch" : "normal") : "no_data",
+      summaryText: hasAnyData
+        ? `ယနေ့ backend facts အရ appointment ${facts.totalAppointments.toLocaleString("en-US")} ခုနှင့် payment ${facts.paymentCount.toLocaleString("en-US")} records ရှိပြီး စုစုပေါင်း ${amount} MMK ဖြစ်ပါသည်။`
+        : "ယနေ့ appointment သို့မဟုတ် payment facts မတွေ့ရသေးပါ။ Data source နှင့် schedule time ကို စစ်ဆေးပါ။",
+      keyFindings: trimList([
+        `Completed appointments: ${facts.completedCount.toLocaleString("en-US")}`,
+        `Paid invoices: ${facts.paidInvoiceCount.toLocaleString("en-US")}`,
+        `Payment total: ${amount} MMK`,
+      ], 4),
+      risksToWatch: trimList([
+        facts.cancelledCount > 0 ? `Cancelled appointments: ${facts.cancelledCount.toLocaleString("en-US")}` : null,
+        facts.noShowCount > 0 ? `No-show appointments: ${facts.noShowCount.toLocaleString("en-US")}` : null,
+        !facts.dateKeysMatch ? "Appointment နှင့် payment date keys မတူပါ။" : null,
+      ]),
+      recommendedActions: hasAnyData
+        ? trimList([
+            "Owner dashboard တွင် appointment status နှင့် payment collection ကို ပြန်စစ်ပါ။",
+            facts.cancelledCount > 0 || facts.noShowCount > 0
+              ? "Cancelled/no-show records အတွက် front desk follow-up ကို စစ်ဆေးပါ။"
+              : "Tomorrow schedule နှင့် payment reconciliation ကို ကြိုတင်ပြင်ဆင်ပါ။",
+          ])
+        : ["API data source, clinic link, and report schedule ကို စစ်ဆေးပါ။"],
+      tomorrowFocus: hasAnyData ? "Tomorrow appointment list နှင့် payment reconciliation ကို ကြိုတင်စစ်ဆေးပါ။" : null,
+      dataQualityNote: facts.dateKeysMatch ? null : "Appointment နှင့် payment facts date key မတူပါ။",
+    };
+  }
+
+  return {
+    reportTitle: "AI Owner Report",
+    overallStatus: hasAnyData ? (hasWatchSignal ? "watch" : "normal") : "no_data",
+    summaryText: hasAnyData
+      ? `Backend facts show ${facts.totalAppointments.toLocaleString("en-US")} appointments and ${facts.paymentCount.toLocaleString("en-US")} payment records today, with ${amount} MMK collected.`
+      : "No appointment or payment facts are available yet. Check the data source and schedule time.",
+    keyFindings: trimList([
+      `Completed appointments: ${facts.completedCount.toLocaleString("en-US")}`,
+      `Paid invoices: ${facts.paidInvoiceCount.toLocaleString("en-US")}`,
+      `Payment total: ${amount} MMK`,
+    ], 4),
+    risksToWatch: trimList([
+      facts.cancelledCount > 0 ? `Cancelled appointments: ${facts.cancelledCount.toLocaleString("en-US")}` : null,
+      facts.noShowCount > 0 ? `No-show appointments: ${facts.noShowCount.toLocaleString("en-US")}` : null,
+      !facts.dateKeysMatch ? "Appointment and payment date keys do not match." : null,
+    ]),
+    recommendedActions: hasAnyData
+      ? trimList([
+          "Review appointment status and payment collection in the owner dashboard.",
+          facts.cancelledCount > 0 || facts.noShowCount > 0
+            ? "Check front desk follow-up for cancelled and no-show records."
+            : "Prepare tomorrow schedule and payment reconciliation.",
+        ])
+      : ["Check API data source, clinic link, and report schedule."],
+    tomorrowFocus: hasAnyData ? "Review tomorrow appointment list and payment reconciliation early." : null,
+    dataQualityNote: facts.dateKeysMatch ? null : "Appointment and payment facts used different date keys.",
   };
 }
 

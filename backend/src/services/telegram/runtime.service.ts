@@ -107,6 +107,12 @@ async function runSchedulerTick() {
           reportTime: record.paymentReportTime,
           lastScheduledDateKey: record.lastPaymentScheduledDateKey,
         },
+        {
+          type: "owner_ai",
+          enabled: record.isOwnerAiReportEnabled,
+          reportTime: record.ownerAiReportTime,
+          lastScheduledDateKey: record.lastOwnerAiScheduledDateKey,
+        },
       ];
 
       for (const scheduledReport of scheduledReports) {
@@ -184,6 +190,10 @@ async function sendScheduledReport(record: TelegramTargetRecord, reportType: Tel
     reportType,
     trigger: "scheduled",
     timezone: record.timezone,
+    ownerAiLanguage: record.ownerAiLanguage,
+    ownerAiTone: record.ownerAiTone,
+    ownerAiFocusAreas: record.ownerAiFocusAreas,
+    ownerAiCustomInstruction: record.ownerAiCustomInstruction,
     referenceDate,
   });
 }

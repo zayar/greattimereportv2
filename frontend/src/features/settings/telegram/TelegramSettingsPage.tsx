@@ -13,8 +13,11 @@ import {
   unlinkTelegramIntegration,
 } from "../../../api/telegram";
 import type {
+  AiLanguage,
   TelegramDeliveryLogEntry,
   TelegramIntegrationStatus,
+  TelegramOwnerAiFocusArea,
+  TelegramOwnerAiTone,
   TelegramReportType,
   TelegramTargetStatus,
 } from "../../../types/domain";
@@ -27,8 +30,35 @@ type TargetDraft = {
   appointmentTime: string;
   paymentEnabled: boolean;
   paymentTime: string;
+  ownerAiEnabled: boolean;
+  ownerAiTime: string;
+  ownerAiLanguage: AiLanguage;
+  ownerAiTone: TelegramOwnerAiTone;
+  ownerAiFocusAreas: TelegramOwnerAiFocusArea[];
+  ownerAiCustomInstruction: string;
   timezone: string;
 };
+
+const DEFAULT_OWNER_AI_FOCUS_AREAS: TelegramOwnerAiFocusArea[] = ["appointments", "payments", "risks", "actions"];
+
+const OWNER_AI_LANGUAGE_OPTIONS: Array<{ value: AiLanguage; label: string }> = [
+  { value: "my-MM", label: "Myanmar" },
+  { value: "en-US", label: "English" },
+];
+
+const OWNER_AI_TONE_OPTIONS: Array<{ value: TelegramOwnerAiTone; label: string }> = [
+  { value: "simple", label: "Simple" },
+  { value: "professional", label: "Professional" },
+  { value: "friendly", label: "Friendly" },
+];
+
+const OWNER_AI_FOCUS_OPTIONS: Array<{ value: TelegramOwnerAiFocusArea; label: string }> = [
+  { value: "appointments", label: "Appointments" },
+  { value: "payments", label: "Payments" },
+  { value: "risks", label: "Risks" },
+  { value: "actions", label: "Actions" },
+  { value: "tomorrow", label: "Tomorrow" },
+];
 
 const COMMON_TIMEZONES = [
   "Asia/Yangon",
@@ -96,12 +126,28 @@ function getApiErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
 }
 
+function normalizeOwnerAiFocusAreas(value: TelegramOwnerAiFocusArea[] | undefined) {
+  return value?.length ? value : DEFAULT_OWNER_AI_FOCUS_AREAS;
+}
+
+function sameFocusAreas(left: TelegramOwnerAiFocusArea[], right: TelegramOwnerAiFocusArea[]) {
+  const leftSorted = [...left].sort();
+  const rightSorted = [...right].sort();
+  return leftSorted.length === rightSorted.length && leftSorted.every((value, index) => value === rightSorted[index]);
+}
+
 function buildTargetDraft(target: TelegramTargetStatus): TargetDraft {
   return {
     appointmentEnabled: target.isTodayAppointmentReportEnabled,
     appointmentTime: target.reportTime,
     paymentEnabled: target.isTodayPaymentReportEnabled,
     paymentTime: target.paymentReportTime,
+    ownerAiEnabled: target.isOwnerAiReportEnabled,
+    ownerAiTime: target.ownerAiReportTime,
+    ownerAiLanguage: target.ownerAiLanguage,
+    ownerAiTone: target.ownerAiTone,
+    ownerAiFocusAreas: normalizeOwnerAiFocusAreas(target.ownerAiFocusAreas),
+    ownerAiCustomInstruction: target.ownerAiCustomInstruction ?? "",
     timezone: target.timezone,
   };
 }
@@ -135,7 +181,23 @@ function formatDeliverySummary(entry: TelegramDeliveryLogEntry) {
     return `${entry.paymentCount ?? 0} payment records · ${amount} MMK`;
   }
 
+  if (entry.reportType === "owner_ai") {
+    const amount = Math.round(entry.totalPaymentAmount ?? 0).toLocaleString("en-US");
+    return `${entry.appointmentCount ?? 0} appointments · ${entry.paymentCount ?? 0} payment records · ${amount} MMK`;
+  }
+
   return `${entry.appointmentCount ?? 0} appointments`;
+}
+
+function formatReportTitle(reportType: TelegramReportType) {
+  switch (reportType) {
+    case "payment":
+      return "Today Payment Report";
+    case "owner_ai":
+      return "AI Owner Report";
+    default:
+      return "Today Appointment Report";
+  }
 }
 
 export function TelegramSettingsPage() {
@@ -228,8 +290,10 @@ export function TelegramSettingsPage() {
     selectedTarget?.telegramChatId ? draftsByChatId[selectedTarget.telegramChatId] ?? buildTargetDraft(selectedTarget) : null;
   const appointmentHistory = getReportHistory(selectedTarget, "appointment");
   const paymentHistory = getReportHistory(selectedTarget, "payment");
+  const ownerAiHistory = getReportHistory(selectedTarget, "owner_ai");
   const latestAppointmentDelivery = appointmentHistory[0] ?? null;
   const latestPaymentDelivery = paymentHistory[0] ?? null;
+  const latestOwnerAiDelivery = ownerAiHistory[0] ?? null;
   const hasChanges = Boolean(
     selectedTarget &&
       selectedDraft &&
@@ -237,6 +301,12 @@ export function TelegramSettingsPage() {
         selectedDraft.appointmentTime !== selectedTarget.reportTime ||
         selectedDraft.paymentEnabled !== selectedTarget.isTodayPaymentReportEnabled ||
         selectedDraft.paymentTime !== selectedTarget.paymentReportTime ||
+        selectedDraft.ownerAiEnabled !== selectedTarget.isOwnerAiReportEnabled ||
+        selectedDraft.ownerAiTime !== selectedTarget.ownerAiReportTime ||
+        selectedDraft.ownerAiLanguage !== selectedTarget.ownerAiLanguage ||
+        selectedDraft.ownerAiTone !== selectedTarget.ownerAiTone ||
+        !sameFocusAreas(selectedDraft.ownerAiFocusAreas, normalizeOwnerAiFocusAreas(selectedTarget.ownerAiFocusAreas)) ||
+        selectedDraft.ownerAiCustomInstruction.trim() !== (selectedTarget.ownerAiCustomInstruction ?? "") ||
         selectedDraft.timezone !== selectedTarget.timezone),
   );
   const isLinked = (status?.linkedTargetCount ?? 0) > 0;
@@ -246,6 +316,8 @@ export function TelegramSettingsPage() {
     latestAppointmentDelivery?.outcome === "failed" ? "Retry appointment send" : "Resend appointment report";
   const paymentResendLabel =
     latestPaymentDelivery?.outcome === "failed" ? "Retry payment send" : "Resend payment report";
+  const ownerAiResendLabel =
+    latestOwnerAiDelivery?.outcome === "failed" ? "Retry AI Owner send" : "Resend AI Owner Report";
   const botTargetUrl = useMemo(() => {
     if (status?.botDeepLink) {
       return status.botDeepLink;
@@ -278,16 +350,6 @@ export function TelegramSettingsPage() {
   }, [status?.botDeepLink, status?.botUrl, status?.botUsername]);
   const botGroupTargetUrl = status?.botGroupDeepLink ?? null;
   const botDisplayUsername = status?.botUsername ? `@${status.botUsername.toUpperCase()}` : "Telegram bot";
-
-  if (!clinic) {
-    return (
-      <div className="page-stack page-stack--workspace analytics-report telegram-settings">
-        <EmptyState label="No clinic selected" detail="Choose a clinic first so Telegram can be linked to the right owner target." />
-      </div>
-    );
-  }
-
-  const activeClinic = clinic;
 
   useEffect(() => {
     if (!isQrOpen || !qrBotUrl) {
@@ -339,6 +401,16 @@ export function TelegramSettingsPage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [isQrOpen]);
 
+  if (!clinic) {
+    return (
+      <div className="page-stack page-stack--workspace analytics-report telegram-settings">
+        <EmptyState label="No clinic selected" detail="Choose a clinic first so Telegram can be linked to the right owner target." />
+      </div>
+    );
+  }
+
+  const activeClinic = clinic;
+
   function updateSelectedDraft(patch: Partial<TargetDraft>) {
     if (!selectedTarget?.telegramChatId || !selectedDraft) {
       return;
@@ -351,6 +423,20 @@ export function TelegramSettingsPage() {
         ...patch,
       },
     }));
+  }
+
+  function toggleOwnerAiFocusArea(focusArea: TelegramOwnerAiFocusArea, checked: boolean) {
+    if (!selectedDraft) {
+      return;
+    }
+
+    const nextFocusAreas = checked
+      ? [...new Set([...selectedDraft.ownerAiFocusAreas, focusArea])]
+      : selectedDraft.ownerAiFocusAreas.filter((item) => item !== focusArea);
+
+    updateSelectedDraft({
+      ownerAiFocusAreas: nextFocusAreas.length > 0 ? nextFocusAreas : selectedDraft.ownerAiFocusAreas,
+    });
   }
 
   async function handleGenerateLinkCode() {
@@ -392,6 +478,12 @@ export function TelegramSettingsPage() {
         reportTime: selectedDraft.appointmentTime,
         isTodayPaymentReportEnabled: selectedDraft.paymentEnabled,
         paymentReportTime: selectedDraft.paymentTime,
+        isOwnerAiReportEnabled: selectedDraft.ownerAiEnabled,
+        ownerAiReportTime: selectedDraft.ownerAiTime,
+        ownerAiLanguage: selectedDraft.ownerAiLanguage,
+        ownerAiTone: selectedDraft.ownerAiTone,
+        ownerAiFocusAreas: selectedDraft.ownerAiFocusAreas,
+        ownerAiCustomInstruction: selectedDraft.ownerAiCustomInstruction.trim() || null,
         timezone: selectedDraft.timezone,
       });
       setStatus(nextStatus);
@@ -430,7 +522,7 @@ export function TelegramSettingsPage() {
     }
   }
 
-  async function handleSendTest(reportType: "appointment" | "payment") {
+  async function handleSendTest(reportType: TelegramReportType) {
     if (!selectedTarget?.telegramChatId || !selectedDraft) {
       return;
     }
@@ -447,9 +539,17 @@ export function TelegramSettingsPage() {
         chatId: selectedTarget.telegramChatId,
         timezone: selectedDraft.timezone,
         reportType,
+        ownerAiLanguage: selectedDraft.ownerAiLanguage,
+        ownerAiTone: selectedDraft.ownerAiTone,
+        ownerAiFocusAreas: selectedDraft.ownerAiFocusAreas,
+        ownerAiCustomInstruction: selectedDraft.ownerAiCustomInstruction.trim() || null,
       });
 
-      if (reportType === "payment") {
+      if (reportType === "owner_ai") {
+        setNotice(
+          `AI Owner test sent to ${selectedTarget.targetLabel} (${result.ownerAiOverallStatus ?? "sent"}, ${result.appointmentCount ?? 0} appointments, ${result.paymentCount ?? 0} payment records).`,
+        );
+      } else if (reportType === "payment") {
         setNotice(
           `Payment test sent to ${selectedTarget.targetLabel} (${result.paymentCount ?? 0} payment records, ${Math.round(result.totalPaymentAmount ?? 0).toLocaleString("en-US")} MMK).`,
         );
@@ -464,7 +564,7 @@ export function TelegramSettingsPage() {
     }
   }
 
-  async function handleResend(reportType: "appointment" | "payment") {
+  async function handleResend(reportType: TelegramReportType) {
     if (!selectedTarget?.telegramChatId || !selectedDraft) {
       return;
     }
@@ -481,9 +581,17 @@ export function TelegramSettingsPage() {
         chatId: selectedTarget.telegramChatId,
         timezone: selectedDraft.timezone,
         reportType,
+        ownerAiLanguage: selectedDraft.ownerAiLanguage,
+        ownerAiTone: selectedDraft.ownerAiTone,
+        ownerAiFocusAreas: selectedDraft.ownerAiFocusAreas,
+        ownerAiCustomInstruction: selectedDraft.ownerAiCustomInstruction.trim() || null,
       });
 
-      if (reportType === "payment") {
+      if (reportType === "owner_ai") {
+        setNotice(
+          `AI Owner Report resent to ${selectedTarget.targetLabel} (${result.ownerAiOverallStatus ?? "sent"}, ${result.appointmentCount ?? 0} appointments, ${result.paymentCount ?? 0} payment records).`,
+        );
+      } else if (reportType === "payment") {
         setNotice(
           `Payment report resent to ${selectedTarget.targetLabel} (${result.paymentCount ?? 0} payment records, ${Math.round(result.totalPaymentAmount ?? 0).toLocaleString("en-US")} MMK).`,
         );
@@ -678,7 +786,8 @@ export function TelegramSettingsPage() {
                 <span>Target coverage</span>
                 <strong>
                   {selectedDraft?.appointmentEnabled ? "Appointment on" : "Appointment off"} ·{" "}
-                  {selectedDraft?.paymentEnabled ? "Payment on" : "Payment off"}
+                  {selectedDraft?.paymentEnabled ? "Payment on" : "Payment off"} ·{" "}
+                  {selectedDraft?.ownerAiEnabled ? "AI Owner on" : "AI Owner off"}
                 </strong>
                 <small>Each linked target can receive its own report mix and send time.</small>
               </article>
@@ -919,6 +1028,165 @@ export function TelegramSettingsPage() {
 
         <Panel
           className="telegram-settings__card telegram-settings__card--wide"
+          title="AI Owner Report"
+          subtitle={
+            selectedTarget
+              ? `AI business-owner summary for ${selectedTarget.targetLabel}.`
+              : "Link a Telegram target first, then configure its AI Owner Report."
+          }
+        >
+          <label className={`telegram-settings__toggle ${!selectedTarget ? "telegram-settings__toggle--disabled" : ""}`}>
+            <input
+              type="checkbox"
+              checked={selectedDraft?.ownerAiEnabled ?? false}
+              onChange={(event) => updateSelectedDraft({ ownerAiEnabled: event.target.checked })}
+              disabled={!selectedTarget}
+            />
+            <span className={`telegram-settings__switch ${selectedDraft?.ownerAiEnabled ? "telegram-settings__switch--on" : ""}`} aria-hidden="true">
+              <span className="telegram-settings__switch-handle" />
+            </span>
+            <div className="telegram-settings__toggle-copy">
+              <strong>Enable daily AI Owner Report</strong>
+              <span>
+                {selectedTarget
+                  ? "This target will receive a short AI summary generated from appointment and payment facts."
+                  : "Link Telegram first to enable scheduled delivery."}
+              </span>
+            </div>
+          </label>
+
+          <div className="telegram-settings__two-up">
+            <label className="field">
+              <span>Daily send time</span>
+              <input
+                type="time"
+                value={selectedDraft?.ownerAiTime ?? envDefaultTime()}
+                onChange={(event) => updateSelectedDraft({ ownerAiTime: event.target.value })}
+                disabled={!selectedTarget}
+              />
+            </label>
+
+            <label className="field">
+              <span>Language</span>
+              <select
+                value={selectedDraft?.ownerAiLanguage ?? "my-MM"}
+                onChange={(event) => updateSelectedDraft({ ownerAiLanguage: event.target.value as AiLanguage })}
+                disabled={!selectedTarget}
+              >
+                {OWNER_AI_LANGUAGE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="telegram-settings__two-up">
+            <label className="field">
+              <span>Tone</span>
+              <select
+                value={selectedDraft?.ownerAiTone ?? "simple"}
+                onChange={(event) => updateSelectedDraft({ ownerAiTone: event.target.value as TelegramOwnerAiTone })}
+                disabled={!selectedTarget}
+              >
+                {OWNER_AI_TONE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <article className="telegram-settings__meta-card telegram-settings__meta-card--inline">
+              <span>Selected target</span>
+              <strong>{selectedTarget?.targetLabel ?? "No target selected"}</strong>
+              <small>AI output is validated as strict JSON before Telegram delivery.</small>
+            </article>
+          </div>
+
+          <div className="field">
+            <span>Focus areas</span>
+            <div className="telegram-settings__checkbox-grid">
+              {OWNER_AI_FOCUS_OPTIONS.map((option) => (
+                <label key={option.value} className="telegram-settings__checkbox">
+                  <input
+                    type="checkbox"
+                    checked={selectedDraft?.ownerAiFocusAreas.includes(option.value) ?? false}
+                    onChange={(event) => toggleOwnerAiFocusArea(option.value, event.target.checked)}
+                    disabled={!selectedTarget}
+                  />
+                  <span>{option.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <label className="field">
+            <span>Custom instruction</span>
+            <textarea
+              className="telegram-settings__textarea"
+              value={selectedDraft?.ownerAiCustomInstruction ?? ""}
+              onChange={(event) => updateSelectedDraft({ ownerAiCustomInstruction: event.target.value })}
+              maxLength={240}
+              rows={3}
+              disabled={!selectedTarget}
+            />
+          </label>
+
+          <div className="telegram-settings__meta-grid">
+            <article className="telegram-settings__meta-card">
+              <span>Last AI Owner test</span>
+              <strong>{formatTimestamp(selectedTarget?.lastOwnerAiTestSentAt)}</strong>
+              <small>Manual tests use the current draft language, tone, focus, and instruction.</small>
+            </article>
+
+            <article className="telegram-settings__meta-card">
+              <span>Last AI Owner daily send</span>
+              <strong>{formatTimestamp(selectedTarget?.lastOwnerAiScheduledSentAt)}</strong>
+              <small>
+                {selectedTarget?.lastOwnerAiScheduledDateKey
+                  ? `Last scheduled AI Owner report date: ${selectedTarget.lastOwnerAiScheduledDateKey}`
+                  : "No scheduled AI Owner send recorded yet."}
+              </small>
+            </article>
+          </div>
+
+          {selectedTarget?.lastOwnerAiFailureReason ? (
+            <div className="telegram-settings__failure-note">
+              <strong>Last AI Owner delivery issue</strong>
+              <span>{selectedTarget.lastOwnerAiFailureReason}</span>
+              <small>Recorded {formatTimestamp(selectedTarget.lastOwnerAiFailureAt)}</small>
+            </div>
+          ) : null}
+
+          <div className="telegram-settings__button-row">
+            <button
+              className="button telegram-settings__button telegram-settings__button--primary"
+              onClick={() => void handleSaveSettings()}
+              disabled={busyAction !== null || !hasChanges || !selectedTarget}
+            >
+              {busyAction === "save" ? "Saving..." : "Save AI Owner schedule"}
+            </button>
+            <button
+              className="button telegram-settings__button telegram-settings__button--secondary"
+              onClick={() => void handleSendTest("owner_ai")}
+              disabled={!selectedTarget || busyAction !== null}
+            >
+              {busyAction === "test" ? "Sending..." : "Send AI Owner test"}
+            </button>
+            <button
+              className="button telegram-settings__button telegram-settings__button--secondary"
+              onClick={() => void handleResend("owner_ai")}
+              disabled={!selectedTarget || busyAction !== null || ownerAiHistory.length === 0}
+            >
+              {busyAction === "resend" ? "Resending..." : ownerAiResendLabel}
+            </button>
+          </div>
+        </Panel>
+
+        <Panel
+          className="telegram-settings__card telegram-settings__card--wide"
           title="Recent delivery activity"
           subtitle={
             selectedTarget
@@ -938,7 +1206,7 @@ export function TelegramSettingsPage() {
                   className={`telegram-settings__delivery-item telegram-settings__delivery-item--${entry.outcome}`}
                 >
                   <div className="telegram-settings__delivery-header">
-                    <strong>{entry.reportType === "appointment" ? "Today Appointment Report" : "Today Payment Report"}</strong>
+                    <strong>{formatReportTitle(entry.reportType)}</strong>
                     <span className={`telegram-settings__delivery-badge telegram-settings__delivery-badge--${entry.outcome}`}>
                       {formatOutcomeLabel(entry.outcome)}
                     </span>

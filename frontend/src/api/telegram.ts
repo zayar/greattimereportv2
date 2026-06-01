@@ -1,5 +1,11 @@
 import { apiClient } from "./http";
-import type { TelegramIntegrationStatus, TelegramReportType } from "../types/domain";
+import type {
+  AiLanguage,
+  TelegramIntegrationStatus,
+  TelegramOwnerAiFocusArea,
+  TelegramOwnerAiTone,
+  TelegramReportType,
+} from "../types/domain";
 
 type ApiEnvelope<T> = {
   success: true;
@@ -31,6 +37,12 @@ export async function saveTelegramSettings(payload: ClinicScopedInput & {
   reportTime: string;
   isTodayPaymentReportEnabled: boolean;
   paymentReportTime: string;
+  isOwnerAiReportEnabled?: boolean;
+  ownerAiReportTime?: string;
+  ownerAiLanguage?: AiLanguage;
+  ownerAiTone?: TelegramOwnerAiTone;
+  ownerAiFocusAreas?: TelegramOwnerAiFocusArea[];
+  ownerAiCustomInstruction?: string | null;
   timezone: string;
 }) {
   const response = await apiClient.post<ApiEnvelope<TelegramIntegrationStatus>>("/integrations/telegram/settings", payload);
@@ -43,7 +55,15 @@ export async function unlinkTelegramIntegration(payload: { clinicId: string; cha
 }
 
 export async function sendTelegramTestReport(
-  payload: ClinicScopedInput & { chatId: string; timezone?: string; reportType?: TelegramReportType },
+  payload: ClinicScopedInput & {
+    chatId: string;
+    timezone?: string;
+    reportType?: TelegramReportType;
+    ownerAiLanguage?: AiLanguage;
+    ownerAiTone?: TelegramOwnerAiTone;
+    ownerAiFocusAreas?: TelegramOwnerAiFocusArea[];
+    ownerAiCustomInstruction?: string | null;
+  },
 ) {
   const response = await apiClient.post<
     ApiEnvelope<{
@@ -52,6 +72,7 @@ export async function sendTelegramTestReport(
       appointmentCount?: number;
       paymentCount?: number;
       totalPaymentAmount?: number;
+      ownerAiOverallStatus?: string;
     }>
   >(
     "/integrations/telegram/send-test",
@@ -61,7 +82,15 @@ export async function sendTelegramTestReport(
 }
 
 export async function resendTelegramReport(
-  payload: ClinicScopedInput & { chatId: string; timezone?: string; reportType?: TelegramReportType },
+  payload: ClinicScopedInput & {
+    chatId: string;
+    timezone?: string;
+    reportType?: TelegramReportType;
+    ownerAiLanguage?: AiLanguage;
+    ownerAiTone?: TelegramOwnerAiTone;
+    ownerAiFocusAreas?: TelegramOwnerAiFocusArea[];
+    ownerAiCustomInstruction?: string | null;
+  },
 ) {
   const response = await apiClient.post<
     ApiEnvelope<{
@@ -70,6 +99,7 @@ export async function resendTelegramReport(
       appointmentCount?: number;
       paymentCount?: number;
       totalPaymentAmount?: number;
+      ownerAiOverallStatus?: string;
     }>
   >(
     "/integrations/telegram/resend",

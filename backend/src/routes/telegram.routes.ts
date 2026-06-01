@@ -16,6 +16,7 @@ import {
   updateTelegramReportSettings,
 } from "../services/telegram/storage.service.js";
 import { normalizeReportTime, normalizeTimeZone } from "../services/telegram/time.js";
+import { ownerAiReportFocusAreas, ownerAiReportTones } from "../services/telegram/types.js";
 import type { TelegramReportType } from "../services/telegram/types.js";
 
 const router = Router();
@@ -41,20 +42,65 @@ const clinicTargetSchema = clinicScopedBaseSchema.extend({
   chatId: z.string().min(1),
 });
 
+const telegramReportTypeSchema = z.enum(["appointment", "payment", "owner_ai"]);
+
+const ownerAiSettingsSchema = z.object({
+  isOwnerAiReportEnabled: z.boolean().optional(),
+  ownerAiReportTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  ownerAiLanguage: z.enum(["my-MM", "en-US"]).optional(),
+  ownerAiTone: z.enum(ownerAiReportTones).optional(),
+  ownerAiFocusAreas: z.array(z.enum(ownerAiReportFocusAreas)).min(1).max(ownerAiReportFocusAreas.length).optional(),
+  ownerAiCustomInstruction: z.string().max(240).nullable().optional(),
+});
+
 const settingsSchema = clinicTargetSchema.extend({
   isTodayAppointmentReportEnabled: z.boolean(),
   reportTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   isTodayPaymentReportEnabled: z.boolean(),
   paymentReportTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   timezone: z.string().min(1),
-});
+}).merge(ownerAiSettingsSchema);
 
 const sendTestSchema = clinicTargetSchema.extend({
-  reportType: z.enum(["appointment", "payment"]).default("appointment"),
+  reportType: telegramReportTypeSchema.default("appointment"),
   timezone: z.string().optional(),
-});
+}).merge(ownerAiSettingsSchema.pick({
+  ownerAiLanguage: true,
+  ownerAiTone: true,
+  ownerAiFocusAreas: true,
+  ownerAiCustomInstruction: true,
+}));
 
 const resendSchema = sendTestSchema;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object");
+}
+
+function readNumber(value: unknown) {
+  return typeof value === "number" ? value : undefined;
+}
+
+function buildSendResponse(input: {
+  sentAt: string;
+  reportType: TelegramReportType;
+  report: unknown;
+}) {
+  const report = isRecord(input.report) ? input.report : {};
+  const appointmentReport = isRecord(report.appointmentReport) ? report.appointmentReport : {};
+  const paymentReport = isRecord(report.paymentReport) ? report.paymentReport : {};
+  const aiReport = isRecord(report.aiReport) ? report.aiReport : {};
+
+  return {
+    sentAt: input.sentAt,
+    reportType: input.reportType,
+    appointmentCount: readNumber(report.totalAppointments) ?? readNumber(appointmentReport.totalAppointments),
+    paymentCount: readNumber(report.paymentCount) ?? readNumber(paymentReport.paymentCount),
+    totalPaymentAmount: readNumber(report.totalPaymentAmount) ?? readNumber(paymentReport.totalPaymentAmount),
+    ownerAiOverallStatus:
+      typeof aiReport.overallStatus === "string" ? aiReport.overallStatus : undefined,
+  };
+}
 
 router.post(
   "/webhook",
@@ -131,6 +177,7 @@ router.post(
       ...params,
       reportTime: normalizeReportTime(params.reportTime),
       paymentReportTime: normalizeReportTime(params.paymentReportTime),
+      ownerAiReportTime: params.ownerAiReportTime ? normalizeReportTime(params.ownerAiReportTime) : undefined,
       timezone: normalizeTimeZone(params.timezone),
     });
     const botMetadata = await getTelegramBotLinkMetadata(status.pendingLinkCode);
@@ -185,18 +232,23 @@ router.post(
       reportType,
       trigger: "manual_test",
       timezone,
+      ownerAiLanguage: params.ownerAiLanguage ?? target.ownerAiLanguage,
+      ownerAiTone: params.ownerAiTone ?? target.ownerAiTone,
+      ownerAiFocusAreas: params.ownerAiFocusAreas ?? target.ownerAiFocusAreas,
+      ownerAiCustomInstruction:
+        params.ownerAiCustomInstruction === undefined
+          ? target.ownerAiCustomInstruction
+          : params.ownerAiCustomInstruction,
       authorizationHeader: req.headers.authorization,
     });
 
     res.json({
       success: true,
-      data: {
+      data: buildSendResponse({
         sentAt: sent.sentAt,
         reportType,
-        appointmentCount: "totalAppointments" in sent.report ? sent.report.totalAppointments : undefined,
-        paymentCount: "paymentCount" in sent.report ? sent.report.paymentCount : undefined,
-        totalPaymentAmount: "totalPaymentAmount" in sent.report ? sent.report.totalPaymentAmount : undefined,
-      },
+        report: sent.report,
+      }),
     });
   }),
 );
@@ -223,18 +275,23 @@ router.post(
       reportType,
       trigger: "resend",
       timezone,
+      ownerAiLanguage: params.ownerAiLanguage ?? target.ownerAiLanguage,
+      ownerAiTone: params.ownerAiTone ?? target.ownerAiTone,
+      ownerAiFocusAreas: params.ownerAiFocusAreas ?? target.ownerAiFocusAreas,
+      ownerAiCustomInstruction:
+        params.ownerAiCustomInstruction === undefined
+          ? target.ownerAiCustomInstruction
+          : params.ownerAiCustomInstruction,
       authorizationHeader: req.headers.authorization,
     });
 
     res.json({
       success: true,
-      data: {
+      data: buildSendResponse({
         sentAt: sent.sentAt,
         reportType,
-        appointmentCount: "totalAppointments" in sent.report ? sent.report.totalAppointments : undefined,
-        paymentCount: "paymentCount" in sent.report ? sent.report.paymentCount : undefined,
-        totalPaymentAmount: "totalPaymentAmount" in sent.report ? sent.report.totalPaymentAmount : undefined,
-      },
+        report: sent.report,
+      }),
     });
   }),
 );

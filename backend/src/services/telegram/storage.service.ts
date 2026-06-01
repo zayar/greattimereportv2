@@ -2,8 +2,18 @@ import { randomBytes } from "node:crypto";
 import { firestoreDb } from "../../config/firebase.js";
 import { env } from "../../config/env.js";
 import { HttpError } from "../../utils/http-error.js";
+import type { AiLanguage } from "../ai/language.js";
 import { normalizeReportTime, normalizeTimeZone } from "./time.js";
+import {
+  DEFAULT_OWNER_AI_FOCUS_AREAS,
+  DEFAULT_OWNER_AI_LANGUAGE,
+  DEFAULT_OWNER_AI_TONE,
+  ownerAiReportFocusAreas,
+  ownerAiReportTones,
+} from "./types.js";
 import type {
+  OwnerAiReportFocusArea,
+  OwnerAiReportTone,
   TelegramChatTarget,
   TelegramConnectionStatus,
   TelegramDeliveryLogEntry,
@@ -62,6 +72,39 @@ function isFutureIso(value: string | null | undefined) {
   return Boolean(value && new Date(value).getTime() > Date.now());
 }
 
+function normalizeOwnerAiLanguage(value: unknown, fallback: AiLanguage = DEFAULT_OWNER_AI_LANGUAGE): AiLanguage {
+  return value === "my-MM" || value === "en-US" ? value : fallback;
+}
+
+function normalizeOwnerAiTone(value: unknown, fallback: OwnerAiReportTone = DEFAULT_OWNER_AI_TONE): OwnerAiReportTone {
+  return ownerAiReportTones.includes(value as OwnerAiReportTone) ? (value as OwnerAiReportTone) : fallback;
+}
+
+function normalizeOwnerAiFocusAreas(value: unknown, fallback = DEFAULT_OWNER_AI_FOCUS_AREAS) {
+  if (!Array.isArray(value)) {
+    return [...fallback];
+  }
+
+  const normalized = value.filter((item): item is OwnerAiReportFocusArea =>
+    ownerAiReportFocusAreas.includes(item as OwnerAiReportFocusArea),
+  );
+
+  return normalized.length > 0 ? [...new Set(normalized)] : [...fallback];
+}
+
+function normalizeOwnerAiCustomInstruction(value: unknown, fallback: string | null) {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const text = value.trim().slice(0, 240);
+  return text || null;
+}
+
 function parseReportSettings(
   data: Record<string, unknown> | undefined,
   defaults: TelegramReportSettingsRecord,
@@ -89,6 +132,20 @@ function parseReportSettings(
     paymentReportTime: normalizeReportTime(
       typeof data?.paymentReportTime === "string" ? data.paymentReportTime : defaults.paymentReportTime,
     ),
+    isOwnerAiReportEnabled:
+      typeof data?.isOwnerAiReportEnabled === "boolean"
+        ? data.isOwnerAiReportEnabled
+        : defaults.isOwnerAiReportEnabled,
+    ownerAiReportTime: normalizeReportTime(
+      typeof data?.ownerAiReportTime === "string" ? data.ownerAiReportTime : defaults.ownerAiReportTime,
+    ),
+    ownerAiLanguage: normalizeOwnerAiLanguage(data?.ownerAiLanguage, defaults.ownerAiLanguage),
+    ownerAiTone: normalizeOwnerAiTone(data?.ownerAiTone, defaults.ownerAiTone),
+    ownerAiFocusAreas: normalizeOwnerAiFocusAreas(data?.ownerAiFocusAreas, defaults.ownerAiFocusAreas),
+    ownerAiCustomInstruction: normalizeOwnerAiCustomInstruction(
+      data?.ownerAiCustomInstruction,
+      defaults.ownerAiCustomInstruction,
+    ),
     timezone: normalizeTimeZone(typeof data?.timezone === "string" ? data.timezone : defaults.timezone),
     lastTestSentAt: typeof data?.lastTestSentAt === "string" ? data.lastTestSentAt : defaults.lastTestSentAt,
     lastScheduledSentAt:
@@ -105,6 +162,16 @@ function parseReportSettings(
       typeof data?.lastPaymentScheduledDateKey === "string"
         ? data.lastPaymentScheduledDateKey
         : defaults.lastPaymentScheduledDateKey,
+    lastOwnerAiTestSentAt:
+      typeof data?.lastOwnerAiTestSentAt === "string" ? data.lastOwnerAiTestSentAt : defaults.lastOwnerAiTestSentAt,
+    lastOwnerAiScheduledSentAt:
+      typeof data?.lastOwnerAiScheduledSentAt === "string"
+        ? data.lastOwnerAiScheduledSentAt
+        : defaults.lastOwnerAiScheduledSentAt,
+    lastOwnerAiScheduledDateKey:
+      typeof data?.lastOwnerAiScheduledDateKey === "string"
+        ? data.lastOwnerAiScheduledDateKey
+        : defaults.lastOwnerAiScheduledDateKey,
     lastAppointmentFailureAt:
       typeof data?.lastAppointmentFailureAt === "string"
         ? data.lastAppointmentFailureAt
@@ -121,6 +188,12 @@ function parseReportSettings(
       typeof data?.lastPaymentFailureReason === "string"
         ? data.lastPaymentFailureReason
         : defaults.lastPaymentFailureReason,
+    lastOwnerAiFailureAt:
+      typeof data?.lastOwnerAiFailureAt === "string" ? data.lastOwnerAiFailureAt : defaults.lastOwnerAiFailureAt,
+    lastOwnerAiFailureReason:
+      typeof data?.lastOwnerAiFailureReason === "string"
+        ? data.lastOwnerAiFailureReason
+        : defaults.lastOwnerAiFailureReason,
   };
 }
 
@@ -139,6 +212,12 @@ function buildDefaultReportSettings(input?: {
     reportTime: env.TELEGRAM_REPORT_DEFAULT_TIME,
     isTodayPaymentReportEnabled: false,
     paymentReportTime: env.TELEGRAM_REPORT_DEFAULT_TIME,
+    isOwnerAiReportEnabled: false,
+    ownerAiReportTime: env.TELEGRAM_REPORT_DEFAULT_TIME,
+    ownerAiLanguage: DEFAULT_OWNER_AI_LANGUAGE,
+    ownerAiTone: DEFAULT_OWNER_AI_TONE,
+    ownerAiFocusAreas: [...DEFAULT_OWNER_AI_FOCUS_AREAS],
+    ownerAiCustomInstruction: null,
     timezone: env.DEFAULT_TIMEZONE,
     lastTestSentAt: null,
     lastScheduledSentAt: null,
@@ -146,10 +225,15 @@ function buildDefaultReportSettings(input?: {
     lastPaymentTestSentAt: null,
     lastPaymentScheduledSentAt: null,
     lastPaymentScheduledDateKey: null,
+    lastOwnerAiTestSentAt: null,
+    lastOwnerAiScheduledSentAt: null,
+    lastOwnerAiScheduledDateKey: null,
     lastAppointmentFailureAt: null,
     lastAppointmentFailureReason: null,
     lastPaymentFailureAt: null,
     lastPaymentFailureReason: null,
+    lastOwnerAiFailureAt: null,
+    lastOwnerAiFailureReason: null,
   };
 }
 
@@ -262,7 +346,10 @@ function getTargetLabel(target: TelegramTargetRecord) {
 function buildDeliveryLogEntry(id: string, data: Record<string, unknown> | undefined): TelegramDeliveryLogEntry | null {
   const clinicId = typeof data?.clinicId === "string" ? data.clinicId : null;
   const telegramChatId = typeof data?.telegramChatId === "string" ? data.telegramChatId : null;
-  const reportType = data?.reportType === "appointment" || data?.reportType === "payment" ? data.reportType : null;
+  const reportType =
+    data?.reportType === "appointment" || data?.reportType === "payment" || data?.reportType === "owner_ai"
+      ? data.reportType
+      : null;
   const trigger =
     data?.trigger === "manual_test" || data?.trigger === "scheduled" || data?.trigger === "resend" ? data.trigger : null;
   const outcome = data?.outcome === "sent" || data?.outcome === "failed" ? data.outcome : null;
@@ -367,6 +454,12 @@ function buildStatus(
         reportTime: primaryTarget.reportTime,
         isTodayPaymentReportEnabled: primaryTarget.isTodayPaymentReportEnabled,
         paymentReportTime: primaryTarget.paymentReportTime,
+        isOwnerAiReportEnabled: primaryTarget.isOwnerAiReportEnabled,
+        ownerAiReportTime: primaryTarget.ownerAiReportTime,
+        ownerAiLanguage: primaryTarget.ownerAiLanguage,
+        ownerAiTone: primaryTarget.ownerAiTone,
+        ownerAiFocusAreas: primaryTarget.ownerAiFocusAreas,
+        ownerAiCustomInstruction: primaryTarget.ownerAiCustomInstruction,
         timezone: primaryTarget.timezone,
         lastTestSentAt: primaryTarget.lastTestSentAt,
         lastScheduledSentAt: primaryTarget.lastScheduledSentAt,
@@ -374,10 +467,15 @@ function buildStatus(
         lastPaymentTestSentAt: primaryTarget.lastPaymentTestSentAt,
         lastPaymentScheduledSentAt: primaryTarget.lastPaymentScheduledSentAt,
         lastPaymentScheduledDateKey: primaryTarget.lastPaymentScheduledDateKey,
+        lastOwnerAiTestSentAt: primaryTarget.lastOwnerAiTestSentAt,
+        lastOwnerAiScheduledSentAt: primaryTarget.lastOwnerAiScheduledSentAt,
+        lastOwnerAiScheduledDateKey: primaryTarget.lastOwnerAiScheduledDateKey,
         lastAppointmentFailureAt: primaryTarget.lastAppointmentFailureAt,
         lastAppointmentFailureReason: primaryTarget.lastAppointmentFailureReason,
         lastPaymentFailureAt: primaryTarget.lastPaymentFailureAt,
         lastPaymentFailureReason: primaryTarget.lastPaymentFailureReason,
+        lastOwnerAiFailureAt: primaryTarget.lastOwnerAiFailureAt,
+        lastOwnerAiFailureReason: primaryTarget.lastOwnerAiFailureReason,
       }
     : buildDefaultReportSettings();
 
@@ -466,6 +564,12 @@ async function ensureLegacyTargetMigrated(record: TelegramIntegrationRecord) {
       reportTime: record.reportTime,
       isTodayPaymentReportEnabled: record.isTodayPaymentReportEnabled,
       paymentReportTime: record.paymentReportTime,
+      isOwnerAiReportEnabled: record.isOwnerAiReportEnabled,
+      ownerAiReportTime: record.ownerAiReportTime,
+      ownerAiLanguage: record.ownerAiLanguage,
+      ownerAiTone: record.ownerAiTone,
+      ownerAiFocusAreas: record.ownerAiFocusAreas,
+      ownerAiCustomInstruction: record.ownerAiCustomInstruction,
       timezone: record.timezone,
       lastTestSentAt: record.lastTestSentAt,
       lastScheduledSentAt: record.lastScheduledSentAt,
@@ -473,10 +577,15 @@ async function ensureLegacyTargetMigrated(record: TelegramIntegrationRecord) {
       lastPaymentTestSentAt: record.lastPaymentTestSentAt,
       lastPaymentScheduledSentAt: record.lastPaymentScheduledSentAt,
       lastPaymentScheduledDateKey: record.lastPaymentScheduledDateKey,
+      lastOwnerAiTestSentAt: record.lastOwnerAiTestSentAt,
+      lastOwnerAiScheduledSentAt: record.lastOwnerAiScheduledSentAt,
+      lastOwnerAiScheduledDateKey: record.lastOwnerAiScheduledDateKey,
       lastAppointmentFailureAt: record.lastAppointmentFailureAt,
       lastAppointmentFailureReason: record.lastAppointmentFailureReason,
       lastPaymentFailureAt: record.lastPaymentFailureAt,
       lastPaymentFailureReason: record.lastPaymentFailureReason,
+      lastOwnerAiFailureAt: record.lastOwnerAiFailureAt,
+      lastOwnerAiFailureReason: record.lastOwnerAiFailureReason,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     };
@@ -536,6 +645,12 @@ export async function updateTelegramReportSettings(input: {
   reportTime: string;
   isTodayPaymentReportEnabled: boolean;
   paymentReportTime: string;
+  isOwnerAiReportEnabled?: boolean;
+  ownerAiReportTime?: string;
+  ownerAiLanguage?: "my-MM" | "en-US";
+  ownerAiTone?: OwnerAiReportTone;
+  ownerAiFocusAreas?: OwnerAiReportFocusArea[];
+  ownerAiCustomInstruction?: string | null;
   timezone: string;
 }) {
   const clinicStatus = await getTelegramIntegrationStatus({
@@ -558,6 +673,15 @@ export async function updateTelegramReportSettings(input: {
     reportTime: normalizeReportTime(input.reportTime),
     isTodayPaymentReportEnabled: Boolean(input.isTodayPaymentReportEnabled),
     paymentReportTime: normalizeReportTime(input.paymentReportTime),
+    isOwnerAiReportEnabled: input.isOwnerAiReportEnabled ?? existingTarget.isOwnerAiReportEnabled,
+    ownerAiReportTime: normalizeReportTime(input.ownerAiReportTime ?? existingTarget.ownerAiReportTime),
+    ownerAiLanguage: normalizeOwnerAiLanguage(input.ownerAiLanguage, existingTarget.ownerAiLanguage),
+    ownerAiTone: normalizeOwnerAiTone(input.ownerAiTone, existingTarget.ownerAiTone),
+    ownerAiFocusAreas: normalizeOwnerAiFocusAreas(input.ownerAiFocusAreas, existingTarget.ownerAiFocusAreas),
+    ownerAiCustomInstruction:
+      input.ownerAiCustomInstruction === undefined
+        ? existingTarget.ownerAiCustomInstruction
+        : normalizeOwnerAiCustomInstruction(input.ownerAiCustomInstruction, existingTarget.ownerAiCustomInstruction),
     timezone: normalizeTimeZone(input.timezone),
     updatedAt: timestamp,
     createdAt: existingTarget.createdAt ?? timestamp,
@@ -830,6 +954,87 @@ async function createTelegramDeliveryLog(entry: TelegramDeliveryLogRecord) {
   await docRef.set(entry);
 }
 
+function buildDeliverySentTargetPatch(input: {
+  reportType: TelegramReportType;
+  trigger: TelegramDeliveryTrigger;
+  sentAt: string;
+  dateKey: string | null;
+}) {
+  if (input.reportType === "appointment") {
+    return {
+      ...(input.trigger === "scheduled"
+        ? {
+            lastScheduledSentAt: input.sentAt,
+            lastScheduledDateKey: input.dateKey,
+          }
+        : {
+            lastTestSentAt: input.sentAt,
+          }),
+      lastAppointmentFailureAt: null,
+      lastAppointmentFailureReason: null,
+      updatedAt: input.sentAt,
+    };
+  }
+
+  if (input.reportType === "payment") {
+    return {
+      ...(input.trigger === "scheduled"
+        ? {
+            lastPaymentScheduledSentAt: input.sentAt,
+            lastPaymentScheduledDateKey: input.dateKey,
+          }
+        : {
+            lastPaymentTestSentAt: input.sentAt,
+          }),
+      lastPaymentFailureAt: null,
+      lastPaymentFailureReason: null,
+      updatedAt: input.sentAt,
+    };
+  }
+
+  return {
+    ...(input.trigger === "scheduled"
+      ? {
+          lastOwnerAiScheduledSentAt: input.sentAt,
+          lastOwnerAiScheduledDateKey: input.dateKey,
+        }
+      : {
+          lastOwnerAiTestSentAt: input.sentAt,
+        }),
+    lastOwnerAiFailureAt: null,
+    lastOwnerAiFailureReason: null,
+    updatedAt: input.sentAt,
+  };
+}
+
+function buildDeliveryFailedTargetPatch(input: {
+  reportType: TelegramReportType;
+  attemptedAt: string;
+  errorMessage: string;
+}) {
+  if (input.reportType === "appointment") {
+    return {
+      lastAppointmentFailureAt: input.attemptedAt,
+      lastAppointmentFailureReason: input.errorMessage,
+      updatedAt: input.attemptedAt,
+    };
+  }
+
+  if (input.reportType === "payment") {
+    return {
+      lastPaymentFailureAt: input.attemptedAt,
+      lastPaymentFailureReason: input.errorMessage,
+      updatedAt: input.attemptedAt,
+    };
+  }
+
+  return {
+    lastOwnerAiFailureAt: input.attemptedAt,
+    lastOwnerAiFailureReason: input.errorMessage,
+    updatedAt: input.attemptedAt,
+  };
+}
+
 export async function markTelegramDeliverySent(input: {
   clinicId: string;
   clinicCode?: string;
@@ -871,33 +1076,12 @@ export async function markTelegramDeliverySent(input: {
       errorMessage: null,
     }),
     targetRef(input.clinicId, input.chatId).set(
-      input.reportType === "appointment"
-        ? {
-            ...(input.trigger === "scheduled"
-              ? {
-                  lastScheduledSentAt: input.sentAt,
-                  lastScheduledDateKey: input.dateKey,
-                }
-              : {
-                  lastTestSentAt: input.sentAt,
-                }),
-            lastAppointmentFailureAt: null,
-            lastAppointmentFailureReason: null,
-            updatedAt: input.sentAt,
-          }
-        : {
-            ...(input.trigger === "scheduled"
-              ? {
-                  lastPaymentScheduledSentAt: input.sentAt,
-                  lastPaymentScheduledDateKey: input.dateKey,
-                }
-              : {
-                  lastPaymentTestSentAt: input.sentAt,
-                }),
-            lastPaymentFailureAt: null,
-            lastPaymentFailureReason: null,
-            updatedAt: input.sentAt,
-          },
+      buildDeliverySentTargetPatch({
+        reportType: input.reportType,
+        trigger: input.trigger,
+        sentAt: input.sentAt,
+        dateKey: input.dateKey,
+      }),
       { merge: true },
     ),
   ]);
@@ -943,17 +1127,11 @@ export async function markTelegramDeliveryFailed(input: {
       errorMessage,
     }),
     targetRef(input.clinicId, input.chatId).set(
-      input.reportType === "appointment"
-        ? {
-            lastAppointmentFailureAt: input.attemptedAt,
-            lastAppointmentFailureReason: errorMessage,
-            updatedAt: input.attemptedAt,
-          }
-        : {
-            lastPaymentFailureAt: input.attemptedAt,
-            lastPaymentFailureReason: errorMessage,
-            updatedAt: input.attemptedAt,
-          },
+      buildDeliveryFailedTargetPatch({
+        reportType: input.reportType,
+        attemptedAt: input.attemptedAt,
+        errorMessage,
+      }),
       { merge: true },
     ),
   ]);
@@ -983,7 +1161,9 @@ export async function listTelegramIntegrationsForScheduling() {
     .filter(
       (record) =>
         Boolean(record.telegramChatId) &&
-        (record.isTodayAppointmentReportEnabled || record.isTodayPaymentReportEnabled),
+        (record.isTodayAppointmentReportEnabled ||
+          record.isTodayPaymentReportEnabled ||
+          record.isOwnerAiReportEnabled),
     );
 }
 

@@ -38,9 +38,11 @@ export interface Business {
 export type AiLanguage = "my-MM" | "en-US";
 
 export type TelegramConnectionStatus = "not_linked" | "pending" | "linked";
-export type TelegramReportType = "appointment" | "payment";
+export type TelegramReportType = "appointment" | "payment" | "owner_ai";
 export type TelegramDeliveryTrigger = "manual_test" | "scheduled" | "resend";
 export type TelegramDeliveryOutcome = "sent" | "failed";
+export type TelegramOwnerAiTone = "simple" | "professional" | "friendly";
+export type TelegramOwnerAiFocusArea = "appointments" | "payments" | "risks" | "actions" | "tomorrow";
 
 export interface TelegramDeliveryLogEntry {
   id: string;
@@ -72,6 +74,12 @@ export interface TelegramTargetStatus {
   reportTime: string;
   isTodayPaymentReportEnabled: boolean;
   paymentReportTime: string;
+  isOwnerAiReportEnabled: boolean;
+  ownerAiReportTime: string;
+  ownerAiLanguage: AiLanguage;
+  ownerAiTone: TelegramOwnerAiTone;
+  ownerAiFocusAreas: TelegramOwnerAiFocusArea[];
+  ownerAiCustomInstruction: string | null;
   timezone: string;
   lastTestSentAt: string | null;
   lastScheduledSentAt: string | null;
@@ -79,10 +87,15 @@ export interface TelegramTargetStatus {
   lastPaymentTestSentAt: string | null;
   lastPaymentScheduledSentAt: string | null;
   lastPaymentScheduledDateKey: string | null;
+  lastOwnerAiTestSentAt: string | null;
+  lastOwnerAiScheduledSentAt: string | null;
+  lastOwnerAiScheduledDateKey: string | null;
   lastAppointmentFailureAt: string | null;
   lastAppointmentFailureReason: string | null;
   lastPaymentFailureAt: string | null;
   lastPaymentFailureReason: string | null;
+  lastOwnerAiFailureAt: string | null;
+  lastOwnerAiFailureReason: string | null;
   targetLabel: string;
   deliveryHistory: TelegramDeliveryLogEntry[];
 }

@@ -3,17 +3,31 @@ import { z } from "zod";
 import { getCustomerPortalOverview } from "../reports/customer-portal.service.js";
 import { getDashboardOverview } from "../reports/dashboard.service.js";
 import { getServicePortalOverview } from "../reports/service-portal.service.js";
-import { buildCorrectionPrompt, buildCustomerInsightPrompt, buildExecutiveSummaryPrompt, buildServiceInsightPrompt } from "./prompt-builders.js";
+import {
+  buildCorrectionPrompt,
+  buildCustomerInsightPrompt,
+  buildExecutiveSummaryPrompt,
+  buildOwnerAiReportPrompt,
+  buildServiceInsightPrompt,
+} from "./prompt-builders.js";
 import { createAiProvider } from "./provider.js";
-import { buildCustomerInsightFallback, buildExecutiveSummaryFallback, buildServiceInsightFallback } from "./fallbacks.js";
+import {
+  buildCustomerInsightFallback,
+  buildExecutiveSummaryFallback,
+  buildOwnerAiReportFallback,
+  buildServiceInsightFallback,
+} from "./fallbacks.js";
 import { calculateCustomerRiskSignals } from "./customer-risk.service.js";
 import type { AiLanguage } from "./language.js";
+import type { OwnerAiReportFocusArea, OwnerAiReportTone } from "../telegram/types.js";
 import {
   customerInsightCoreSchema,
   executiveSummaryCoreSchema,
+  ownerAiReportCoreSchema,
   serviceInsightCoreSchema,
   type CustomerInsightResponse,
   type ExecutiveSummaryResponse,
+  type OwnerAiReportResponse,
   type ServiceInsightResponse,
 } from "./schemas.js";
 
@@ -43,6 +57,47 @@ type ServiceInsightRequest = {
   toDate: string;
   aiLanguage: AiLanguage;
   serviceName: string;
+};
+
+export type OwnerAiReportFacts = {
+  clinic: {
+    clinicName: string;
+  };
+  date: {
+    dateKey: string;
+    timezone: string;
+  };
+  appointments: {
+    totalAppointments: number;
+    upcomingCount: number;
+    completedCount: number;
+    cancelledCount: number;
+    noShowCount: number;
+    topServices: Array<{ serviceName: string; count: number }>;
+    therapistLoad: Array<{ therapistName: string; count: number }>;
+  };
+  payments: {
+    totalPaymentAmount: number;
+    paidInvoiceCount: number;
+    paymentCount: number;
+    paymentMethods: Array<{ paymentMethod: string; count: number; amount: number }>;
+    sellerTotals: Array<{ sellerName: string; count: number; amount: number }>;
+  };
+  dataQuality: {
+    appointmentDateKey: string;
+    paymentDateKey: string;
+    dateKeysMatch: boolean;
+    omittedPrivateFields: string[];
+  };
+};
+
+type OwnerAiReportRequest = {
+  clinicId: string;
+  aiLanguage: AiLanguage;
+  tone: OwnerAiReportTone;
+  focusAreas: OwnerAiReportFocusArea[];
+  customInstruction: string | null;
+  facts: OwnerAiReportFacts;
 };
 
 function sanitizeOptionalText(value: string | null | undefined) {
@@ -223,6 +278,59 @@ export async function generateExecutiveSummary(
   });
 
   return data;
+}
+
+export async function generateOwnerAiReport(
+  params: OwnerAiReportRequest,
+): Promise<OwnerAiReportResponse> {
+  const startedAt = Date.now();
+  const generatedAt = new Date().toISOString();
+  const prompt = buildOwnerAiReportPrompt({
+    aiLanguage: params.aiLanguage,
+    tone: params.tone,
+    focusAreas: params.focusAreas,
+    customInstruction: params.customInstruction,
+    facts: params.facts,
+  });
+
+  const aiResult = await getStructuredAiOutput({
+    featureName: "owner-ai-report",
+    schema: ownerAiReportCoreSchema,
+    prompt,
+    fallbackReason: "Gemini is not configured for AI Owner Report.",
+  });
+
+  const fallback = buildOwnerAiReportFallback({
+    aiLanguage: params.aiLanguage,
+    facts: params.facts,
+  });
+  const aiCopy = aiResult.data ?? fallback;
+
+  const response: OwnerAiReportResponse = {
+    reportTitle: aiCopy.reportTitle,
+    overallStatus: aiCopy.overallStatus,
+    summaryText: aiCopy.summaryText,
+    keyFindings: (aiCopy.keyFindings ?? []).slice(0, 4),
+    risksToWatch: (aiCopy.risksToWatch ?? []).slice(0, 3),
+    recommendedActions: (aiCopy.recommendedActions ?? []).slice(0, 3),
+    tomorrowFocus: sanitizeOptionalText(aiCopy.tomorrowFocus),
+    dataQualityNote: sanitizeOptionalText(aiCopy.dataQualityNote),
+    languageUsed: params.aiLanguage,
+    generatedAt,
+  };
+
+  logAiFeature({
+    featureName: "owner-ai-report",
+    clinicId: params.clinicId,
+    aiLanguage: params.aiLanguage,
+    modelName: aiResult.modelName,
+    durationMs: Date.now() - startedAt,
+    success: aiResult.data != null,
+    usedFallback: aiResult.data == null,
+    failureReason: aiResult.fallbackReason,
+  });
+
+  return response;
 }
 
 export async function generateCustomerInsight(

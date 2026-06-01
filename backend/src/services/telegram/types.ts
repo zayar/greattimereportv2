@@ -1,9 +1,23 @@
+import type { AiLanguage } from "../ai/language.js";
+
 export type TelegramChatType = "private" | "group" | "supergroup" | "channel";
 
 export type TelegramConnectionStatus = "not_linked" | "pending" | "linked";
-export type TelegramReportType = "appointment" | "payment";
+export type TelegramReportType = "appointment" | "payment" | "owner_ai";
 export type TelegramDeliveryTrigger = "manual_test" | "scheduled" | "resend";
 export type TelegramDeliveryOutcome = "sent" | "failed";
+export const ownerAiReportTones = ["simple", "professional", "friendly"] as const;
+export type OwnerAiReportTone = (typeof ownerAiReportTones)[number];
+export const ownerAiReportFocusAreas = ["appointments", "payments", "risks", "actions", "tomorrow"] as const;
+export type OwnerAiReportFocusArea = (typeof ownerAiReportFocusAreas)[number];
+export const DEFAULT_OWNER_AI_LANGUAGE = "my-MM" satisfies AiLanguage;
+export const DEFAULT_OWNER_AI_TONE = "simple" satisfies OwnerAiReportTone;
+export const DEFAULT_OWNER_AI_FOCUS_AREAS: OwnerAiReportFocusArea[] = [
+  "appointments",
+  "payments",
+  "risks",
+  "actions",
+];
 
 export interface TelegramReportSettingsRecord {
   telegramChatId: string | null;
@@ -14,6 +28,12 @@ export interface TelegramReportSettingsRecord {
   reportTime: string;
   isTodayPaymentReportEnabled: boolean;
   paymentReportTime: string;
+  isOwnerAiReportEnabled: boolean;
+  ownerAiReportTime: string;
+  ownerAiLanguage: AiLanguage;
+  ownerAiTone: OwnerAiReportTone;
+  ownerAiFocusAreas: OwnerAiReportFocusArea[];
+  ownerAiCustomInstruction: string | null;
   timezone: string;
   lastTestSentAt: string | null;
   lastScheduledSentAt: string | null;
@@ -21,10 +41,15 @@ export interface TelegramReportSettingsRecord {
   lastPaymentTestSentAt: string | null;
   lastPaymentScheduledSentAt: string | null;
   lastPaymentScheduledDateKey: string | null;
+  lastOwnerAiTestSentAt: string | null;
+  lastOwnerAiScheduledSentAt: string | null;
+  lastOwnerAiScheduledDateKey: string | null;
   lastAppointmentFailureAt: string | null;
   lastAppointmentFailureReason: string | null;
   lastPaymentFailureAt: string | null;
   lastPaymentFailureReason: string | null;
+  lastOwnerAiFailureAt: string | null;
+  lastOwnerAiFailureReason: string | null;
 }
 
 export interface TelegramTargetRecord extends TelegramReportSettingsRecord {
@@ -144,4 +169,22 @@ export interface TodayPaymentReportSummary {
   payments: TodayPaymentReportItem[];
   paymentMethods: Array<{ paymentMethod: string; count: number; amount: number }>;
   sellerTotals: Array<{ sellerName: string; count: number; amount: number }>;
+}
+
+export interface TodayOwnerAiReportSummary {
+  clinicName: string;
+  dateKey: string;
+  timezone: string;
+  appointmentReport: Omit<TodayAppointmentReportSummary, "appointments">;
+  paymentReport: Omit<TodayPaymentReportSummary, "payments">;
+  aiReport: {
+    reportTitle: string;
+    overallStatus: "good" | "normal" | "watch" | "no_data";
+    summaryText: string;
+    keyFindings: string[];
+    risksToWatch: string[];
+    recommendedActions: string[];
+    tomorrowFocus: string | null;
+    dataQualityNote: string | null;
+  };
 }

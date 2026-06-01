@@ -1,8 +1,15 @@
+import { sendTodayOwnerAiReport } from "./owner-ai-report.service.js";
 import { sendTodayPaymentReport } from "./payment-report.service.js";
 import { sendTodayAppointmentReport } from "./report.service.js";
 import { markTelegramDeliveryFailed, markTelegramDeliverySent } from "./storage.service.js";
 import { formatDateKeyInTimeZone, normalizeTimeZone } from "./time.js";
-import type { TelegramDeliveryTrigger, TelegramReportType } from "./types.js";
+import type {
+  OwnerAiReportFocusArea,
+  OwnerAiReportTone,
+  TelegramDeliveryTrigger,
+  TelegramReportType,
+} from "./types.js";
+import type { AiLanguage } from "../ai/language.js";
 
 function getDeliveryErrorMessage(error: unknown) {
   if (error instanceof Error) {
@@ -20,6 +27,10 @@ export async function sendTrackedTelegramReport(input: {
   reportType: TelegramReportType;
   trigger: TelegramDeliveryTrigger;
   timezone?: string;
+  ownerAiLanguage?: AiLanguage;
+  ownerAiTone?: OwnerAiReportTone;
+  ownerAiFocusAreas?: OwnerAiReportFocusArea[];
+  ownerAiCustomInstruction?: string | null;
   authorizationHeader?: string;
   referenceDate?: Date;
 }) {
@@ -56,7 +67,40 @@ export async function sendTrackedTelegramReport(input: {
     }
 
     if (!input.clinicCode) {
-      throw new Error("Clinic code is required for appointment delivery.");
+      throw new Error(`Clinic code is required for ${input.reportType} delivery.`);
+    }
+
+    if (input.reportType === "owner_ai") {
+      const sent = await sendTodayOwnerAiReport({
+        chatId: input.chatId,
+        clinicId: input.clinicId,
+        clinicCode: input.clinicCode,
+        clinicName: input.clinicName,
+        timezone,
+        aiLanguage: input.ownerAiLanguage,
+        tone: input.ownerAiTone,
+        focusAreas: input.ownerAiFocusAreas,
+        customInstruction: input.ownerAiCustomInstruction,
+        authorizationHeader: input.authorizationHeader,
+        referenceDate: input.referenceDate,
+      });
+
+      await markTelegramDeliverySent({
+        clinicId: input.clinicId,
+        clinicCode: input.clinicCode,
+        clinicName: input.clinicName,
+        chatId: input.chatId,
+        reportType: input.reportType,
+        trigger: input.trigger,
+        sentAt: sent.sentAt,
+        dateKey: sent.report.dateKey,
+        timezone,
+        appointmentCount: sent.report.appointmentReport.totalAppointments,
+        paymentCount: sent.report.paymentReport.paymentCount,
+        totalPaymentAmount: sent.report.paymentReport.totalPaymentAmount,
+      });
+
+      return sent;
     }
 
     const sent = await sendTodayAppointmentReport({
