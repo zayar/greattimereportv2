@@ -62,6 +62,21 @@ function appendList(lines: string[], label: string, items: string[]) {
   });
 }
 
+function appendCountList(
+  lines: string[],
+  label: string,
+  items: Array<{ name: string; count: number }>,
+) {
+  if (items.length === 0) {
+    return;
+  }
+
+  lines.push("", label);
+  items.slice(0, 3).forEach((item, index) => {
+    lines.push(`${index + 1}. ${item.name} - ${item.count.toLocaleString("en-US")}`);
+  });
+}
+
 export function formatTodayOwnerAiTelegramMessage(report: TodayOwnerAiReportSummary) {
   const lines = [
     report.aiReport.reportTitle,
@@ -69,11 +84,28 @@ export function formatTodayOwnerAiTelegramMessage(report: TodayOwnerAiReportSumm
     `Date: ${report.dateKey}`,
     `Timezone: ${report.timezone}`,
     `Status: ${report.aiReport.overallStatus}`,
+    "Based on our GT data",
     "",
     report.aiReport.summaryText,
   ];
 
   appendList(lines, "Key findings", report.aiReport.keyFindings);
+  appendCountList(
+    lines,
+    "Top 3 services",
+    report.appointmentReport.topServices.map((service) => ({
+      name: service.serviceName,
+      count: service.count,
+    })),
+  );
+  appendCountList(
+    lines,
+    "Top 3 therapists",
+    report.appointmentReport.therapistLoad.map((therapist) => ({
+      name: therapist.therapistName,
+      count: therapist.count,
+    })),
+  );
   appendList(lines, "Risks to watch", report.aiReport.risksToWatch);
   appendList(lines, "Recommended actions", report.aiReport.recommendedActions);
 

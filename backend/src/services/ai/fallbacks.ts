@@ -150,7 +150,7 @@ export function buildOwnerAiReportFallback(params: {
       reportTitle: "AI Owner Report",
       overallStatus: hasAnyData ? (hasWatchSignal ? "watch" : "normal") : "no_data",
       summaryText: hasAnyData
-        ? `ယနေ့ backend facts အရ appointment ${facts.totalAppointments.toLocaleString("en-US")} ခုနှင့် payment ${facts.paymentCount.toLocaleString("en-US")} records ရှိပြီး စုစုပေါင်း ${amount} MMK ဖြစ်ပါသည်။`
+        ? `ယနေ့ GT data အရ appointment ${facts.totalAppointments.toLocaleString("en-US")} ခုနှင့် payment ${facts.paymentCount.toLocaleString("en-US")} records ရှိပြီး စုစုပေါင်း ${amount} MMK ဖြစ်ပါသည်။`
         : "ယနေ့ appointment သို့မဟုတ် payment facts မတွေ့ရသေးပါ။ Data source နှင့် schedule time ကို စစ်ဆေးပါ။",
       keyFindings: trimList([
         `Completed appointments: ${facts.completedCount.toLocaleString("en-US")}`,
@@ -179,7 +179,7 @@ export function buildOwnerAiReportFallback(params: {
     reportTitle: "AI Owner Report",
     overallStatus: hasAnyData ? (hasWatchSignal ? "watch" : "normal") : "no_data",
     summaryText: hasAnyData
-      ? `Backend facts show ${facts.totalAppointments.toLocaleString("en-US")} appointments and ${facts.paymentCount.toLocaleString("en-US")} payment records today, with ${amount} MMK collected.`
+      ? `Based on our GT data, today has ${facts.totalAppointments.toLocaleString("en-US")} appointments and ${facts.paymentCount.toLocaleString("en-US")} payment records, with ${amount} MMK collected.`
       : "No appointment or payment facts are available yet. Check the data source and schedule time.",
     keyFindings: trimList([
       `Completed appointments: ${facts.completedCount.toLocaleString("en-US")}`,

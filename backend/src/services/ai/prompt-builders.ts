@@ -191,7 +191,8 @@ ${ownerFocusInstruction(params.focusAreas)}
 
 Rules:
 - ${baseRulesBlock()}
-- Use only the appointment, payment, and sales facts provided by the backend.
+- Use only the GT appointment, payment, and sales facts provided below.
+- When describing the source, say "GT data" or "our GT data"; do not say "backend facts".
 - Do not invent sales, appointment counts, staff names, service names, customer behavior, trends, percentages, or causes.
 - Do not say increased, decreased, higher, lower, up, down, improved, or softened unless explicit comparison facts are provided.
 - Do not include customer phone numbers or sensitive private details.
