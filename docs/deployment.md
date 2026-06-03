@@ -70,6 +70,9 @@ Optional GitHub repository variables for Cloud Run runtime sizing:
 
 Optional GitHub repository variables for Telegram reliability tuning:
 - `TELEGRAM_SCHEDULER_JOB_NAME`
+- `TELEGRAM_SCHEDULER_CRON` (defaults to `*/30 * * * *`)
+- `TELEGRAM_SCHEDULER_TIME_ZONE` (defaults to `Etc/UTC`)
+- `TELEGRAM_SCHEDULER_INTERVAL_MS` (defaults to `1800000`)
 - `TELEGRAM_API_TIMEOUT_MS`
 - `TELEGRAM_SCHEDULER_BUSY_TIMEOUT_MS`
 - `TELEGRAM_WEBHOOK_WATCHDOG_ENABLED`
@@ -79,8 +82,9 @@ Optional GitHub repository variables for Telegram reliability tuning:
 
 Recommended Telegram scheduler setup:
 - Set `APP_BASE_URL` to the public backend base URL and set the `TELEGRAM_SCHEDULER_SECRET` GitHub secret.
-- The backend deploy workflow creates or updates a Cloud Scheduler HTTP job that calls `POST {APP_BASE_URL}/api/integrations/telegram/scheduler/run` every minute with header `x-telegram-scheduler-secret`.
+- The backend deploy workflow creates or updates a Cloud Scheduler HTTP job that calls `POST {APP_BASE_URL}/api/integrations/telegram/scheduler/run` every 30 minutes by default with header `x-telegram-scheduler-secret`.
 - Optional variable: `TELEGRAM_SCHEDULER_JOB_NAME` (defaults to `gt-v2report-telegram-scheduler`).
+- Optional variable: `TELEGRAM_SCHEDULER_CRON` controls the Cloud Scheduler interval. Use `*/15 * * * *` for every 15 minutes, `*/30 * * * *` for every 30 minutes, or `0 * * * *` for every 60 minutes.
 - Keep `TELEGRAM_SCHEDULER_ENABLED=true`. The backend still runs a local catch-up tick, but Cloud Scheduler is the reliable production trigger when Cloud Run scales down or CPU is throttled between requests.
 - Keep `TELEGRAM_WEBHOOK_WATCHDOG_ENABLED=true` unless intentionally disabled. The watchdog repairs the Telegram webhook if another process clears or replaces it.
 

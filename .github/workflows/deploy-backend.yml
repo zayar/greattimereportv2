@@ -250,6 +250,8 @@ jobs:
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           TELEGRAM_SCHEDULER_SECRET: ${{ secrets.TELEGRAM_SCHEDULER_SECRET }}
           TELEGRAM_SCHEDULER_JOB_NAME: ${{ vars.TELEGRAM_SCHEDULER_JOB_NAME }}
+          TELEGRAM_SCHEDULER_CRON: ${{ vars.TELEGRAM_SCHEDULER_CRON }}
+          TELEGRAM_SCHEDULER_TIME_ZONE: ${{ vars.TELEGRAM_SCHEDULER_TIME_ZONE }}
         run: |
           if [ -z "$APP_BASE_URL" ] || [ -z "$TELEGRAM_SCHEDULER_SECRET" ]; then
             echo "Skipping Telegram Cloud Scheduler job because APP_BASE_URL or TELEGRAM_SCHEDULER_SECRET is not configured."
@@ -257,7 +259,10 @@ jobs:
           fi
 
           JOB_NAME="${TELEGRAM_SCHEDULER_JOB_NAME:-gt-v2report-telegram-scheduler}"
+          JOB_SCHEDULE="${TELEGRAM_SCHEDULER_CRON:-*/30 * * * *}"
+          JOB_TIME_ZONE="${TELEGRAM_SCHEDULER_TIME_ZONE:-Etc/UTC}"
           SCHEDULER_URI="${APP_BASE_URL%/}/api/integrations/telegram/scheduler/run"
+          echo "Using Telegram Cloud Scheduler schedule: ${JOB_SCHEDULE} (${JOB_TIME_ZONE})"
 
           if gcloud scheduler jobs describe "$JOB_NAME" \
             --project "$GCP_PROJECT_ID" \
@@ -265,8 +270,8 @@ jobs:
             gcloud scheduler jobs update http "$JOB_NAME" \
               --project "$GCP_PROJECT_ID" \
               --location "$CLOUD_RUN_REGION" \
-              --schedule="* * * * *" \
-              --time-zone="Etc/UTC" \
+              --schedule="$JOB_SCHEDULE" \
+              --time-zone="$JOB_TIME_ZONE" \
               --uri="$SCHEDULER_URI" \
               --http-method=POST \
               --headers="x-telegram-scheduler-secret=${TELEGRAM_SCHEDULER_SECRET}" \
@@ -276,8 +281,8 @@ jobs:
             gcloud scheduler jobs create http "$JOB_NAME" \
               --project "$GCP_PROJECT_ID" \
               --location "$CLOUD_RUN_REGION" \
-              --schedule="* * * * *" \
-              --time-zone="Etc/UTC" \
+              --schedule="$JOB_SCHEDULE" \
+              --time-zone="$JOB_TIME_ZONE" \
               --uri="$SCHEDULER_URI" \
               --http-method=POST \
               --headers="x-telegram-scheduler-secret=${TELEGRAM_SCHEDULER_SECRET}" \
