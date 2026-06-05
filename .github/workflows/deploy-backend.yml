@@ -274,7 +274,7 @@ jobs:
               --time-zone="$JOB_TIME_ZONE" \
               --uri="$SCHEDULER_URI" \
               --http-method=POST \
-              --headers="x-telegram-scheduler-secret=${TELEGRAM_SCHEDULER_SECRET}" \
+              --update-headers="x-telegram-scheduler-secret=${TELEGRAM_SCHEDULER_SECRET}" \
               --attempt-deadline=30s \
               --quiet
           else
