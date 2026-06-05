@@ -90,9 +90,14 @@ export async function fetchCustomerRelationshipProfiles(
     offset?: number;
   },
 ) {
+  const queryParams = {
+    ...params,
+    segment: params.segment || undefined,
+    riskLevel: params.riskLevel || undefined,
+  };
   const response = await apiClient.get<{ success: true; data: CustomerRelationshipProfilesResponse }>(
     "/ai/customer-relationship-agent/profiles",
-    { params },
+    { params: queryParams },
   );
 
   return response.data.data;

@@ -74,6 +74,9 @@ const customerRelationshipBaseSchema = z.object({
   clinicCode: z.string().min(1),
 });
 
+const optionalEmptyString = (schema: z.ZodTypeAny) =>
+  z.preprocess((value) => (typeof value === "string" && value.trim() === "" ? undefined : value), schema.optional());
+
 const customerRelationshipLearnSchema = customerRelationshipBaseSchema
   .extend({
     aiLanguage: z.string().optional(),
@@ -85,8 +88,8 @@ const customerRelationshipLearnSchema = customerRelationshipBaseSchema
   }));
 
 const customerRelationshipProfilesSchema = customerRelationshipBaseSchema.extend({
-  segment: z.enum(customerRelationshipSegments).optional(),
-  riskLevel: z.enum(customerRelationshipRiskLevels).optional(),
+  segment: optionalEmptyString(z.enum(customerRelationshipSegments)),
+  riskLevel: optionalEmptyString(z.enum(customerRelationshipRiskLevels)),
   search: z.string().default(""),
   sortBy: z
     .enum(["priorityScore", "lastVisitDate", "daysSinceLastVisit", "lifetimeSpend", "remainingPackageSessions"])
