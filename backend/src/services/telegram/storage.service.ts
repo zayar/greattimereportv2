@@ -8,8 +8,12 @@ import {
   DEFAULT_OWNER_AI_FOCUS_AREAS,
   DEFAULT_OWNER_AI_LANGUAGE,
   DEFAULT_OWNER_AI_TONE,
+  DEFAULT_WEEKLY_SUMMARY_DAY_OF_WEEK,
+  DEFAULT_WEEKLY_SUMMARY_SECTIONS,
   ownerAiReportFocusAreas,
   ownerAiReportTones,
+  weeklySummaryDaysOfWeek,
+  weeklySummarySections,
 } from "./types.js";
 import type {
   OwnerAiReportFocusArea,
@@ -26,6 +30,8 @@ import type {
   TelegramReportType,
   TelegramTargetRecord,
   TelegramTargetStatus,
+  WeeklySummaryDayOfWeek,
+  WeeklySummarySection,
 } from "./types.js";
 
 const SETTINGS_COLLECTION = "gt_v2report_telegram_settings";
@@ -105,6 +111,27 @@ function normalizeOwnerAiCustomInstruction(value: unknown, fallback: string | nu
   return text || null;
 }
 
+function normalizeWeeklySummaryDayOfWeek(
+  value: unknown,
+  fallback: WeeklySummaryDayOfWeek = DEFAULT_WEEKLY_SUMMARY_DAY_OF_WEEK,
+) {
+  return weeklySummaryDaysOfWeek.includes(value as WeeklySummaryDayOfWeek)
+    ? (value as WeeklySummaryDayOfWeek)
+    : fallback;
+}
+
+function normalizeWeeklySummarySections(value: unknown, fallback = DEFAULT_WEEKLY_SUMMARY_SECTIONS) {
+  if (!Array.isArray(value)) {
+    return [...fallback];
+  }
+
+  const normalized = value.filter((item): item is WeeklySummarySection =>
+    weeklySummarySections.includes(item as WeeklySummarySection),
+  );
+
+  return normalized.length > 0 ? [...new Set(normalized)] : [...fallback];
+}
+
 function parseReportSettings(
   data: Record<string, unknown> | undefined,
   defaults: TelegramReportSettingsRecord,
@@ -146,6 +173,23 @@ function parseReportSettings(
       data?.ownerAiCustomInstruction,
       defaults.ownerAiCustomInstruction,
     ),
+    isWeeklySummaryReportEnabled:
+      typeof data?.isWeeklySummaryReportEnabled === "boolean"
+        ? data.isWeeklySummaryReportEnabled
+        : defaults.isWeeklySummaryReportEnabled,
+    weeklySummaryReportTime: normalizeReportTime(
+      typeof data?.weeklySummaryReportTime === "string"
+        ? data.weeklySummaryReportTime
+        : defaults.weeklySummaryReportTime,
+    ),
+    weeklySummaryDayOfWeek: normalizeWeeklySummaryDayOfWeek(
+      data?.weeklySummaryDayOfWeek,
+      defaults.weeklySummaryDayOfWeek,
+    ),
+    weeklySummarySections: normalizeWeeklySummarySections(
+      data?.weeklySummarySections,
+      defaults.weeklySummarySections,
+    ),
     timezone: normalizeTimeZone(typeof data?.timezone === "string" ? data.timezone : defaults.timezone),
     lastTestSentAt: typeof data?.lastTestSentAt === "string" ? data.lastTestSentAt : defaults.lastTestSentAt,
     lastScheduledSentAt:
@@ -172,6 +216,18 @@ function parseReportSettings(
       typeof data?.lastOwnerAiScheduledDateKey === "string"
         ? data.lastOwnerAiScheduledDateKey
         : defaults.lastOwnerAiScheduledDateKey,
+    lastWeeklySummaryTestSentAt:
+      typeof data?.lastWeeklySummaryTestSentAt === "string"
+        ? data.lastWeeklySummaryTestSentAt
+        : defaults.lastWeeklySummaryTestSentAt,
+    lastWeeklySummaryScheduledSentAt:
+      typeof data?.lastWeeklySummaryScheduledSentAt === "string"
+        ? data.lastWeeklySummaryScheduledSentAt
+        : defaults.lastWeeklySummaryScheduledSentAt,
+    lastWeeklySummaryScheduledDateKey:
+      typeof data?.lastWeeklySummaryScheduledDateKey === "string"
+        ? data.lastWeeklySummaryScheduledDateKey
+        : defaults.lastWeeklySummaryScheduledDateKey,
     lastAppointmentFailureAt:
       typeof data?.lastAppointmentFailureAt === "string"
         ? data.lastAppointmentFailureAt
@@ -194,6 +250,14 @@ function parseReportSettings(
       typeof data?.lastOwnerAiFailureReason === "string"
         ? data.lastOwnerAiFailureReason
         : defaults.lastOwnerAiFailureReason,
+    lastWeeklySummaryFailureAt:
+      typeof data?.lastWeeklySummaryFailureAt === "string"
+        ? data.lastWeeklySummaryFailureAt
+        : defaults.lastWeeklySummaryFailureAt,
+    lastWeeklySummaryFailureReason:
+      typeof data?.lastWeeklySummaryFailureReason === "string"
+        ? data.lastWeeklySummaryFailureReason
+        : defaults.lastWeeklySummaryFailureReason,
   };
 }
 
@@ -218,6 +282,10 @@ function buildDefaultReportSettings(input?: {
     ownerAiTone: DEFAULT_OWNER_AI_TONE,
     ownerAiFocusAreas: [...DEFAULT_OWNER_AI_FOCUS_AREAS],
     ownerAiCustomInstruction: null,
+    isWeeklySummaryReportEnabled: false,
+    weeklySummaryReportTime: env.TELEGRAM_REPORT_DEFAULT_TIME,
+    weeklySummaryDayOfWeek: DEFAULT_WEEKLY_SUMMARY_DAY_OF_WEEK,
+    weeklySummarySections: [...DEFAULT_WEEKLY_SUMMARY_SECTIONS],
     timezone: env.DEFAULT_TIMEZONE,
     lastTestSentAt: null,
     lastScheduledSentAt: null,
@@ -228,12 +296,17 @@ function buildDefaultReportSettings(input?: {
     lastOwnerAiTestSentAt: null,
     lastOwnerAiScheduledSentAt: null,
     lastOwnerAiScheduledDateKey: null,
+    lastWeeklySummaryTestSentAt: null,
+    lastWeeklySummaryScheduledSentAt: null,
+    lastWeeklySummaryScheduledDateKey: null,
     lastAppointmentFailureAt: null,
     lastAppointmentFailureReason: null,
     lastPaymentFailureAt: null,
     lastPaymentFailureReason: null,
     lastOwnerAiFailureAt: null,
     lastOwnerAiFailureReason: null,
+    lastWeeklySummaryFailureAt: null,
+    lastWeeklySummaryFailureReason: null,
   };
 }
 
@@ -347,7 +420,10 @@ function buildDeliveryLogEntry(id: string, data: Record<string, unknown> | undef
   const clinicId = typeof data?.clinicId === "string" ? data.clinicId : null;
   const telegramChatId = typeof data?.telegramChatId === "string" ? data.telegramChatId : null;
   const reportType =
-    data?.reportType === "appointment" || data?.reportType === "payment" || data?.reportType === "owner_ai"
+    data?.reportType === "appointment" ||
+    data?.reportType === "payment" ||
+    data?.reportType === "owner_ai" ||
+    data?.reportType === "weekly_summary"
       ? data.reportType
       : null;
   const trigger =
@@ -460,6 +536,10 @@ function buildStatus(
         ownerAiTone: primaryTarget.ownerAiTone,
         ownerAiFocusAreas: primaryTarget.ownerAiFocusAreas,
         ownerAiCustomInstruction: primaryTarget.ownerAiCustomInstruction,
+        isWeeklySummaryReportEnabled: primaryTarget.isWeeklySummaryReportEnabled,
+        weeklySummaryReportTime: primaryTarget.weeklySummaryReportTime,
+        weeklySummaryDayOfWeek: primaryTarget.weeklySummaryDayOfWeek,
+        weeklySummarySections: primaryTarget.weeklySummarySections,
         timezone: primaryTarget.timezone,
         lastTestSentAt: primaryTarget.lastTestSentAt,
         lastScheduledSentAt: primaryTarget.lastScheduledSentAt,
@@ -470,12 +550,17 @@ function buildStatus(
         lastOwnerAiTestSentAt: primaryTarget.lastOwnerAiTestSentAt,
         lastOwnerAiScheduledSentAt: primaryTarget.lastOwnerAiScheduledSentAt,
         lastOwnerAiScheduledDateKey: primaryTarget.lastOwnerAiScheduledDateKey,
+        lastWeeklySummaryTestSentAt: primaryTarget.lastWeeklySummaryTestSentAt,
+        lastWeeklySummaryScheduledSentAt: primaryTarget.lastWeeklySummaryScheduledSentAt,
+        lastWeeklySummaryScheduledDateKey: primaryTarget.lastWeeklySummaryScheduledDateKey,
         lastAppointmentFailureAt: primaryTarget.lastAppointmentFailureAt,
         lastAppointmentFailureReason: primaryTarget.lastAppointmentFailureReason,
         lastPaymentFailureAt: primaryTarget.lastPaymentFailureAt,
         lastPaymentFailureReason: primaryTarget.lastPaymentFailureReason,
         lastOwnerAiFailureAt: primaryTarget.lastOwnerAiFailureAt,
         lastOwnerAiFailureReason: primaryTarget.lastOwnerAiFailureReason,
+        lastWeeklySummaryFailureAt: primaryTarget.lastWeeklySummaryFailureAt,
+        lastWeeklySummaryFailureReason: primaryTarget.lastWeeklySummaryFailureReason,
       }
     : buildDefaultReportSettings();
 
@@ -570,6 +655,10 @@ async function ensureLegacyTargetMigrated(record: TelegramIntegrationRecord) {
       ownerAiTone: record.ownerAiTone,
       ownerAiFocusAreas: record.ownerAiFocusAreas,
       ownerAiCustomInstruction: record.ownerAiCustomInstruction,
+      isWeeklySummaryReportEnabled: record.isWeeklySummaryReportEnabled,
+      weeklySummaryReportTime: record.weeklySummaryReportTime,
+      weeklySummaryDayOfWeek: record.weeklySummaryDayOfWeek,
+      weeklySummarySections: record.weeklySummarySections,
       timezone: record.timezone,
       lastTestSentAt: record.lastTestSentAt,
       lastScheduledSentAt: record.lastScheduledSentAt,
@@ -580,12 +669,17 @@ async function ensureLegacyTargetMigrated(record: TelegramIntegrationRecord) {
       lastOwnerAiTestSentAt: record.lastOwnerAiTestSentAt,
       lastOwnerAiScheduledSentAt: record.lastOwnerAiScheduledSentAt,
       lastOwnerAiScheduledDateKey: record.lastOwnerAiScheduledDateKey,
+      lastWeeklySummaryTestSentAt: record.lastWeeklySummaryTestSentAt,
+      lastWeeklySummaryScheduledSentAt: record.lastWeeklySummaryScheduledSentAt,
+      lastWeeklySummaryScheduledDateKey: record.lastWeeklySummaryScheduledDateKey,
       lastAppointmentFailureAt: record.lastAppointmentFailureAt,
       lastAppointmentFailureReason: record.lastAppointmentFailureReason,
       lastPaymentFailureAt: record.lastPaymentFailureAt,
       lastPaymentFailureReason: record.lastPaymentFailureReason,
       lastOwnerAiFailureAt: record.lastOwnerAiFailureAt,
       lastOwnerAiFailureReason: record.lastOwnerAiFailureReason,
+      lastWeeklySummaryFailureAt: record.lastWeeklySummaryFailureAt,
+      lastWeeklySummaryFailureReason: record.lastWeeklySummaryFailureReason,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     };
@@ -651,6 +745,10 @@ export async function updateTelegramReportSettings(input: {
   ownerAiTone?: OwnerAiReportTone;
   ownerAiFocusAreas?: OwnerAiReportFocusArea[];
   ownerAiCustomInstruction?: string | null;
+  isWeeklySummaryReportEnabled?: boolean;
+  weeklySummaryReportTime?: string;
+  weeklySummaryDayOfWeek?: WeeklySummaryDayOfWeek;
+  weeklySummarySections?: WeeklySummarySection[];
   timezone: string;
 }) {
   const clinicStatus = await getTelegramIntegrationStatus({
@@ -682,6 +780,19 @@ export async function updateTelegramReportSettings(input: {
       input.ownerAiCustomInstruction === undefined
         ? existingTarget.ownerAiCustomInstruction
         : normalizeOwnerAiCustomInstruction(input.ownerAiCustomInstruction, existingTarget.ownerAiCustomInstruction),
+    isWeeklySummaryReportEnabled:
+      input.isWeeklySummaryReportEnabled ?? existingTarget.isWeeklySummaryReportEnabled,
+    weeklySummaryReportTime: normalizeReportTime(
+      input.weeklySummaryReportTime ?? existingTarget.weeklySummaryReportTime,
+    ),
+    weeklySummaryDayOfWeek: normalizeWeeklySummaryDayOfWeek(
+      input.weeklySummaryDayOfWeek,
+      existingTarget.weeklySummaryDayOfWeek,
+    ),
+    weeklySummarySections: normalizeWeeklySummarySections(
+      input.weeklySummarySections,
+      existingTarget.weeklySummarySections,
+    ),
     timezone: normalizeTimeZone(input.timezone),
     updatedAt: timestamp,
     createdAt: existingTarget.createdAt ?? timestamp,
@@ -992,17 +1103,33 @@ function buildDeliverySentTargetPatch(input: {
     };
   }
 
+  if (input.reportType === "owner_ai") {
+    return {
+      ...(input.trigger === "scheduled"
+        ? {
+            lastOwnerAiScheduledSentAt: input.sentAt,
+            lastOwnerAiScheduledDateKey: input.dateKey,
+          }
+        : {
+            lastOwnerAiTestSentAt: input.sentAt,
+          }),
+      lastOwnerAiFailureAt: null,
+      lastOwnerAiFailureReason: null,
+      updatedAt: input.sentAt,
+    };
+  }
+
   return {
     ...(input.trigger === "scheduled"
       ? {
-          lastOwnerAiScheduledSentAt: input.sentAt,
-          lastOwnerAiScheduledDateKey: input.dateKey,
+          lastWeeklySummaryScheduledSentAt: input.sentAt,
+          lastWeeklySummaryScheduledDateKey: input.dateKey,
         }
       : {
-          lastOwnerAiTestSentAt: input.sentAt,
+          lastWeeklySummaryTestSentAt: input.sentAt,
         }),
-    lastOwnerAiFailureAt: null,
-    lastOwnerAiFailureReason: null,
+    lastWeeklySummaryFailureAt: null,
+    lastWeeklySummaryFailureReason: null,
     updatedAt: input.sentAt,
   };
 }
@@ -1028,9 +1155,17 @@ function buildDeliveryFailedTargetPatch(input: {
     };
   }
 
+  if (input.reportType === "owner_ai") {
+    return {
+      lastOwnerAiFailureAt: input.attemptedAt,
+      lastOwnerAiFailureReason: input.errorMessage,
+      updatedAt: input.attemptedAt,
+    };
+  }
+
   return {
-    lastOwnerAiFailureAt: input.attemptedAt,
-    lastOwnerAiFailureReason: input.errorMessage,
+    lastWeeklySummaryFailureAt: input.attemptedAt,
+    lastWeeklySummaryFailureReason: input.errorMessage,
     updatedAt: input.attemptedAt,
   };
 }
@@ -1163,7 +1298,8 @@ export async function listTelegramIntegrationsForScheduling() {
         Boolean(record.telegramChatId) &&
         (record.isTodayAppointmentReportEnabled ||
           record.isTodayPaymentReportEnabled ||
-          record.isOwnerAiReportEnabled),
+          record.isOwnerAiReportEnabled ||
+          record.isWeeklySummaryReportEnabled),
     );
 }
 

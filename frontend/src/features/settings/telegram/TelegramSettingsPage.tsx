@@ -20,6 +20,8 @@ import type {
   TelegramOwnerAiTone,
   TelegramReportType,
   TelegramTargetStatus,
+  TelegramWeeklySummaryDayOfWeek,
+  TelegramWeeklySummarySection,
 } from "../../../types/domain";
 import { useAccess } from "../../access/AccessProvider";
 
@@ -36,10 +38,22 @@ type TargetDraft = {
   ownerAiTone: TelegramOwnerAiTone;
   ownerAiFocusAreas: TelegramOwnerAiFocusArea[];
   ownerAiCustomInstruction: string;
+  weeklySummaryEnabled: boolean;
+  weeklySummaryTime: string;
+  weeklySummaryDayOfWeek: TelegramWeeklySummaryDayOfWeek;
+  weeklySummarySections: TelegramWeeklySummarySection[];
   timezone: string;
 };
 
 const DEFAULT_OWNER_AI_FOCUS_AREAS: TelegramOwnerAiFocusArea[] = ["appointments", "payments", "risks", "actions"];
+const DEFAULT_WEEKLY_SUMMARY_SECTIONS: TelegramWeeklySummarySection[] = [
+  "appointment_summary",
+  "service_summary",
+  "therapist_summary",
+  "payment_summary",
+  "top_services",
+  "busy_hours",
+];
 
 const OWNER_AI_LANGUAGE_OPTIONS: Array<{ value: AiLanguage; label: string }> = [
   { value: "my-MM", label: "Myanmar" },
@@ -58,6 +72,25 @@ const OWNER_AI_FOCUS_OPTIONS: Array<{ value: TelegramOwnerAiFocusArea; label: st
   { value: "risks", label: "Risks" },
   { value: "actions", label: "Actions" },
   { value: "tomorrow", label: "Tomorrow" },
+];
+
+const WEEKLY_SUMMARY_DAY_OPTIONS: Array<{ value: TelegramWeeklySummaryDayOfWeek; label: string }> = [
+  { value: "monday", label: "Monday" },
+  { value: "tuesday", label: "Tuesday" },
+  { value: "wednesday", label: "Wednesday" },
+  { value: "thursday", label: "Thursday" },
+  { value: "friday", label: "Friday" },
+  { value: "saturday", label: "Saturday" },
+  { value: "sunday", label: "Sunday" },
+];
+
+const WEEKLY_SUMMARY_SECTION_OPTIONS: Array<{ value: TelegramWeeklySummarySection; label: string }> = [
+  { value: "appointment_summary", label: "Appointment Summary" },
+  { value: "service_summary", label: "Service Summary" },
+  { value: "therapist_summary", label: "Therapist Summary" },
+  { value: "payment_summary", label: "Payment Summary" },
+  { value: "top_services", label: "Top Services" },
+  { value: "busy_hours", label: "Busy Hours" },
 ];
 
 const COMMON_TIMEZONES = [
@@ -130,7 +163,20 @@ function normalizeOwnerAiFocusAreas(value: TelegramOwnerAiFocusArea[] | undefine
   return value?.length ? value : DEFAULT_OWNER_AI_FOCUS_AREAS;
 }
 
+function normalizeWeeklySummarySections(value: TelegramWeeklySummarySection[] | undefined) {
+  return value?.length ? value : DEFAULT_WEEKLY_SUMMARY_SECTIONS;
+}
+
 function sameFocusAreas(left: TelegramOwnerAiFocusArea[], right: TelegramOwnerAiFocusArea[]) {
+  const leftSorted = [...left].sort();
+  const rightSorted = [...right].sort();
+  return leftSorted.length === rightSorted.length && leftSorted.every((value, index) => value === rightSorted[index]);
+}
+
+function sameWeeklySummarySections(
+  left: TelegramWeeklySummarySection[],
+  right: TelegramWeeklySummarySection[],
+) {
   const leftSorted = [...left].sort();
   const rightSorted = [...right].sort();
   return leftSorted.length === rightSorted.length && leftSorted.every((value, index) => value === rightSorted[index]);
@@ -148,6 +194,10 @@ function buildTargetDraft(target: TelegramTargetStatus): TargetDraft {
     ownerAiTone: target.ownerAiTone,
     ownerAiFocusAreas: normalizeOwnerAiFocusAreas(target.ownerAiFocusAreas),
     ownerAiCustomInstruction: target.ownerAiCustomInstruction ?? "",
+    weeklySummaryEnabled: target.isWeeklySummaryReportEnabled,
+    weeklySummaryTime: target.weeklySummaryReportTime,
+    weeklySummaryDayOfWeek: target.weeklySummaryDayOfWeek,
+    weeklySummarySections: normalizeWeeklySummarySections(target.weeklySummarySections),
     timezone: target.timezone,
   };
 }
@@ -186,6 +236,11 @@ function formatDeliverySummary(entry: TelegramDeliveryLogEntry) {
     return `${entry.appointmentCount ?? 0} appointments · ${entry.paymentCount ?? 0} payment records · ${amount} MMK`;
   }
 
+  if (entry.reportType === "weekly_summary") {
+    const amount = Math.round(entry.totalPaymentAmount ?? 0).toLocaleString("en-US");
+    return `${entry.appointmentCount ?? 0} appointments · ${entry.paymentCount ?? 0} payment records · ${amount} MMK`;
+  }
+
   return `${entry.appointmentCount ?? 0} appointments`;
 }
 
@@ -195,6 +250,8 @@ function formatReportTitle(reportType: TelegramReportType) {
       return "Today Payment Report";
     case "owner_ai":
       return "AI Owner Report";
+    case "weekly_summary":
+      return "Weekly Summary Report";
     default:
       return "Today Appointment Report";
   }
@@ -291,9 +348,11 @@ export function TelegramSettingsPage() {
   const appointmentHistory = getReportHistory(selectedTarget, "appointment");
   const paymentHistory = getReportHistory(selectedTarget, "payment");
   const ownerAiHistory = getReportHistory(selectedTarget, "owner_ai");
+  const weeklySummaryHistory = getReportHistory(selectedTarget, "weekly_summary");
   const latestAppointmentDelivery = appointmentHistory[0] ?? null;
   const latestPaymentDelivery = paymentHistory[0] ?? null;
   const latestOwnerAiDelivery = ownerAiHistory[0] ?? null;
+  const latestWeeklySummaryDelivery = weeklySummaryHistory[0] ?? null;
   const hasChanges = Boolean(
     selectedTarget &&
       selectedDraft &&
@@ -307,6 +366,13 @@ export function TelegramSettingsPage() {
         selectedDraft.ownerAiTone !== selectedTarget.ownerAiTone ||
         !sameFocusAreas(selectedDraft.ownerAiFocusAreas, normalizeOwnerAiFocusAreas(selectedTarget.ownerAiFocusAreas)) ||
         selectedDraft.ownerAiCustomInstruction.trim() !== (selectedTarget.ownerAiCustomInstruction ?? "") ||
+        selectedDraft.weeklySummaryEnabled !== selectedTarget.isWeeklySummaryReportEnabled ||
+        selectedDraft.weeklySummaryTime !== selectedTarget.weeklySummaryReportTime ||
+        selectedDraft.weeklySummaryDayOfWeek !== selectedTarget.weeklySummaryDayOfWeek ||
+        !sameWeeklySummarySections(
+          selectedDraft.weeklySummarySections,
+          normalizeWeeklySummarySections(selectedTarget.weeklySummarySections),
+        ) ||
         selectedDraft.timezone !== selectedTarget.timezone),
   );
   const isLinked = (status?.linkedTargetCount ?? 0) > 0;
@@ -318,6 +384,8 @@ export function TelegramSettingsPage() {
     latestPaymentDelivery?.outcome === "failed" ? "Retry payment send" : "Resend payment report";
   const ownerAiResendLabel =
     latestOwnerAiDelivery?.outcome === "failed" ? "Retry AI Owner send" : "Resend AI Owner Report";
+  const weeklySummaryResendLabel =
+    latestWeeklySummaryDelivery?.outcome === "failed" ? "Retry weekly summary send" : "Resend Weekly Report";
   const botTargetUrl = useMemo(() => {
     if (status?.botDeepLink) {
       return status.botDeepLink;
@@ -439,6 +507,20 @@ export function TelegramSettingsPage() {
     });
   }
 
+  function toggleWeeklySummarySection(section: TelegramWeeklySummarySection, checked: boolean) {
+    if (!selectedDraft) {
+      return;
+    }
+
+    const nextSections = checked
+      ? [...new Set([...selectedDraft.weeklySummarySections, section])]
+      : selectedDraft.weeklySummarySections.filter((item) => item !== section);
+
+    updateSelectedDraft({
+      weeklySummarySections: nextSections.length > 0 ? nextSections : selectedDraft.weeklySummarySections,
+    });
+  }
+
   async function handleGenerateLinkCode() {
     setBusyAction("link");
     setNotice(null);
@@ -484,6 +566,10 @@ export function TelegramSettingsPage() {
         ownerAiTone: selectedDraft.ownerAiTone,
         ownerAiFocusAreas: selectedDraft.ownerAiFocusAreas,
         ownerAiCustomInstruction: selectedDraft.ownerAiCustomInstruction.trim() || null,
+        isWeeklySummaryReportEnabled: selectedDraft.weeklySummaryEnabled,
+        weeklySummaryReportTime: selectedDraft.weeklySummaryTime,
+        weeklySummaryDayOfWeek: selectedDraft.weeklySummaryDayOfWeek,
+        weeklySummarySections: selectedDraft.weeklySummarySections,
         timezone: selectedDraft.timezone,
       });
       setStatus(nextStatus);
@@ -543,11 +629,16 @@ export function TelegramSettingsPage() {
         ownerAiTone: selectedDraft.ownerAiTone,
         ownerAiFocusAreas: selectedDraft.ownerAiFocusAreas,
         ownerAiCustomInstruction: selectedDraft.ownerAiCustomInstruction.trim() || null,
+        weeklySummarySections: selectedDraft.weeklySummarySections,
       });
 
       if (reportType === "owner_ai") {
         setNotice(
           `AI Owner test sent to ${selectedTarget.targetLabel} (${result.ownerAiOverallStatus ?? "sent"}, ${result.appointmentCount ?? 0} appointments, ${result.paymentCount ?? 0} payment records).`,
+        );
+      } else if (reportType === "weekly_summary") {
+        setNotice(
+          `Weekly Summary test sent to ${selectedTarget.targetLabel} (${result.appointmentCount ?? 0} appointments, ${result.paymentCount ?? 0} payment records, ${Math.round(result.totalPaymentAmount ?? 0).toLocaleString("en-US")} MMK).`,
         );
       } else if (reportType === "payment") {
         setNotice(
@@ -585,11 +676,16 @@ export function TelegramSettingsPage() {
         ownerAiTone: selectedDraft.ownerAiTone,
         ownerAiFocusAreas: selectedDraft.ownerAiFocusAreas,
         ownerAiCustomInstruction: selectedDraft.ownerAiCustomInstruction.trim() || null,
+        weeklySummarySections: selectedDraft.weeklySummarySections,
       });
 
       if (reportType === "owner_ai") {
         setNotice(
           `AI Owner Report resent to ${selectedTarget.targetLabel} (${result.ownerAiOverallStatus ?? "sent"}, ${result.appointmentCount ?? 0} appointments, ${result.paymentCount ?? 0} payment records).`,
+        );
+      } else if (reportType === "weekly_summary") {
+        setNotice(
+          `Weekly Summary Report resent to ${selectedTarget.targetLabel} (${result.appointmentCount ?? 0} appointments, ${result.paymentCount ?? 0} payment records, ${Math.round(result.totalPaymentAmount ?? 0).toLocaleString("en-US")} MMK).`,
         );
       } else if (reportType === "payment") {
         setNotice(
@@ -787,7 +883,8 @@ export function TelegramSettingsPage() {
                 <strong>
                   {selectedDraft?.appointmentEnabled ? "Appointment on" : "Appointment off"} ·{" "}
                   {selectedDraft?.paymentEnabled ? "Payment on" : "Payment off"} ·{" "}
-                  {selectedDraft?.ownerAiEnabled ? "AI Owner on" : "AI Owner off"}
+                  {selectedDraft?.ownerAiEnabled ? "AI Owner on" : "AI Owner off"} ·{" "}
+                  {selectedDraft?.weeklySummaryEnabled ? "Weekly on" : "Weekly off"}
                 </strong>
                 <small>Each linked target can receive its own report mix and send time.</small>
               </article>
@@ -1024,6 +1121,157 @@ export function TelegramSettingsPage() {
           <p className="telegram-settings__hint">
             Each linked Telegram target has its own report toggles, times, and timezone, so one clinic can send owners and management groups different schedules without reconnecting.
           </p>
+        </Panel>
+
+        <Panel
+          className="telegram-settings__card telegram-settings__card--wide"
+          title="Weekly Summary Report"
+          subtitle={
+            selectedTarget
+              ? `Weekly operational summary for ${selectedTarget.targetLabel}.`
+              : "Link a Telegram target first, then configure its Weekly Summary Report."
+          }
+        >
+          <label className={`telegram-settings__toggle ${!selectedTarget ? "telegram-settings__toggle--disabled" : ""}`}>
+            <input
+              type="checkbox"
+              checked={selectedDraft?.weeklySummaryEnabled ?? false}
+              onChange={(event) => updateSelectedDraft({ weeklySummaryEnabled: event.target.checked })}
+              disabled={!selectedTarget}
+            />
+            <span className={`telegram-settings__switch ${selectedDraft?.weeklySummaryEnabled ? "telegram-settings__switch--on" : ""}`} aria-hidden="true">
+              <span className="telegram-settings__switch-handle" />
+            </span>
+            <div className="telegram-settings__toggle-copy">
+              <strong>Enable Weekly Summary Report</strong>
+              <span>
+                {selectedTarget
+                  ? "This target will receive the selected weekly summary sections on the chosen day and time."
+                  : "Link Telegram first to enable scheduled weekly delivery."}
+              </span>
+            </div>
+          </label>
+
+          <div className="telegram-settings__two-up">
+            <label className="field">
+              <span>Weekly send day</span>
+              <select
+                value={selectedDraft?.weeklySummaryDayOfWeek ?? "monday"}
+                onChange={(event) =>
+                  updateSelectedDraft({
+                    weeklySummaryDayOfWeek: event.target.value as TelegramWeeklySummaryDayOfWeek,
+                  })
+                }
+                disabled={!selectedTarget}
+              >
+                {WEEKLY_SUMMARY_DAY_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>Weekly send time</span>
+              <input
+                type="time"
+                value={selectedDraft?.weeklySummaryTime ?? envDefaultTime()}
+                onChange={(event) => updateSelectedDraft({ weeklySummaryTime: event.target.value })}
+                disabled={!selectedTarget}
+              />
+            </label>
+          </div>
+
+          <div className="telegram-settings__two-up">
+            <label className="field">
+              <span>Timezone</span>
+              <select
+                value={selectedDraft?.timezone ?? timezoneOptions[0]}
+                onChange={(event) => updateSelectedDraft({ timezone: event.target.value })}
+                disabled={!selectedTarget}
+              >
+                {timezoneOptions.map((timezone) => (
+                  <option key={timezone} value={timezone}>
+                    {timezone}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <article className="telegram-settings__meta-card telegram-settings__meta-card--inline">
+              <span>Selected target</span>
+              <strong>{selectedTarget?.targetLabel ?? "No target selected"}</strong>
+              <small>Weekly delivery uses the target timezone and selected weekday.</small>
+            </article>
+          </div>
+
+          <div className="field">
+            <span>Report sections</span>
+            <div className="telegram-settings__checkbox-grid">
+              {WEEKLY_SUMMARY_SECTION_OPTIONS.map((option) => (
+                <label key={option.value} className="telegram-settings__checkbox">
+                  <input
+                    type="checkbox"
+                    checked={selectedDraft?.weeklySummarySections.includes(option.value) ?? false}
+                    onChange={(event) => toggleWeeklySummarySection(option.value, event.target.checked)}
+                    disabled={!selectedTarget}
+                  />
+                  <span>{option.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="telegram-settings__meta-grid">
+            <article className="telegram-settings__meta-card">
+              <span>Last Weekly test</span>
+              <strong>{formatTimestamp(selectedTarget?.lastWeeklySummaryTestSentAt)}</strong>
+              <small>Manual tests use the current selected weekly sections.</small>
+            </article>
+
+            <article className="telegram-settings__meta-card">
+              <span>Last Weekly scheduled send</span>
+              <strong>{formatTimestamp(selectedTarget?.lastWeeklySummaryScheduledSentAt)}</strong>
+              <small>
+                {selectedTarget?.lastWeeklySummaryScheduledDateKey
+                  ? `Last scheduled Weekly Summary report date: ${selectedTarget.lastWeeklySummaryScheduledDateKey}`
+                  : "No scheduled Weekly Summary send recorded yet."}
+              </small>
+            </article>
+          </div>
+
+          {selectedTarget?.lastWeeklySummaryFailureReason ? (
+            <div className="telegram-settings__failure-note">
+              <strong>Last Weekly Summary delivery issue</strong>
+              <span>{selectedTarget.lastWeeklySummaryFailureReason}</span>
+              <small>Recorded {formatTimestamp(selectedTarget.lastWeeklySummaryFailureAt)}</small>
+            </div>
+          ) : null}
+
+          <div className="telegram-settings__button-row">
+            <button
+              className="button telegram-settings__button telegram-settings__button--primary"
+              onClick={() => void handleSaveSettings()}
+              disabled={busyAction !== null || !hasChanges || !selectedTarget}
+            >
+              {busyAction === "save" ? "Saving..." : "Save Weekly Schedule"}
+            </button>
+            <button
+              className="button telegram-settings__button telegram-settings__button--secondary"
+              onClick={() => void handleSendTest("weekly_summary")}
+              disabled={!selectedTarget || busyAction !== null}
+            >
+              {busyAction === "test" ? "Sending..." : "Send Weekly Test"}
+            </button>
+            <button
+              className="button telegram-settings__button telegram-settings__button--secondary"
+              onClick={() => void handleResend("weekly_summary")}
+              disabled={!selectedTarget || busyAction !== null || weeklySummaryHistory.length === 0}
+            >
+              {busyAction === "resend" ? "Resending..." : weeklySummaryResendLabel}
+            </button>
+          </div>
         </Panel>
 
         <Panel

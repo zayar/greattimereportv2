@@ -5,6 +5,8 @@ import type {
   TelegramOwnerAiFocusArea,
   TelegramOwnerAiTone,
   TelegramReportType,
+  TelegramWeeklySummaryDayOfWeek,
+  TelegramWeeklySummarySection,
 } from "../types/domain";
 
 type ApiEnvelope<T> = {
@@ -43,6 +45,10 @@ export async function saveTelegramSettings(payload: ClinicScopedInput & {
   ownerAiTone?: TelegramOwnerAiTone;
   ownerAiFocusAreas?: TelegramOwnerAiFocusArea[];
   ownerAiCustomInstruction?: string | null;
+  isWeeklySummaryReportEnabled?: boolean;
+  weeklySummaryReportTime?: string;
+  weeklySummaryDayOfWeek?: TelegramWeeklySummaryDayOfWeek;
+  weeklySummarySections?: TelegramWeeklySummarySection[];
   timezone: string;
 }) {
   const response = await apiClient.post<ApiEnvelope<TelegramIntegrationStatus>>("/integrations/telegram/settings", payload);
@@ -63,6 +69,7 @@ export async function sendTelegramTestReport(
     ownerAiTone?: TelegramOwnerAiTone;
     ownerAiFocusAreas?: TelegramOwnerAiFocusArea[];
     ownerAiCustomInstruction?: string | null;
+    weeklySummarySections?: TelegramWeeklySummarySection[];
   },
 ) {
   const response = await apiClient.post<
@@ -90,6 +97,7 @@ export async function resendTelegramReport(
     ownerAiTone?: TelegramOwnerAiTone;
     ownerAiFocusAreas?: TelegramOwnerAiFocusArea[];
     ownerAiCustomInstruction?: string | null;
+    weeklySummarySections?: TelegramWeeklySummarySection[];
   },
 ) {
   const response = await apiClient.post<

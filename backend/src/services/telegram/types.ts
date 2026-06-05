@@ -3,7 +3,7 @@ import type { AiLanguage } from "../ai/language.js";
 export type TelegramChatType = "private" | "group" | "supergroup" | "channel";
 
 export type TelegramConnectionStatus = "not_linked" | "pending" | "linked";
-export type TelegramReportType = "appointment" | "payment" | "owner_ai";
+export type TelegramReportType = "appointment" | "payment" | "owner_ai" | "weekly_summary";
 export type TelegramDeliveryTrigger = "manual_test" | "scheduled" | "resend";
 export type TelegramDeliveryOutcome = "sent" | "failed";
 export const ownerAiReportTones = ["simple", "professional", "friendly"] as const;
@@ -18,6 +18,27 @@ export const DEFAULT_OWNER_AI_FOCUS_AREAS: OwnerAiReportFocusArea[] = [
   "risks",
   "actions",
 ];
+export const weeklySummaryDaysOfWeek = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+] as const;
+export type WeeklySummaryDayOfWeek = (typeof weeklySummaryDaysOfWeek)[number];
+export const weeklySummarySections = [
+  "appointment_summary",
+  "service_summary",
+  "therapist_summary",
+  "payment_summary",
+  "top_services",
+  "busy_hours",
+] as const;
+export type WeeklySummarySection = (typeof weeklySummarySections)[number];
+export const DEFAULT_WEEKLY_SUMMARY_DAY_OF_WEEK = "monday" satisfies WeeklySummaryDayOfWeek;
+export const DEFAULT_WEEKLY_SUMMARY_SECTIONS: WeeklySummarySection[] = [...weeklySummarySections];
 
 export interface TelegramReportSettingsRecord {
   telegramChatId: string | null;
@@ -34,6 +55,10 @@ export interface TelegramReportSettingsRecord {
   ownerAiTone: OwnerAiReportTone;
   ownerAiFocusAreas: OwnerAiReportFocusArea[];
   ownerAiCustomInstruction: string | null;
+  isWeeklySummaryReportEnabled: boolean;
+  weeklySummaryReportTime: string;
+  weeklySummaryDayOfWeek: WeeklySummaryDayOfWeek;
+  weeklySummarySections: WeeklySummarySection[];
   timezone: string;
   lastTestSentAt: string | null;
   lastScheduledSentAt: string | null;
@@ -44,12 +69,17 @@ export interface TelegramReportSettingsRecord {
   lastOwnerAiTestSentAt: string | null;
   lastOwnerAiScheduledSentAt: string | null;
   lastOwnerAiScheduledDateKey: string | null;
+  lastWeeklySummaryTestSentAt: string | null;
+  lastWeeklySummaryScheduledSentAt: string | null;
+  lastWeeklySummaryScheduledDateKey: string | null;
   lastAppointmentFailureAt: string | null;
   lastAppointmentFailureReason: string | null;
   lastPaymentFailureAt: string | null;
   lastPaymentFailureReason: string | null;
   lastOwnerAiFailureAt: string | null;
   lastOwnerAiFailureReason: string | null;
+  lastWeeklySummaryFailureAt: string | null;
+  lastWeeklySummaryFailureReason: string | null;
 }
 
 export interface TelegramTargetRecord extends TelegramReportSettingsRecord {
@@ -187,4 +217,51 @@ export interface TodayOwnerAiReportSummary {
     tomorrowFocus: string | null;
     dataQualityNote: string | null;
   };
+}
+
+export interface WeeklySummaryAppointmentSummary {
+  totalAppointments: number;
+  completedAppointments: number;
+  cancelledAppointments: number;
+  noShowAppointments: number;
+  completionRatePercent: number | null;
+}
+
+export interface WeeklySummaryCountItem {
+  name: string;
+  count: number;
+}
+
+export interface WeeklySummaryTopServiceItem extends WeeklySummaryCountItem {
+  percentage: number | null;
+}
+
+export interface WeeklySummaryPaymentMethodItem {
+  paymentMethod: string;
+  count: number;
+  amount: number;
+}
+
+export interface WeeklySummaryBusyHourItem {
+  label: string;
+  count: number;
+}
+
+export interface WeeklySummaryReportSummary {
+  clinicName: string;
+  dateKey: string;
+  weekStartDateKey: string;
+  weekEndDateKey: string;
+  timezone: string;
+  selectedSections: WeeklySummarySection[];
+  appointmentSummary: WeeklySummaryAppointmentSummary;
+  serviceSummary: WeeklySummaryCountItem[];
+  therapistSummary: WeeklySummaryCountItem[];
+  paymentSummary: {
+    totalPaymentAmount: number;
+    paymentCount: number;
+    paymentMethods: WeeklySummaryPaymentMethodItem[];
+  };
+  topServices: WeeklySummaryTopServiceItem[];
+  busyHours: WeeklySummaryBusyHourItem[];
 }

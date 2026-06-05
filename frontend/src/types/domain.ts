@@ -38,11 +38,26 @@ export interface Business {
 export type AiLanguage = "my-MM" | "en-US";
 
 export type TelegramConnectionStatus = "not_linked" | "pending" | "linked";
-export type TelegramReportType = "appointment" | "payment" | "owner_ai";
+export type TelegramReportType = "appointment" | "payment" | "owner_ai" | "weekly_summary";
 export type TelegramDeliveryTrigger = "manual_test" | "scheduled" | "resend";
 export type TelegramDeliveryOutcome = "sent" | "failed";
 export type TelegramOwnerAiTone = "simple" | "professional" | "friendly";
 export type TelegramOwnerAiFocusArea = "appointments" | "payments" | "risks" | "actions" | "tomorrow";
+export type TelegramWeeklySummaryDayOfWeek =
+  | "monday"
+  | "tuesday"
+  | "wednesday"
+  | "thursday"
+  | "friday"
+  | "saturday"
+  | "sunday";
+export type TelegramWeeklySummarySection =
+  | "appointment_summary"
+  | "service_summary"
+  | "therapist_summary"
+  | "payment_summary"
+  | "top_services"
+  | "busy_hours";
 
 export interface TelegramDeliveryLogEntry {
   id: string;
@@ -80,6 +95,10 @@ export interface TelegramTargetStatus {
   ownerAiTone: TelegramOwnerAiTone;
   ownerAiFocusAreas: TelegramOwnerAiFocusArea[];
   ownerAiCustomInstruction: string | null;
+  isWeeklySummaryReportEnabled: boolean;
+  weeklySummaryReportTime: string;
+  weeklySummaryDayOfWeek: TelegramWeeklySummaryDayOfWeek;
+  weeklySummarySections: TelegramWeeklySummarySection[];
   timezone: string;
   lastTestSentAt: string | null;
   lastScheduledSentAt: string | null;
@@ -90,12 +109,17 @@ export interface TelegramTargetStatus {
   lastOwnerAiTestSentAt: string | null;
   lastOwnerAiScheduledSentAt: string | null;
   lastOwnerAiScheduledDateKey: string | null;
+  lastWeeklySummaryTestSentAt: string | null;
+  lastWeeklySummaryScheduledSentAt: string | null;
+  lastWeeklySummaryScheduledDateKey: string | null;
   lastAppointmentFailureAt: string | null;
   lastAppointmentFailureReason: string | null;
   lastPaymentFailureAt: string | null;
   lastPaymentFailureReason: string | null;
   lastOwnerAiFailureAt: string | null;
   lastOwnerAiFailureReason: string | null;
+  lastWeeklySummaryFailureAt: string | null;
+  lastWeeklySummaryFailureReason: string | null;
   targetLabel: string;
   deliveryHistory: TelegramDeliveryLogEntry[];
 }

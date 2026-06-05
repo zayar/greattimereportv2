@@ -15,7 +15,7 @@ import {
   tryAcquireTelegramScheduleLock,
 } from "./storage.service.js";
 import { formatDateKeyInTimeZone, formatTimeKeyInTimeZone } from "./time.js";
-import type { TelegramReportType, TelegramTargetRecord } from "./types.js";
+import type { TelegramReportType, TelegramTargetRecord, WeeklySummaryDayOfWeek } from "./types.js";
 
 let schedulerStarted = false;
 let schedulerBusy = false;
@@ -43,6 +43,38 @@ function isDueNow(reportTime: string, timezone: string, lastScheduledDateKey: st
 
   // Allow same-day catch-up if the runtime starts after the configured minute.
   if (currentTimeKey < reportTime) {
+    return null;
+  }
+
+  return currentDateKey;
+}
+
+function formatWeekdayInTimeZone(date: Date, timezone: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    weekday: "long",
+  }).format(date).toLowerCase() as WeeklySummaryDayOfWeek;
+}
+
+function isWeeklyDueNow(input: {
+  reportTime: string;
+  timezone: string;
+  dayOfWeek: WeeklySummaryDayOfWeek;
+  lastScheduledDateKey: string | null;
+  now: Date;
+}) {
+  const currentDateKey = formatDateKeyInTimeZone(input.now, input.timezone);
+  const currentTimeKey = formatTimeKeyInTimeZone(input.now, input.timezone);
+
+  if (input.lastScheduledDateKey === currentDateKey) {
+    return null;
+  }
+
+  if (formatWeekdayInTimeZone(input.now, input.timezone) !== input.dayOfWeek) {
+    return null;
+  }
+
+  if (currentTimeKey < input.reportTime) {
     return null;
   }
 
@@ -94,24 +126,37 @@ async function runSchedulerTick() {
         enabled: boolean;
         reportTime: string;
         lastScheduledDateKey: string | null;
+        frequency: "daily" | "weekly";
+        dayOfWeek?: WeeklySummaryDayOfWeek;
       }> = [
         {
           type: "appointment",
           enabled: record.isTodayAppointmentReportEnabled,
           reportTime: record.reportTime,
           lastScheduledDateKey: record.lastScheduledDateKey,
+          frequency: "daily",
         },
         {
           type: "payment",
           enabled: record.isTodayPaymentReportEnabled,
           reportTime: record.paymentReportTime,
           lastScheduledDateKey: record.lastPaymentScheduledDateKey,
+          frequency: "daily",
         },
         {
           type: "owner_ai",
           enabled: record.isOwnerAiReportEnabled,
           reportTime: record.ownerAiReportTime,
           lastScheduledDateKey: record.lastOwnerAiScheduledDateKey,
+          frequency: "daily",
+        },
+        {
+          type: "weekly_summary",
+          enabled: record.isWeeklySummaryReportEnabled,
+          reportTime: record.weeklySummaryReportTime,
+          lastScheduledDateKey: record.lastWeeklySummaryScheduledDateKey,
+          frequency: "weekly",
+          dayOfWeek: record.weeklySummaryDayOfWeek,
         },
       ];
 
@@ -120,12 +165,21 @@ async function runSchedulerTick() {
           continue;
         }
 
-        const dateKey = isDueNow(
-          scheduledReport.reportTime,
-          record.timezone,
-          scheduledReport.lastScheduledDateKey,
-          now,
-        );
+        const dateKey =
+          scheduledReport.frequency === "weekly"
+            ? isWeeklyDueNow({
+                reportTime: scheduledReport.reportTime,
+                timezone: record.timezone,
+                dayOfWeek: scheduledReport.dayOfWeek ?? "monday",
+                lastScheduledDateKey: scheduledReport.lastScheduledDateKey,
+                now,
+              })
+            : isDueNow(
+                scheduledReport.reportTime,
+                record.timezone,
+                scheduledReport.lastScheduledDateKey,
+                now,
+              );
         if (!dateKey) {
           summary.skippedReports += 1;
           continue;
@@ -194,6 +248,7 @@ async function sendScheduledReport(record: TelegramTargetRecord, reportType: Tel
     ownerAiTone: record.ownerAiTone,
     ownerAiFocusAreas: record.ownerAiFocusAreas,
     ownerAiCustomInstruction: record.ownerAiCustomInstruction,
+    weeklySummarySections: record.weeklySummarySections,
     referenceDate,
   });
 }

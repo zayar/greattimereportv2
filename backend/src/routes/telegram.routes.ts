@@ -16,7 +16,12 @@ import {
   updateTelegramReportSettings,
 } from "../services/telegram/storage.service.js";
 import { normalizeReportTime, normalizeTimeZone } from "../services/telegram/time.js";
-import { ownerAiReportFocusAreas, ownerAiReportTones } from "../services/telegram/types.js";
+import {
+  ownerAiReportFocusAreas,
+  ownerAiReportTones,
+  weeklySummaryDaysOfWeek,
+  weeklySummarySections,
+} from "../services/telegram/types.js";
 import type { TelegramReportType } from "../services/telegram/types.js";
 
 const router = Router();
@@ -42,7 +47,7 @@ const clinicTargetSchema = clinicScopedBaseSchema.extend({
   chatId: z.string().min(1),
 });
 
-const telegramReportTypeSchema = z.enum(["appointment", "payment", "owner_ai"]);
+const telegramReportTypeSchema = z.enum(["appointment", "payment", "owner_ai", "weekly_summary"]);
 
 const ownerAiSettingsSchema = z.object({
   isOwnerAiReportEnabled: z.boolean().optional(),
@@ -53,13 +58,20 @@ const ownerAiSettingsSchema = z.object({
   ownerAiCustomInstruction: z.string().max(240).nullable().optional(),
 });
 
+const weeklySummarySettingsSchema = z.object({
+  isWeeklySummaryReportEnabled: z.boolean().optional(),
+  weeklySummaryReportTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  weeklySummaryDayOfWeek: z.enum(weeklySummaryDaysOfWeek).optional(),
+  weeklySummarySections: z.array(z.enum(weeklySummarySections)).min(1).max(weeklySummarySections.length).optional(),
+});
+
 const settingsSchema = clinicTargetSchema.extend({
   isTodayAppointmentReportEnabled: z.boolean(),
   reportTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   isTodayPaymentReportEnabled: z.boolean(),
   paymentReportTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   timezone: z.string().min(1),
-}).merge(ownerAiSettingsSchema);
+}).merge(ownerAiSettingsSchema).merge(weeklySummarySettingsSchema);
 
 const sendTestSchema = clinicTargetSchema.extend({
   reportType: telegramReportTypeSchema.default("appointment"),
@@ -69,6 +81,8 @@ const sendTestSchema = clinicTargetSchema.extend({
   ownerAiTone: true,
   ownerAiFocusAreas: true,
   ownerAiCustomInstruction: true,
+})).merge(weeklySummarySettingsSchema.pick({
+  weeklySummarySections: true,
 }));
 
 const resendSchema = sendTestSchema;
@@ -88,15 +102,24 @@ function buildSendResponse(input: {
 }) {
   const report = isRecord(input.report) ? input.report : {};
   const appointmentReport = isRecord(report.appointmentReport) ? report.appointmentReport : {};
+  const appointmentSummary = isRecord(report.appointmentSummary) ? report.appointmentSummary : {};
   const paymentReport = isRecord(report.paymentReport) ? report.paymentReport : {};
+  const paymentSummary = isRecord(report.paymentSummary) ? report.paymentSummary : {};
   const aiReport = isRecord(report.aiReport) ? report.aiReport : {};
 
   return {
     sentAt: input.sentAt,
     reportType: input.reportType,
-    appointmentCount: readNumber(report.totalAppointments) ?? readNumber(appointmentReport.totalAppointments),
-    paymentCount: readNumber(report.paymentCount) ?? readNumber(paymentReport.paymentCount),
-    totalPaymentAmount: readNumber(report.totalPaymentAmount) ?? readNumber(paymentReport.totalPaymentAmount),
+    appointmentCount:
+      readNumber(report.totalAppointments) ??
+      readNumber(appointmentReport.totalAppointments) ??
+      readNumber(appointmentSummary.totalAppointments),
+    paymentCount:
+      readNumber(report.paymentCount) ?? readNumber(paymentReport.paymentCount) ?? readNumber(paymentSummary.paymentCount),
+    totalPaymentAmount:
+      readNumber(report.totalPaymentAmount) ??
+      readNumber(paymentReport.totalPaymentAmount) ??
+      readNumber(paymentSummary.totalPaymentAmount),
     ownerAiOverallStatus:
       typeof aiReport.overallStatus === "string" ? aiReport.overallStatus : undefined,
   };
@@ -178,6 +201,9 @@ router.post(
       reportTime: normalizeReportTime(params.reportTime),
       paymentReportTime: normalizeReportTime(params.paymentReportTime),
       ownerAiReportTime: params.ownerAiReportTime ? normalizeReportTime(params.ownerAiReportTime) : undefined,
+      weeklySummaryReportTime: params.weeklySummaryReportTime
+        ? normalizeReportTime(params.weeklySummaryReportTime)
+        : undefined,
       timezone: normalizeTimeZone(params.timezone),
     });
     const botMetadata = await getTelegramBotLinkMetadata(status.pendingLinkCode);
@@ -239,6 +265,7 @@ router.post(
         params.ownerAiCustomInstruction === undefined
           ? target.ownerAiCustomInstruction
           : params.ownerAiCustomInstruction,
+      weeklySummarySections: params.weeklySummarySections ?? target.weeklySummarySections,
       authorizationHeader: req.headers.authorization,
     });
 
@@ -282,6 +309,7 @@ router.post(
         params.ownerAiCustomInstruction === undefined
           ? target.ownerAiCustomInstruction
           : params.ownerAiCustomInstruction,
+      weeklySummarySections: params.weeklySummarySections ?? target.weeklySummarySections,
       authorizationHeader: req.headers.authorization,
     });
 

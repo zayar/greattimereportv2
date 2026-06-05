@@ -3,11 +3,13 @@ import { sendTodayPaymentReport } from "./payment-report.service.js";
 import { sendTodayAppointmentReport } from "./report.service.js";
 import { markTelegramDeliveryFailed, markTelegramDeliverySent } from "./storage.service.js";
 import { formatDateKeyInTimeZone, normalizeTimeZone } from "./time.js";
+import { sendWeeklySummaryReport } from "./weekly-summary-report.service.js";
 import type {
   OwnerAiReportFocusArea,
   OwnerAiReportTone,
   TelegramDeliveryTrigger,
   TelegramReportType,
+  WeeklySummarySection,
 } from "./types.js";
 import type { AiLanguage } from "../ai/language.js";
 
@@ -31,6 +33,7 @@ export async function sendTrackedTelegramReport(input: {
   ownerAiTone?: OwnerAiReportTone;
   ownerAiFocusAreas?: OwnerAiReportFocusArea[];
   ownerAiCustomInstruction?: string | null;
+  weeklySummarySections?: WeeklySummarySection[];
   authorizationHeader?: string;
   referenceDate?: Date;
 }) {
@@ -98,6 +101,36 @@ export async function sendTrackedTelegramReport(input: {
         appointmentCount: sent.report.appointmentReport.totalAppointments,
         paymentCount: sent.report.paymentReport.paymentCount,
         totalPaymentAmount: sent.report.paymentReport.totalPaymentAmount,
+      });
+
+      return sent;
+    }
+
+    if (input.reportType === "weekly_summary") {
+      const sent = await sendWeeklySummaryReport({
+        chatId: input.chatId,
+        clinicId: input.clinicId,
+        clinicCode: input.clinicCode,
+        clinicName: input.clinicName,
+        timezone,
+        sections: input.weeklySummarySections,
+        authorizationHeader: input.authorizationHeader,
+        referenceDate: input.referenceDate,
+      });
+
+      await markTelegramDeliverySent({
+        clinicId: input.clinicId,
+        clinicCode: input.clinicCode,
+        clinicName: input.clinicName,
+        chatId: input.chatId,
+        reportType: input.reportType,
+        trigger: input.trigger,
+        sentAt: sent.sentAt,
+        dateKey: sent.report.dateKey,
+        timezone,
+        appointmentCount: sent.report.appointmentSummary.totalAppointments,
+        paymentCount: sent.report.paymentSummary.paymentCount,
+        totalPaymentAmount: sent.report.paymentSummary.totalPaymentAmount,
       });
 
       return sent;
