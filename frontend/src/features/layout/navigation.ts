@@ -81,6 +81,12 @@ export const navigationSections: NavigationSection[] = [
     ],
   },
   {
+    title: "AI",
+    items: [
+      { to: "/ai/customer-relationship-agent", label: "Customer Relationship Agent" },
+    ],
+  },
+  {
     title: "Behavior",
     items: [
       { to: "/analytics/customers", label: "Customer portal" },

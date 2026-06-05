@@ -22,6 +22,18 @@ const IconCP = () => (
   </svg>
 );
 
+const IconAgent = () => (
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 3v3"></path>
+    <rect x="5" y="6" width="14" height="11" rx="4"></rect>
+    <path d="M8 17v2"></path>
+    <path d="M16 17v2"></path>
+    <path d="M9 11h.01"></path>
+    <path d="M15 11h.01"></path>
+    <path d="M9 14h6"></path>
+  </svg>
+);
+
 const IconFinance = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <rect x="2" y="4" width="20" height="16" rx="2"></rect>
@@ -100,6 +112,15 @@ const quickAccessConfig: HomeCardConfig[] = [
     iconNode: <IconCP />,
     tone: "secondary",
     cta: "View Directory →",
+  },
+  {
+    id: "customer-relationship-agent",
+    title: "Customer Relationship Agent",
+    description: "Learn customer behavior, find priority follow-ups, and generate owner-safe messages.",
+    eyebrow: "AI Agent",
+    iconNode: <IconAgent />,
+    tone: "tertiary",
+    cta: "Open Agent →",
   },
 ];
 
