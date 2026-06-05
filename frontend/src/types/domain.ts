@@ -171,6 +171,148 @@ export interface AiServiceInsightResponse {
   generatedAt: string;
 }
 
+export type CustomerRelationshipSegment =
+  | "package_bought_never_came"
+  | "package_bought_not_used"
+  | "unused_package_balance"
+  | "inactive_vip"
+  | "treatment_due"
+  | "overdue_customer"
+  | "high_value_no_recent_visit"
+  | "new_customer_no_second_visit"
+  | "declining_frequency"
+  | "loyal_vip"
+  | "healthy_active_customer";
+
+export type CustomerRelationshipRiskLevel = "low" | "medium" | "high";
+export type CustomerRelationshipRebookingStatus = "onTrack" | "dueSoon" | "overdue" | "unknown";
+export type CustomerRelationshipFeedbackOutcome =
+  | "called"
+  | "messaged"
+  | "booked"
+  | "replied"
+  | "no_reply"
+  | "not_interested"
+  | "wrong_number"
+  | "other";
+export type CustomerRelationshipFollowUpTone = "friendly" | "professional" | "soft" | "promotion";
+export type CustomerRelationshipIntent =
+  | "package_bought_never_came"
+  | "package_bought_not_used"
+  | "unused_package_balance"
+  | "follow_up_today"
+  | "inactive_vip"
+  | "churn_risk"
+  | "treatment_due"
+  | "high_value_no_recent_visit"
+  | "customer_search"
+  | "general_summary"
+  | "unsupported";
+
+export interface CustomerRelationshipProfile {
+  clinicId: string;
+  clinicCode: string;
+  customerKey: string;
+  customerName: string;
+  customerPhoneMasked: string;
+  customerPhoneDigitsHash?: string;
+  memberId?: string | null;
+  firstSeenDate: string | null;
+  lastVisitDate: string | null;
+  daysSinceLastVisit: number | null;
+  lastPaymentDate: string | null;
+  lastPackagePurchaseDate: string | null;
+  totalVisits: number;
+  lifetimeSpend: number;
+  averageSpend: number;
+  recent90DayVisits: number;
+  previous90DayVisits: number;
+  preferredService: string | null;
+  preferredServiceCategory: string | null;
+  preferredTherapist: string | null;
+  preferredDayOfWeek: string | null;
+  preferredHour: number | null;
+  lastService: string | null;
+  lastPaymentMethod: string | null;
+  packagePurchaseCount: number;
+  activePackageCount: number;
+  totalPackageSessions: number;
+  usedPackageSessions: number;
+  remainingPackageSessions: number;
+  packageBoughtNeverCame: boolean;
+  packageBoughtButNoUsage: boolean;
+  hasUnusedPackageBalance: boolean;
+  relationshipHealthScore: number;
+  riskLevel: CustomerRelationshipRiskLevel;
+  rebookingStatus: CustomerRelationshipRebookingStatus;
+  segments: CustomerRelationshipSegment[];
+  reasons: string[];
+  nextBestAction: string;
+  priorityScore: number;
+  lastFollowUpAt: string | null;
+  lastFollowUpOutcome: string | null;
+  followUpCount: number;
+  learnedAt: string;
+  sourceLookbackDays: number;
+}
+
+export interface CustomerRelationshipLearningSummary {
+  learnedAt: string;
+  totalCustomersAnalyzed: number;
+  profilesSaved: number;
+  highRiskCount: number;
+  mediumRiskCount: number;
+  lowRiskCount: number;
+  segmentCounts: Record<string, number>;
+}
+
+export interface CustomerRelationshipProfilesResponse {
+  rows: CustomerRelationshipProfile[];
+  totalCount: number;
+  lastLearnedAt: string | null;
+  sourceLookbackDays: number | null;
+}
+
+export interface CustomerRelationshipAgentRow {
+  customerKey: string;
+  customerName: string;
+  customerPhoneMasked: string;
+  lastVisitDate: string | null;
+  daysSinceLastVisit: number | null;
+  remainingPackageSessions: number;
+  lifetimeSpend: number;
+  riskLevel: CustomerRelationshipRiskLevel;
+  segments: CustomerRelationshipSegment[];
+  reasons: string[];
+  nextBestAction: string;
+  priorityScore: number;
+  lastFollowUpAt: string | null;
+  lastFollowUpOutcome: string | null;
+  followUpCount: number;
+}
+
+export interface CustomerRelationshipAgentResponse {
+  detectedIntent: CustomerRelationshipIntent;
+  answerSummary: string;
+  matchedCount: number;
+  recommendedActions: string[];
+  rows: CustomerRelationshipAgentRow[];
+  dataFreshnessNote: string;
+  learnedAt: string | null;
+  sourceLookbackDays: number | null;
+  suggestions?: string[];
+  usedFallback: boolean;
+}
+
+export interface CustomerRelationshipFollowUpMessage {
+  message: string;
+  reason: string;
+  customerName: string;
+  segments: CustomerRelationshipSegment[];
+  languageUsed: AiLanguage;
+  usedFallback: boolean;
+}
+
 export interface AppointmentRow {
   bookingid: string;
   FromTime: string;

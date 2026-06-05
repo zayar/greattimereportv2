@@ -38,6 +38,16 @@ export const directoryItems: DirectoryItem[] = [
     featured: true,
   },
   {
+    id: "customer-relationship-agent",
+    title: "Customer Relationship Agent",
+    description: "Learn customer behavior, find priority follow-ups, and generate owner-safe messages.",
+    route: "/ai/customer-relationship-agent",
+    group: "Featured",
+    eyebrow: "AI Agent",
+    window: "year",
+    featured: true,
+  },
+  {
     id: "service-portal",
     title: "Service portal",
     description: "Service intelligence for revenue, bookings, repeat depth, and therapist dependence.",

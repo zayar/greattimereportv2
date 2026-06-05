@@ -10,6 +10,22 @@ import {
   generateExecutiveSummary,
   generateServiceInsight,
 } from "../services/ai/insights.service.js";
+import {
+  askCustomerRelationshipAgent,
+  generateCustomerRelationshipFollowUpMessage,
+  recordCustomerRelationshipFeedback,
+} from "../services/ai/customer-relationship-agent.service.js";
+import {
+  customerRelationshipFeedbackOutcomes,
+  customerRelationshipFollowUpTones,
+  customerRelationshipSegments,
+  customerRelationshipRiskLevels,
+} from "../services/ai/customer-relationship-schemas.js";
+import { runCustomerRelationshipLearning } from "../services/reports/customer-relationship-learning.service.js";
+import {
+  getLatestCustomerRelationshipLearningRun,
+  searchCustomerRelationshipProfiles,
+} from "../services/reports/customer-relationship-profile.repository.js";
 
 const router = Router();
 
@@ -53,6 +69,61 @@ const serviceInsightSchema = dateScopedBaseSchema
     aiLanguage: resolveAiLanguage(value.aiLanguage, resolveAiLanguage(env.AI_DEFAULT_LANGUAGE)),
   }));
 
+const customerRelationshipBaseSchema = z.object({
+  clinicId: z.string().min(1),
+  clinicCode: z.string().min(1),
+});
+
+const customerRelationshipLearnSchema = customerRelationshipBaseSchema
+  .extend({
+    aiLanguage: z.string().optional(),
+    lookbackDays: z.coerce.number().int().min(30).max(730).default(365),
+  })
+  .transform((value) => ({
+    ...value,
+    aiLanguage: resolveAiLanguage(value.aiLanguage, resolveAiLanguage(env.AI_DEFAULT_LANGUAGE)),
+  }));
+
+const customerRelationshipProfilesSchema = customerRelationshipBaseSchema.extend({
+  segment: z.enum(customerRelationshipSegments).optional(),
+  riskLevel: z.enum(customerRelationshipRiskLevels).optional(),
+  search: z.string().default(""),
+  sortBy: z
+    .enum(["priorityScore", "lastVisitDate", "daysSinceLastVisit", "lifetimeSpend", "remainingPackageSessions"])
+    .default("priorityScore"),
+  sortDirection: z.enum(["asc", "desc"]).default("desc"),
+  limit: z.coerce.number().int().min(1).max(100).default(25),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
+const customerRelationshipAskSchema = customerRelationshipBaseSchema
+  .extend({
+    question: z.string().min(1).max(500),
+    aiLanguage: z.string().optional(),
+    autoLearnIfStale: z.coerce.boolean().default(false),
+  })
+  .transform((value) => ({
+    ...value,
+    aiLanguage: resolveAiLanguage(value.aiLanguage, resolveAiLanguage(env.AI_DEFAULT_LANGUAGE)),
+  }));
+
+const customerRelationshipFollowUpMessageSchema = customerRelationshipBaseSchema
+  .extend({
+    customerKey: z.string().min(1),
+    aiLanguage: z.string().optional(),
+    tone: z.enum(customerRelationshipFollowUpTones).default("friendly"),
+  })
+  .transform((value) => ({
+    ...value,
+    aiLanguage: resolveAiLanguage(value.aiLanguage, resolveAiLanguage(env.AI_DEFAULT_LANGUAGE)),
+  }));
+
+const customerRelationshipFeedbackSchema = customerRelationshipBaseSchema.extend({
+  customerKey: z.string().min(1),
+  outcome: z.enum(customerRelationshipFeedbackOutcomes),
+  note: z.string().max(500).nullable().optional(),
+});
+
 router.use(verifyFirebaseToken);
 
 router.post(
@@ -81,6 +152,73 @@ router.post(
   asyncHandler(async (req, res) => {
     const params = serviceInsightSchema.parse(req.body);
     const data = await generateServiceInsight(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.post(
+  "/customer-relationship-agent/learn",
+  requireClinicAccess("body", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = customerRelationshipLearnSchema.parse(req.body);
+    const data = await runCustomerRelationshipLearning({
+      clinicId: params.clinicId,
+      clinicCode: params.clinicCode,
+      lookbackDays: params.lookbackDays,
+    });
+
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/customer-relationship-agent/profiles",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = customerRelationshipProfilesSchema.parse(req.query);
+    const [profiles, latestRun] = await Promise.all([
+      searchCustomerRelationshipProfiles(params),
+      getLatestCustomerRelationshipLearningRun(params.clinicId),
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        rows: profiles.rows,
+        totalCount: profiles.totalCount,
+        lastLearnedAt: latestRun?.learnedAt ?? null,
+        sourceLookbackDays: latestRun?.sourceLookbackDays ?? null,
+      },
+    });
+  }),
+);
+
+router.post(
+  "/customer-relationship-agent/ask",
+  requireClinicAccess("body", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = customerRelationshipAskSchema.parse(req.body);
+    const data = await askCustomerRelationshipAgent(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.post(
+  "/customer-relationship-agent/follow-up-message",
+  requireClinicAccess("body", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = customerRelationshipFollowUpMessageSchema.parse(req.body);
+    const data = await generateCustomerRelationshipFollowUpMessage(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.post(
+  "/customer-relationship-agent/feedback",
+  requireClinicAccess("body", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = customerRelationshipFeedbackSchema.parse(req.body);
+    const data = await recordCustomerRelationshipFeedback(params);
     res.json({ success: true, data });
   }),
 );
