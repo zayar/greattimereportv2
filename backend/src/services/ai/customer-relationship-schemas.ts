@@ -46,6 +46,12 @@ export type CustomerRelationshipIntent = (typeof customerRelationshipIntents)[nu
 export type CustomerRelationshipFeedbackOutcome = (typeof customerRelationshipFeedbackOutcomes)[number];
 export type CustomerRelationshipFollowUpTone = (typeof customerRelationshipFollowUpTones)[number];
 export type CustomerRelationshipRebookingStatus = "onTrack" | "dueSoon" | "overdue" | "unknown";
+export type CustomerRelationshipEvidenceType =
+  | "package_usage"
+  | "visit_pattern"
+  | "risk_explanation"
+  | "renewal_opportunity"
+  | "none";
 
 export type CustomerRelationshipPackageHolding = {
   serviceName: string;
@@ -56,6 +62,7 @@ export type CustomerRelationshipPackageHolding = {
   remainingCount: number;
   latestUsageDate: string | null;
   latestTherapist: string | null;
+  status?: string | null;
 };
 
 export type CustomerRelationshipPackagePurchase = {
@@ -72,6 +79,44 @@ export type CustomerRelationshipServiceUsage = {
   serviceCategory: string;
   counts: number[];
   totalUsage: number;
+};
+
+export type CustomerRelationshipEvidenceMetric = {
+  label: string;
+  value: string;
+  tone?: "positive" | "neutral" | "attention";
+};
+
+export type CustomerRelationshipJourneyEvent = {
+  date: string | null;
+  title: string;
+  detail: string;
+  tone?: "positive" | "neutral" | "attention";
+};
+
+export type CustomerRelationshipUsageHeatmap = {
+  year: number;
+  months: string[];
+  services: CustomerRelationshipServiceUsage[];
+  summary: {
+    totalUsage: number;
+    distinctServices: number;
+  };
+};
+
+export type CustomerRelationshipEvidence = {
+  targetCustomer: {
+    customerKey: string;
+    customerName: string;
+    customerPhoneMasked: string;
+  };
+  evidenceType: CustomerRelationshipEvidenceType;
+  title: string;
+  insight: string;
+  metrics: CustomerRelationshipEvidenceMetric[];
+  packages: CustomerRelationshipPackageHolding[];
+  usageHeatmap: CustomerRelationshipUsageHeatmap | null;
+  journey: CustomerRelationshipJourneyEvent[];
 };
 
 export type CustomerRelationshipProfile = {
@@ -164,12 +209,16 @@ export type CustomerRelationshipAgentRow = {
 export type CustomerRelationshipAgentResponse = {
   detectedIntent: CustomerRelationshipIntent;
   answerSummary: string;
+  reasonBullets: string[];
+  evidenceNarrative: string;
   matchedCount: number;
   recommendedActions: string[];
   rows: CustomerRelationshipAgentRow[];
+  evidence?: CustomerRelationshipEvidence | null;
   dataFreshnessNote: string;
   learnedAt: string | null;
   sourceLookbackDays: number | null;
+  nextQuestionSuggestions?: string[];
   suggestions?: string[];
   usedFallback: boolean;
 };
@@ -185,7 +234,10 @@ export type CustomerRelationshipFollowUpMessage = {
 
 export const customerRelationshipAgentAnswerSchema = z.object({
   answerSummary: z.string().min(1).max(520),
+  reasonBullets: z.array(z.string().min(1).max(180)).max(5).default([]),
+  evidenceNarrative: z.string().max(520).default(""),
   recommendedActions: z.array(z.string().min(1).max(180)).max(4).default([]),
+  nextQuestionSuggestions: z.array(z.string().min(1).max(140)).max(4).default([]),
 });
 
 export const customerRelationshipFollowUpMessageSchema = z.object({

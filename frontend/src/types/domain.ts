@@ -196,6 +196,12 @@ export type CustomerRelationshipFeedbackOutcome =
   | "wrong_number"
   | "other";
 export type CustomerRelationshipFollowUpTone = "friendly" | "professional" | "soft" | "promotion";
+export type CustomerRelationshipEvidenceType =
+  | "package_usage"
+  | "visit_pattern"
+  | "risk_explanation"
+  | "renewal_opportunity"
+  | "none";
 export type CustomerRelationshipIntent =
   | "package_bought_never_came"
   | "package_bought_not_used"
@@ -218,6 +224,7 @@ export interface CustomerRelationshipPackageHolding {
   remainingCount: number;
   latestUsageDate: string | null;
   latestTherapist: string | null;
+  status?: string | null;
 }
 
 export interface CustomerRelationshipPackagePurchase {
@@ -234,6 +241,44 @@ export interface CustomerRelationshipServiceUsage {
   serviceCategory: string;
   counts: number[];
   totalUsage: number;
+}
+
+export interface CustomerRelationshipEvidenceMetric {
+  label: string;
+  value: string;
+  tone?: "positive" | "neutral" | "attention";
+}
+
+export interface CustomerRelationshipJourneyEvent {
+  date: string | null;
+  title: string;
+  detail: string;
+  tone?: "positive" | "neutral" | "attention";
+}
+
+export interface CustomerRelationshipUsageHeatmap {
+  year: number;
+  months: string[];
+  services: CustomerRelationshipServiceUsage[];
+  summary: {
+    totalUsage: number;
+    distinctServices: number;
+  };
+}
+
+export interface CustomerRelationshipEvidence {
+  targetCustomer: {
+    customerKey: string;
+    customerName: string;
+    customerPhoneMasked: string;
+  };
+  evidenceType: CustomerRelationshipEvidenceType;
+  title: string;
+  insight: string;
+  metrics: CustomerRelationshipEvidenceMetric[];
+  packages: CustomerRelationshipPackageHolding[];
+  usageHeatmap: CustomerRelationshipUsageHeatmap | null;
+  journey: CustomerRelationshipJourneyEvent[];
 }
 
 export interface CustomerRelationshipProfile {
@@ -331,12 +376,16 @@ export interface CustomerRelationshipAgentRow {
 export interface CustomerRelationshipAgentResponse {
   detectedIntent: CustomerRelationshipIntent;
   answerSummary: string;
+  reasonBullets: string[];
+  evidenceNarrative: string;
   matchedCount: number;
   recommendedActions: string[];
   rows: CustomerRelationshipAgentRow[];
+  evidence?: CustomerRelationshipEvidence | null;
   dataFreshnessNote: string;
   learnedAt: string | null;
   sourceLookbackDays: number | null;
+  nextQuestionSuggestions?: string[];
   suggestions?: string[];
   usedFallback: boolean;
 }

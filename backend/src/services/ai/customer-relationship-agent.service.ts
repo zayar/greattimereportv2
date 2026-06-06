@@ -16,12 +16,14 @@ import {
   buildCustomerRelationshipAgentPrompt,
   buildCustomerRelationshipFollowUpPrompt,
 } from "./customer-relationship-prompts.js";
+import { buildCustomerRelationshipEvidence } from "./customer-relationship-evidence.service.js";
 import {
   customerRelationshipAgentAnswerSchema,
   customerRelationshipFeedbackOutcomes,
   customerRelationshipFollowUpMessageSchema,
   type CustomerRelationshipAgentResponse,
   type CustomerRelationshipAgentRow,
+  type CustomerRelationshipEvidenceType,
   type CustomerRelationshipFeedbackOutcome,
   type CustomerRelationshipFollowUpMessage,
   type CustomerRelationshipFollowUpTone,
@@ -102,7 +104,7 @@ export function detectCustomerRelationshipIntent(question: string): CustomerRela
     return "package_bought_never_came";
   }
 
-  if (/(balance|remaining|sessions left|ကျန်|လက်ကျန်)/i.test(normalized)) {
+  if (/(balance|remaining|sessions left|renewal|renew|ကျန်|လက်ကျန်)/i.test(normalized)) {
     return "unused_package_balance";
   }
 
@@ -206,6 +208,23 @@ function toAgentRow(profile: CustomerRelationshipProfile): CustomerRelationshipA
   };
 }
 
+export function selectCustomerRelationshipEvidenceType(intent: CustomerRelationshipIntent): CustomerRelationshipEvidenceType {
+  switch (intent) {
+    case "package_bought_never_came":
+    case "package_bought_not_used":
+    case "unused_package_balance":
+      return "package_usage";
+    case "treatment_due":
+      return "visit_pattern";
+    case "churn_risk":
+    case "inactive_vip":
+    case "high_value_no_recent_visit":
+      return "risk_explanation";
+    default:
+      return "none";
+  }
+}
+
 function buildDataFreshnessNote(params: {
   learnedAt: string | null;
   sourceLookbackDays: number | null;
@@ -223,6 +242,11 @@ function buildUnsupportedAnswer(): CustomerRelationshipAgentResponse {
     detectedIntent: "unsupported",
     answerSummary:
       "I can answer safe customer relationship questions after learning profiles, but I cannot run arbitrary SQL or guess from raw data.",
+    reasonBullets: [
+      "The question is outside the supported customer relationship intents.",
+      "No profile search was run, so there is no customer evidence to display.",
+    ],
+    evidenceNarrative: "Ask a supported relationship question after customer behavior learning has run.",
     matchedCount: 0,
     recommendedActions: [
       "Try: Who bought package but never came?",
@@ -233,6 +257,11 @@ function buildUnsupportedAnswer(): CustomerRelationshipAgentResponse {
     dataFreshnessNote: "No profile search was run because the question is outside the supported V1 intents.",
     learnedAt: null,
     sourceLookbackDays: null,
+    nextQuestionSuggestions: [
+      "Who bought package but never came?",
+      "Which customers should we follow up today?",
+      "Which customers are at risk of churn?",
+    ],
     suggestions: [
       "Who bought package but never came?",
       "Which customers should we follow up today?",
@@ -251,6 +280,17 @@ export function buildFallbackAgentCopy(params: {
 }) {
   const first = params.rows[0];
   const intentLabel = params.intent.replace(/_/g, " ");
+  const reasonBullets = first
+    ? first.reasons.slice(0, 4)
+    : ["No matched customers were found for the selected intent."];
+  const evidenceNarrative = first
+    ? `${first.customerName} is the top matched customer. The priority is based on learned profile reasons and the sorted customer list.`
+    : "No customer evidence is available for this answer. Refresh learning if the data looks stale.";
+  const nextQuestionSuggestions = [
+    "Which customers have unused package balance?",
+    "Which customers are at risk?",
+    "Who should we follow up today?",
+  ];
 
   if (params.aiLanguage === "my-MM") {
     return {
@@ -261,6 +301,9 @@ export function buildFallbackAgentCopy(params: {
         first?.nextBestAction ?? "Refresh customer behavior learning and review the priority list.",
         "Record follow-up feedback after the team contacts the customer.",
       ],
+      reasonBullets,
+      evidenceNarrative,
+      nextQuestionSuggestions,
     };
   }
 
@@ -273,6 +316,9 @@ export function buildFallbackAgentCopy(params: {
       "Record follow-up feedback after the team contacts the customer.",
       params.dataFreshnessNote,
     ].slice(0, 3),
+    reasonBullets,
+    evidenceNarrative,
+    nextQuestionSuggestions,
   };
 }
 
@@ -328,6 +374,7 @@ export async function askCustomerRelationshipAgent(params: {
     offset: 0,
   });
   const rows = result.rows.map(toAgentRow);
+  const evidenceType = selectCustomerRelationshipEvidenceType(intent);
   const dataFreshnessNote = buildDataFreshnessNote({
     learnedAt: latestRun?.learnedAt ?? null,
     sourceLookbackDays: latestRun?.sourceLookbackDays ?? null,
@@ -356,6 +403,15 @@ export async function askCustomerRelationshipAgent(params: {
     dataFreshnessNote,
     aiLanguage,
   });
+  const evidence =
+    rows.length > 0 && evidenceType !== "none"
+      ? await buildCustomerRelationshipEvidence({
+          clinicId: params.clinicId,
+          clinicCode: params.clinicCode,
+          customerKey: rows[0].customerKey,
+          evidenceType,
+        })
+      : null;
   const aiResult = await getStructuredAiOutput({
     schema: customerRelationshipAgentAnswerSchema,
     prompt: buildCustomerRelationshipAgentPrompt({
@@ -364,6 +420,7 @@ export async function askCustomerRelationshipAgent(params: {
       detectedIntent: intent,
       matchedCount: result.totalCount,
       rows,
+      evidence,
       dataFreshnessNote,
     }),
     fallbackReason: "Gemini is not configured for Customer Relationship Agent.",
@@ -373,16 +430,27 @@ export async function askCustomerRelationshipAgent(params: {
     copy.recommendedActions && copy.recommendedActions.length > 0
       ? copy.recommendedActions
       : fallbackCopy.recommendedActions;
+  const nextQuestionSuggestions =
+    copy.nextQuestionSuggestions && copy.nextQuestionSuggestions.length > 0
+      ? copy.nextQuestionSuggestions
+      : fallbackCopy.nextQuestionSuggestions;
+  const reasonBullets =
+    copy.reasonBullets && copy.reasonBullets.length > 0 ? copy.reasonBullets : fallbackCopy.reasonBullets;
 
   return {
     detectedIntent: intent,
     answerSummary: copy.answerSummary,
+    reasonBullets,
+    evidenceNarrative: copy.evidenceNarrative || fallbackCopy.evidenceNarrative,
     matchedCount: result.totalCount,
     recommendedActions: recommendedActions.slice(0, 4),
     rows,
+    evidence,
     dataFreshnessNote,
     learnedAt: latestRun?.learnedAt ?? null,
     sourceLookbackDays: latestRun?.sourceLookbackDays ?? null,
+    nextQuestionSuggestions: nextQuestionSuggestions.slice(0, 4),
+    suggestions: nextQuestionSuggestions.slice(0, 4),
     usedFallback: aiResult.data == null,
   };
 }

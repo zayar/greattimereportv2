@@ -1,6 +1,7 @@
 import type { AiLanguage } from "./language.js";
 import type {
   CustomerRelationshipAgentRow,
+  CustomerRelationshipEvidence,
   CustomerRelationshipFollowUpTone,
   CustomerRelationshipIntent,
   CustomerRelationshipProfile,
@@ -22,27 +23,35 @@ export function buildCustomerRelationshipAgentPrompt(params: {
   detectedIntent: CustomerRelationshipIntent;
   matchedCount: number;
   rows: CustomerRelationshipAgentRow[];
+  evidence?: CustomerRelationshipEvidence | null;
   dataFreshnessNote: string;
 }) {
   return `
-You are the GreatTime Customer Relationship Agent for a clinic owner.
+You are the GreatTime Customer Relationship Intelligence Agent for a clinic owner.
 
 Return strict JSON only:
 {
   "answerSummary": "string",
-  "recommendedActions": ["string"]
+  "reasonBullets": ["string"],
+  "evidenceNarrative": "string",
+  "recommendedActions": ["string"],
+  "nextQuestionSuggestions": ["string"]
 }
 
 Rules:
 - Use only the provided structured facts.
-- Do not invent customer counts, names, visit dates, package balance, spend, risk level, or causes.
+- Do not invent customer counts, customer names, visit dates, package balances, spend amounts, risk levels, or reasons.
 - Do not mention full phone numbers. Use only masked phone if needed.
 - Do not expose private notes or internal raw data.
-- Do not diagnose, provide medical advice, or make health claims.
+- Do not diagnose, give medical advice, or make health guarantees.
 - Do not blame staff or customers.
-- If the facts are insufficient, say what should be learned/refreshed instead of guessing.
-- Keep the answer owner-friendly and short.
-- Recommended actions should be operational follow-up steps only. Do not say an automatic message was sent.
+- Keep the explanation business-owner friendly.
+- Explain why the selected customers need attention.
+- Refer to visual evidence only when the evidence object is provided.
+- Recommended actions must be operational actions only: call, message, review, book, record follow-up.
+- Do not say that a message was already sent.
+- If facts are insufficient, say what data should be refreshed.
+- Keep JSON keys in English.
 - ${languageInstruction(params.aiLanguage)}
 
 Owner question:
@@ -51,13 +60,20 @@ ${params.question}
 Detected intent:
 ${params.detectedIntent}
 
-Facts:
+Matched count:
+${params.matchedCount}
+
+Data freshness:
+${params.dataFreshnessNote}
+
+Top matched customers:
 ${stringifyFacts({
-  matchedCount: params.matchedCount,
-  dataFreshnessNote: params.dataFreshnessNote,
   rows: params.rows.slice(0, 8).map((row) => ({
     customerName: row.customerName,
     customerPhoneMasked: row.customerPhoneMasked,
+    lastService: row.lastService,
+    lastPackageServiceName: row.lastPackageServiceName,
+    lastPackageName: row.lastPackageName,
     daysSinceLastVisit: row.daysSinceLastVisit,
     lastVisitDate: row.lastVisitDate,
     remainingPackageSessions: row.remainingPackageSessions,
@@ -69,6 +85,9 @@ ${stringifyFacts({
     priorityScore: row.priorityScore,
   })),
 })}
+
+Evidence:
+${stringifyFacts(params.evidence ?? null)}
   `.trim();
 }
 

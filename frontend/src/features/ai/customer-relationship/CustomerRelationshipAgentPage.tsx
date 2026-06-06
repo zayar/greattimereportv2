@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   askCustomerRelationshipAgent,
   fetchCustomerRelationshipProfiles,
@@ -7,11 +7,14 @@ import {
   runCustomerRelationshipLearning,
 } from "../../../api/ai";
 import { DataTable } from "../../../components/DataTable";
+import { CustomerPackageEvidenceTable } from "../../../components/CustomerPackageEvidenceTable";
+import { CustomerUsageHeatmap } from "../../../components/CustomerUsageHeatmap";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import { PageHeader } from "../../../components/PageHeader";
 import { Panel } from "../../../components/Panel";
 import type {
   CustomerRelationshipAgentResponse,
+  CustomerRelationshipEvidenceMetric,
   CustomerRelationshipFeedbackOutcome,
   CustomerRelationshipFollowUpMessage,
   CustomerRelationshipProfile,
@@ -49,10 +52,12 @@ const FEEDBACK_OPTIONS: Array<{ value: CustomerRelationshipFeedbackOutcome; labe
 
 const DEFAULT_QUESTION = "Who bought package but never came?";
 const SUGGESTED_QUESTIONS = [
-  "Who bought package but never came?",
-  "Which customers have unused package balance?",
-  "Which VIP customers are inactive?",
-  "Who should we follow up today?",
+  { label: "Package bought never came", question: "Who bought package but never came?" },
+  { label: "Unused package balance", question: "Which customers have unused package balance?" },
+  { label: "Inactive VIP", question: "Which VIP customers are inactive?" },
+  { label: "Treatment due", question: "Which customers are treatment due?" },
+  { label: "High risk", question: "Which customers are at risk?" },
+  { label: "Likely renewal", question: "Which customers are likely renewal opportunities?" },
 ];
 
 function formatMoney(value: number) {
@@ -91,6 +96,14 @@ function riskTone(riskLevel: CustomerRelationshipRiskLevel) {
   return "positive";
 }
 
+function metricTone(tone: CustomerRelationshipEvidenceMetric["tone"] | undefined) {
+  return tone === "attention" ? "attention" : tone === "positive" ? "positive" : "neutral";
+}
+
+function metricValue(metrics: CustomerRelationshipEvidenceMetric[], label: string) {
+  return metrics.find((metric) => metric.label.toLowerCase() === label.toLowerCase())?.value ?? "—";
+}
+
 function profileToAgentRow(profile: CustomerRelationshipProfile) {
   return {
     customerKey: profile.customerKey,
@@ -98,7 +111,12 @@ function profileToAgentRow(profile: CustomerRelationshipProfile) {
     customerPhoneMasked: profile.customerPhoneMasked,
     lastVisitDate: profile.lastVisitDate,
     daysSinceLastVisit: profile.daysSinceLastVisit,
+    lastService: profile.lastService,
+    lastPackageServiceName: profile.lastPackageServiceName,
+    lastPackageName: profile.lastPackageName,
     remainingPackageSessions: profile.remainingPackageSessions,
+    packageHoldings: profile.packageHoldings,
+    packagePurchases: profile.packagePurchases,
     lifetimeSpend: profile.lifetimeSpend,
     riskLevel: profile.riskLevel,
     segments: profile.segments,
@@ -166,14 +184,12 @@ export function CustomerRelationshipAgentPage() {
     void loadProfiles();
   }, [loadProfiles]);
 
-  const selectedProfile = useMemo(
-    () => profiles.find((profile) => profile.customerKey === selectedCustomerKey) ?? null,
-    [profiles, selectedCustomerKey],
-  );
   const displayRows = agentResponse?.rows.length ? agentResponse.rows : profiles.map(profileToAgentRow);
-  const highRiskCount = profiles.filter((profile) => profile.riskLevel === "high").length;
-  const packageNeverCameCount = profiles.filter((profile) => profile.segments.includes("package_bought_never_came")).length;
-  const unusedBalanceCount = profiles.filter((profile) => profile.remainingPackageSessions > 0).length;
+  const selectedCustomerName =
+    followUpMessage?.customerName ??
+    agentResponse?.evidence?.targetCustomer.customerName ??
+    displayRows.find((row) => row.customerKey === selectedCustomerKey)?.customerName ??
+    null;
 
   async function handleLearn() {
     if (!currentClinic) {
@@ -221,6 +237,7 @@ export function CustomerRelationshipAgentPage() {
       });
       setLastAskedQuestion(submittedQuestion);
       setAgentResponse(response);
+      setSelectedCustomerKey(response.evidence?.targetCustomer.customerKey ?? response.rows[0]?.customerKey ?? null);
       setNotice(`Agent found ${response.matchedCount.toLocaleString("en-US")} matching customer profiles.`);
     } catch (askError) {
       setError(askError instanceof Error ? askError.message : "Customer Relationship Agent could not answer.");
@@ -317,126 +334,15 @@ export function CustomerRelationshipAgentPage() {
       {error ? <ErrorState label="Customer Relationship Agent issue" detail={error} /> : null}
       {notice ? <div className="inline-note inline-note--success">{notice}</div> : null}
 
-      <div className="report-kpi-strip">
-        <article className="report-kpi-strip__card">
-          <span className="report-kpi-strip__label">Last learned</span>
-          <strong className="report-kpi-strip__value">{formatDate(lastLearnedAt)}</strong>
-          <span className="report-kpi-strip__hint">
-            {sourceLookbackDays ? `${sourceLookbackDays} day source lookback` : "Run learning to refresh profiles"}
-          </span>
-        </article>
-        <article className="report-kpi-strip__card">
-          <span className="report-kpi-strip__label">Customers learned</span>
-          <strong className="report-kpi-strip__value">{totalCount.toLocaleString("en-US")}</strong>
-          <span className="report-kpi-strip__hint">Profiles in learned memory</span>
-        </article>
-        <article className="report-kpi-strip__card">
-          <span className="report-kpi-strip__label">High risk</span>
-          <strong className="report-kpi-strip__value">{highRiskCount.toLocaleString("en-US")}</strong>
-          <span className="report-kpi-strip__hint">Visible in current filter</span>
-        </article>
-        <article className="report-kpi-strip__card">
-          <span className="report-kpi-strip__label">Package never came</span>
-          <strong className="report-kpi-strip__value">{packageNeverCameCount.toLocaleString("en-US")}</strong>
-          <span className="report-kpi-strip__hint">Package purchase with no later visit</span>
-        </article>
-        <article className="report-kpi-strip__card">
-          <span className="report-kpi-strip__label">Unused balance</span>
-          <strong className="report-kpi-strip__value">{unusedBalanceCount.toLocaleString("en-US")}</strong>
-          <span className="report-kpi-strip__hint">Remaining package sessions</span>
-        </article>
-      </div>
-
-      <section className="customer-agent-console">
-        <aside className="customer-agent-profile" aria-label="Customer Relationship Agent profile">
-          <div className="customer-agent-profile__visual" aria-hidden>
-            <span className="customer-agent-profile__face">CR</span>
-          </div>
-          <div className="customer-agent-profile__copy">
-            <span className="customer-agent-profile__eyebrow">Relationship specialist</span>
-            <h2>Customer Relationship Agent</h2>
-            <p>Learned profiles first, then answers from safe customer behavior facts.</p>
-          </div>
-          <div className="customer-agent-profile__mode">
-            <strong>Read-only</strong>
-            <span>Reason {"->"} Act {"->"} Observe {"->"} Learn</span>
-          </div>
-          <div className="customer-agent-profile__section">
-            <strong>What this agent can answer</strong>
-            <ul>
-              <li>Package buyers who never returned</li>
-              <li>Unused package balance and overdue customers</li>
-              <li>Inactive VIP and churn-risk follow-up lists</li>
-              <li>Suggested customer messages and next best actions</li>
-            </ul>
-          </div>
-          <div className="customer-agent-profile__chips">
-            <span>Packages</span>
-            <span>VIP</span>
-            <span>Follow-up</span>
-            <span>Retention</span>
-          </div>
-        </aside>
-
-        <section className="customer-agent-chat" aria-label="Customer Relationship Agent chat">
-          <div className="customer-agent-chat__header">
-            <div>
-              <span className="customer-agent-chat__eyebrow">Selected workspace</span>
-              <h2>Chat with Customer Relationship Agent</h2>
-              <p>Ask safe customer relationship questions against learned GT profiles.</p>
-            </div>
-            <div className="customer-agent-chat__controls">
-              <button className="button button--secondary" type="button" onClick={() => setQuestion(DEFAULT_QUESTION)}>
-                Example
-              </button>
-              <span className="status-pill status-pill--positive">Manual specialist</span>
-            </div>
-          </div>
-
-          <div className="customer-agent-chat__body">
-            {!agentResponse ? (
-              <div className="customer-agent-chat__empty">
-                <span className="customer-agent-chat__empty-icon" aria-hidden>+</span>
-                <strong>Start by asking the relationship agent.</strong>
-                <div className="customer-agent-chat__suggestions">
-                  {SUGGESTED_QUESTIONS.map((suggestion) => (
-                    <button key={suggestion} type="button" onClick={() => setQuestion(suggestion)}>
-                      {suggestion}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="customer-agent-chat__messages">
-                <article className="customer-agent-chat__message customer-agent-chat__message--user">
-                  <span>You</span>
-                  <p>{lastAskedQuestion}</p>
-                </article>
-                <article className="customer-agent-chat__message customer-agent-chat__message--agent">
-                  <span>Customer Relationship Agent</span>
-                  <p>{agentResponse.answerSummary}</p>
-                  <div className="customer-agent-chat__badges">
-                    <span className="status-pill status-pill--neutral">{agentResponse.detectedIntent.replace(/_/g, " ")}</span>
-                    <span className="status-pill status-pill--positive">{agentResponse.matchedCount.toLocaleString("en-US")} matches</span>
-                    {agentResponse.usedFallback ? <span className="status-pill status-pill--attention">Fallback summary</span> : null}
-                  </div>
-                  {agentResponse.recommendedActions.length ? (
-                    <div className="customer-agent-chat__actions">
-                      <strong>Recommended actions</strong>
-                      <ul>
-                        {agentResponse.recommendedActions.map((action) => (
-                          <li key={action}>{action}</li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-                  <small>{agentResponse.dataFreshnessNote}</small>
-                </article>
-              </div>
-            )}
-          </div>
-
-          <div className="customer-agent-chat__composer">
+      <Panel
+        title="Ask anything about customers"
+        subtitle={`${totalCount.toLocaleString("en-US")} learned profiles · Last learned ${formatDate(lastLearnedAt)}${
+          sourceLookbackDays ? ` · ${sourceLookbackDays} day lookback` : ""
+        }`}
+        action={<span className="status-pill status-pill--positive">Read-only agent</span>}
+      >
+        <div className="customer-agent-ask">
+          <div className="customer-agent-ask__composer">
             <input
               type="text"
               value={question}
@@ -446,18 +352,125 @@ export function CustomerRelationshipAgentPage() {
                   void handleAsk();
                 }
               }}
-              placeholder="Ask a read-only question about customer relationships..."
+              placeholder="Ask anything about customers..."
             />
             <button className="button button--primary" type="button" onClick={() => void handleAsk()} disabled={busyAction !== null || !question.trim()}>
               {busyAction === "ask" ? "Asking..." : "Ask"}
             </button>
           </div>
-        </section>
-      </section>
+          <div className="customer-agent-ask__suggestions" aria-label="Suggested questions">
+            <strong>Suggested questions:</strong>
+            <div>
+              {SUGGESTED_QUESTIONS.map((suggestion) => (
+                <button key={suggestion.label} type="button" onClick={() => setQuestion(suggestion.question)}>
+                  {suggestion.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </Panel>
+
+      {agentResponse ? (
+        <Panel
+          title="AI Answer"
+          subtitle={`Asked: ${lastAskedQuestion}`}
+          action={
+            <div className="customer-agent-answer__badges">
+              <span className="status-pill status-pill--neutral">{agentResponse.detectedIntent.replace(/_/g, " ")}</span>
+              <span className="status-pill status-pill--positive">{agentResponse.matchedCount.toLocaleString("en-US")} matches</span>
+              {agentResponse.usedFallback ? <span className="status-pill status-pill--attention">Fallback summary</span> : null}
+            </div>
+          }
+        >
+          <div className="customer-agent-answer">
+            <p className="customer-agent-answer__summary">{agentResponse.answerSummary}</p>
+            {agentResponse.reasonBullets.length ? (
+              <div className="customer-agent-answer__block">
+                <strong>Why these customers need attention</strong>
+                <ul>
+                  {agentResponse.reasonBullets.map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {agentResponse.evidenceNarrative ? (
+              <div className="customer-agent-answer__block">
+                <strong>Evidence narrative</strong>
+                <p>{agentResponse.evidenceNarrative}</p>
+              </div>
+            ) : null}
+            {agentResponse.recommendedActions.length ? (
+              <div className="customer-agent-answer__block">
+                <strong>Recommended actions</strong>
+                <ol>
+                  {agentResponse.recommendedActions.map((action) => (
+                    <li key={action}>{action}</li>
+                  ))}
+                </ol>
+              </div>
+            ) : null}
+            {(agentResponse.nextQuestionSuggestions ?? agentResponse.suggestions ?? []).length ? (
+              <div className="customer-agent-ask__suggestions customer-agent-ask__suggestions--inline">
+                <strong>Next questions:</strong>
+                <div>
+                  {(agentResponse.nextQuestionSuggestions ?? agentResponse.suggestions ?? []).map((suggestion) => (
+                    <button key={suggestion} type="button" onClick={() => setQuestion(suggestion)}>
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            <small>{agentResponse.dataFreshnessNote}</small>
+          </div>
+        </Panel>
+      ) : null}
+
+      {agentResponse?.evidence ? (
+        <Panel title="Why this answer" subtitle={agentResponse.evidence.insight}>
+          <div className="customer-agent-why">
+            <article>
+              <span>Customer</span>
+              <strong>{agentResponse.evidence.targetCustomer.customerName}</strong>
+              <small>{agentResponse.evidence.targetCustomer.customerPhoneMasked || "Masked phone unavailable"}</small>
+            </article>
+            <article>
+              <span>Health score</span>
+              <strong>{metricValue(agentResponse.evidence.metrics, "Health score")}</strong>
+            </article>
+            <article>
+              <span>Risk</span>
+              <strong>{metricValue(agentResponse.evidence.metrics, "Risk level")}</strong>
+            </article>
+            <article>
+              <span>Remaining sessions</span>
+              <strong>{metricValue(agentResponse.evidence.metrics, "Remaining sessions")}</strong>
+            </article>
+            <article>
+              <span>Days since last visit</span>
+              <strong>{metricValue(agentResponse.evidence.metrics, "Days since visit")}</strong>
+            </article>
+          </div>
+        </Panel>
+      ) : null}
+
+      {agentResponse?.evidence?.packages.length ? (
+        <Panel title="Package Evidence" subtitle="Package total, used, remaining, latest usage, therapist, and status for the top matched customer.">
+          <CustomerPackageEvidenceTable packages={agentResponse.evidence.packages} formatDate={formatDate} />
+        </Panel>
+      ) : null}
+
+      {agentResponse?.evidence?.usageHeatmap && agentResponse.evidence.usageHeatmap.services.length > 0 ? (
+        <Panel title="Service Usage Over Time" subtitle={`${agentResponse.evidence.usageHeatmap.year} service usage heatmap for the top matched customer.`}>
+          <CustomerUsageHeatmap data={agentResponse.evidence.usageHeatmap} />
+        </Panel>
+      ) : null}
 
       <Panel
-        title="Priority Segments"
-        subtitle="Switch between safe deterministic customer lists."
+        title="Priority Customers"
+        subtitle="Rows come from learned Firestore profiles, not raw free-form SQL."
         action={
           <label className="field field--compact field--search">
             <span>Search</span>
@@ -465,7 +478,7 @@ export function CustomerRelationshipAgentPage() {
           </label>
         }
       >
-        <div className="filter-row">
+        <div className="customer-agent-priority-controls">
           {SEGMENT_FILTERS.map((filter) => (
             <button
               key={filter.id}
@@ -480,9 +493,6 @@ export function CustomerRelationshipAgentPage() {
             </button>
           ))}
         </div>
-      </Panel>
-
-      <Panel title="Priority Customers" subtitle="Rows come from learned Firestore profiles, not raw free-form SQL.">
         {busyAction === "profiles" ? (
           <div className="inline-note inline-note--loading">Loading learned customer profiles...</div>
         ) : displayRows.length === 0 ? (
@@ -535,9 +545,6 @@ export function CustomerRelationshipAgentPage() {
                 header: "Actions",
                 render: (row) => (
                   <div className="button-row">
-                    <button type="button" className="button button--secondary" onClick={() => setSelectedCustomerKey(row.customerKey)}>
-                      View details
-                    </button>
                     <button type="button" className="button button--primary" onClick={() => void handleGenerateMessage(row.customerKey)}>
                       Message
                     </button>
@@ -549,51 +556,32 @@ export function CustomerRelationshipAgentPage() {
         )}
       </Panel>
 
-      {selectedProfile ? (
+      {selectedCustomerKey || agentResponse?.evidence ? (
         <Panel
-          title={`Customer details: ${selectedProfile.customerName}`}
-          subtitle="Learned relationship profile and follow-up reasoning."
+          title="Suggested Message"
+          subtitle={
+            followUpMessage?.reason ??
+            (selectedCustomerName ? `Generate a safe follow-up draft for ${selectedCustomerName}.` : "Select a customer or ask the agent first.")
+          }
           action={
-            <button type="button" className="button button--secondary" onClick={() => setSelectedCustomerKey(null)}>
-              Close
+            <button
+              type="button"
+              className="button button--primary"
+              onClick={() => void handleGenerateMessage(selectedCustomerKey ?? agentResponse?.evidence?.targetCustomer.customerKey ?? "")}
+              disabled={busyAction !== null || !(selectedCustomerKey ?? agentResponse?.evidence?.targetCustomer.customerKey)}
+            >
+              {busyAction === "message" ? "Generating..." : "Generate Message"}
             </button>
           }
         >
-          <div className="report-kpi-strip">
-            <article className="report-kpi-strip__card">
-              <span className="report-kpi-strip__label">Health score</span>
-              <strong className="report-kpi-strip__value">{selectedProfile.relationshipHealthScore}</strong>
-              <span className="report-kpi-strip__hint">{selectedProfile.riskLevel} risk</span>
-            </article>
-            <article className="report-kpi-strip__card">
-              <span className="report-kpi-strip__label">Preferred service</span>
-              <strong className="report-kpi-strip__value">{selectedProfile.preferredService ?? "—"}</strong>
-              <span className="report-kpi-strip__hint">{selectedProfile.preferredTherapist ?? "No preferred therapist"}</span>
-            </article>
-            <article className="report-kpi-strip__card">
-              <span className="report-kpi-strip__label">Package sessions</span>
-              <strong className="report-kpi-strip__value">{selectedProfile.remainingPackageSessions}</strong>
-              <span className="report-kpi-strip__hint">{selectedProfile.usedPackageSessions} used</span>
-            </article>
-          </div>
-          <div className="ai-panel">
-            <strong>Why high priority</strong>
-            <ul>
-              {selectedProfile.reasons.map((reason) => (
-                <li key={reason}>{reason}</li>
-              ))}
-            </ul>
-            <strong>Next best action</strong>
-            <p>{selectedProfile.nextBestAction}</p>
-          </div>
-        </Panel>
-      ) : null}
-
-      {followUpMessage ? (
-        <Panel title={`Suggested message: ${followUpMessage.customerName}`} subtitle={followUpMessage.reason}>
-          <div className="ai-panel">
-            <p>{followUpMessage.message}</p>
-            <div className="filter-row">
+          <div className="customer-agent-message">
+            {followUpMessage ? (
+              <p>{followUpMessage.message}</p>
+            ) : (
+              <EmptyState label="No suggested message generated yet" detail="Generate a draft after choosing a priority customer." />
+            )}
+            {followUpMessage ? (
+              <div className="filter-row">
               <button
                 className="button button--secondary"
                 type="button"
@@ -613,6 +601,7 @@ export function CustomerRelationshipAgentPage() {
                 </button>
               ))}
             </div>
+            ) : null}
           </div>
         </Panel>
       ) : null}

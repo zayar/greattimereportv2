@@ -9,6 +9,8 @@ import {
 } from "../../../api/analytics";
 import { DateRangeControls } from "../../../components/DateRangeControls";
 import { DataTable } from "../../../components/DataTable";
+import { CustomerPackageEvidenceTable } from "../../../components/CustomerPackageEvidenceTable";
+import { CustomerUsageHeatmap } from "../../../components/CustomerUsageHeatmap";
 import { DualMetricBarChart } from "../../../components/DualMetricBarChart";
 import { HorizontalBarList } from "../../../components/HorizontalBarList";
 import { Panel } from "../../../components/Panel";
@@ -169,62 +171,6 @@ function statusTone(status: string) {
   }
 
   return "neutral";
-}
-
-function UsageHeatmap({
-  data,
-}: {
-  data: CustomerPortalUsageResponse;
-}) {
-  if (data.services.length === 0) {
-    return (
-      <EmptyState
-        label="No service usage found"
-        detail="Try a different year or widen the overall date range."
-      />
-    );
-  }
-
-  const maxValue = Math.max(
-    ...data.services.flatMap((service) => service.counts),
-    1,
-  );
-
-  return (
-    <div className="customer-detail__usage-heatmap">
-      <div className="customer-detail__usage-header">
-        <div />
-        {data.months.map((month) => (
-          <span key={month}>{month}</span>
-        ))}
-      </div>
-      <div className="customer-detail__usage-body">
-        {data.services.map((service) => (
-          <div key={`${service.serviceName}-${service.serviceCategory}`} className="customer-detail__usage-row">
-            <div className="customer-detail__usage-service">
-              <strong>{service.serviceName}</strong>
-              <span>{service.serviceCategory}</span>
-            </div>
-            {service.counts.map((count, index) => (
-              <div
-                key={`${service.serviceName}-${data.months[index]}`}
-                className="customer-detail__usage-cell"
-                title={`${service.serviceName} • ${data.months[index]} • ${count} use${count === 1 ? "" : "s"}`}
-                style={{
-                  backgroundColor:
-                    count === 0
-                      ? "rgba(29, 110, 242, 0.06)"
-                      : `rgba(29, 110, 242, ${0.18 + (count / maxValue) * 0.42})`,
-                }}
-              >
-                {count > 0 ? count : ""}
-              </div>
-            ))}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 export function CustomerDetailPage() {
@@ -864,35 +810,7 @@ export function CustomerDetailPage() {
             <EmptyState label="No package records found" detail="This customer may only purchase one-off services." />
           ) : null}
           {packagesState.data && packagesState.data.packages.length > 0 ? (
-            <DataTable
-              rows={packagesState.data.packages}
-              rowKey={(row) => row.id}
-              columns={[
-                {
-                  key: "service",
-                  header: "Service",
-                  render: (row) => (
-                    <div className="customer-detail__metric-cell">
-                      <strong>{row.serviceName}</strong>
-                      <span>{row.packageName || row.serviceCategory}</span>
-                    </div>
-                  ),
-                },
-                { key: "category", header: "Category", render: (row) => row.serviceCategory },
-                { key: "total", header: "Package total", render: (row) => row.packageTotal.toLocaleString("en-US") },
-                { key: "used", header: "Used", render: (row) => row.usedCount.toLocaleString("en-US") },
-                { key: "remaining", header: "Remaining", render: (row) => row.remainingCount.toLocaleString("en-US") },
-                { key: "latest", header: "Latest usage", render: (row) => formatDate(row.latestUsageDate) },
-                { key: "therapist", header: "Therapist", render: (row) => row.latestTherapist || "Unknown" },
-                {
-                  key: "status",
-                  header: "Status",
-                  render: (row) => (
-                    <span className={`status-pill status-pill--${statusTone(row.status)}`.trim()}>{row.status}</span>
-                  ),
-                },
-              ]}
-            />
+            <CustomerPackageEvidenceTable packages={packagesState.data.packages} formatDate={(value) => (value ? formatDate(value) : "—")} />
           ) : null}
         </Panel>
       ) : null}
@@ -1141,7 +1059,7 @@ export function CustomerDetailPage() {
             {usageState.error ? (
               <ErrorState label="Usage history could not be loaded" detail={usageState.error} />
             ) : null}
-            {!usageState.loading && !usageState.error && usageState.data ? <UsageHeatmap data={usageState.data} /> : null}
+            {!usageState.loading && !usageState.error && usageState.data ? <CustomerUsageHeatmap data={usageState.data} /> : null}
           </Panel>
 
           <Panel
