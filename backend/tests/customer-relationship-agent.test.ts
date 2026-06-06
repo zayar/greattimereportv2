@@ -10,6 +10,9 @@ const { buildFallbackAgentCopy, detectCustomerRelationshipIntent, selectCustomer
 const { buildCustomerRelationshipProfilesFromRows } = await import(
   "../src/services/reports/customer-relationship-learning.service.ts"
 )
+const { normalizeCustomerRelationshipProfile } = await import(
+  "../src/services/reports/customer-relationship-profile.repository.ts"
+)
 
 function buildProfiles() {
   return buildCustomerRelationshipProfilesFromRows({
@@ -249,4 +252,21 @@ test("frontend agent rows expose masked phone only", () => {
   assert.match(row.customerPhoneMasked, /^\*+6789$/)
   assert.doesNotMatch(serialized, /09123456789/)
   assert.doesNotMatch(serialized, /123456789/)
+})
+
+test("normalizes legacy learned profiles that do not have evidence arrays", () => {
+  const legacyProfile = { ...buildProfiles()[0] } as Record<string, unknown>
+  delete legacyProfile.packageHoldings
+  delete legacyProfile.packagePurchases
+  delete legacyProfile.serviceUsageByMonth
+  delete legacyProfile.lastPackageServiceName
+  delete legacyProfile.lastPackageName
+
+  const normalized = normalizeCustomerRelationshipProfile(legacyProfile as never)
+
+  assert.deepEqual(normalized.packageHoldings, [])
+  assert.deepEqual(normalized.packagePurchases, [])
+  assert.deepEqual(normalized.serviceUsageByMonth, [])
+  assert.equal(normalized.lastPackageServiceName, null)
+  assert.equal(normalized.lastPackageName, null)
 })

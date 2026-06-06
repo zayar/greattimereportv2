@@ -15,7 +15,9 @@ import {
   generateCustomerRelationshipFollowUpMessage,
   recordCustomerRelationshipFeedback,
 } from "../services/ai/customer-relationship-agent.service.js";
+import { buildCustomerRelationshipEvidence } from "../services/ai/customer-relationship-evidence.service.js";
 import {
+  customerRelationshipEvidenceTypes,
   customerRelationshipFeedbackOutcomes,
   customerRelationshipFollowUpTones,
   customerRelationshipSegments,
@@ -121,6 +123,12 @@ const customerRelationshipFollowUpMessageSchema = customerRelationshipBaseSchema
     aiLanguage: resolveAiLanguage(value.aiLanguage, resolveAiLanguage(env.AI_DEFAULT_LANGUAGE)),
   }));
 
+const customerRelationshipEvidenceSchema = customerRelationshipBaseSchema.extend({
+  customerKey: z.string().min(1),
+  evidenceType: z.enum(customerRelationshipEvidenceTypes).default("package_usage"),
+  year: z.coerce.number().int().min(2020).max(2100).optional(),
+});
+
 const customerRelationshipFeedbackSchema = customerRelationshipBaseSchema.extend({
   customerKey: z.string().min(1),
   outcome: z.enum(customerRelationshipFeedbackOutcomes),
@@ -212,6 +220,16 @@ router.post(
   asyncHandler(async (req, res) => {
     const params = customerRelationshipFollowUpMessageSchema.parse(req.body);
     const data = await generateCustomerRelationshipFollowUpMessage(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.post(
+  "/customer-relationship-agent/evidence",
+  requireClinicAccess("body", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = customerRelationshipEvidenceSchema.parse(req.body);
+    const data = await buildCustomerRelationshipEvidence(params);
     res.json({ success: true, data });
   }),
 );

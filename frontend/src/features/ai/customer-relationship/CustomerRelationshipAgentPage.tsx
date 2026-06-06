@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   askCustomerRelationshipAgent,
+  fetchCustomerRelationshipEvidence,
   fetchCustomerRelationshipProfiles,
   generateCustomerFollowUpMessage,
   recordCustomerRelationshipFeedback,
@@ -14,6 +15,7 @@ import { PageHeader } from "../../../components/PageHeader";
 import { Panel } from "../../../components/Panel";
 import type {
   CustomerRelationshipAgentResponse,
+  CustomerRelationshipEvidence,
   CustomerRelationshipEvidenceMetric,
   CustomerRelationshipFeedbackOutcome,
   CustomerRelationshipFollowUpMessage,
@@ -24,7 +26,7 @@ import type {
 import { useAccess } from "../../access/AccessProvider";
 import { AI_LANGUAGE_OPTIONS, useAiPreferences } from "../AiPreferencesProvider";
 
-type BusyAction = "learn" | "profiles" | "ask" | "message" | "feedback" | null;
+type BusyAction = "learn" | "profiles" | "ask" | "evidence" | "message" | "feedback" | null;
 
 type SegmentFilter = {
   id: string;
@@ -145,6 +147,7 @@ export function CustomerRelationshipAgentPage() {
   const [activeFilterId, setActiveFilterId] = useState(SEGMENT_FILTERS[0].id);
   const [search, setSearch] = useState("");
   const [selectedCustomerKey, setSelectedCustomerKey] = useState<string | null>(null);
+  const [selectedEvidence, setSelectedEvidence] = useState<CustomerRelationshipEvidence | null>(null);
   const [followUpMessage, setFollowUpMessage] = useState<CustomerRelationshipFollowUpMessage | null>(null);
 
   const activeFilter = SEGMENT_FILTERS.find((filter) => filter.id === activeFilterId) ?? SEGMENT_FILTERS[0];
@@ -185,9 +188,10 @@ export function CustomerRelationshipAgentPage() {
   }, [loadProfiles]);
 
   const displayRows = agentResponse?.rows.length ? agentResponse.rows : profiles.map(profileToAgentRow);
+  const activeEvidence = selectedEvidence ?? agentResponse?.evidence ?? null;
   const selectedCustomerName =
     followUpMessage?.customerName ??
-    agentResponse?.evidence?.targetCustomer.customerName ??
+    activeEvidence?.targetCustomer.customerName ??
     displayRows.find((row) => row.customerKey === selectedCustomerKey)?.customerName ??
     null;
 
@@ -238,9 +242,40 @@ export function CustomerRelationshipAgentPage() {
       setLastAskedQuestion(submittedQuestion);
       setAgentResponse(response);
       setSelectedCustomerKey(response.evidence?.targetCustomer.customerKey ?? response.rows[0]?.customerKey ?? null);
+      setSelectedEvidence(response.evidence ?? null);
+      setFollowUpMessage(null);
       setNotice(`Agent found ${response.matchedCount.toLocaleString("en-US")} matching customer profiles.`);
     } catch (askError) {
       setError(askError instanceof Error ? askError.message : "Customer Relationship Agent could not answer.");
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function handleSelectCustomer(customerKey: string) {
+    if (!currentClinic) {
+      return;
+    }
+
+    setSelectedCustomerKey(customerKey);
+    setBusyAction("evidence");
+    setError(null);
+    setNotice(null);
+    setFollowUpMessage(null);
+
+    try {
+      const evidence = await fetchCustomerRelationshipEvidence({
+        clinicId: currentClinic.id,
+        clinicCode: currentClinic.code,
+        customerKey,
+        evidenceType: "package_usage",
+      });
+      setSelectedEvidence(evidence);
+      if (!evidence) {
+        setNotice("No package or usage evidence was found for this customer yet.");
+      }
+    } catch (evidenceError) {
+      setError(evidenceError instanceof Error ? evidenceError.message : "Customer package evidence could not be loaded.");
     } finally {
       setBusyAction(null);
     }
@@ -428,43 +463,49 @@ export function CustomerRelationshipAgentPage() {
         </Panel>
       ) : null}
 
-      {agentResponse?.evidence ? (
-        <Panel title="Why this answer" subtitle={agentResponse.evidence.insight}>
+      {busyAction === "evidence" ? <div className="inline-note inline-note--loading">Loading package and usage evidence...</div> : null}
+
+      {activeEvidence ? (
+        <Panel title={selectedEvidence ? "Customer Package Details" : "Why this answer"} subtitle={activeEvidence.insight}>
           <div className="customer-agent-why">
             <article>
               <span>Customer</span>
-              <strong>{agentResponse.evidence.targetCustomer.customerName}</strong>
-              <small>{agentResponse.evidence.targetCustomer.customerPhoneMasked || "Masked phone unavailable"}</small>
+              <strong>{activeEvidence.targetCustomer.customerName}</strong>
+              <small>{activeEvidence.targetCustomer.customerPhoneMasked || "Masked phone unavailable"}</small>
             </article>
             <article>
               <span>Health score</span>
-              <strong>{metricValue(agentResponse.evidence.metrics, "Health score")}</strong>
+              <strong>{metricValue(activeEvidence.metrics, "Health score")}</strong>
             </article>
             <article>
               <span>Risk</span>
-              <strong>{metricValue(agentResponse.evidence.metrics, "Risk level")}</strong>
+              <strong>{metricValue(activeEvidence.metrics, "Risk level")}</strong>
             </article>
             <article>
               <span>Remaining sessions</span>
-              <strong>{metricValue(agentResponse.evidence.metrics, "Remaining sessions")}</strong>
+              <strong>{metricValue(activeEvidence.metrics, "Remaining sessions")}</strong>
             </article>
             <article>
               <span>Days since last visit</span>
-              <strong>{metricValue(agentResponse.evidence.metrics, "Days since visit")}</strong>
+              <strong>{metricValue(activeEvidence.metrics, "Days since visit")}</strong>
             </article>
           </div>
         </Panel>
       ) : null}
 
-      {agentResponse?.evidence?.packages.length ? (
-        <Panel title="Package Evidence" subtitle="Package total, used, remaining, latest usage, therapist, and status for the top matched customer.">
-          <CustomerPackageEvidenceTable packages={agentResponse.evidence.packages} formatDate={formatDate} />
+      {activeEvidence ? (
+        <Panel title="Package Evidence" subtitle="Package total, used, remaining, latest usage, therapist, and status for the selected customer.">
+          {activeEvidence.packages.length ? (
+            <CustomerPackageEvidenceTable packages={activeEvidence.packages} formatDate={formatDate} />
+          ) : (
+            <EmptyState label="No package holdings found" detail="This customer may only have one-off service usage, or package evidence needs a fresh learning run." />
+          )}
         </Panel>
       ) : null}
 
-      {agentResponse?.evidence?.usageHeatmap && agentResponse.evidence.usageHeatmap.services.length > 0 ? (
-        <Panel title="Service Usage Over Time" subtitle={`${agentResponse.evidence.usageHeatmap.year} service usage heatmap for the top matched customer.`}>
-          <CustomerUsageHeatmap data={agentResponse.evidence.usageHeatmap} />
+      {activeEvidence?.usageHeatmap ? (
+        <Panel title="Service Usage Over Time" subtitle={`${activeEvidence.usageHeatmap.year} service usage heatmap for the selected customer.`}>
+          <CustomerUsageHeatmap data={activeEvidence.usageHeatmap} />
         </Panel>
       ) : null}
 
@@ -506,7 +547,7 @@ export function CustomerRelationshipAgentPage() {
                 key: "customer",
                 header: "Customer",
                 render: (row) => (
-                  <button type="button" className="entity-link-button entity-link-button--strong" onClick={() => setSelectedCustomerKey(row.customerKey)}>
+                  <button type="button" className="entity-link-button entity-link-button--strong" onClick={() => void handleSelectCustomer(row.customerKey)}>
                     {row.customerName}
                     {row.customerPhoneMasked ? ` · ${row.customerPhoneMasked}` : ""}
                   </button>
@@ -567,8 +608,8 @@ export function CustomerRelationshipAgentPage() {
             <button
               type="button"
               className="button button--primary"
-              onClick={() => void handleGenerateMessage(selectedCustomerKey ?? agentResponse?.evidence?.targetCustomer.customerKey ?? "")}
-              disabled={busyAction !== null || !(selectedCustomerKey ?? agentResponse?.evidence?.targetCustomer.customerKey)}
+              onClick={() => void handleGenerateMessage(selectedCustomerKey ?? activeEvidence?.targetCustomer.customerKey ?? "")}
+              disabled={busyAction !== null || !(selectedCustomerKey ?? activeEvidence?.targetCustomer.customerKey)}
             >
               {busyAction === "message" ? "Generating..." : "Generate Message"}
             </button>
@@ -582,25 +623,25 @@ export function CustomerRelationshipAgentPage() {
             )}
             {followUpMessage ? (
               <div className="filter-row">
-              <button
-                className="button button--secondary"
-                type="button"
-                onClick={() => void navigator.clipboard.writeText(followUpMessage.message)}
-              >
-                Copy
-              </button>
-              {FEEDBACK_OPTIONS.map((option) => (
                 <button
-                  key={option.value}
                   className="button button--secondary"
                   type="button"
-                  onClick={() => void handleFeedback(option.value)}
-                  disabled={busyAction !== null}
+                  onClick={() => void navigator.clipboard.writeText(followUpMessage.message)}
                 >
-                  {option.label}
+                  Copy
                 </button>
-              ))}
-            </div>
+                {FEEDBACK_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    className="button button--secondary"
+                    type="button"
+                    onClick={() => void handleFeedback(option.value)}
+                    disabled={busyAction !== null}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
             ) : null}
           </div>
         </Panel>

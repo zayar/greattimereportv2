@@ -39,6 +39,13 @@ export const customerRelationshipFeedbackOutcomes = [
   "other",
 ] as const;
 export const customerRelationshipFollowUpTones = ["friendly", "professional", "soft", "promotion"] as const;
+export const customerRelationshipEvidenceTypes = [
+  "package_usage",
+  "visit_pattern",
+  "risk_explanation",
+  "renewal_opportunity",
+  "none",
+] as const;
 
 export type CustomerRelationshipRiskLevel = (typeof customerRelationshipRiskLevels)[number];
 export type CustomerRelationshipSegment = (typeof customerRelationshipSegments)[number];
@@ -46,12 +53,7 @@ export type CustomerRelationshipIntent = (typeof customerRelationshipIntents)[nu
 export type CustomerRelationshipFeedbackOutcome = (typeof customerRelationshipFeedbackOutcomes)[number];
 export type CustomerRelationshipFollowUpTone = (typeof customerRelationshipFollowUpTones)[number];
 export type CustomerRelationshipRebookingStatus = "onTrack" | "dueSoon" | "overdue" | "unknown";
-export type CustomerRelationshipEvidenceType =
-  | "package_usage"
-  | "visit_pattern"
-  | "risk_explanation"
-  | "renewal_opportunity"
-  | "none";
+export type CustomerRelationshipEvidenceType = (typeof customerRelationshipEvidenceTypes)[number];
 
 export type CustomerRelationshipPackageHolding = {
   serviceName: string;

@@ -52,6 +52,61 @@ function isProfile(data: FirebaseFirestore.DocumentData | undefined): data is Cu
   return Boolean(data?.clinicId && data?.customerKey && data?.customerName);
 }
 
+export function normalizeCustomerRelationshipProfile(
+  data: CustomerRelationshipProfile,
+): CustomerRelationshipProfile {
+  const remainingPackageSessions = Number(data.remainingPackageSessions ?? 0);
+  const totalPackageSessions = Number(data.totalPackageSessions ?? remainingPackageSessions);
+
+  return {
+    ...data,
+    customerPhoneMasked: data.customerPhoneMasked ?? "",
+    memberId: data.memberId ?? null,
+    firstSeenDate: data.firstSeenDate ?? null,
+    lastVisitDate: data.lastVisitDate ?? null,
+    daysSinceLastVisit: data.daysSinceLastVisit ?? null,
+    lastPaymentDate: data.lastPaymentDate ?? null,
+    lastPackagePurchaseDate: data.lastPackagePurchaseDate ?? null,
+    lastPackageServiceName: data.lastPackageServiceName ?? null,
+    lastPackageName: data.lastPackageName ?? null,
+    totalVisits: Number(data.totalVisits ?? 0),
+    lifetimeSpend: Number(data.lifetimeSpend ?? 0),
+    averageSpend: Number(data.averageSpend ?? 0),
+    recent90DayVisits: Number(data.recent90DayVisits ?? 0),
+    previous90DayVisits: Number(data.previous90DayVisits ?? 0),
+    preferredService: data.preferredService ?? null,
+    preferredServiceCategory: data.preferredServiceCategory ?? null,
+    preferredTherapist: data.preferredTherapist ?? null,
+    preferredDayOfWeek: data.preferredDayOfWeek ?? null,
+    preferredHour: data.preferredHour ?? null,
+    lastService: data.lastService ?? null,
+    lastPaymentMethod: data.lastPaymentMethod ?? null,
+    packagePurchaseCount: Number(data.packagePurchaseCount ?? 0),
+    activePackageCount: Number(data.activePackageCount ?? 0),
+    totalPackageSessions,
+    usedPackageSessions: Number(data.usedPackageSessions ?? Math.max(0, totalPackageSessions - remainingPackageSessions)),
+    remainingPackageSessions,
+    packageHoldings: Array.isArray(data.packageHoldings) ? data.packageHoldings : [],
+    packagePurchases: Array.isArray(data.packagePurchases) ? data.packagePurchases : [],
+    serviceUsageByMonth: Array.isArray(data.serviceUsageByMonth) ? data.serviceUsageByMonth : [],
+    packageBoughtNeverCame: Boolean(data.packageBoughtNeverCame),
+    packageBoughtButNoUsage: Boolean(data.packageBoughtButNoUsage),
+    hasUnusedPackageBalance: Boolean(data.hasUnusedPackageBalance ?? remainingPackageSessions > 0),
+    relationshipHealthScore: Number(data.relationshipHealthScore ?? 0),
+    rebookingStatus: data.rebookingStatus ?? "unknown",
+    segments: Array.isArray(data.segments) ? data.segments : [],
+    reasons: Array.isArray(data.reasons) ? data.reasons : [],
+    nextBestAction: data.nextBestAction ?? "Review the learned customer profile and record the next follow-up.",
+    priorityScore: Number(data.priorityScore ?? 0),
+    lastFollowUpAt: data.lastFollowUpAt ?? null,
+    lastFollowUpOutcome: data.lastFollowUpOutcome ?? null,
+    followUpCount: Number(data.followUpCount ?? 0),
+    lastMatchedAt: data.lastMatchedAt ?? null,
+    lastMatchedIntent: data.lastMatchedIntent ?? null,
+    sourceLookbackDays: Number(data.sourceLookbackDays ?? 365),
+  };
+}
+
 function compareNullableDate(left: string | null, right: string | null) {
   if (left === right) {
     return 0;
@@ -79,6 +134,7 @@ export async function saveCustomerRelationshipProfiles(params: {
     existingSnapshot.docs
       .map((doc) => doc.data())
       .filter(isProfile)
+      .map(normalizeCustomerRelationshipProfile)
       .map((profile) => [profile.customerKey, profile]),
   );
   const batches: FirebaseFirestore.WriteBatch[] = [];
@@ -156,6 +212,7 @@ export async function searchCustomerRelationshipProfiles(input: CustomerRelation
   const filtered = snapshot.docs
     .map((doc) => doc.data())
     .filter(isProfile)
+    .map(normalizeCustomerRelationshipProfile)
     .filter((profile) => (input.segment ? profile.segments.includes(input.segment) : true))
     .filter((profile) => (input.riskLevel ? profile.riskLevel === input.riskLevel : true))
     .filter((profile) => {
@@ -198,7 +255,7 @@ export async function getCustomerRelationshipProfileByKey(params: {
 }) {
   const snapshot = await profilesCollection().doc(profileDocId(params.clinicId, params.customerKey)).get();
   const data = snapshot.data();
-  return isProfile(data) ? data : null;
+  return isProfile(data) ? normalizeCustomerRelationshipProfile(data) : null;
 }
 
 export async function markCustomerRelationshipProfilesMatched(params: {

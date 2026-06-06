@@ -5,6 +5,8 @@ import type {
   AiLanguage,
   AiServiceInsightResponse,
   CustomerRelationshipAgentResponse,
+  CustomerRelationshipEvidence,
+  CustomerRelationshipEvidenceType,
   CustomerRelationshipFeedbackOutcome,
   CustomerRelationshipFollowUpMessage,
   CustomerRelationshipFollowUpTone,
@@ -127,6 +129,21 @@ export async function generateCustomerFollowUpMessage(
 ) {
   const response = await apiClient.post<{ success: true; data: CustomerRelationshipFollowUpMessage }>(
     "/ai/customer-relationship-agent/follow-up-message",
+    params,
+  );
+
+  return response.data.data;
+}
+
+export async function fetchCustomerRelationshipEvidence(
+  params: CustomerRelationshipBaseRequest & {
+    customerKey: string;
+    evidenceType?: CustomerRelationshipEvidenceType;
+    year?: number;
+  },
+) {
+  const response = await apiClient.post<{ success: true; data: CustomerRelationshipEvidence | null }>(
+    "/ai/customer-relationship-agent/evidence",
     params,
   );
 
