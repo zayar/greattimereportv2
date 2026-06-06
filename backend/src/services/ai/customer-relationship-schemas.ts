@@ -47,6 +47,33 @@ export type CustomerRelationshipFeedbackOutcome = (typeof customerRelationshipFe
 export type CustomerRelationshipFollowUpTone = (typeof customerRelationshipFollowUpTones)[number];
 export type CustomerRelationshipRebookingStatus = "onTrack" | "dueSoon" | "overdue" | "unknown";
 
+export type CustomerRelationshipPackageHolding = {
+  serviceName: string;
+  packageName: string | null;
+  serviceCategory: string;
+  packageTotal: number;
+  usedCount: number;
+  remainingCount: number;
+  latestUsageDate: string | null;
+  latestTherapist: string | null;
+};
+
+export type CustomerRelationshipPackagePurchase = {
+  serviceName: string;
+  packageName: string | null;
+  serviceCategory: string;
+  purchaseCount: number;
+  latestPurchaseDate: string | null;
+  totalAmount: number;
+};
+
+export type CustomerRelationshipServiceUsage = {
+  serviceName: string;
+  serviceCategory: string;
+  counts: number[];
+  totalUsage: number;
+};
+
 export type CustomerRelationshipProfile = {
   clinicId: string;
   clinicCode: string;
@@ -60,6 +87,8 @@ export type CustomerRelationshipProfile = {
   daysSinceLastVisit: number | null;
   lastPaymentDate: string | null;
   lastPackagePurchaseDate: string | null;
+  lastPackageServiceName: string | null;
+  lastPackageName: string | null;
   totalVisits: number;
   lifetimeSpend: number;
   averageSpend: number;
@@ -77,6 +106,9 @@ export type CustomerRelationshipProfile = {
   totalPackageSessions: number;
   usedPackageSessions: number;
   remainingPackageSessions: number;
+  packageHoldings: CustomerRelationshipPackageHolding[];
+  packagePurchases: CustomerRelationshipPackagePurchase[];
+  serviceUsageByMonth: CustomerRelationshipServiceUsage[];
   packageBoughtNeverCame: boolean;
   packageBoughtButNoUsage: boolean;
   hasUnusedPackageBalance: boolean;
@@ -112,7 +144,12 @@ export type CustomerRelationshipAgentRow = {
   customerPhoneMasked: string;
   lastVisitDate: string | null;
   daysSinceLastVisit: number | null;
+  lastService: string | null;
+  lastPackageServiceName: string | null;
+  lastPackageName: string | null;
   remainingPackageSessions: number;
+  packageHoldings: CustomerRelationshipPackageHolding[];
+  packagePurchases: CustomerRelationshipPackagePurchase[];
   lifetimeSpend: number;
   riskLevel: CustomerRelationshipRiskLevel;
   segments: CustomerRelationshipSegment[];

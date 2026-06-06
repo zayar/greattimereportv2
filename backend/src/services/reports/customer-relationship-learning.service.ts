@@ -4,9 +4,12 @@ import { runAnalyticsQuery } from "../bigquery.service.js";
 import { calculateCustomerRiskSignals } from "../ai/customer-risk.service.js";
 import type {
   CustomerRelationshipLearningSummary,
+  CustomerRelationshipPackageHolding,
+  CustomerRelationshipPackagePurchase,
   CustomerRelationshipProfile,
   CustomerRelationshipRiskLevel,
   CustomerRelationshipSegment,
+  CustomerRelationshipServiceUsage,
 } from "../ai/customer-relationship-schemas.js";
 import {
   saveCustomerRelationshipLearningRun,
@@ -22,6 +25,8 @@ export type CustomerRelationshipLearningRow = {
   daysSinceLastVisit: number | null;
   lastPaymentDate: string | null;
   lastPackagePurchaseDate: string | null;
+  lastPackageServiceName: string | null;
+  lastPackageName: string | null;
   totalVisits: number | string | null;
   lifetimeSpend: number | string | null;
   averageSpend: number | string | null;
@@ -40,6 +45,9 @@ export type CustomerRelationshipLearningRow = {
   totalPackageSessions: number | string | null;
   remainingPackageSessions: number | string | null;
   visitsAfterLastPackagePurchase: number | string | null;
+  packageHoldingsJson: string | null;
+  packagePurchasesJson: string | null;
+  serviceUsageJson: string | null;
 };
 
 function parseNumber(value: unknown) {
@@ -65,6 +73,117 @@ function parseNullableNumber(value: unknown) {
   }
   const parsed = parseNumber(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseText(value: unknown, fallback = "") {
+  if (typeof value === "string") {
+    return value.trim() || fallback;
+  }
+
+  if (value == null) {
+    return fallback;
+  }
+
+  if (typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  if (typeof value === "object" && "value" in value) {
+    return parseText((value as { value: unknown }).value, fallback);
+  }
+
+  return fallback;
+}
+
+function parseJsonArray(value: unknown): unknown[] {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (typeof value !== "string" || !value.trim()) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizePackageHoldings(value: unknown): CustomerRelationshipPackageHolding[] {
+  return parseJsonArray(value)
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+
+      const record = item as Record<string, unknown>;
+      const serviceName = parseText(record.serviceName, "Unknown service");
+      const packageTotal = parseNumber(record.packageTotal);
+      const remainingCount = parseNumber(record.remainingCount);
+
+      return {
+        serviceName,
+        packageName: parseText(record.packageName) || null,
+        serviceCategory: parseText(record.serviceCategory, "Other"),
+        packageTotal,
+        usedCount: parseNumber(record.usedCount),
+        remainingCount,
+        latestUsageDate: parseText(record.latestUsageDate) || null,
+        latestTherapist: parseText(record.latestTherapist) || null,
+      } satisfies CustomerRelationshipPackageHolding;
+    })
+    .filter((item): item is CustomerRelationshipPackageHolding => item != null)
+    .filter((item) => item.packageTotal > 0 || item.usedCount > 0 || item.remainingCount > 0)
+    .slice(0, 12);
+}
+
+function normalizePackagePurchases(value: unknown): CustomerRelationshipPackagePurchase[] {
+  return parseJsonArray(value)
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+
+      const record = item as Record<string, unknown>;
+
+      return {
+        serviceName: parseText(record.serviceName, "Unknown service"),
+        packageName: parseText(record.packageName) || null,
+        serviceCategory: parseText(record.serviceCategory, "Other"),
+        purchaseCount: parseNumber(record.purchaseCount),
+        latestPurchaseDate: parseText(record.latestPurchaseDate) || null,
+        totalAmount: parseNumber(record.totalAmount),
+      } satisfies CustomerRelationshipPackagePurchase;
+    })
+    .filter((item): item is CustomerRelationshipPackagePurchase => item != null)
+    .filter((item) => item.purchaseCount > 0 || item.totalAmount > 0)
+    .slice(0, 12);
+}
+
+function normalizeServiceUsage(value: unknown): CustomerRelationshipServiceUsage[] {
+  return parseJsonArray(value)
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return null;
+      }
+
+      const record = item as Record<string, unknown>;
+      const counts = parseJsonArray(record.counts).map(parseNumber);
+      const totalUsage = parseNumber(record.totalUsage);
+
+      return {
+        serviceName: parseText(record.serviceName, "Unknown service"),
+        serviceCategory: parseText(record.serviceCategory, "Other"),
+        counts,
+        totalUsage,
+      } satisfies CustomerRelationshipServiceUsage;
+    })
+    .filter((item): item is CustomerRelationshipServiceUsage => item != null)
+    .filter((item) => item.totalUsage > 0)
+    .slice(0, 12);
 }
 
 function normalizePhoneDigits(value: string | null | undefined) {
@@ -298,6 +417,43 @@ function buildLearningQuery() {
         FROM DistinctVisits
         GROUP BY customerName, phoneNumber
       ),
+      PackageHoldings AS (
+        SELECT
+          customerName,
+          phoneNumber,
+          TO_JSON_STRING(
+            ARRAY_AGG(
+              STRUCT(
+                serviceName,
+                CAST(NULL AS STRING) AS packageName,
+                serviceCategory,
+                packageTotal,
+                usedCount,
+                remainingCount,
+                FORMAT_DATE('%Y-%m-%d', latestUsageDate) AS latestUsageDate,
+                latestTherapist
+              )
+              ORDER BY remainingCount DESC, latestUsageDate DESC
+              LIMIT 12
+            )
+          ) AS packageHoldingsJson
+        FROM (
+          SELECT
+            customerName,
+            phoneNumber,
+            COALESCE(NULLIF(serviceName, ''), 'Unknown service') AS serviceName,
+            COALESCE(NULLIF(serviceCategory, ''), 'Other') AS serviceCategory,
+            MAX(GREATEST(packageCount, remainingPackageCount, 0)) AS packageTotal,
+            SUM(IF(packageCount > 0, 1, 0)) AS usedCount,
+            MAX(GREATEST(remainingPackageCount, 0)) AS remainingCount,
+            MAX(DATE(checkInTime)) AS latestUsageDate,
+            ARRAY_AGG(practitionerName ORDER BY checkInTime DESC LIMIT 1)[SAFE_OFFSET(0)] AS latestTherapist
+          FROM DistinctVisits
+          WHERE packageCount > 0 OR remainingPackageCount > 0
+          GROUP BY customerName, phoneNumber, serviceName, serviceCategory
+        )
+        GROUP BY customerName, phoneNumber
+      ),
       PaymentSummary AS (
         SELECT
           customerName,
@@ -308,8 +464,78 @@ function buildLearningQuery() {
           SAFE_DIVIDE(SUM(invoiceNetTotal), COUNT(*)) AS averageSpend,
           ARRAY_AGG(paymentMethod ORDER BY orderCreatedDate DESC LIMIT 1)[SAFE_OFFSET(0)] AS lastPaymentMethod,
           COUNTIF(COALESCE(servicePackageName, '') != '') AS packagePurchaseCount,
-          MAX(IF(COALESCE(servicePackageName, '') != '', DATE(orderCreatedDate), NULL)) AS lastPackagePurchaseDate
+          MAX(IF(COALESCE(servicePackageName, '') != '', DATE(orderCreatedDate), NULL)) AS lastPackagePurchaseDate,
+          ARRAY_AGG(IF(COALESCE(servicePackageName, '') != '', serviceName, NULL) IGNORE NULLS ORDER BY orderCreatedDate DESC LIMIT 1)[SAFE_OFFSET(0)] AS lastPackageServiceName,
+          ARRAY_AGG(IF(COALESCE(servicePackageName, '') != '', servicePackageName, NULL) IGNORE NULLS ORDER BY orderCreatedDate DESC LIMIT 1)[SAFE_OFFSET(0)] AS lastPackageName
         FROM InvoiceLevelPayments
+        GROUP BY customerName, phoneNumber
+      ),
+      PackagePurchases AS (
+        SELECT
+          customerName,
+          phoneNumber,
+          TO_JSON_STRING(
+            ARRAY_AGG(
+              STRUCT(
+                serviceName,
+                packageName,
+                serviceCategory,
+                purchaseCount,
+                FORMAT_DATE('%Y-%m-%d', latestPurchaseDate) AS latestPurchaseDate,
+                totalAmount
+              )
+              ORDER BY latestPurchaseDate DESC, totalAmount DESC
+              LIMIT 12
+            )
+          ) AS packagePurchasesJson
+        FROM (
+          SELECT
+            customerName,
+            phoneNumber,
+            COALESCE(NULLIF(serviceName, ''), 'Unknown service') AS serviceName,
+            NULLIF(servicePackageName, '') AS packageName,
+            COALESCE(NULLIF(serviceCategory, ''), 'Other') AS serviceCategory,
+            COUNT(*) AS purchaseCount,
+            MAX(DATE(orderCreatedDate)) AS latestPurchaseDate,
+            SUM(invoiceNetTotal) AS totalAmount
+          FROM InvoiceLevelPayments
+          WHERE COALESCE(servicePackageName, '') != ''
+          GROUP BY customerName, phoneNumber, serviceName, packageName, serviceCategory
+        )
+        GROUP BY customerName, phoneNumber
+      ),
+      ServiceUsageByMonth AS (
+        SELECT
+          customerName,
+          phoneNumber,
+          TO_JSON_STRING(
+            ARRAY_AGG(
+              STRUCT(serviceName, serviceCategory, counts, totalUsage)
+              ORDER BY totalUsage DESC, serviceName ASC
+              LIMIT 12
+            )
+          ) AS serviceUsageJson
+        FROM (
+          SELECT
+            customerName,
+            phoneNumber,
+            serviceName,
+            serviceCategory,
+            ARRAY_AGG(usageCount ORDER BY monthStart ASC) AS counts,
+            SUM(usageCount) AS totalUsage
+          FROM (
+            SELECT
+              customerName,
+              phoneNumber,
+              COALESCE(NULLIF(serviceName, ''), 'Unknown service') AS serviceName,
+              COALESCE(NULLIF(serviceCategory, ''), 'Other') AS serviceCategory,
+              DATE_TRUNC(DATE(checkInTime), MONTH) AS monthStart,
+              COUNT(*) AS usageCount
+            FROM DistinctVisits
+            GROUP BY customerName, phoneNumber, serviceName, serviceCategory, monthStart
+          )
+          GROUP BY customerName, phoneNumber, serviceName, serviceCategory
+        )
         GROUP BY customerName, phoneNumber
       ),
       ScopedCustomers AS (
@@ -329,6 +555,8 @@ function buildLearningQuery() {
       END AS daysSinceLastVisit,
       FORMAT_DATE('%Y-%m-%d', payment.lastPaymentDate) AS lastPaymentDate,
       FORMAT_DATE('%Y-%m-%d', payment.lastPackagePurchaseDate) AS lastPackagePurchaseDate,
+      payment.lastPackageServiceName,
+      payment.lastPackageName,
       COALESCE(visit.totalVisits, 0) AS totalVisits,
       COALESCE(payment.lifetimeSpend, 0) AS lifetimeSpend,
       COALESCE(payment.averageSpend, 0) AS averageSpend,
@@ -346,6 +574,9 @@ function buildLearningQuery() {
       COALESCE(packageSummary.activePackageCount, 0) AS activePackageCount,
       COALESCE(packageSummary.totalPackageSessions, 0) AS totalPackageSessions,
       COALESCE(packageSummary.remainingPackageSessions, 0) AS remainingPackageSessions,
+      packageHoldings.packageHoldingsJson,
+      packagePurchases.packagePurchasesJson,
+      serviceUsage.serviceUsageJson,
       (
         SELECT COUNT(*)
         FROM DistinctVisits visitAfterPackage
@@ -362,6 +593,9 @@ function buildLearningQuery() {
     LEFT JOIN PreferredTherapist preferredTherapist USING (customerName, phoneNumber)
     LEFT JOIN PreferredTime preferredTime USING (customerName, phoneNumber)
     LEFT JOIN PackageSummary packageSummary USING (customerName, phoneNumber)
+    LEFT JOIN PackageHoldings packageHoldings USING (customerName, phoneNumber)
+    LEFT JOIN PackagePurchases packagePurchases USING (customerName, phoneNumber)
+    LEFT JOIN ServiceUsageByMonth serviceUsage USING (customerName, phoneNumber)
     WHERE scoped.customerName IS NOT NULL
     ORDER BY COALESCE(payment.lifetimeSpend, 0) DESC, scoped.customerName ASC
   `;
@@ -633,6 +867,9 @@ export function buildCustomerRelationshipProfilesFromRows(params: {
       daysSinceLastVisit,
     });
     const customerPhoneDigits = normalizePhoneDigits(row.phoneNumber);
+    const packageHoldings = normalizePackageHoldings(row.packageHoldingsJson);
+    const packagePurchases = normalizePackagePurchases(row.packagePurchasesJson);
+    const serviceUsageByMonth = normalizeServiceUsage(row.serviceUsageJson);
 
     return {
       clinicId: params.clinicId,
@@ -655,6 +892,8 @@ export function buildCustomerRelationshipProfilesFromRows(params: {
       daysSinceLastVisit,
       lastPaymentDate: row.lastPaymentDate ?? null,
       lastPackagePurchaseDate: row.lastPackagePurchaseDate ?? null,
+      lastPackageServiceName: parseText(row.lastPackageServiceName) || null,
+      lastPackageName: parseText(row.lastPackageName) || null,
       totalVisits,
       lifetimeSpend,
       averageSpend,
@@ -672,6 +911,9 @@ export function buildCustomerRelationshipProfilesFromRows(params: {
       totalPackageSessions,
       usedPackageSessions,
       remainingPackageSessions,
+      packageHoldings,
+      packagePurchases,
+      serviceUsageByMonth,
       packageBoughtNeverCame,
       packageBoughtButNoUsage,
       hasUnusedPackageBalance,

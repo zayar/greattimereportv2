@@ -48,6 +48,12 @@ const FEEDBACK_OPTIONS: Array<{ value: CustomerRelationshipFeedbackOutcome; labe
 ];
 
 const DEFAULT_QUESTION = "Who bought package but never came?";
+const SUGGESTED_QUESTIONS = [
+  "Who bought package but never came?",
+  "Which customers have unused package balance?",
+  "Which VIP customers are inactive?",
+  "Who should we follow up today?",
+];
 
 function formatMoney(value: number) {
   return `${Math.round(value).toLocaleString("en-US")} MMK`;
@@ -116,6 +122,7 @@ export function CustomerRelationshipAgentPage() {
   const [lastLearnedAt, setLastLearnedAt] = useState<string | null>(null);
   const [sourceLookbackDays, setSourceLookbackDays] = useState<number | null>(null);
   const [question, setQuestion] = useState(DEFAULT_QUESTION);
+  const [lastAskedQuestion, setLastAskedQuestion] = useState(DEFAULT_QUESTION);
   const [agentResponse, setAgentResponse] = useState<CustomerRelationshipAgentResponse | null>(null);
   const [activeFilterId, setActiveFilterId] = useState(SEGMENT_FILTERS[0].id);
   const [search, setSearch] = useState("");
@@ -195,7 +202,8 @@ export function CustomerRelationshipAgentPage() {
   }
 
   async function handleAsk() {
-    if (!currentClinic || !question.trim()) {
+    const submittedQuestion = question.trim();
+    if (!currentClinic || !submittedQuestion) {
       return;
     }
 
@@ -207,10 +215,11 @@ export function CustomerRelationshipAgentPage() {
       const response = await askCustomerRelationshipAgent({
         clinicId: currentClinic.id,
         clinicCode: currentClinic.code,
-        question,
+        question: submittedQuestion,
         aiLanguage,
         autoLearnIfStale: false,
       });
+      setLastAskedQuestion(submittedQuestion);
       setAgentResponse(response);
       setNotice(`Agent found ${response.matchedCount.toLocaleString("en-US")} matching customer profiles.`);
     } catch (askError) {
@@ -338,49 +347,113 @@ export function CustomerRelationshipAgentPage() {
         </article>
       </div>
 
-      <Panel
-        title="Ask Agent"
-        subtitle="Questions are matched to safe supported intents and answered from learned customer profiles."
-        action={
-          <button className="button button--secondary" type="button" onClick={() => setQuestion(DEFAULT_QUESTION)}>
-            Example
-          </button>
-        }
-      >
-        <div className="filter-row">
-          <label className="field field--grow">
-            <span>Question</span>
+      <section className="customer-agent-console">
+        <aside className="customer-agent-profile" aria-label="Customer Relationship Agent profile">
+          <div className="customer-agent-profile__visual" aria-hidden>
+            <span className="customer-agent-profile__face">CR</span>
+          </div>
+          <div className="customer-agent-profile__copy">
+            <span className="customer-agent-profile__eyebrow">Relationship specialist</span>
+            <h2>Customer Relationship Agent</h2>
+            <p>Learned profiles first, then answers from safe customer behavior facts.</p>
+          </div>
+          <div className="customer-agent-profile__mode">
+            <strong>Read-only</strong>
+            <span>Reason {"->"} Act {"->"} Observe {"->"} Learn</span>
+          </div>
+          <div className="customer-agent-profile__section">
+            <strong>What this agent can answer</strong>
+            <ul>
+              <li>Package buyers who never returned</li>
+              <li>Unused package balance and overdue customers</li>
+              <li>Inactive VIP and churn-risk follow-up lists</li>
+              <li>Suggested customer messages and next best actions</li>
+            </ul>
+          </div>
+          <div className="customer-agent-profile__chips">
+            <span>Packages</span>
+            <span>VIP</span>
+            <span>Follow-up</span>
+            <span>Retention</span>
+          </div>
+        </aside>
+
+        <section className="customer-agent-chat" aria-label="Customer Relationship Agent chat">
+          <div className="customer-agent-chat__header">
+            <div>
+              <span className="customer-agent-chat__eyebrow">Selected workspace</span>
+              <h2>Chat with Customer Relationship Agent</h2>
+              <p>Ask safe customer relationship questions against learned GT profiles.</p>
+            </div>
+            <div className="customer-agent-chat__controls">
+              <button className="button button--secondary" type="button" onClick={() => setQuestion(DEFAULT_QUESTION)}>
+                Example
+              </button>
+              <span className="status-pill status-pill--positive">Manual specialist</span>
+            </div>
+          </div>
+
+          <div className="customer-agent-chat__body">
+            {!agentResponse ? (
+              <div className="customer-agent-chat__empty">
+                <span className="customer-agent-chat__empty-icon" aria-hidden>+</span>
+                <strong>Start by asking the relationship agent.</strong>
+                <div className="customer-agent-chat__suggestions">
+                  {SUGGESTED_QUESTIONS.map((suggestion) => (
+                    <button key={suggestion} type="button" onClick={() => setQuestion(suggestion)}>
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="customer-agent-chat__messages">
+                <article className="customer-agent-chat__message customer-agent-chat__message--user">
+                  <span>You</span>
+                  <p>{lastAskedQuestion}</p>
+                </article>
+                <article className="customer-agent-chat__message customer-agent-chat__message--agent">
+                  <span>Customer Relationship Agent</span>
+                  <p>{agentResponse.answerSummary}</p>
+                  <div className="customer-agent-chat__badges">
+                    <span className="status-pill status-pill--neutral">{agentResponse.detectedIntent.replace(/_/g, " ")}</span>
+                    <span className="status-pill status-pill--positive">{agentResponse.matchedCount.toLocaleString("en-US")} matches</span>
+                    {agentResponse.usedFallback ? <span className="status-pill status-pill--attention">Fallback summary</span> : null}
+                  </div>
+                  {agentResponse.recommendedActions.length ? (
+                    <div className="customer-agent-chat__actions">
+                      <strong>Recommended actions</strong>
+                      <ul>
+                        {agentResponse.recommendedActions.map((action) => (
+                          <li key={action}>{action}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  <small>{agentResponse.dataFreshnessNote}</small>
+                </article>
+              </div>
+            )}
+          </div>
+
+          <div className="customer-agent-chat__composer">
             <input
               type="text"
               value={question}
               onChange={(event) => setQuestion(event.target.value)}
-              placeholder="Ask: Who bought package but never came?"
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && question.trim() && busyAction === null) {
+                  void handleAsk();
+                }
+              }}
+              placeholder="Ask a read-only question about customer relationships..."
             />
-          </label>
-          <button className="button button--primary" type="button" onClick={() => void handleAsk()} disabled={busyAction !== null || !question.trim()}>
-            {busyAction === "ask" ? "Asking..." : "Ask Agent"}
-          </button>
-        </div>
-
-        {agentResponse ? (
-          <div className="ai-panel">
-            <p>{agentResponse.answerSummary}</p>
-            <div className="customer-quick-panel__badges">
-              <span className="status-pill status-pill--neutral">{agentResponse.detectedIntent.replace(/_/g, " ")}</span>
-              <span className="status-pill status-pill--positive">{agentResponse.matchedCount.toLocaleString("en-US")} matches</span>
-              {agentResponse.usedFallback ? <span className="status-pill status-pill--attention">Fallback summary</span> : null}
-            </div>
-            {agentResponse.recommendedActions.length ? (
-              <ul>
-                {agentResponse.recommendedActions.map((action) => (
-                  <li key={action}>{action}</li>
-                ))}
-              </ul>
-            ) : null}
-            <small>{agentResponse.dataFreshnessNote}</small>
+            <button className="button button--primary" type="button" onClick={() => void handleAsk()} disabled={busyAction !== null || !question.trim()}>
+              {busyAction === "ask" ? "Asking..." : "Ask"}
+            </button>
           </div>
-        ) : null}
-      </Panel>
+        </section>
+      </section>
 
       <Panel
         title="Priority Segments"

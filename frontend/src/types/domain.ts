@@ -209,6 +209,33 @@ export type CustomerRelationshipIntent =
   | "general_summary"
   | "unsupported";
 
+export interface CustomerRelationshipPackageHolding {
+  serviceName: string;
+  packageName: string | null;
+  serviceCategory: string;
+  packageTotal: number;
+  usedCount: number;
+  remainingCount: number;
+  latestUsageDate: string | null;
+  latestTherapist: string | null;
+}
+
+export interface CustomerRelationshipPackagePurchase {
+  serviceName: string;
+  packageName: string | null;
+  serviceCategory: string;
+  purchaseCount: number;
+  latestPurchaseDate: string | null;
+  totalAmount: number;
+}
+
+export interface CustomerRelationshipServiceUsage {
+  serviceName: string;
+  serviceCategory: string;
+  counts: number[];
+  totalUsage: number;
+}
+
 export interface CustomerRelationshipProfile {
   clinicId: string;
   clinicCode: string;
@@ -222,6 +249,8 @@ export interface CustomerRelationshipProfile {
   daysSinceLastVisit: number | null;
   lastPaymentDate: string | null;
   lastPackagePurchaseDate: string | null;
+  lastPackageServiceName: string | null;
+  lastPackageName: string | null;
   totalVisits: number;
   lifetimeSpend: number;
   averageSpend: number;
@@ -239,6 +268,9 @@ export interface CustomerRelationshipProfile {
   totalPackageSessions: number;
   usedPackageSessions: number;
   remainingPackageSessions: number;
+  packageHoldings: CustomerRelationshipPackageHolding[];
+  packagePurchases: CustomerRelationshipPackagePurchase[];
+  serviceUsageByMonth: CustomerRelationshipServiceUsage[];
   packageBoughtNeverCame: boolean;
   packageBoughtButNoUsage: boolean;
   hasUnusedPackageBalance: boolean;
@@ -279,7 +311,12 @@ export interface CustomerRelationshipAgentRow {
   customerPhoneMasked: string;
   lastVisitDate: string | null;
   daysSinceLastVisit: number | null;
+  lastService: string | null;
+  lastPackageServiceName: string | null;
+  lastPackageName: string | null;
   remainingPackageSessions: number;
+  packageHoldings: CustomerRelationshipPackageHolding[];
+  packagePurchases: CustomerRelationshipPackagePurchase[];
   lifetimeSpend: number;
   riskLevel: CustomerRelationshipRiskLevel;
   segments: CustomerRelationshipSegment[];
