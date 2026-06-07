@@ -6731,6 +6731,13 @@ a {
   margin-bottom: 14px;
 }
 
+.customer-agent-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
 .customer-agent-message .empty-state {
   margin: 0;
 }
@@ -6797,6 +6804,10 @@ a {
   gap: 12px;
 }
 
+.customer-agent-evidence__overview {
+  align-items: start;
+}
+
 .customer-agent-evidence__section h3 {
   margin: 0;
   color: #111827;
@@ -6808,6 +6819,10 @@ a {
   display: grid;
   grid-template-columns: repeat(5, minmax(140px, 1fr));
   gap: 12px;
+}
+
+.customer-agent-evidence__journey--compact {
+  grid-template-columns: 1fr;
 }
 
 .customer-agent-evidence__event {
@@ -8221,6 +8236,8 @@ a {
   display: grid;
   gap: 14px;
   min-width: 0;
+  overflow-x: auto;
+  padding-bottom: 2px;
 }
 
 .customer-detail__usage-header,

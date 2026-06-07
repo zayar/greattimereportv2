@@ -11,12 +11,15 @@ import { DataTable } from "../../../components/DataTable";
 import { CustomerPackageEvidenceTable } from "../../../components/CustomerPackageEvidenceTable";
 import { CustomerUsageHeatmap } from "../../../components/CustomerUsageHeatmap";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
+import { HorizontalBarList } from "../../../components/HorizontalBarList";
 import { PageHeader } from "../../../components/PageHeader";
 import { Panel } from "../../../components/Panel";
 import type {
   CustomerRelationshipAgentResponse,
   CustomerRelationshipEvidence,
   CustomerRelationshipEvidenceMetric,
+  CustomerRelationshipPackageHolding,
+  CustomerRelationshipPackagePurchase,
   CustomerRelationshipFeedbackOutcome,
   CustomerRelationshipFollowUpMessage,
   CustomerRelationshipProfile,
@@ -106,6 +109,92 @@ function metricValue(metrics: CustomerRelationshipEvidenceMetric[], label: strin
   return metrics.find((metric) => metric.label.toLowerCase() === label.toLowerCase())?.value ?? "—";
 }
 
+function pluralize(value: number, singular: string, plural = `${singular}s`) {
+  return `${value.toLocaleString("en-US")} ${value === 1 ? singular : plural}`;
+}
+
+function buildPurchasedServiceItems(
+  purchases: CustomerRelationshipPackagePurchase[],
+  fallbackPackages: CustomerRelationshipPackageHolding[],
+) {
+  const groupedPurchases = new Map<
+    string,
+    {
+      serviceName: string;
+      purchaseCount: number;
+      totalAmount: number;
+    }
+  >();
+
+  purchases.forEach((purchase) => {
+    const key = purchase.serviceName;
+    const current =
+      groupedPurchases.get(key) ??
+      {
+        serviceName: purchase.serviceName,
+        purchaseCount: 0,
+        totalAmount: 0,
+      };
+
+    current.purchaseCount += purchase.purchaseCount;
+    current.totalAmount += purchase.totalAmount;
+    groupedPurchases.set(key, current);
+  });
+
+  const purchaseItems = [...groupedPurchases.values()]
+    .filter((purchase) => purchase.purchaseCount > 0 || purchase.totalAmount > 0)
+    .sort((left, right) => right.totalAmount - left.totalAmount || right.purchaseCount - left.purchaseCount)
+    .slice(0, 8)
+    .map((purchase) => ({
+      label: purchase.serviceName,
+      value: purchase.totalAmount > 0 ? purchase.totalAmount : purchase.purchaseCount,
+      valueDisplay:
+        purchase.totalAmount > 0
+          ? `${formatMoney(purchase.totalAmount)} · ${pluralize(purchase.purchaseCount, "purchase")}`
+          : pluralize(purchase.purchaseCount, "purchase"),
+    }));
+
+  if (purchaseItems.length > 0) {
+    return purchaseItems;
+  }
+
+  const groupedPackages = new Map<
+    string,
+    {
+      serviceName: string;
+      packageTotal: number;
+      usedCount: number;
+      remainingCount: number;
+    }
+  >();
+
+  fallbackPackages.forEach((packageRow) => {
+    const current =
+      groupedPackages.get(packageRow.serviceName) ??
+      {
+        serviceName: packageRow.serviceName,
+        packageTotal: 0,
+        usedCount: 0,
+        remainingCount: 0,
+      };
+
+    current.packageTotal += packageRow.packageTotal;
+    current.usedCount += packageRow.usedCount;
+    current.remainingCount += packageRow.remainingCount;
+    groupedPackages.set(packageRow.serviceName, current);
+  });
+
+  return [...groupedPackages.values()]
+    .filter((packageRow) => packageRow.packageTotal > 0 || packageRow.remainingCount > 0)
+    .sort((left, right) => right.packageTotal - left.packageTotal || right.remainingCount - left.remainingCount)
+    .slice(0, 8)
+    .map((packageRow) => ({
+      label: packageRow.serviceName,
+      value: Math.max(packageRow.packageTotal, packageRow.usedCount + packageRow.remainingCount, 1),
+      valueDisplay: `${pluralize(packageRow.packageTotal, "session")} · ${packageRow.remainingCount.toLocaleString("en-US")} remaining`,
+    }));
+}
+
 function profileToAgentRow(profile: CustomerRelationshipProfile) {
   return {
     customerKey: profile.customerKey,
@@ -147,6 +236,7 @@ export function CustomerRelationshipAgentPage() {
   const [activeFilterId, setActiveFilterId] = useState(SEGMENT_FILTERS[0].id);
   const [search, setSearch] = useState("");
   const [selectedCustomerKey, setSelectedCustomerKey] = useState<string | null>(null);
+  const [customerInfoRequested, setCustomerInfoRequested] = useState(false);
   const [selectedEvidence, setSelectedEvidence] = useState<CustomerRelationshipEvidence | null>(null);
   const [followUpMessage, setFollowUpMessage] = useState<CustomerRelationshipFollowUpMessage | null>(null);
 
@@ -194,6 +284,12 @@ export function CustomerRelationshipAgentPage() {
     activeEvidence?.targetCustomer.customerName ??
     displayRows.find((row) => row.customerKey === selectedCustomerKey)?.customerName ??
     null;
+  const selectedCustomerRow = displayRows.find((row) => row.customerKey === selectedCustomerKey) ?? null;
+  const selectedCustomerPurchases = selectedCustomerRow?.packagePurchases ?? [];
+  const selectedCustomerPackages = activeEvidence?.packages.length
+    ? activeEvidence.packages
+    : selectedCustomerRow?.packageHoldings ?? [];
+  const purchasedServiceItems = buildPurchasedServiceItems(selectedCustomerPurchases, selectedCustomerPackages);
 
   async function handleLearn() {
     if (!currentClinic) {
@@ -242,6 +338,7 @@ export function CustomerRelationshipAgentPage() {
       setLastAskedQuestion(submittedQuestion);
       setAgentResponse(response);
       setSelectedCustomerKey(null);
+      setCustomerInfoRequested(false);
       setSelectedEvidence(null);
       setFollowUpMessage(null);
       setNotice(`Agent found ${response.matchedCount.toLocaleString("en-US")} matching customer profiles.`);
@@ -258,6 +355,8 @@ export function CustomerRelationshipAgentPage() {
     }
 
     setSelectedCustomerKey(customerKey);
+    setCustomerInfoRequested(true);
+    setSelectedEvidence((current) => (current?.targetCustomer.customerKey === customerKey ? current : null));
     setBusyAction("evidence");
     setError(null);
     setNotice(null);
@@ -286,7 +385,12 @@ export function CustomerRelationshipAgentPage() {
       return;
     }
 
+    const shouldKeepCustomerInfo = customerInfoRequested && selectedCustomerKey === customerKey;
     setSelectedCustomerKey(customerKey);
+    setCustomerInfoRequested(shouldKeepCustomerInfo);
+    if (!shouldKeepCustomerInfo) {
+      setSelectedEvidence(null);
+    }
     setBusyAction("message");
     setError(null);
     setNotice(null);
@@ -482,6 +586,8 @@ export function CustomerRelationshipAgentPage() {
               onClick={() => {
                 setActiveFilterId(filter.id);
                 setAgentResponse(null);
+                setCustomerInfoRequested(false);
+                setSelectedEvidence(null);
               }}
             >
               {filter.label}
@@ -539,7 +645,10 @@ export function CustomerRelationshipAgentPage() {
                 key: "tools",
                 header: "Actions",
                 render: (row) => (
-                  <div className="button-row">
+                  <div className="customer-agent-action-row">
+                    <button type="button" className="button button--secondary" onClick={() => void handleSelectCustomer(row.customerKey)}>
+                      Info
+                    </button>
                     <button type="button" className="button button--primary" onClick={() => void handleGenerateMessage(row.customerKey)}>
                       Message
                     </button>
@@ -550,6 +659,108 @@ export function CustomerRelationshipAgentPage() {
           />
         )}
       </Panel>
+
+      {customerInfoRequested && selectedCustomerKey ? (
+        <Panel
+          title={activeEvidence?.title ?? `Customer info${selectedCustomerName ? ` for ${selectedCustomerName}` : ""}`}
+          subtitle={
+            activeEvidence?.insight ??
+            (busyAction === "evidence" ? "Loading usage and package evidence for this customer." : "Usage and package evidence will appear here after loading.")
+          }
+          action={
+            <div className="filter-row">
+              <button type="button" className="button button--secondary" onClick={() => void handleSelectCustomer(selectedCustomerKey)} disabled={busyAction !== null}>
+                {busyAction === "evidence" ? "Refreshing..." : "Refresh Info"}
+              </button>
+              <button
+                type="button"
+                className="button button--primary"
+                onClick={() => void handleGenerateMessage(selectedCustomerKey)}
+                disabled={busyAction !== null}
+              >
+                Message
+              </button>
+            </div>
+          }
+        >
+          {busyAction === "evidence" ? <div className="inline-note inline-note--loading">Loading customer info...</div> : null}
+          {!activeEvidence && busyAction !== "evidence" ? (
+            <EmptyState label="No customer evidence found" detail="Run learning again or choose another customer with package and visit activity." />
+          ) : null}
+          {activeEvidence ? (
+            <div className="customer-agent-evidence">
+              <div className="customer-agent-evidence__summary">
+                <p>
+                  {activeEvidence.targetCustomer.customerName}
+                  {activeEvidence.targetCustomer.customerPhoneMasked ? ` · ${activeEvidence.targetCustomer.customerPhoneMasked}` : ""}
+                </p>
+                <small>
+                  Remaining sessions: {metricValue(activeEvidence.metrics, "Remaining sessions")} · Risk:{" "}
+                  {metricValue(activeEvidence.metrics, "Risk level")} · Days since visit: {metricValue(activeEvidence.metrics, "Days since visit")}
+                </small>
+              </div>
+
+              <div className="customer-agent-evidence__metrics">
+                {activeEvidence.metrics.map((metric) => (
+                  <article key={metric.label} className={`customer-agent-evidence__metric customer-agent-evidence__metric--${metricTone(metric.tone)}`}>
+                    <span>{metric.label}</span>
+                    <strong>{metric.value}</strong>
+                  </article>
+                ))}
+              </div>
+
+              <div className="panel-grid panel-grid--split customer-agent-evidence__overview">
+                <section className="customer-agent-evidence__section">
+                  <h3>Purchased services graph</h3>
+                  {purchasedServiceItems.length > 0 ? (
+                    <HorizontalBarList items={purchasedServiceItems} />
+                  ) : (
+                    <EmptyState label="No purchased services found" detail="This customer may only have one-off usage records in the learned profile." />
+                  )}
+                </section>
+
+                <section className="customer-agent-evidence__section">
+                  <h3>Customer journey</h3>
+                  {activeEvidence.journey.length > 0 ? (
+                    <div className="customer-agent-evidence__journey customer-agent-evidence__journey--compact">
+                      {activeEvidence.journey.map((event) => (
+                        <article
+                          key={`${event.title}-${event.date ?? "current"}`}
+                          className={`customer-agent-evidence__event customer-agent-evidence__event--${metricTone(event.tone)}`}
+                        >
+                          <span>{event.date ? formatDate(event.date) : "Current"}</span>
+                          <strong>{event.title}</strong>
+                          <p>{event.detail}</p>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyState label="No journey events found" />
+                  )}
+                </section>
+              </div>
+
+              <section className="customer-agent-evidence__section">
+                <h3>Usage over time heatmap</h3>
+                {activeEvidence.usageHeatmap ? (
+                  <CustomerUsageHeatmap data={activeEvidence.usageHeatmap} />
+                ) : (
+                  <EmptyState label="No usage heatmap found" detail="Usage will appear after completed visit records are learned or refreshed." />
+                )}
+              </section>
+
+              <section className="customer-agent-evidence__section">
+                <h3>Purchased services and package holdings</h3>
+                {activeEvidence.packages.length > 0 ? (
+                  <CustomerPackageEvidenceTable packages={activeEvidence.packages} formatDate={(value) => formatDate(value)} />
+                ) : (
+                  <EmptyState label="No package holdings found" detail="This customer may not have active package balances in the current clinic." />
+                )}
+              </section>
+            </div>
+          ) : null}
+        </Panel>
+      ) : null}
 
       {selectedCustomerKey ? (
         <Panel
