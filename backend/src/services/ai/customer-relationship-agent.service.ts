@@ -16,7 +16,6 @@ import {
   buildCustomerRelationshipAgentPrompt,
   buildCustomerRelationshipFollowUpPrompt,
 } from "./customer-relationship-prompts.js";
-import { buildCustomerRelationshipEvidence } from "./customer-relationship-evidence.service.js";
 import {
   customerRelationshipAgentAnswerSchema,
   customerRelationshipFeedbackOutcomes,
@@ -374,7 +373,6 @@ export async function askCustomerRelationshipAgent(params: {
     offset: 0,
   });
   const rows = result.rows.map(toAgentRow);
-  const evidenceType = selectCustomerRelationshipEvidenceType(intent);
   const dataFreshnessNote = buildDataFreshnessNote({
     learnedAt: latestRun?.learnedAt ?? null,
     sourceLookbackDays: latestRun?.sourceLookbackDays ?? null,
@@ -403,15 +401,6 @@ export async function askCustomerRelationshipAgent(params: {
     dataFreshnessNote,
     aiLanguage,
   });
-  const evidence =
-    rows.length > 0 && evidenceType !== "none"
-      ? await buildCustomerRelationshipEvidence({
-          clinicId: params.clinicId,
-          clinicCode: params.clinicCode,
-          customerKey: rows[0].customerKey,
-          evidenceType,
-        })
-      : null;
   const aiResult = await getStructuredAiOutput({
     schema: customerRelationshipAgentAnswerSchema,
     prompt: buildCustomerRelationshipAgentPrompt({
@@ -420,7 +409,7 @@ export async function askCustomerRelationshipAgent(params: {
       detectedIntent: intent,
       matchedCount: result.totalCount,
       rows,
-      evidence,
+      evidence: null,
       dataFreshnessNote,
     }),
     fallbackReason: "Gemini is not configured for Customer Relationship Agent.",
@@ -445,7 +434,7 @@ export async function askCustomerRelationshipAgent(params: {
     matchedCount: result.totalCount,
     recommendedActions: recommendedActions.slice(0, 4),
     rows,
-    evidence,
+    evidence: null,
     dataFreshnessNote,
     learnedAt: latestRun?.learnedAt ?? null,
     sourceLookbackDays: latestRun?.sourceLookbackDays ?? null,

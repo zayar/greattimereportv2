@@ -7,6 +7,7 @@ import type {
   CustomerRelationshipEvidenceType,
   CustomerRelationshipJourneyEvent,
   CustomerRelationshipPackageHolding,
+  CustomerRelationshipPaymentEvidence,
   CustomerRelationshipProfile,
   CustomerRelationshipServiceUsage,
   CustomerRelationshipUsageHeatmap,
@@ -393,6 +394,116 @@ async function fetchUsageHeatmap(params: {
   } satisfies CustomerRelationshipUsageHeatmap;
 }
 
+async function fetchPayments(params: {
+  clinicId: string;
+  clinicCode: string;
+  customerKey: string;
+}) {
+  const ctes = `
+    WITH InvoiceLevelPayments AS (
+      SELECT
+        CustomerName AS customerName,
+        CustomerPhoneNumber AS phoneNumber,
+        InvoiceNumber AS invoiceNumber,
+        MAX(OrderCreatedDate) AS orderCreatedDate,
+        MAX(COALESCE(PaymentMethod, 'Unknown')) AS paymentMethod,
+        MAX(COALESCE(PaymentStatus, '')) AS paymentStatus,
+        MAX(COALESCE(SellerName, 'Unknown')) AS salePerson,
+        MAX(CAST(COALESCE(NetTotal, 0) AS FLOAT64)) AS invoiceNetTotal,
+        MAX(CAST(COALESCE(Total, 0) AS FLOAT64)) AS invoiceTotal,
+        MAX(CAST(COALESCE(Discount, 0) AS FLOAT64)) AS discount,
+        MAX(CAST(COALESCE(OrderBalance, 0) AS FLOAT64)) AS orderBalance,
+        ARRAY_AGG(COALESCE(ServiceName, '') IGNORE NULLS ORDER BY ServiceName ASC LIMIT 1)[SAFE_OFFSET(0)] AS serviceName,
+        ARRAY_AGG(ServicePackageName IGNORE NULLS ORDER BY ServicePackageName ASC LIMIT 1)[SAFE_OFFSET(0)] AS servicePackageName
+      FROM ${analyticsTables.mainPaymentView}
+      WHERE LOWER(ClinicCode) = LOWER(@clinicCode)
+        AND CustomerName IS NOT NULL
+        AND PaymentStatus = 'PAID'
+        AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
+        AND COALESCE(PaymentMethod, '') != 'PASS'
+        AND ${buildCustomerKeyCondition("CustomerPhoneNumber", "CustomerName")}
+      GROUP BY customerName, phoneNumber, invoiceNumber
+    )
+  `;
+  const [summaryRows, paymentRows] = await Promise.all([
+    runAnalyticsQuery<{
+      totalSpent: number;
+      invoiceCount: number;
+      averageInvoice: number;
+      outstandingAmount: number;
+    }>(
+      `
+        ${ctes}
+        SELECT
+          COALESCE(SUM(invoiceNetTotal), 0) AS totalSpent,
+          COUNT(*) AS invoiceCount,
+          COALESCE(AVG(invoiceNetTotal), 0) AS averageInvoice,
+          COALESCE(SUM(orderBalance), 0) AS outstandingAmount
+        FROM InvoiceLevelPayments
+      `,
+      params,
+    ),
+    runAnalyticsQuery<{
+      dateLabel: string;
+      invoiceNumber: string;
+      serviceName: string;
+      servicePackageName: string | null;
+      paymentMethod: string;
+      salePerson: string;
+      invoiceTotal: number;
+      discount: number;
+      netAmount: number;
+      outstandingAmount: number;
+      paymentStatus: string;
+    }>(
+      `
+        ${ctes}
+        SELECT
+          FORMAT_DATE('%Y-%m-%d', DATE(orderCreatedDate)) AS dateLabel,
+          invoiceNumber,
+          COALESCE(serviceName, '') AS serviceName,
+          servicePackageName,
+          COALESCE(paymentMethod, 'Unknown') AS paymentMethod,
+          COALESCE(salePerson, 'Unknown') AS salePerson,
+          invoiceTotal,
+          discount,
+          invoiceNetTotal AS netAmount,
+          orderBalance AS outstandingAmount,
+          COALESCE(paymentStatus, '') AS paymentStatus
+        FROM InvoiceLevelPayments
+        ORDER BY orderCreatedDate DESC, invoiceNumber DESC
+        LIMIT 8
+      `,
+      params,
+    ),
+  ]);
+  const summary = summaryRows[0];
+  const payments: CustomerRelationshipPaymentEvidence = {
+    summary: {
+      totalSpent: parseNumber(summary?.totalSpent),
+      invoiceCount: parseNumber(summary?.invoiceCount),
+      averageInvoice: parseNumber(summary?.averageInvoice),
+      outstandingAmount: parseNumber(summary?.outstandingAmount),
+    },
+    rows: paymentRows.map((row) => ({
+      dateLabel: row.dateLabel,
+      invoiceNumber: row.invoiceNumber,
+      serviceName: row.serviceName,
+      servicePackageName: row.servicePackageName,
+      paymentMethod: row.paymentMethod,
+      salePerson: row.salePerson,
+      invoiceTotal: parseNumber(row.invoiceTotal),
+      discount: parseNumber(row.discount),
+      netAmount: parseNumber(row.netAmount),
+      outstandingAmount: parseNumber(row.outstandingAmount),
+      paymentStatus: row.paymentStatus,
+    })),
+    totalCount: parseNumber(summary?.invoiceCount),
+  };
+
+  return payments;
+}
+
 function heatmapFromProfile(profile: CustomerRelationshipProfile, year: number) {
   const services = profile.serviceUsageByMonth.slice(0, 12);
 
@@ -433,11 +544,13 @@ export async function buildCustomerRelationshipEvidence(params: {
     status: row.status ?? packageStatus(row),
   }));
   let usageHeatmap = heatmapFromProfile(profile, year);
+  let payments: CustomerRelationshipPaymentEvidence | null = null;
 
   try {
-    const [freshPackages, freshUsageHeatmap] = await Promise.all([
+    const [freshPackages, freshUsageHeatmap, freshPayments] = await Promise.all([
       fetchPackages(params),
       fetchUsageHeatmap({ ...params, year }),
+      fetchPayments(params),
     ]);
 
     if (freshPackages.length > 0) {
@@ -447,6 +560,8 @@ export async function buildCustomerRelationshipEvidence(params: {
     if (freshUsageHeatmap.services.length > 0) {
       usageHeatmap = freshUsageHeatmap;
     }
+
+    payments = freshPayments;
   } catch {
     // Learned profile evidence is safe to return if live analytics evidence is unavailable.
   }
@@ -469,6 +584,7 @@ export async function buildCustomerRelationshipEvidence(params: {
     insight: buildInsight(params.evidenceType, profile, packages),
     metrics: buildMetrics(profile),
     packages,
+    payments,
     usageHeatmap,
     journey: buildJourney({
       profile,

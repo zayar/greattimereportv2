@@ -188,7 +188,7 @@ export function CustomerRelationshipAgentPage() {
   }, [loadProfiles]);
 
   const displayRows = agentResponse?.rows.length ? agentResponse.rows : profiles.map(profileToAgentRow);
-  const activeEvidence = selectedEvidence ?? agentResponse?.evidence ?? null;
+  const activeEvidence = selectedEvidence;
   const selectedCustomerName =
     followUpMessage?.customerName ??
     activeEvidence?.targetCustomer.customerName ??
@@ -241,8 +241,8 @@ export function CustomerRelationshipAgentPage() {
       });
       setLastAskedQuestion(submittedQuestion);
       setAgentResponse(response);
-      setSelectedCustomerKey(response.evidence?.targetCustomer.customerKey ?? response.rows[0]?.customerKey ?? null);
-      setSelectedEvidence(response.evidence ?? null);
+      setSelectedCustomerKey(null);
+      setSelectedEvidence(null);
       setFollowUpMessage(null);
       setNotice(`Agent found ${response.matchedCount.toLocaleString("en-US")} matching customer profiles.`);
     } catch (askError) {
@@ -463,52 +463,6 @@ export function CustomerRelationshipAgentPage() {
         </Panel>
       ) : null}
 
-      {busyAction === "evidence" ? <div className="inline-note inline-note--loading">Loading package and usage evidence...</div> : null}
-
-      {activeEvidence ? (
-        <Panel title={selectedEvidence ? "Customer Package Details" : "Why this answer"} subtitle={activeEvidence.insight}>
-          <div className="customer-agent-why">
-            <article>
-              <span>Customer</span>
-              <strong>{activeEvidence.targetCustomer.customerName}</strong>
-              <small>{activeEvidence.targetCustomer.customerPhoneMasked || "Masked phone unavailable"}</small>
-            </article>
-            <article>
-              <span>Health score</span>
-              <strong>{metricValue(activeEvidence.metrics, "Health score")}</strong>
-            </article>
-            <article>
-              <span>Risk</span>
-              <strong>{metricValue(activeEvidence.metrics, "Risk level")}</strong>
-            </article>
-            <article>
-              <span>Remaining sessions</span>
-              <strong>{metricValue(activeEvidence.metrics, "Remaining sessions")}</strong>
-            </article>
-            <article>
-              <span>Days since last visit</span>
-              <strong>{metricValue(activeEvidence.metrics, "Days since visit")}</strong>
-            </article>
-          </div>
-        </Panel>
-      ) : null}
-
-      {activeEvidence ? (
-        <Panel title="Package Evidence" subtitle="Package total, used, remaining, latest usage, therapist, and status for the selected customer.">
-          {activeEvidence.packages.length ? (
-            <CustomerPackageEvidenceTable packages={activeEvidence.packages} formatDate={formatDate} />
-          ) : (
-            <EmptyState label="No package holdings found" detail="This customer may only have one-off service usage, or package evidence needs a fresh learning run." />
-          )}
-        </Panel>
-      ) : null}
-
-      {activeEvidence?.usageHeatmap ? (
-        <Panel title="Service Usage Over Time" subtitle={`${activeEvidence.usageHeatmap.year} service usage heatmap for the selected customer.`}>
-          <CustomerUsageHeatmap data={activeEvidence.usageHeatmap} />
-        </Panel>
-      ) : null}
-
       <Panel
         title="Priority Customers"
         subtitle="Rows come from learned Firestore profiles, not raw free-form SQL."
@@ -597,7 +551,7 @@ export function CustomerRelationshipAgentPage() {
         )}
       </Panel>
 
-      {selectedCustomerKey || agentResponse?.evidence ? (
+      {selectedCustomerKey ? (
         <Panel
           title="Suggested Message"
           subtitle={

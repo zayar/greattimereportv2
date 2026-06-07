@@ -266,6 +266,29 @@ export interface CustomerRelationshipUsageHeatmap {
   };
 }
 
+export interface CustomerRelationshipPaymentEvidence {
+  summary: {
+    totalSpent: number;
+    invoiceCount: number;
+    averageInvoice: number;
+    outstandingAmount: number;
+  };
+  rows: Array<{
+    dateLabel: string;
+    invoiceNumber: string;
+    serviceName: string;
+    servicePackageName: string | null;
+    paymentMethod: string;
+    salePerson: string;
+    invoiceTotal: number;
+    discount: number;
+    netAmount: number;
+    outstandingAmount: number;
+    paymentStatus: string;
+  }>;
+  totalCount: number;
+}
+
 export interface CustomerRelationshipEvidence {
   targetCustomer: {
     customerKey: string;
@@ -277,6 +300,7 @@ export interface CustomerRelationshipEvidence {
   insight: string;
   metrics: CustomerRelationshipEvidenceMetric[];
   packages: CustomerRelationshipPackageHolding[];
+  payments: CustomerRelationshipPaymentEvidence | null;
   usageHeatmap: CustomerRelationshipUsageHeatmap | null;
   journey: CustomerRelationshipJourneyEvent[];
 }
