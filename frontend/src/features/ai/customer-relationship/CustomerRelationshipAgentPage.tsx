@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import relationshipAgentImage from "../../../../relationship_agent.jpg";
 import {
   askCustomerRelationshipAgent,
   fetchCustomerRelationshipEvidence,
@@ -473,42 +474,81 @@ export function CustomerRelationshipAgentPage() {
       {error ? <ErrorState label="Customer Relationship Agent issue" detail={error} /> : null}
       {notice ? <div className="inline-note inline-note--success">{notice}</div> : null}
 
-      <Panel
-        title="Ask anything about customers"
-        subtitle={`${totalCount.toLocaleString("en-US")} learned profiles · Last learned ${formatDate(lastLearnedAt)}${
-          sourceLookbackDays ? ` · ${sourceLookbackDays} day lookback` : ""
-        }`}
-        action={<span className="status-pill status-pill--positive">Read-only agent</span>}
-      >
-        <div className="customer-agent-ask">
-          <div className="customer-agent-ask__composer">
-            <input
-              type="text"
-              value={question}
-              onChange={(event) => setQuestion(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && question.trim() && busyAction === null) {
-                  void handleAsk();
-                }
-              }}
-              placeholder="Ask anything about customers..."
-            />
-            <button className="button button--primary" type="button" onClick={() => void handleAsk()} disabled={busyAction !== null || !question.trim()}>
-              {busyAction === "ask" ? "Asking..." : "Ask"}
-            </button>
+      <div className="customer-agent-console customer-agent-console--relationship">
+        <aside className="customer-agent-profile customer-agent-profile--relationship" aria-label="Customer Relationship Agent profile">
+          <div className="customer-agent-profile__visual customer-agent-profile__visual--photo">
+            <img className="customer-agent-profile__photo" src={relationshipAgentImage} alt="Customer Relationship Agent portrait" />
+            <span className="customer-agent-profile__status">
+              {busyAction === "learn" ? "Learning" : busyAction === "profiles" ? "Loading" : "Ready"}
+            </span>
           </div>
-          <div className="customer-agent-ask__suggestions" aria-label="Suggested questions">
-            <strong>Suggested questions:</strong>
-            <div>
-              {SUGGESTED_QUESTIONS.map((suggestion) => (
-                <button key={suggestion.label} type="button" onClick={() => setQuestion(suggestion.question)}>
-                  {suggestion.label}
-                </button>
-              ))}
+          <div className="customer-agent-profile__copy">
+            <span className="customer-agent-profile__eyebrow">AI Customer Desk</span>
+            <h2>Customer Relationship Agent</h2>
+            <p>Retention focus for inactive VIPs, package balances, treatment due dates, churn risk, and renewal timing.</p>
+          </div>
+          <div className="customer-agent-profile__metrics" aria-label="Customer relationship learning status">
+            <article>
+              <span>Profiles</span>
+              <strong>{totalCount.toLocaleString("en-US")}</strong>
+            </article>
+            <article>
+              <span>Last learned</span>
+              <strong>{formatDate(lastLearnedAt)}</strong>
+            </article>
+            <article>
+              <span>Lookback</span>
+              <strong>{sourceLookbackDays ? `${sourceLookbackDays} days` : "—"}</strong>
+            </article>
+          </div>
+          <div className="customer-agent-profile__mode">
+            <strong>Read-only agent</strong>
+            <span>Learned customer profiles only</span>
+          </div>
+          <div className="customer-agent-profile__chips">
+            <span>{currentClinic.name}</span>
+            <span>{aiLanguage === "my-MM" ? "Myanmar answers" : "English answers"}</span>
+          </div>
+        </aside>
+
+        <Panel
+          className="customer-agent-ask-panel"
+          title="Ask anything about customers"
+          subtitle={`${totalCount.toLocaleString("en-US")} learned profiles · Last learned ${formatDate(lastLearnedAt)}${
+            sourceLookbackDays ? ` · ${sourceLookbackDays} day lookback` : ""
+          }`}
+          action={<span className="status-pill status-pill--positive">Read-only agent</span>}
+        >
+          <div className="customer-agent-ask">
+            <div className="customer-agent-ask__composer">
+              <input
+                type="text"
+                value={question}
+                onChange={(event) => setQuestion(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && question.trim() && busyAction === null) {
+                    void handleAsk();
+                  }
+                }}
+                placeholder="Ask anything about customers..."
+              />
+              <button className="button button--primary" type="button" onClick={() => void handleAsk()} disabled={busyAction !== null || !question.trim()}>
+                {busyAction === "ask" ? "Asking..." : "Ask"}
+              </button>
+            </div>
+            <div className="customer-agent-ask__suggestions" aria-label="Suggested questions">
+              <strong>Suggested questions:</strong>
+              <div>
+                {SUGGESTED_QUESTIONS.map((suggestion) => (
+                  <button key={suggestion.label} type="button" onClick={() => setQuestion(suggestion.question)}>
+                    {suggestion.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-      </Panel>
+        </Panel>
+      </div>
 
       {agentResponse ? (
         <Panel
