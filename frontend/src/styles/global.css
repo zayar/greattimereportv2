@@ -6701,6 +6701,11 @@ a {
   min-height: 250px;
 }
 
+.customer-agent-ask-panel--answered .panel__body {
+  align-content: start;
+  min-height: auto;
+}
+
 .customer-agent-ask-panel .customer-agent-ask {
   gap: 22px;
 }
@@ -6785,6 +6790,50 @@ a {
   color: #111827;
   font-size: 1.05rem;
   line-height: 1.7;
+}
+
+.customer-agent-answer--inline {
+  gap: 16px;
+  margin-top: 4px;
+  padding-top: 20px;
+  border-top: 1px solid rgba(17, 24, 39, 0.07);
+}
+
+.customer-agent-answer__topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.customer-agent-answer__topline > div:first-child {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.customer-agent-answer__eyebrow {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.customer-agent-answer__topline strong {
+  color: #111827;
+  font-size: 1.05rem;
+}
+
+.customer-agent-answer__grid {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) minmax(220px, 0.85fr) minmax(240px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.customer-agent-answer__grid .customer-agent-answer__block {
+  max-width: none;
 }
 
 .customer-agent-answer__block {
@@ -9895,6 +9944,7 @@ a {
   .service-detail__customer-grid,
   .customer-agent-console,
   .customer-agent-why,
+  .customer-agent-answer__grid,
   .customer-agent-evidence__metrics,
   .customer-agent-evidence__journey {
     grid-template-columns: 1fr;
@@ -10124,6 +10174,7 @@ a {
 
   .entity-inspector__header,
   .entity-inspector__actions,
+  .customer-agent-answer__topline,
   .customer-agent-chat__header,
   .customer-agent-chat__controls,
   .customer-quick-panel__identity {

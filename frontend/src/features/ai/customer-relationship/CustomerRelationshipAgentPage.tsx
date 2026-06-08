@@ -512,7 +512,7 @@ export function CustomerRelationshipAgentPage() {
         </aside>
 
         <Panel
-          className="customer-agent-ask-panel"
+          className={`customer-agent-ask-panel ${agentResponse ? "customer-agent-ask-panel--answered" : ""}`.trim()}
           title="Ask anything about customers"
           subtitle={`${totalCount.toLocaleString("en-US")} learned profiles · Last learned ${formatDate(lastLearnedAt)}${
             sourceLookbackDays ? ` · ${sourceLookbackDays} day lookback` : ""
@@ -546,66 +546,66 @@ export function CustomerRelationshipAgentPage() {
                 ))}
               </div>
             </div>
+            {agentResponse ? (
+              <div className="customer-agent-answer customer-agent-answer--inline">
+                <div className="customer-agent-answer__topline">
+                  <div>
+                    <span className="customer-agent-answer__eyebrow">AI Answer</span>
+                    <strong>Asked: {lastAskedQuestion}</strong>
+                  </div>
+                  <div className="customer-agent-answer__badges">
+                    <span className="status-pill status-pill--neutral">{agentResponse.detectedIntent.replace(/_/g, " ")}</span>
+                    <span className="status-pill status-pill--positive">{agentResponse.matchedCount.toLocaleString("en-US")} matches</span>
+                    {agentResponse.usedFallback ? <span className="status-pill status-pill--attention">Fallback summary</span> : null}
+                  </div>
+                </div>
+                <p className="customer-agent-answer__summary">{agentResponse.answerSummary}</p>
+                <div className="customer-agent-answer__grid">
+                  {agentResponse.reasonBullets.length ? (
+                    <div className="customer-agent-answer__block">
+                      <strong>Why these customers need attention</strong>
+                      <ul>
+                        {agentResponse.reasonBullets.map((reason) => (
+                          <li key={reason}>{reason}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+                  {agentResponse.evidenceNarrative ? (
+                    <div className="customer-agent-answer__block">
+                      <strong>Evidence narrative</strong>
+                      <p>{agentResponse.evidenceNarrative}</p>
+                    </div>
+                  ) : null}
+                  {agentResponse.recommendedActions.length ? (
+                    <div className="customer-agent-answer__block">
+                      <strong>Recommended actions</strong>
+                      <ol>
+                        {agentResponse.recommendedActions.map((action) => (
+                          <li key={action}>{action}</li>
+                        ))}
+                      </ol>
+                    </div>
+                  ) : null}
+                </div>
+                {(agentResponse.nextQuestionSuggestions ?? agentResponse.suggestions ?? []).length ? (
+                  <div className="customer-agent-ask__suggestions customer-agent-ask__suggestions--inline">
+                    <strong>Next questions:</strong>
+                    <div>
+                      {(agentResponse.nextQuestionSuggestions ?? agentResponse.suggestions ?? []).map((suggestion) => (
+                        <button key={suggestion} type="button" onClick={() => setQuestion(suggestion)}>
+                          {suggestion}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                <small>{agentResponse.dataFreshnessNote}</small>
+              </div>
+            ) : null}
           </div>
         </Panel>
       </div>
-
-      {agentResponse ? (
-        <Panel
-          title="AI Answer"
-          subtitle={`Asked: ${lastAskedQuestion}`}
-          action={
-            <div className="customer-agent-answer__badges">
-              <span className="status-pill status-pill--neutral">{agentResponse.detectedIntent.replace(/_/g, " ")}</span>
-              <span className="status-pill status-pill--positive">{agentResponse.matchedCount.toLocaleString("en-US")} matches</span>
-              {agentResponse.usedFallback ? <span className="status-pill status-pill--attention">Fallback summary</span> : null}
-            </div>
-          }
-        >
-          <div className="customer-agent-answer">
-            <p className="customer-agent-answer__summary">{agentResponse.answerSummary}</p>
-            {agentResponse.reasonBullets.length ? (
-              <div className="customer-agent-answer__block">
-                <strong>Why these customers need attention</strong>
-                <ul>
-                  {agentResponse.reasonBullets.map((reason) => (
-                    <li key={reason}>{reason}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            {agentResponse.evidenceNarrative ? (
-              <div className="customer-agent-answer__block">
-                <strong>Evidence narrative</strong>
-                <p>{agentResponse.evidenceNarrative}</p>
-              </div>
-            ) : null}
-            {agentResponse.recommendedActions.length ? (
-              <div className="customer-agent-answer__block">
-                <strong>Recommended actions</strong>
-                <ol>
-                  {agentResponse.recommendedActions.map((action) => (
-                    <li key={action}>{action}</li>
-                  ))}
-                </ol>
-              </div>
-            ) : null}
-            {(agentResponse.nextQuestionSuggestions ?? agentResponse.suggestions ?? []).length ? (
-              <div className="customer-agent-ask__suggestions customer-agent-ask__suggestions--inline">
-                <strong>Next questions:</strong>
-                <div>
-                  {(agentResponse.nextQuestionSuggestions ?? agentResponse.suggestions ?? []).map((suggestion) => (
-                    <button key={suggestion} type="button" onClick={() => setQuestion(suggestion)}>
-                      {suggestion}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            <small>{agentResponse.dataFreshnessNote}</small>
-          </div>
-        </Panel>
-      ) : null}
 
       <Panel
         title="Priority Customers"
