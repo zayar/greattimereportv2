@@ -2636,6 +2636,75 @@ a {
   gap: 14px;
 }
 
+.telegram-routing-matrix,
+.sales-assistant-rules {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid var(--luxe-border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.telegram-routing-matrix__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.telegram-routing-matrix__header strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.telegram-routing-matrix__header span {
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+}
+
+.telegram-routing-matrix__table td small,
+.sales-assistant-rules__checkbox small {
+  display: block;
+  color: var(--ink-muted);
+  line-height: 1.4;
+}
+
+.telegram-routing-matrix__row--selected {
+  outline: 2px solid rgba(29, 119, 93, 0.22);
+  outline-offset: -2px;
+}
+
+.telegram-routing-matrix__pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.telegram-routing-matrix__pill--on {
+  color: #155e48;
+  background: rgba(13, 122, 82, 0.12);
+}
+
+.telegram-routing-matrix__pill--off {
+  color: var(--ink-muted);
+  background: rgba(31, 41, 55, 0.08);
+}
+
+.sales-assistant-rules__checkbox {
+  min-height: 68px;
+  align-items: flex-start;
+}
+
+.sales-assistant-rules__notes {
+  padding: 14px 16px;
+}
+
 .telegram-settings__checkbox-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));

@@ -112,6 +112,15 @@ const TELEGRAM_TARGET_PURPOSE_OPTIONS: Array<{ value: GtGrowthAiTelegramTargetPu
   { value: "other", label: "Other" },
 ];
 
+const REPORT_ROUTING_COLUMNS = [
+  { key: "appointment", label: "Appointment" },
+  { key: "payment", label: "Payment" },
+  { key: "weekly", label: "Weekly" },
+  { key: "owner_ai", label: "AI Owner" },
+  { key: "sales_assistant", label: "Sales Assistant" },
+  { key: "owner_progress", label: "Owner Progress" },
+] as const;
+
 const COMMON_TIMEZONES = [
   "Asia/Yangon",
   "Asia/Bangkok",
@@ -278,6 +287,35 @@ function formatReportTitle(reportType: TelegramReportType) {
       return "Weekly Summary Report";
     default:
       return "Today Appointment Report";
+  }
+}
+
+function formatTargetPurposeLabel(value: GtGrowthAiTelegramTargetPurpose) {
+  return TELEGRAM_TARGET_PURPOSE_OPTIONS.find((option) => option.value === value)?.label ?? "Other";
+}
+
+function getRoutingCell(target: TelegramTargetStatus, key: (typeof REPORT_ROUTING_COLUMNS)[number]["key"]) {
+  switch (key) {
+    case "appointment":
+      return { enabled: target.isTodayAppointmentReportEnabled, time: target.reportTime };
+    case "payment":
+      return { enabled: target.isTodayPaymentReportEnabled, time: target.paymentReportTime };
+    case "weekly":
+      return {
+        enabled: target.isWeeklySummaryReportEnabled,
+        time: `${target.weeklySummaryDayOfWeek.slice(0, 3)} ${target.weeklySummaryReportTime}`,
+      };
+    case "owner_ai":
+      return { enabled: target.isOwnerAiReportEnabled, time: target.ownerAiReportTime };
+    case "sales_assistant":
+      return { enabled: target.isGtGrowthAiSalesAssistantEnabled, time: target.gtGrowthAiSalesAssistantTime };
+    case "owner_progress":
+      return {
+        enabled: target.isGtGrowthAiOwnerProgressSummaryEnabled,
+        time: target.gtGrowthAiOwnerProgressSummaryTime,
+      };
+    default:
+      return { enabled: false, time: "" };
   }
 }
 
@@ -788,10 +826,11 @@ export function TelegramSettingsPage() {
         clinicId: activeClinic.id,
         clinicCode: activeClinic.code,
         clinicName: activeClinic.name,
-        targetPurpose: "sales_lead",
+        targetPurpose: selectedDraft.targetPurpose,
+        targetChatId: selectedTarget.telegramChatId,
       });
       setNotice(
-        `GT Growth AI Sales Assistant sent ${result.actionCount} tasks to ${result.salesTargetLabel}.`,
+        `GT Growth AI Sales Assistant sent ${result.actionCount} task${result.actionCount === 1 ? "" : "s"} to ${result.salesTargetLabel}. Check that Telegram chat, or send /tasks there to refresh.`,
       );
       await loadStatus(false);
     } catch (error) {
@@ -987,6 +1026,68 @@ export function TelegramSettingsPage() {
                 </strong>
                 <small>Each linked target can receive its own report mix and send time.</small>
               </article>
+            </div>
+          ) : null}
+
+          {status?.linkedTargets.length ? (
+            <div className="telegram-routing-matrix">
+              <div className="telegram-routing-matrix__header">
+                <div>
+                  <strong>Report routing</strong>
+                  <span>Choose a target, then enable which reports that target should receive below.</span>
+                </div>
+              </div>
+              <div className="table-wrap">
+                <table className="data-table telegram-routing-matrix__table">
+                  <thead>
+                    <tr>
+                      <th>Target</th>
+                      <th>Purpose</th>
+                      {REPORT_ROUTING_COLUMNS.map((column) => (
+                        <th key={column.key}>{column.label}</th>
+                      ))}
+                      <th>Manage</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {status.linkedTargets.map((target) => (
+                      <tr
+                        key={target.telegramChatId ?? target.targetLabel}
+                        className={target.telegramChatId === selectedTarget?.telegramChatId ? "telegram-routing-matrix__row--selected" : ""}
+                      >
+                        <td>
+                          <strong>{target.targetLabel}</strong>
+                          <small>{target.telegramChatType ?? "chat"}</small>
+                        </td>
+                        <td>{formatTargetPurposeLabel(target.targetPurpose)}</td>
+                        {REPORT_ROUTING_COLUMNS.map((column) => {
+                          const cell = getRoutingCell(target, column.key);
+                          return (
+                            <td key={`${target.telegramChatId}-${column.key}`}>
+                              <span
+                                className={`telegram-routing-matrix__pill ${
+                                  cell.enabled ? "telegram-routing-matrix__pill--on" : "telegram-routing-matrix__pill--off"
+                                }`}
+                              >
+                                {cell.enabled ? cell.time : "Off"}
+                              </span>
+                            </td>
+                          );
+                        })}
+                        <td>
+                          <button
+                            className="button telegram-settings__button telegram-settings__button--secondary"
+                            onClick={() => setSelectedChatId(target.telegramChatId)}
+                            disabled={!target.telegramChatId}
+                          >
+                            Manage
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           ) : null}
 

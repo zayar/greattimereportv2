@@ -3,6 +3,7 @@ import { env } from "../../config/env.js";
 import { firestoreDb } from "../../config/firebase.js";
 import { GT_GROWTH_AI_FEATURE_GATE } from "../../types/report-ai.js";
 import {
+  gtGrowthAiSalesActionTypes,
   gtGrowthAiSalesActionStatuses,
   type GtGrowthAiActionPriority,
   type GtGrowthAiSalesAction,
@@ -10,8 +11,11 @@ import {
   type GtGrowthAiSalesActionStatus,
   type GtGrowthAiSalesActionType,
   type GtGrowthAiSalesActionUpdateStatus,
+  type GtGrowthAiSalesAssistantLanguage,
   type GtGrowthAiSalesAssistantProgress,
   type GtGrowthAiSalesAssistantResponse,
+  type GtGrowthAiSalesAssistantSettings,
+  type GtGrowthAiSalesAssistantSettingsResponse,
   type GtGrowthAiSalesAssistantSummary,
   type GtGrowthAiTelegramTargetPurpose,
 } from "../../types/gt-growth-ai-sales-assistant.js";
@@ -27,10 +31,26 @@ import type { TelegramTargetStatus } from "../telegram/types.js";
 
 const ACTIONS_COLLECTION = "gt_growth_ai_sales_actions";
 const TASK_SESSIONS_COLLECTION = "gt_growth_ai_telegram_task_sessions";
-const DEFAULT_ACTION_LIMIT = 40;
+const SETTINGS_COLLECTION = "gt_growth_ai_sales_assistant_settings";
+const DEFAULT_ACTION_LIMIT = 15;
 const TELEGRAM_TASK_LIMIT = 10;
 const TASK_SESSION_TTL_HOURS = 20;
 const COMPLETED_STATUSES = new Set(["CHECKOUT", "CHECKED_OUT"]);
+
+const DEFAULT_SALES_ASSISTANT_SETTINGS: Omit<
+  GtGrowthAiSalesAssistantSettings,
+  "clinicId" | "updatedAt" | "updatedByUserId" | "updatedByEmail"
+> = {
+  language: "my-MM",
+  maxTasksPerDay: DEFAULT_ACTION_LIMIT,
+  enabledActionTypes: [...gtGrowthAiSalesActionTypes],
+  minPriorityScore: 0,
+  inactiveVipMinDays: 60,
+  vipMinLifetimeSpend: 1_000_000,
+  packageFollowUpMinInactiveDays: 21,
+  includePaymentFollowUp: true,
+  ownerInstruction: null,
+};
 
 type BuildActionFactsInput = {
   clinicId: string;
@@ -114,6 +134,10 @@ function taskSessionCollection() {
   return firestoreDb().collection(TASK_SESSIONS_COLLECTION);
 }
 
+function settingsCollection() {
+  return firestoreDb().collection(SETTINGS_COLLECTION);
+}
+
 function hashId(value: string) {
   return createHash("sha1").update(value).digest("hex").slice(0, 24);
 }
@@ -176,6 +200,101 @@ function moneyLabel(value: number | null | undefined) {
   }
 
   return `${Math.round(value).toLocaleString("en-US")} MMK`;
+}
+
+function normalizeInteger(value: unknown, fallback: number, min: number, max: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, Math.round(parsed)));
+}
+
+function normalizeSalesAssistantLanguage(
+  value: unknown,
+  fallback: GtGrowthAiSalesAssistantLanguage = DEFAULT_SALES_ASSISTANT_SETTINGS.language,
+) {
+  return value === "my-MM" || value === "en-US" ? value : fallback;
+}
+
+function normalizeEnabledActionTypes(
+  value: unknown,
+  fallback: GtGrowthAiSalesActionType[] = DEFAULT_SALES_ASSISTANT_SETTINGS.enabledActionTypes,
+) {
+  if (!Array.isArray(value)) {
+    return [...fallback];
+  }
+
+  const normalized = value.filter((item): item is GtGrowthAiSalesActionType =>
+    gtGrowthAiSalesActionTypes.includes(item as GtGrowthAiSalesActionType),
+  );
+
+  return normalized.length > 0 ? [...new Set(normalized)] : [...fallback];
+}
+
+function normalizeOwnerInstruction(value: unknown, fallback: string | null = null) {
+  if (value === null) {
+    return null;
+  }
+
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const text = value.trim().slice(0, 500);
+  return text || null;
+}
+
+function buildDefaultSalesAssistantSettings(clinicId: string): GtGrowthAiSalesAssistantSettings {
+  return {
+    clinicId,
+    ...DEFAULT_SALES_ASSISTANT_SETTINGS,
+    updatedAt: null,
+    updatedByUserId: null,
+    updatedByEmail: null,
+  };
+}
+
+function normalizeSalesAssistantSettings(
+  clinicId: string,
+  data: Record<string, unknown> | undefined,
+): GtGrowthAiSalesAssistantSettings {
+  const defaults = buildDefaultSalesAssistantSettings(clinicId);
+
+  if (!data) {
+    return defaults;
+  }
+
+  const includePaymentFollowUp =
+    typeof data.includePaymentFollowUp === "boolean" ? data.includePaymentFollowUp : defaults.includePaymentFollowUp;
+  const fallbackActionTypes = includePaymentFollowUp
+    ? defaults.enabledActionTypes
+    : defaults.enabledActionTypes.filter((type) => type !== "payment_follow_up");
+  const enabledActionTypes = normalizeEnabledActionTypes(data.enabledActionTypes, defaults.enabledActionTypes).filter(
+    (type) => includePaymentFollowUp || type !== "payment_follow_up",
+  );
+
+  return {
+    clinicId,
+    language: normalizeSalesAssistantLanguage(data.language, defaults.language),
+    maxTasksPerDay: normalizeInteger(data.maxTasksPerDay, defaults.maxTasksPerDay, 1, 50),
+    enabledActionTypes: enabledActionTypes.length > 0 ? enabledActionTypes : fallbackActionTypes,
+    minPriorityScore: normalizeInteger(data.minPriorityScore, defaults.minPriorityScore, 0, 100),
+    inactiveVipMinDays: normalizeInteger(data.inactiveVipMinDays, defaults.inactiveVipMinDays, 7, 365),
+    vipMinLifetimeSpend: normalizeInteger(data.vipMinLifetimeSpend, defaults.vipMinLifetimeSpend, 0, 500_000_000),
+    packageFollowUpMinInactiveDays: normalizeInteger(
+      data.packageFollowUpMinInactiveDays,
+      defaults.packageFollowUpMinInactiveDays,
+      1,
+      365,
+    ),
+    includePaymentFollowUp,
+    ownerInstruction: normalizeOwnerInstruction(data.ownerInstruction, defaults.ownerInstruction),
+    updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : defaults.updatedAt,
+    updatedByUserId: typeof data.updatedByUserId === "string" ? data.updatedByUserId : defaults.updatedByUserId,
+    updatedByEmail: typeof data.updatedByEmail === "string" ? data.updatedByEmail : defaults.updatedByEmail,
+  };
 }
 
 function stripUndefinedDeep(value: unknown): unknown {
@@ -310,7 +429,23 @@ function buildBaseAction(input: {
   };
 }
 
-export function buildSalesAssistantActionsFromFacts(input: BuildActionFactsInput) {
+function applySalesAssistantSettings(
+  actions: GtGrowthAiSalesAction[],
+  settings: GtGrowthAiSalesAssistantSettings,
+) {
+  return actions
+    .filter((action) => settings.enabledActionTypes.includes(action.actionType))
+    .filter((action) => settings.includePaymentFollowUp || action.actionType !== "payment_follow_up")
+    .filter((action) => action.priorityScore >= settings.minPriorityScore)
+    .sort((left, right) => right.priorityScore - left.priorityScore || left.title.localeCompare(right.title))
+    .slice(0, settings.maxTasksPerDay);
+}
+
+export function buildSalesAssistantActionsFromFacts(
+  input: BuildActionFactsInput,
+  settingsInput?: Partial<GtGrowthAiSalesAssistantSettings>,
+) {
+  const settings = normalizeSalesAssistantSettings(input.clinicId, settingsInput as Record<string, unknown> | undefined);
   const actions: GtGrowthAiSalesAction[] = [];
 
   for (const row of input.completedAppointments ?? []) {
@@ -444,7 +579,6 @@ export function buildSalesAssistantActionsFromFacts(input: BuildActionFactsInput
   for (const row of input.inactiveVipCustomers ?? []) {
     const name = cleanText(row.customerName, "Customer");
     const key = customerKey({ customerName: name, memberId: row.memberId });
-    const estimatedValue = row.averageSpend ?? null;
 
     actions.push(
       buildBaseAction({
@@ -468,7 +602,6 @@ export function buildSalesAssistantActionsFromFacts(input: BuildActionFactsInput
           ...(row.preferredService ? [{ label: "Preferred service", value: row.preferredService }] : []),
           ...(row.preferredTherapist ? [{ label: "Preferred therapist", value: row.preferredTherapist }] : []),
         ],
-        estimatedValue,
         estimatedValueLabel: "High-value customer retention opportunity",
         source: "customer_portal",
         suggestedMessage: {
@@ -523,9 +656,7 @@ export function buildSalesAssistantActionsFromFacts(input: BuildActionFactsInput
     );
   }
 
-  return dedupeActions(actions)
-    .sort((left, right) => right.priorityScore - left.priorityScore || left.title.localeCompare(right.title))
-    .slice(0, DEFAULT_ACTION_LIMIT);
+  return applySalesAssistantSettings(dedupeActions(actions), settings);
 }
 
 function dedupeActions(actions: GtGrowthAiSalesAction[]) {
@@ -711,6 +842,7 @@ async function collectSourceFacts(input: {
   clinicId: string;
   clinicCode: string;
   dateKey: string;
+  settings: GtGrowthAiSalesAssistantSettings;
   authorizationHeader?: string;
 }) {
   const recentFromDate = addDays(input.dateKey, -90);
@@ -797,7 +929,12 @@ async function collectSourceFacts(input: {
 
   if (packageReport.status === "fulfilled") {
     facts.packageFollowUps = packageReport.value.followUpRows
-      .filter((row) => row.remainingUnits > 0 && (row.needsFollowUp || row.daysSinceActivity >= 21))
+      .filter(
+        (row) =>
+          row.remainingUnits > 0 &&
+          (row.needsFollowUp || row.daysSinceActivity >= input.settings.packageFollowUpMinInactiveDays) &&
+          row.daysSinceActivity >= input.settings.packageFollowUpMinInactiveDays,
+      )
       .slice(0, 12)
       .map((row) => ({
         customerName: row.customerName,
@@ -864,7 +1001,11 @@ async function collectSourceFacts(input: {
 
   if (vipReport.status === "fulfilled") {
     facts.inactiveVipCustomers = vipReport.value.rows
-      .filter((row) => (row.daysSinceLastVisit ?? 0) >= 45)
+      .filter(
+        (row) =>
+          (row.daysSinceLastVisit ?? 0) >= input.settings.inactiveVipMinDays &&
+          (row.lifetimeSpend ?? 0) >= input.settings.vipMinLifetimeSpend,
+      )
       .slice(0, 10)
       .map((row) => ({
         customerName: row.customerName,
@@ -879,19 +1020,167 @@ async function collectSourceFacts(input: {
       }));
   }
 
-  facts.paymentFollowUps = (dayPayments?.rows ?? [])
-    .filter((row) => (row.orderBalance ?? 0) > 0 || (row.orderCreditBalance ?? 0) > 0)
-    .map((row) => ({
-      customerName: row.customerName,
-      memberId: row.memberId,
-      invoiceNumber: row.invoiceNumber,
-      outstandingAmount: Math.max(row.orderBalance ?? 0, row.orderCreditBalance ?? 0),
-      paymentStatus: row.paymentStatus,
-      lastPaymentDate: row.dateLabel,
-    }))
-    .slice(0, 10);
+  facts.paymentFollowUps = input.settings.includePaymentFollowUp
+    ? (dayPayments?.rows ?? [])
+        .filter((row) => (row.orderBalance ?? 0) > 0 || (row.orderCreditBalance ?? 0) > 0)
+        .map((row) => ({
+          customerName: row.customerName,
+          memberId: row.memberId,
+          invoiceNumber: row.invoiceNumber,
+          outstandingAmount: Math.max(row.orderBalance ?? 0, row.orderCreditBalance ?? 0),
+          paymentStatus: row.paymentStatus,
+          lastPaymentDate: row.dateLabel,
+        }))
+        .slice(0, 10)
+    : [];
 
   return facts;
+}
+
+export async function getSalesAssistantSettings(input: {
+  clinicId: string;
+}): Promise<GtGrowthAiSalesAssistantSettings> {
+  const snapshot = await settingsCollection().doc(input.clinicId).get();
+  return normalizeSalesAssistantSettings(input.clinicId, snapshot.data());
+}
+
+export async function getSalesAssistantSettingsResponse(input: {
+  clinicId: string;
+}): Promise<GtGrowthAiSalesAssistantSettingsResponse> {
+  const premium = await hasFeatureAccess({
+    clinicId: input.clinicId,
+    feature: GT_GROWTH_AI_FEATURE_GATE,
+  });
+  const settings = await getSalesAssistantSettings({ clinicId: input.clinicId });
+
+  return {
+    premium,
+    settings,
+  };
+}
+
+export async function updateSalesAssistantSettings(input: {
+  clinicId: string;
+  patch: Partial<GtGrowthAiSalesAssistantSettings>;
+  updatedByUserId?: string | null;
+  updatedByEmail?: string | null;
+}) {
+  const current = await getSalesAssistantSettings({ clinicId: input.clinicId });
+  const timestamp = nowIso();
+  const next = normalizeSalesAssistantSettings(input.clinicId, {
+    ...current,
+    ...input.patch,
+    updatedAt: timestamp,
+    updatedByUserId: input.updatedByUserId ?? current.updatedByUserId,
+    updatedByEmail: input.updatedByEmail ?? current.updatedByEmail,
+  });
+
+  await settingsCollection().doc(input.clinicId).set(stripUndefinedDeep(next) as Record<string, unknown>, { merge: true });
+  return next;
+}
+
+function parsePromptNumber(prompt: string, patterns: RegExp[]) {
+  for (const pattern of patterns) {
+    const match = prompt.match(pattern);
+    if (match?.[1]) {
+      const parsed = Number(match[1].replace(/,/g, ""));
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  return null;
+}
+
+export function interpretSalesAssistantInstruction(
+  current: GtGrowthAiSalesAssistantSettings,
+  instruction: string,
+) {
+  const text = instruction.trim();
+  const lower = text.toLowerCase();
+  const patch: Partial<GtGrowthAiSalesAssistantSettings> = {
+    ownerInstruction: text || null,
+  };
+  const notes: string[] = [];
+  const mentionedActionTypes = new Set<GtGrowthAiSalesActionType>();
+
+  if (/\bvip\b|high[-\s]?value|customer\s*retention|အရေးကြီး|vip/i.test(text)) {
+    mentionedActionTypes.add("inactive_vip_follow_up");
+  }
+  if (/package|ပက်ကေ့|package\s*follow/i.test(lower)) {
+    mentionedActionTypes.add("package_usage_follow_up");
+    mentionedActionTypes.add("package_upsell_opportunity");
+  }
+  if (/rebook|booking|appointment|ပြန်ချိန်း|ချိန်း/i.test(text)) {
+    mentionedActionTypes.add("rebooking_opportunity");
+  }
+  if (/payment|invoice|outstanding|partial|ငွေ|ပေးချေ/i.test(text)) {
+    mentionedActionTypes.add("payment_follow_up");
+  }
+
+  if (/only|ပဲ|သာ/i.test(text) && mentionedActionTypes.size > 0) {
+    patch.enabledActionTypes = [...mentionedActionTypes];
+    notes.push("Limited task categories based on the owner instruction.");
+  }
+
+  if (/no payment|exclude payment|without payment|payment မပါ|ငွေ မပါ/i.test(lower)) {
+    patch.includePaymentFollowUp = false;
+    patch.enabledActionTypes = (patch.enabledActionTypes ?? current.enabledActionTypes).filter(
+      (type) => type !== "payment_follow_up",
+    );
+    notes.push("Payment follow-up was turned off.");
+  }
+
+  const taskLimit = parsePromptNumber(text, [
+    /(?:top|only|limit|max|send)\s*(\d{1,2})\s*(?:tasks|customers|people)/i,
+    /(?:top|only|limit|max|send)\s*(\d{1,2})/i,
+    /(\d{1,2})\s*(?:tasks|customers|people|ခု|ယောက်)/i,
+  ]);
+  if (taskLimit != null) {
+    patch.maxTasksPerDay = normalizeInteger(taskLimit, current.maxTasksPerDay, 1, 50);
+    notes.push(`Daily task limit set to ${patch.maxTasksPerDay}.`);
+  }
+
+  const inactiveDays = parsePromptNumber(text, [
+    /inactive\s*(?:over|after|for)?\s*(\d{1,3})\s*days/i,
+    /(\d{1,3})\s*days\s*inactive/i,
+    /(\d{1,3})\s*ရက်/i,
+  ]);
+  if (inactiveDays != null) {
+    patch.inactiveVipMinDays = normalizeInteger(inactiveDays, current.inactiveVipMinDays, 7, 365);
+    patch.packageFollowUpMinInactiveDays = normalizeInteger(inactiveDays, current.packageFollowUpMinInactiveDays, 1, 365);
+    notes.push(`Inactive customer/package threshold set to ${patch.inactiveVipMinDays} days.`);
+  }
+
+  const minimumSpend = parsePromptNumber(text, [
+    /(?:above|over|min(?:imum)?|at least)\s*([0-9,]{5,})/i,
+    /([0-9,]{5,})\s*(?:mmk|ကျပ်|အထက်)/i,
+  ]);
+  if (minimumSpend != null) {
+    patch.vipMinLifetimeSpend = normalizeInteger(minimumSpend, current.vipMinLifetimeSpend, 0, 500_000_000);
+    notes.push(`VIP minimum lifetime spend set to ${moneyLabel(patch.vipMinLifetimeSpend) ?? patch.vipMinLifetimeSpend}.`);
+  }
+
+  if (/english|en-us/i.test(lower)) {
+    patch.language = "en-US";
+    notes.push("Telegram Sales Assistant language set to English.");
+  } else if (/myanmar|burmese|မြန်မာ/i.test(lower)) {
+    patch.language = "my-MM";
+    notes.push("Telegram Sales Assistant language set to Myanmar.");
+  }
+
+  if (notes.length === 0) {
+    notes.push("Instruction saved as guidance. No safe numeric filters were changed.");
+  }
+
+  return {
+    settings: normalizeSalesAssistantSettings(current.clinicId, {
+      ...current,
+      ...patch,
+    }),
+    notes,
+  };
 }
 
 export async function generateSalesAssistantActions(input: {
@@ -901,8 +1190,9 @@ export async function generateSalesAssistantActions(input: {
   forceRefresh?: boolean;
   authorizationHeader?: string;
 }) {
-  const facts = await collectSourceFacts(input);
-  const actions = buildSalesAssistantActionsFromFacts(facts);
+  const settings = await getSalesAssistantSettings({ clinicId: input.clinicId });
+  const facts = await collectSourceFacts({ ...input, settings });
+  const actions = buildSalesAssistantActionsFromFacts(facts, settings);
   return upsertActions(actions, input.forceRefresh);
 }
 
@@ -943,7 +1233,8 @@ export async function getSalesAssistantActionsResponse(input: {
     return buildLockedSalesAssistantResponse(premium);
   }
 
-  const actions = await listSalesAssistantActions(input);
+  const settings = await getSalesAssistantSettings({ clinicId: input.clinicId });
+  const actions = applySalesAssistantSettings(await listSalesAssistantActions(input), settings);
   return {
     premium,
     summary: summarizeSalesAssistantActions(actions),
@@ -1026,7 +1317,8 @@ export async function markSalesAssistantActionsAssigned(input: {
 }
 
 export async function getSalesAssistantProgress(input: { clinicId: string; dateKey: string }) {
-  const actions = await listSalesAssistantActions(input);
+  const settings = await getSalesAssistantSettings({ clinicId: input.clinicId });
+  const actions = applySalesAssistantSettings(await listSalesAssistantActions(input), settings);
   return {
     summary: summarizeSalesAssistantActions(actions),
     progress: summarizeSalesAssistantProgress(actions),
@@ -1077,6 +1369,51 @@ function actionTypeLabel(type: GtGrowthAiSalesActionType) {
   }
 }
 
+function actionTypeLabelMyanmar(type: GtGrowthAiSalesActionType) {
+  switch (type) {
+    case "rebooking_opportunity":
+      return "ပြန်ချိန်းရန်";
+    case "package_usage_follow_up":
+      return "Package အသုံးပြုရန်";
+    case "package_upsell_opportunity":
+      return "Package ရောင်းရန်";
+    case "inactive_vip_follow_up":
+      return "VIP ပြန်ခေါ်ရန်";
+    default:
+      return "Payment Follow-up";
+  }
+}
+
+function actionReasonMyanmar(action: GtGrowthAiSalesAction) {
+  switch (action.actionType) {
+    case "rebooking_opportunity":
+      return "Service ပြီးပြီးချင်း 24-48 နာရီအတွင်း ပြန်ချိန်းလွယ်ပါတယ်။";
+    case "package_usage_follow_up":
+      return "Customer မှာ package session ကျန်နေပြီး မသုံးတာကြာနေပါတယ်။";
+    case "package_upsell_opportunity":
+      return "ဒီ customer က service ကို ထပ်ခါထပ်ခါ သုံးထားလို့ package offer အတွက် သင့်တော်ပါတယ်။";
+    case "inactive_vip_follow_up":
+      return "High-value customer မလာတာကြာနေပြီဖြစ်လို့ relationship မအေးခင် follow-up လိုပါတယ်။";
+    default:
+      return "Outstanding or partial payment ကို closing မတိုင်ခင် follow-up လုပ်သင့်ပါတယ်။";
+  }
+}
+
+function actionRecommendationMyanmar(action: GtGrowthAiSalesAction) {
+  switch (action.actionType) {
+    case "rebooking_opportunity":
+      return "ဒီနေ့/မနက်ဖြန်အတွင်း ဆက်သွယ်ပြီး နောက် appointment ပြန်ချိန်းပါ။";
+    case "package_usage_follow_up":
+      return "ကျန်ရှိတဲ့ package session အတွက် အဆင်ပြေတဲ့အချိန်ကို ချိန်းပေးပါ။";
+    case "package_upsell_opportunity":
+      return "သူအသုံးများတဲ့ service အလိုက် သင့်တော်တဲ့ package option ကိုရှင်းပြပါ။";
+    case "inactive_vip_follow_up":
+      return "Owner သို့မဟုတ် senior sales staff က personal follow-up လုပ်ပါ။";
+    default:
+      return "Finance/owner က payment status ကို confirm လုပ်ပြီး follow-up လုပ်ပါ။";
+  }
+}
+
 function shortCustomerLabel(action: GtGrowthAiSalesAction, includeCustomerDetails: boolean) {
   if (!includeCustomerDetails) {
     return "Customer";
@@ -1089,7 +1426,44 @@ export function formatSalesAssistantTaskMessage(input: {
   actions: GtGrowthAiSalesAction[];
   summary: GtGrowthAiSalesAssistantSummary;
   includeCustomerDetails: boolean;
+  language?: GtGrowthAiSalesAssistantLanguage;
 }) {
+  const language = input.language ?? DEFAULT_SALES_ASSISTANT_SETTINGS.language;
+  if (language === "my-MM") {
+    const lines = [
+      "GT Growth AI — ယနေ့ Sales Tasks",
+      "",
+      `ဒီနေ့လုပ်ရန် task ${Math.min(input.actions.length, TELEGRAM_TASK_LIMIT).toLocaleString("en-US")} ခု / opportunity ${input.summary.totalActions.toLocaleString("en-US")} ခု တွေ့ထားပါတယ်။`,
+    ];
+
+    if (input.summary.estimatedTotalValue != null) {
+      lines.push(`တွက်ချက်ထားသော opportunity: ${moneyLabel(input.summary.estimatedTotalValue)}။`);
+    } else if (input.summary.estimatedTotalValueLabel) {
+      lines.push(`Opportunity: ${input.summary.estimatedTotalValueLabel}။`);
+    }
+
+    lines.push("");
+    input.actions.slice(0, TELEGRAM_TASK_LIMIT).forEach((action, index) => {
+      const number = index + 1;
+      lines.push(`${number}. ${shortCustomerLabel(action, input.includeCustomerDetails)} — ${actionTypeLabelMyanmar(action.actionType)}`);
+      lines.push(`အကြောင်းရင်း: ${actionReasonMyanmar(action)}`);
+      lines.push(`လုပ်ရန်: ${actionRecommendationMyanmar(action)}`);
+      if (action.estimatedValue != null) {
+        lines.push(`တန်ဖိုး: ${moneyLabel(action.estimatedValue)}`);
+      } else if (action.estimatedValueLabel) {
+        lines.push(`တန်ဖိုး: ${action.estimatedValueLabel}`);
+      }
+      lines.push("");
+    });
+
+    lines.push("Reply:");
+    lines.push("C1 = contacted, B1 = booked, P1 = purchased, S1 = skipped");
+    lines.push("M1 = customer message ကိုပြ");
+    lines.push("/tasks = ဒီနေ့ task ပြန်ကြည့်");
+
+    return lines.join("\n").trim();
+  }
+
   const lines = [
     "GT Growth AI — Today's Sales Tasks",
     "",
@@ -1125,7 +1499,23 @@ export function formatSalesAssistantTaskMessage(input: {
 export function formatSalesAssistantOwnerSummary(input: {
   summary: GtGrowthAiSalesAssistantSummary;
   targetLabel?: string | null;
+  language?: GtGrowthAiSalesAssistantLanguage;
 }) {
+  if ((input.language ?? DEFAULT_SALES_ASSISTANT_SETTINGS.language) === "my-MM") {
+    return [
+      `GT Growth AI က ${input.targetLabel || "Sales Lead"} အတွက် follow-up task ${input.summary.totalActions.toLocaleString("en-US")} ခု သတ်မှတ်ထားပါတယ်။`,
+      "",
+      "ဒီနေ့ focus:",
+      `- Rebooking: ${input.summary.rebookingCount}`,
+      `- Package follow-up: ${input.summary.packageUsageCount}`,
+      `- Package upsell: ${input.summary.packageUpsellCount}`,
+      `- VIP follow-up: ${input.summary.inactiveVipCount}`,
+      `- Payment follow-up: ${input.summary.paymentFollowUpCount}`,
+      "",
+      "Progress summary ကို နောက်ပိုင်းမှာ ပို့ပေးပါမယ်။",
+    ].join("\n");
+  }
+
   return [
     `GT Growth AI assigned ${input.summary.totalActions.toLocaleString("en-US")} sales follow-up tasks to ${input.targetLabel || "Sales Lead"}.`,
     "",
@@ -1140,7 +1530,30 @@ export function formatSalesAssistantOwnerSummary(input: {
   ].join("\n");
 }
 
-export function formatSalesAssistantProgressMessage(progress: GtGrowthAiSalesAssistantProgress) {
+export function formatSalesAssistantProgressMessage(
+  progress: GtGrowthAiSalesAssistantProgress,
+  language: GtGrowthAiSalesAssistantLanguage = DEFAULT_SALES_ASSISTANT_SETTINGS.language,
+) {
+  if (language === "my-MM") {
+    return [
+      "GT Growth AI — Follow-up Progress",
+      "",
+      `Assigned: ${progress.assigned}`,
+      `ဆက်သွယ်ပြီး: ${progress.contacted}`,
+      `Reply ရပြီး: ${progress.replied}`,
+      `Booked: ${progress.booked}`,
+      `Purchased: ${progress.purchased}`,
+      `Skipped: ${progress.skipped}`,
+      `Pending: ${progress.pending}`,
+      "",
+      `Handled opportunity: ${
+        progress.estimatedOpportunityHandled != null
+          ? moneyLabel(progress.estimatedOpportunityHandled)
+          : progress.estimatedOpportunityHandledLabel
+      }`,
+    ].join("\n");
+  }
+
   return [
     "GT Growth AI — Follow-up Progress",
     "",
@@ -1212,9 +1625,14 @@ export async function buildSalesAssistantSendPlan(input: {
   clinicName?: string;
   dateKey: string;
   targetPurpose?: GtGrowthAiTelegramTargetPurpose;
+  targetChatId?: string | null;
   authorizationHeader?: string;
 }) {
-  let actions = await listSalesAssistantActions({ clinicId: input.clinicId, dateKey: input.dateKey });
+  const settings = await getSalesAssistantSettings({ clinicId: input.clinicId });
+  let actions = applySalesAssistantSettings(
+    await listSalesAssistantActions({ clinicId: input.clinicId, dateKey: input.dateKey }),
+    settings,
+  );
   if (actions.length === 0) {
     actions = await generateSalesAssistantActions({
       clinicId: input.clinicId,
@@ -1229,7 +1647,10 @@ export async function buildSalesAssistantSendPlan(input: {
     clinicCode: input.clinicCode,
     clinicName: input.clinicName,
   });
-  const salesTarget = pickTarget(status.linkedTargets, input.targetPurpose ?? "sales_lead");
+  const explicitTarget = input.targetChatId
+    ? status.linkedTargets.find((target) => target.telegramChatId === input.targetChatId)
+    : null;
+  const salesTarget = explicitTarget ?? pickTarget(status.linkedTargets, input.targetPurpose ?? "sales_lead");
   const ownerTarget = pickTarget(status.linkedTargets, "owner_group");
   const summary = summarizeSalesAssistantActions(actions);
   const includeCustomerDetails = salesTarget?.telegramChatType === "private";
@@ -1246,16 +1667,19 @@ export async function buildSalesAssistantSendPlan(input: {
             actions,
             summary,
             includeCustomerDetails,
+            language: settings.language,
           })
         : formatSalesAssistantOwnerSummary({
             summary,
             targetLabel: salesTarget.targetLabel,
+            language: settings.language,
           })
       : null,
     ownerMessage: ownerTarget?.telegramChatId
       ? formatSalesAssistantOwnerSummary({
           summary,
           targetLabel: salesTarget?.targetLabel,
+          language: settings.language,
         })
       : null,
   } satisfies SendPlan;
@@ -1318,7 +1742,8 @@ export async function buildTelegramSalesAssistantReply(input: {
   const trimmed = input.text.trim();
 
   if (/^\/tasks(?:@\w+)?$/i.test(trimmed) || /^\/today(?:@\w+)?$/i.test(trimmed)) {
-    let actions = await listSalesAssistantActions({ clinicId: target.clinicId, dateKey });
+    const settings = await getSalesAssistantSettings({ clinicId: target.clinicId });
+    let actions = applySalesAssistantSettings(await listSalesAssistantActions({ clinicId: target.clinicId, dateKey }), settings);
     if (actions.length === 0) {
       actions = await generateSalesAssistantActions({
         clinicId: target.clinicId,
@@ -1330,6 +1755,7 @@ export async function buildTelegramSalesAssistantReply(input: {
       return formatSalesAssistantOwnerSummary({
         summary: summarizeSalesAssistantActions(actions),
         targetLabel: target.targetLabel,
+        language: settings.language,
       });
     }
     await createTelegramTaskSession({
@@ -1342,6 +1768,7 @@ export async function buildTelegramSalesAssistantReply(input: {
       actions,
       summary: summarizeSalesAssistantActions(actions),
       includeCustomerDetails: target.telegramChatType === "private",
+      language: settings.language,
     });
   }
 

@@ -51,6 +51,7 @@ export type GtGrowthAiTelegramTargetPurpose =
   | "finance"
   | "manager"
   | "other";
+export type GtGrowthAiSalesAssistantLanguage = "my-MM" | "en-US";
 export type TelegramWeeklySummaryDayOfWeek =
   | "monday"
   | "tuesday"
@@ -256,6 +257,22 @@ export interface ReportBusinessOpportunity {
   confidence: ReportAiConfidence;
   evidence: ReportAiEvidenceItem[];
   recommendedAction: string;
+}
+
+export interface GtGrowthAiSalesAssistantSettings {
+  clinicId: string;
+  language: GtGrowthAiSalesAssistantLanguage;
+  maxTasksPerDay: number;
+  enabledActionTypes: GtGrowthAiSalesActionType[];
+  minPriorityScore: number;
+  inactiveVipMinDays: number;
+  vipMinLifetimeSpend: number;
+  packageFollowUpMinInactiveDays: number;
+  includePaymentFollowUp: boolean;
+  ownerInstruction: string | null;
+  updatedAt: string | null;
+  updatedByUserId: string | null;
+  updatedByEmail: string | null;
 }
 
 export interface ReportPremiumAccess {

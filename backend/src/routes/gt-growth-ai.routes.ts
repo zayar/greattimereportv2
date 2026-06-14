@@ -14,9 +14,13 @@ import {
   generateSalesAssistantActions,
   getSalesAssistantActionsResponse,
   getSalesAssistantProgress,
+  getSalesAssistantSettings,
+  getSalesAssistantSettingsResponse,
+  interpretSalesAssistantInstruction,
   markSalesAssistantActionsAssigned,
   normalizeSalesAssistantDateKey,
   requireSalesAssistantPremium,
+  updateSalesAssistantSettings,
   updateSalesAssistantActionStatus,
 } from "../services/gt-growth-ai/sales-assistant.service.js";
 import { sendTelegramMessage } from "../services/telegram/bot.service.js";
@@ -48,6 +52,25 @@ const sendSchema = z.object({
   clinicName: z.string().optional(),
   dateKey: dateKeySchema.optional(),
   targetPurpose: z.enum(gtGrowthAiTelegramTargetPurposes).optional(),
+  targetChatId: z.string().min(1).optional(),
+});
+
+const salesAssistantSettingsSchema = z.object({
+  clinicId: z.string().min(1),
+  language: z.enum(["my-MM", "en-US"]).optional(),
+  maxTasksPerDay: z.number().int().min(1).max(50).optional(),
+  enabledActionTypes: z.array(z.enum(gtGrowthAiSalesActionTypes)).min(1).max(gtGrowthAiSalesActionTypes.length).optional(),
+  minPriorityScore: z.number().int().min(0).max(100).optional(),
+  inactiveVipMinDays: z.number().int().min(7).max(365).optional(),
+  vipMinLifetimeSpend: z.number().int().min(0).max(500_000_000).optional(),
+  packageFollowUpMinInactiveDays: z.number().int().min(1).max(365).optional(),
+  includePaymentFollowUp: z.boolean().optional(),
+  ownerInstruction: z.string().max(500).nullable().optional(),
+});
+
+const salesAssistantInstructionSchema = z.object({
+  clinicId: z.string().min(1),
+  instruction: z.string().max(500),
 });
 
 const statusUpdateSchema = z.object({
@@ -81,6 +104,65 @@ router.get(
     });
 
     res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/sales-assistant/settings",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = salesAssistantQuerySchema.pick({ clinicId: true }).parse(req.query);
+    const data = await getSalesAssistantSettingsResponse({
+      clinicId: params.clinicId,
+    });
+
+    res.json({ success: true, data });
+  }),
+);
+
+router.put(
+  "/sales-assistant/settings",
+  requireClinicAccess("body", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = salesAssistantSettingsSchema.parse(req.body);
+
+    try {
+      const premium = await requireSalesAssistantPremium(params.clinicId);
+      const settings = await updateSalesAssistantSettings({
+        clinicId: params.clinicId,
+        patch: params,
+        updatedByUserId: req.user?.userId ?? req.user?.uid ?? null,
+        updatedByEmail: req.user?.email ?? null,
+      });
+
+      res.json({ success: true, data: { premium, settings } });
+    } catch (error) {
+      mapLockedError(error);
+    }
+  }),
+);
+
+router.post(
+  "/sales-assistant/settings/interpret",
+  requireClinicAccess("body", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = salesAssistantInstructionSchema.parse(req.body);
+
+    try {
+      const premium = await requireSalesAssistantPremium(params.clinicId);
+      const current = await getSalesAssistantSettings({ clinicId: params.clinicId });
+      const interpreted = interpretSalesAssistantInstruction(current, params.instruction);
+      const settings = await updateSalesAssistantSettings({
+        clinicId: params.clinicId,
+        patch: interpreted.settings,
+        updatedByUserId: req.user?.userId ?? req.user?.uid ?? null,
+        updatedByEmail: req.user?.email ?? null,
+      });
+
+      res.json({ success: true, data: { premium, settings, promptNotes: interpreted.notes } });
+    } catch (error) {
+      mapLockedError(error);
+    }
   }),
 );
 
@@ -134,6 +216,7 @@ router.post(
         clinicName: params.clinicName,
         dateKey,
         targetPurpose: params.targetPurpose,
+        targetChatId: params.targetChatId,
         authorizationHeader: req.headers.authorization,
       });
 
@@ -164,6 +247,8 @@ router.post(
           dateKey,
           sentToSalesLead: true,
           salesTargetLabel: plan.salesTarget.targetLabel,
+          salesTargetChatType: plan.salesTarget.telegramChatType,
+          salesTargetPurpose: plan.salesTarget.targetPurpose,
           sentOwnerSummary: Boolean(plan.ownerTarget?.telegramChatId && plan.ownerMessage),
           ownerTargetLabel: plan.ownerTarget?.targetLabel ?? null,
           summary: plan.summary,

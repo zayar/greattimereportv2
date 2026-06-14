@@ -10,6 +10,8 @@ export const gtGrowthAiSalesActionTypes = [
 
 export type GtGrowthAiSalesActionType = (typeof gtGrowthAiSalesActionTypes)[number];
 
+export type GtGrowthAiSalesAssistantLanguage = "my-MM" | "en-US";
+
 export const gtGrowthAiSalesActionStatuses = [
   "new",
   "assigned",
@@ -120,6 +122,28 @@ export interface GtGrowthAiSalesAssistantSummary {
   estimatedTotalValue?: number;
   estimatedTotalValueLabel?: string;
   currency?: "MMK";
+}
+
+export interface GtGrowthAiSalesAssistantSettings {
+  clinicId: string;
+  language: GtGrowthAiSalesAssistantLanguage;
+  maxTasksPerDay: number;
+  enabledActionTypes: GtGrowthAiSalesActionType[];
+  minPriorityScore: number;
+  inactiveVipMinDays: number;
+  vipMinLifetimeSpend: number;
+  packageFollowUpMinInactiveDays: number;
+  includePaymentFollowUp: boolean;
+  ownerInstruction: string | null;
+  updatedAt: string | null;
+  updatedByUserId: string | null;
+  updatedByEmail: string | null;
+}
+
+export interface GtGrowthAiSalesAssistantSettingsResponse {
+  premium: ReportPremiumAccess;
+  settings: GtGrowthAiSalesAssistantSettings;
+  promptNotes?: string[];
 }
 
 export interface GtGrowthAiSalesAssistantProgress {

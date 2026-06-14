@@ -12,6 +12,7 @@ import {
   createTelegramTaskSession,
   formatSalesAssistantProgressMessage,
   getSalesAssistantProgress,
+  getSalesAssistantSettings,
   markSalesAssistantActionsAssigned,
   requireSalesAssistantPremium,
 } from "../gt-growth-ai/sales-assistant.service.js";
@@ -310,6 +311,7 @@ async function maybeSendScheduledSalesAssistant(
       clinicName: record.clinicName,
       dateKey,
       targetPurpose: "sales_lead",
+      targetChatId: record.telegramChatId,
     });
 
     if (!plan.salesTarget?.telegramChatId || !plan.salesMessage) {
@@ -391,7 +393,8 @@ async function maybeSendScheduledOwnerProgress(
       clinicId: record.clinicId,
       dateKey,
     });
-    await sendTelegramMessage(record.telegramChatId, formatSalesAssistantProgressMessage(progress.progress));
+    const settings = await getSalesAssistantSettings({ clinicId: record.clinicId });
+    await sendTelegramMessage(record.telegramChatId, formatSalesAssistantProgressMessage(progress.progress, settings.language));
     await markTelegramScheduleLockSent(lockId, new Date().toISOString());
     summary.sentReports += 1;
     console.log(

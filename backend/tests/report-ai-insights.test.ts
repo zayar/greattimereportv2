@@ -26,6 +26,7 @@ const {
   buildSalesAssistantActionsFromFacts,
   calculateSalesAssistantPriorityScore,
   formatSalesAssistantTaskMessage,
+  interpretSalesAssistantInstruction,
   summarizeSalesAssistantActions,
 } = await import("../src/services/gt-growth-ai/sales-assistant.service.ts");
 
@@ -395,7 +396,85 @@ test("GT Growth AI Sales Assistant builds deterministic money-making actions", (
   assert.equal(summary.packageUpsellCount, 1);
   assert.equal(summary.inactiveVipCount, 1);
   assert.equal(summary.paymentFollowUpCount, 1);
-  assert.equal(summary.estimatedTotalValue, 1_700_000);
+  assert.equal(summary.estimatedTotalValue, 1_000_000);
+});
+
+test("GT Growth AI Sales Assistant rules filter categories and task limits deterministically", () => {
+  const actions = buildSalesAssistantActionsFromFacts(
+    {
+      clinicId: "clinic-premium",
+      dateKey: "2026-06-14",
+      completedAppointments: [
+        { customerName: "Daw Mya", customerPhone: "09999991234", serviceName: "Thai Massage", paymentAmount: 450_000 },
+      ],
+      packageUpsells: [
+        {
+          customerName: "Ma Nilar",
+          recentVisitCount: 3,
+          recentSpend: 900_000,
+          repeatedService: "Facial",
+          averageInvoiceValue: 300_000,
+        },
+      ],
+      paymentFollowUps: [
+        {
+          customerName: "Ko Tun",
+          invoiceNumber: "SO-1001",
+          outstandingAmount: 250_000,
+          paymentStatus: "Partial",
+        },
+      ],
+    },
+    {
+      clinicId: "clinic-premium",
+      enabledActionTypes: ["payment_follow_up"],
+      includePaymentFollowUp: true,
+      maxTasksPerDay: 1,
+    },
+  );
+
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].actionType, "payment_follow_up");
+});
+
+test("GT Growth AI Sales Assistant interprets owner condition into safe settings only", () => {
+  const current = {
+    clinicId: "clinic-premium",
+    language: "my-MM" as const,
+    maxTasksPerDay: 15,
+    enabledActionTypes: [
+      "rebooking_opportunity",
+      "package_usage_follow_up",
+      "package_upsell_opportunity",
+      "inactive_vip_follow_up",
+      "payment_follow_up",
+    ] as const,
+    minPriorityScore: 0,
+    inactiveVipMinDays: 60,
+    vipMinLifetimeSpend: 1_000_000,
+    packageFollowUpMinInactiveDays: 21,
+    includePaymentFollowUp: true,
+    ownerInstruction: null,
+    updatedAt: null,
+    updatedByUserId: null,
+    updatedByEmail: null,
+  };
+
+  const interpreted = interpretSalesAssistantInstruction(
+    current,
+    "Only send top 8 VIP and package tasks. VIP inactive over 90 days and above 2,000,000 MMK. No payment follow-up.",
+  );
+
+  assert.equal(interpreted.settings.maxTasksPerDay, 8);
+  assert.equal(interpreted.settings.inactiveVipMinDays, 90);
+  assert.equal(interpreted.settings.packageFollowUpMinInactiveDays, 90);
+  assert.equal(interpreted.settings.vipMinLifetimeSpend, 2_000_000);
+  assert.equal(interpreted.settings.includePaymentFollowUp, false);
+  assert.deepEqual(
+    interpreted.settings.enabledActionTypes.sort(),
+    ["inactive_vip_follow_up", "package_usage_follow_up", "package_upsell_opportunity"].sort(),
+  );
+  assert.ok(interpreted.notes.length > 0);
 });
 
 test("GT Growth AI Sales Assistant dedupes repeated action facts", () => {
