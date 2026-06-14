@@ -5,6 +5,7 @@ import aiRoutes from "./ai.routes.js";
 import apicoreRoutes from "./apicore.routes.js";
 import telegramRoutes from "./telegram.routes.js";
 import commissionRoutes from "./commission.routes.js";
+import featuresRoutes from "./features.routes.js";
 
 const router = Router();
 
@@ -24,5 +25,6 @@ router.use("/analytics", analyticsRoutes);
 router.use("/ai", aiRoutes);
 router.use("/integrations/telegram", telegramRoutes);
 router.use("/commission", commissionRoutes);
+router.use("/features", featuresRoutes);
 
 export default router;

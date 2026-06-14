@@ -3,6 +3,7 @@ import test from "node:test";
 
 process.env.APICORE_GRAPHQL_URL ??= "https://example.com/graphql";
 process.env.GT_GROWTH_AI_ENABLED_CLINIC_IDS ??= "clinic-premium";
+process.env.GT_GROWTH_AI_FEATURE_STORE_ENABLED ??= "false";
 
 const {
   buildAppointmentReportAiPayload,

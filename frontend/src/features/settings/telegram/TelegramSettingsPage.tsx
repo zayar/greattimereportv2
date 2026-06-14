@@ -12,8 +12,13 @@ import {
   sendTelegramTestReport,
   unlinkTelegramIntegration,
 } from "../../../api/telegram";
+import {
+  fetchGtGrowthAiFeatureAccess,
+  saveGtGrowthAiFeatureAccess,
+} from "../../../api/features";
 import type {
   AiLanguage,
+  ClinicFeatureAccessStatus,
   TelegramDeliveryLogEntry,
   TelegramIntegrationStatus,
   TelegramOwnerAiFocusArea,
@@ -26,6 +31,7 @@ import type {
 import { useAccess } from "../../access/AccessProvider";
 
 type BusyAction = "load" | "link" | "save" | "unlink" | "test" | "resend" | null;
+type FeatureBusyAction = "save_gt_growth_ai" | null;
 
 type TargetDraft = {
   appointmentEnabled: boolean;
@@ -257,6 +263,35 @@ function formatReportTitle(reportType: TelegramReportType) {
   }
 }
 
+function formatFeatureAccessSource(source: ClinicFeatureAccessStatus["source"] | undefined) {
+  switch (source) {
+    case "environment":
+      return "Enabled by Cloud Run env";
+    case "clinic_setting":
+      return "Clinic setting";
+    case "default_locked":
+      return "Locked by default";
+    default:
+      return "Loading";
+  }
+}
+
+function buildUnavailableGtGrowthAiAccess(clinicId: string): ClinicFeatureAccessStatus {
+  return {
+    clinicId,
+    feature: "gt_growth_ai",
+    enabled: false,
+    source: "default_locked",
+    title: "Unlock GT Growth AI",
+    message: "AI insights and recommended actions are available with GT Growth AI.",
+    upgradeMessage: "Upgrade to see AI recommendations.",
+    lockedReason: "GT Growth AI access could not be checked.",
+    updatedAt: null,
+    updatedByUserId: null,
+    updatedByEmail: null,
+  };
+}
+
 export function TelegramSettingsPage() {
   const { currentClinic } = useAccess();
   const clinic = currentClinic;
@@ -267,6 +302,9 @@ export function TelegramSettingsPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [draftsByChatId, setDraftsByChatId] = useState<Record<string, TargetDraft>>({});
+  const [gtGrowthAiAccess, setGtGrowthAiAccess] = useState<ClinicFeatureAccessStatus | null>(null);
+  const [gtGrowthAiEnabledDraft, setGtGrowthAiEnabledDraft] = useState(false);
+  const [featureBusyAction, setFeatureBusyAction] = useState<FeatureBusyAction>(null);
   const [isQrOpen, setIsQrOpen] = useState(false);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
   const [qrError, setQrError] = useState<string | null>(null);
@@ -285,12 +323,21 @@ export function TelegramSettingsPage() {
 
       try {
         setErrorMessage(null);
-        const nextStatus = await fetchTelegramIntegrationStatus({
-          clinicId: clinic.id,
-          clinicCode: clinic.code,
-          clinicName: clinic.name,
-        });
+        const [nextStatus, nextFeatureAccess] = await Promise.all([
+          fetchTelegramIntegrationStatus({
+            clinicId: clinic.id,
+            clinicCode: clinic.code,
+            clinicName: clinic.name,
+          }),
+          fetchGtGrowthAiFeatureAccess({
+            clinicId: clinic.id,
+          }).catch(() => ({
+            gtGrowthAi: buildUnavailableGtGrowthAiAccess(clinic.id),
+          })),
+        ]);
         setStatus(nextStatus);
+        setGtGrowthAiAccess(nextFeatureAccess.gtGrowthAi);
+        setGtGrowthAiEnabledDraft(nextFeatureAccess.gtGrowthAi.enabled);
       } catch (error) {
         setErrorMessage(getApiErrorMessage(error, "Telegram settings could not be loaded."));
       } finally {
@@ -375,6 +422,12 @@ export function TelegramSettingsPage() {
         ) ||
         selectedDraft.timezone !== selectedTarget.timezone),
   );
+  const gtGrowthAiHasChanges = Boolean(gtGrowthAiAccess && gtGrowthAiEnabledDraft !== gtGrowthAiAccess.enabled);
+  const gtGrowthAiSaveDisabled =
+    featureBusyAction !== null ||
+    busyAction === "load" ||
+    !gtGrowthAiHasChanges ||
+    gtGrowthAiAccess?.source === "environment";
   const isLinked = (status?.linkedTargetCount ?? 0) > 0;
   const pendingCodeActive = hasActivePendingCode(status);
   const saveButtonLabel = busyAction === "save" ? "Saving..." : "Save target settings";
@@ -578,6 +631,30 @@ export function TelegramSettingsPage() {
       setErrorMessage(getApiErrorMessage(error, "Telegram settings could not be saved."));
     } finally {
       setBusyAction(null);
+    }
+  }
+
+  async function handleSaveGtGrowthAiAccess() {
+    setFeatureBusyAction("save_gt_growth_ai");
+    setNotice(null);
+    setErrorMessage(null);
+
+    try {
+      const nextAccess = await saveGtGrowthAiFeatureAccess({
+        clinicId: activeClinic.id,
+        enabled: gtGrowthAiEnabledDraft,
+      });
+      setGtGrowthAiAccess(nextAccess.gtGrowthAi);
+      setGtGrowthAiEnabledDraft(nextAccess.gtGrowthAi.enabled);
+      setNotice(
+        nextAccess.gtGrowthAi.enabled
+          ? "GT Growth AI premium report sections are enabled for this clinic."
+          : "GT Growth AI premium report sections are disabled for this clinic.",
+      );
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error, "GT Growth AI access could not be saved."));
+    } finally {
+      setFeatureBusyAction(null);
     }
   }
 
@@ -904,6 +981,77 @@ export function TelegramSettingsPage() {
               <strong>3. Send the code</strong>
               <span>Paste the code in Telegram. Each redeemed code adds one new linked target for this clinic.</span>
             </div>
+          </div>
+        </Panel>
+
+        <Panel
+          className="telegram-settings__card telegram-settings__card--wide"
+          title="GT Growth AI"
+          subtitle="Clinic-level paid feature access for AI insights, business opportunities, evidence, and Myanmar Telegram recommendations."
+          action={
+            <span
+              className={`telegram-settings__badge telegram-settings__badge--${
+                gtGrowthAiAccess?.enabled ? "linked" : "idle"
+              }`}
+            >
+              {gtGrowthAiAccess?.enabled ? "Enabled" : "Locked"}
+            </span>
+          }
+        >
+          <label className="telegram-settings__toggle">
+            <input
+              type="checkbox"
+              checked={gtGrowthAiEnabledDraft}
+              onChange={(event) => setGtGrowthAiEnabledDraft(event.target.checked)}
+              disabled={!gtGrowthAiAccess || gtGrowthAiAccess.source === "environment" || featureBusyAction !== null}
+            />
+            <span className={`telegram-settings__switch ${gtGrowthAiEnabledDraft ? "telegram-settings__switch--on" : ""}`} aria-hidden="true">
+              <span className="telegram-settings__switch-handle" />
+            </span>
+            <div className="telegram-settings__toggle-copy">
+              <strong>Enable GT Growth AI premium report sections</strong>
+              <span>
+                Adds AI summary, evidence, business opportunity, and Myanmar recommended actions to premium appointment,
+                payment, and weekly reports.
+              </span>
+            </div>
+          </label>
+
+          <div className="telegram-settings__meta-grid">
+            <article className="telegram-settings__meta-card">
+              <span>Access source</span>
+              <strong>{formatFeatureAccessSource(gtGrowthAiAccess?.source)}</strong>
+              <small>
+                {gtGrowthAiAccess?.source === "environment"
+                  ? "Cloud Run env enables this clinic, so the setting cannot be changed here."
+                  : "This clinic setting controls the backend premium gate."}
+              </small>
+            </article>
+
+            <article className="telegram-settings__meta-card">
+              <span>Last updated</span>
+              <strong>{formatTimestamp(gtGrowthAiAccess?.updatedAt)}</strong>
+              <small>{gtGrowthAiAccess?.updatedByEmail ?? "No saved clinic-level feature change yet."}</small>
+            </article>
+          </div>
+
+          <div className="telegram-settings__callout">
+            <strong>{gtGrowthAiAccess?.enabled ? "Premium AI reports are active" : "Premium AI reports are locked"}</strong>
+            <span>
+              {gtGrowthAiAccess?.enabled
+                ? "Premium clinics will see the GT Growth AI section in Telegram and AI cards in supported report UI."
+                : "Basic reports remain free. Turn this on to show premium GT Growth AI sections for this clinic."}
+            </span>
+          </div>
+
+          <div className="telegram-settings__button-row">
+            <button
+              className="button telegram-settings__button telegram-settings__button--primary"
+              onClick={() => void handleSaveGtGrowthAiAccess()}
+              disabled={gtGrowthAiSaveDisabled}
+            >
+              {featureBusyAction === "save_gt_growth_ai" ? "Saving..." : "Save GT Growth AI access"}
+            </button>
           </div>
         </Panel>
 

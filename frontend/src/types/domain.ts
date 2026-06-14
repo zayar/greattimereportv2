@@ -259,6 +259,26 @@ export interface ReportPremiumAccess {
   };
 }
 
+export type ClinicFeatureAccessSource = "environment" | "clinic_setting" | "default_locked";
+
+export interface ClinicFeatureAccessStatus {
+  clinicId: string;
+  feature: "gt_growth_ai";
+  enabled: boolean;
+  source: ClinicFeatureAccessSource;
+  title: string;
+  message: string;
+  upgradeMessage?: string;
+  lockedReason?: string;
+  updatedAt?: string | null;
+  updatedByUserId?: string | null;
+  updatedByEmail?: string | null;
+}
+
+export interface ClinicFeatureAccessResponse {
+  gtGrowthAi: ClinicFeatureAccessStatus;
+}
+
 export interface ReportAiPayload {
   featureGate: "gt_growth_ai";
   isPremiumFeature: true;
