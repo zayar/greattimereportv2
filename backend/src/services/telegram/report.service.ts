@@ -1,4 +1,9 @@
 import { fetchApicoreBookingDetails, type ApicoreBookingDetailsRow } from "../apicore.service.js";
+import {
+  buildAppointmentReportAiPayload,
+  getReportAiActionLines,
+  percentageRate,
+} from "../reports/report-ai-insights.service.js";
 import { sendTelegramMessage } from "./bot.service.js";
 import {
   buildUtcDayRangeForDateKeyInTimeZone,
@@ -12,6 +17,10 @@ const PAGE_SIZE = 200;
 const APPOINTMENT_PREVIEW_LIMIT = 12;
 const THERAPIST_PREVIEW_LIMIT = 5;
 const SERVICE_PREVIEW_LIMIT = 5;
+const BUSY_HOUR_PREVIEW_LIMIT = 5;
+const UNDERUTILIZED_HOUR_PREVIEW_LIMIT = 5;
+const REBOOKING_LOOKAHEAD_DAYS = 60;
+const SAME_WEEKDAY_BENCHMARK_WEEKS = 4;
 
 const CANCELLED_STATUSES = new Set(["MERCHANT_CANCEL", "MEMBER_CANCEL", "CANCEL"]);
 const COMPLETED_STATUSES = new Set(["CHECKOUT", "CHECKED_OUT"]);
@@ -86,15 +95,23 @@ function summarizeByKey(
     .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
 }
 
-async function fetchAllAppointmentsForToday(input: {
-  clinicCode: string;
-  timezone: string;
-  authorizationHeader?: string;
-  referenceDate?: Date;
-}) {
-  const dateKey = formatDateKeyInTimeZone(input.referenceDate ?? new Date(), input.timezone);
-  const { startIso, endIso } = buildUtcDayRangeForDateKeyInTimeZone(dateKey, input.timezone);
+function parseDateKey(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map((value) => Number(value));
+  return new Date(Date.UTC(year, month - 1, day));
+}
 
+function addDaysToDateKey(dateKey: string, days: number) {
+  const date = parseDateKey(dateKey);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+async function fetchAllAppointmentsForRange(input: {
+  clinicCode: string;
+  startIso: string;
+  endIso: string;
+  authorizationHeader?: string;
+}) {
   const rows: ApicoreBookingDetailsRow[] = [];
   let skip = 0;
   let totalCount = Number.POSITIVE_INFINITY;
@@ -102,8 +119,8 @@ async function fetchAllAppointmentsForToday(input: {
   while (rows.length < totalCount) {
     const result = await fetchApicoreBookingDetails({
       clinicCode: input.clinicCode,
-      startDate: startIso,
-      endDate: endIso,
+      startDate: input.startIso,
+      endDate: input.endIso,
       skip,
       take: PAGE_SIZE,
       authorizationHeader: input.authorizationHeader,
@@ -117,9 +134,26 @@ async function fetchAllAppointmentsForToday(input: {
     skip += result.data.length;
   }
 
+  return rows.sort((left, right) => new Date(left.FromTime).getTime() - new Date(right.FromTime).getTime());
+}
+
+async function fetchAllAppointmentsForToday(input: {
+  clinicCode: string;
+  timezone: string;
+  authorizationHeader?: string;
+  referenceDate?: Date;
+}) {
+  const dateKey = formatDateKeyInTimeZone(input.referenceDate ?? new Date(), input.timezone);
+  const { startIso, endIso } = buildUtcDayRangeForDateKeyInTimeZone(dateKey, input.timezone);
+
   return {
     dateKey,
-    rows: rows.sort((left, right) => new Date(left.FromTime).getTime() - new Date(right.FromTime).getTime()),
+    rows: await fetchAllAppointmentsForRange({
+      clinicCode: input.clinicCode,
+      startIso,
+      endIso,
+      authorizationHeader: input.authorizationHeader,
+    }),
   };
 }
 
@@ -160,6 +194,84 @@ export function summarizeTherapistLoad(rows: ApicoreBookingDetailsRow[]) {
     }));
 }
 
+function getLocalHour(date: Date, timezone: string) {
+  const hour = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).format(date);
+
+  return Number(hour);
+}
+
+function formatHourSlot(hour: number) {
+  const start = String(hour).padStart(2, "0");
+  const end = String((hour + 1) % 24).padStart(2, "0");
+  return `${start}:00-${end}:00`;
+}
+
+export function summarizeAppointmentHourLoad(rows: ApicoreBookingDetailsRow[], timezone: string) {
+  const counts = new Map<number, number>();
+
+  rows.forEach((row) => {
+    const normalized = normalizeStatus(row.status);
+    if (CANCELLED_STATUSES.has(normalized)) {
+      return;
+    }
+
+    const date = new Date(row.FromTime);
+    if (Number.isNaN(date.getTime())) {
+      return;
+    }
+
+    const hour = getLocalHour(date, timezone);
+    if (!Number.isFinite(hour)) {
+      return;
+    }
+
+    counts.set(hour, (counts.get(hour) ?? 0) + 1);
+  });
+
+  const slots = [...counts.entries()].map(([hour, count]) => ({
+    label: formatHourSlot(hour),
+    count,
+    hour,
+  }));
+
+  const busyHours = slots
+    .map(({ label, count }) => ({ label, count }))
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label))
+    .slice(0, BUSY_HOUR_PREVIEW_LIMIT);
+
+  if (slots.length < 2) {
+    return {
+      busyHours,
+      underutilizedHours: [],
+    };
+  }
+
+  const hours = slots.map((slot) => slot.hour);
+  const minHour = Math.min(...hours);
+  const maxHour = Math.max(...hours);
+  const peak = Math.max(...slots.map((slot) => slot.count));
+  const threshold = Math.max(1, Math.floor(peak * 0.5));
+  const allObservedRangeSlots = Array.from({ length: maxHour - minHour + 1 }, (_, index) => {
+    const hour = minHour + index;
+    return {
+      label: formatHourSlot(hour),
+      count: counts.get(hour) ?? 0,
+    };
+  });
+
+  return {
+    busyHours,
+    underutilizedHours: allObservedRangeSlots
+      .filter((slot) => slot.count < threshold)
+      .sort((left, right) => left.count - right.count || left.label.localeCompare(right.label))
+      .slice(0, UNDERUTILIZED_HOUR_PREVIEW_LIMIT),
+  };
+}
+
 function mapAppointments(rows: ApicoreBookingDetailsRow[], timezone: string): TodayAppointmentReportItem[] {
   return rows.slice(0, APPOINTMENT_PREVIEW_LIMIT).map((row) => ({
     time: formatDisplayTimeInTimeZone(new Date(row.FromTime), timezone),
@@ -168,6 +280,121 @@ function mapAppointments(rows: ApicoreBookingDetailsRow[], timezone: string): To
     therapistName: row.PractitionerName?.trim() || "Unassigned",
     status: mapStatusLabel(row.status),
   }));
+}
+
+function buildCustomerKey(row: ApicoreBookingDetailsRow) {
+  const phone = row.MemberPhoneNumber?.replace(/\D/g, "") ?? "";
+  if (phone) {
+    return `phone:${phone}`;
+  }
+
+  const name = row.MemberName?.trim().toLowerCase() ?? "";
+  return name ? `name:${name}` : "";
+}
+
+async function countCompletedCustomersWithoutFutureBooking(input: {
+  clinicCode: string;
+  timezone: string;
+  dateKey: string;
+  rows: ApicoreBookingDetailsRow[];
+  authorizationHeader?: string;
+}) {
+  const completedCustomerKeys = new Set(
+    input.rows
+      .filter((row) => COMPLETED_STATUSES.has(normalizeStatus(row.status)))
+      .map(buildCustomerKey)
+      .filter(Boolean),
+  );
+
+  if (completedCustomerKeys.size === 0) {
+    return 0;
+  }
+
+  try {
+    const startDateKey = addDaysToDateKey(input.dateKey, 1);
+    const endDateKey = addDaysToDateKey(input.dateKey, REBOOKING_LOOKAHEAD_DAYS);
+    const startRange = buildUtcDayRangeForDateKeyInTimeZone(startDateKey, input.timezone);
+    const endRange = buildUtcDayRangeForDateKeyInTimeZone(endDateKey, input.timezone);
+    const futureRows = await fetchAllAppointmentsForRange({
+      clinicCode: input.clinicCode,
+      startIso: startRange.startIso,
+      endIso: endRange.endIso,
+      authorizationHeader: input.authorizationHeader,
+    });
+    const futureCustomerKeys = new Set(futureRows.map(buildCustomerKey).filter(Boolean));
+
+    return [...completedCustomerKeys].filter((customerKey) => !futureCustomerKeys.has(customerKey)).length;
+  } catch (error) {
+    console.warn("[GT_V2Report][GT Growth AI] future booking lookup failed", {
+      clinicCode: input.clinicCode,
+      dateKey: input.dateKey,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+    return null;
+  }
+}
+
+async function fetchSameWeekdayBenchmark(input: {
+  clinicCode: string;
+  timezone: string;
+  dateKey: string;
+  authorizationHeader?: string;
+}) {
+  try {
+    const dateKeys = Array.from({ length: SAME_WEEKDAY_BENCHMARK_WEEKS }, (_, index) =>
+      addDaysToDateKey(input.dateKey, -7 * (index + 1)),
+    );
+    const rowsByDay = await Promise.all(
+      dateKeys.map((dateKey) => {
+        const { startIso, endIso } = buildUtcDayRangeForDateKeyInTimeZone(dateKey, input.timezone);
+        return fetchAllAppointmentsForRange({
+          clinicCode: input.clinicCode,
+          startIso,
+          endIso,
+          authorizationHeader: input.authorizationHeader,
+        });
+      }),
+    );
+    const validDays = rowsByDay.filter((rows) => rows.length > 0);
+
+    if (validDays.length === 0) {
+      return null;
+    }
+
+    const appointmentCounts = validDays.map((rows) => rows.length);
+    const noShowRates = validDays
+      .map((rows) => {
+        const counts = summarizeAppointmentCounts(rows);
+        return percentageRate(counts.noShowCount, rows.length);
+      })
+      .filter((rate): rate is number => rate != null);
+    const cancellationRates = validDays
+      .map((rows) => {
+        const counts = summarizeAppointmentCounts(rows);
+        return percentageRate(counts.cancelledCount, rows.length);
+      })
+      .filter((rate): rate is number => rate != null);
+
+    return {
+      previousSameWeekdayAverageAppointments:
+        Math.round(appointmentCounts.reduce((total, count) => total + count, 0) / validDays.length),
+      previousSameWeekdayAverageNoShowRatePercent:
+        noShowRates.length > 0
+          ? Number((noShowRates.reduce((total, rate) => total + rate, 0) / noShowRates.length).toFixed(1))
+          : null,
+      previousSameWeekdayAverageCancellationRatePercent:
+        cancellationRates.length > 0
+          ? Number((cancellationRates.reduce((total, rate) => total + rate, 0) / cancellationRates.length).toFixed(1))
+          : null,
+    };
+  } catch (error) {
+    console.warn("[GT_V2Report][GT Growth AI] same-weekday appointment benchmark failed", {
+      clinicCode: input.clinicCode,
+      dateKey: input.dateKey,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+    return null;
+  }
 }
 
 export async function buildTodayAppointmentReport(input: {
@@ -187,6 +414,42 @@ export async function buildTodayAppointmentReport(input: {
   const counts = summarizeAppointmentCounts(rows);
   const appointments = mapAppointments(rows, timezone);
   const clinicName = input.clinicName || rows[0]?.ClinicName || input.clinicCode;
+  const topServices = summarizeTopServices(rows);
+  const therapistLoad = summarizeTherapistLoad(rows);
+  const { busyHours, underutilizedHours } = summarizeAppointmentHourLoad(rows, timezone);
+  const [completedCustomersWithoutFutureBookingCount, comparison] = await Promise.all([
+    countCompletedCustomersWithoutFutureBooking({
+      clinicCode: input.clinicCode,
+      timezone,
+      dateKey,
+      rows,
+      authorizationHeader: input.authorizationHeader,
+    }),
+    fetchSameWeekdayBenchmark({
+      clinicCode: input.clinicCode,
+      timezone,
+      dateKey,
+      authorizationHeader: input.authorizationHeader,
+    }),
+  ]);
+  const cancellationRatePercent = percentageRate(counts.cancelledCount, rows.length);
+  const noShowRatePercent = percentageRate(counts.noShowCount, rows.length);
+  const gtGrowthAi = buildAppointmentReportAiPayload({
+    dateKey,
+    totalAppointments: rows.length,
+    completedAppointments: counts.completedCount,
+    upcomingAppointments: counts.upcomingCount,
+    cancelledAppointments: counts.cancelledCount,
+    noShowAppointments: counts.noShowCount,
+    cancellationRatePercent,
+    noShowRatePercent,
+    busyHours,
+    underutilizedHours,
+    topServices: topServices.map((service) => ({ name: service.serviceName, count: service.count })),
+    therapistLoad: therapistLoad.map((therapist) => ({ name: therapist.therapistName, count: therapist.count })),
+    completedCustomersWithoutFutureBookingCount,
+    comparison,
+  });
 
   return {
     clinicName,
@@ -197,9 +460,15 @@ export async function buildTodayAppointmentReport(input: {
     completedCount: counts.completedCount,
     cancelledCount: counts.cancelledCount,
     noShowCount: counts.noShowCount,
+    cancellationRatePercent,
+    noShowRatePercent,
     appointments,
-    topServices: summarizeTopServices(rows),
-    therapistLoad: summarizeTherapistLoad(rows),
+    topServices,
+    therapistLoad,
+    busyHours,
+    underutilizedHours,
+    completedCustomersWithoutFutureBookingCount,
+    gtGrowthAi,
   } satisfies TodayAppointmentReportSummary;
 }
 
@@ -215,6 +484,8 @@ export function formatTodayAppointmentTelegramMessage(report: TodayAppointmentRe
     `ပြီးဆုံး: ${report.completedCount}`,
     `ပယ်ဖျက်: ${report.cancelledCount}`,
     `မလာ: ${report.noShowCount}`,
+    `Cancellation rate: ${report.cancellationRatePercent === null ? "N/A" : `${report.cancellationRatePercent}%`}`,
+    `No-show rate: ${report.noShowRatePercent === null ? "N/A" : `${report.noShowRatePercent}%`}`,
     "",
     "🕒 အချိန်စာရင်း",
   ];
@@ -245,6 +516,14 @@ export function formatTodayAppointmentTelegramMessage(report: TodayAppointmentRe
     lines.push("", "🔥 Top services");
     report.topServices.forEach((entry) => {
       lines.push(`${entry.serviceName} - ${entry.count}`);
+    });
+  }
+
+  const aiActionLines = getReportAiActionLines(report.gtGrowthAi);
+  if (aiActionLines.length > 0) {
+    lines.push("", "AI Actions:");
+    aiActionLines.forEach((action, index) => {
+      lines.push(`${index + 1}. ${action}`);
     });
   }
 

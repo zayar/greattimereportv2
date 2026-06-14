@@ -4,6 +4,12 @@ import {
   type ApicoreBookingDetailsRow,
   type ApicoreOrderWithPaymentsRow,
 } from "../apicore.service.js";
+import {
+  buildWeeklySummaryReportAiPayload,
+  getReportAiActionLines,
+  percentageChange,
+  percentageRate,
+} from "../reports/report-ai-insights.service.js";
 import { sendTelegramMessage } from "./bot.service.js";
 import { summarizeAppointmentCounts } from "./report.service.js";
 import {
@@ -21,6 +27,8 @@ import {
 const PAGE_SIZE = 200;
 const TOP_SERVICE_LIMIT = 5;
 const BUSY_HOUR_LIMIT = 5;
+const BUSY_DAY_LIMIT = 7;
+const UNDERUTILIZED_LIMIT = 5;
 const TELEGRAM_CHUNK_LIMIT = 3900;
 
 type WeeklyPaymentRow = {
@@ -53,6 +61,24 @@ function getPreviousCompletedWeekRange(referenceDate: Date, timezone: string) {
 
   return {
     dateKey,
+    weekStartDateKey,
+    weekEndDateKey,
+    startIso: startRange.startIso,
+    endIso: endRange.endIso,
+  };
+}
+
+function getPreviousWeekRangeFromRange(range: {
+  weekStartDateKey: string;
+  weekEndDateKey: string;
+  timezone: string;
+}) {
+  const weekStartDateKey = addDaysToDateKey(range.weekStartDateKey, -7);
+  const weekEndDateKey = addDaysToDateKey(range.weekEndDateKey, -7);
+  const startRange = buildUtcDayRangeForDateKeyInTimeZone(weekStartDateKey, range.timezone);
+  const endRange = buildUtcDayRangeForDateKeyInTimeZone(weekEndDateKey, range.timezone);
+
+  return {
     weekStartDateKey,
     weekEndDateKey,
     startIso: startRange.startIso,
@@ -359,6 +385,142 @@ function summarizeBusyHours(rows: ApicoreBookingDetailsRow[], timezone: string) 
     .slice(0, BUSY_HOUR_LIMIT);
 }
 
+function summarizeUnderutilizedHours(rows: ApicoreBookingDetailsRow[], timezone: string) {
+  const summary = new Map<string, { label: string; count: number }>();
+
+  rows.forEach((row) => {
+    const date = new Date(row.FromTime);
+    if (Number.isNaN(date.getTime())) {
+      return;
+    }
+
+    const dateKey = formatDateKeyInTimeZone(date, timezone);
+    const hourKey = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      hour: "2-digit",
+      hourCycle: "h23",
+    }).format(date);
+    const key = `${dateKey}-${hourKey}`;
+    const current = summary.get(key) ?? {
+      label: formatBusyHourLabel(date, timezone),
+      count: 0,
+    };
+    current.count += 1;
+    summary.set(key, current);
+  });
+
+  const slots = [...summary.values()];
+  if (slots.length < 2) {
+    return [];
+  }
+
+  const peak = Math.max(...slots.map((slot) => slot.count));
+  const threshold = Math.max(1, Math.floor(peak * 0.5));
+
+  return slots
+    .filter((slot) => slot.count < threshold)
+    .sort((left, right) => left.count - right.count || left.label.localeCompare(right.label))
+    .slice(0, UNDERUTILIZED_LIMIT);
+}
+
+function formatWeekdayLabel(dateKey: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  }).format(parseDateKey(dateKey));
+}
+
+function summarizeBusyDays(rows: ApicoreBookingDetailsRow[], timezone: string, weekStartDateKey: string) {
+  const counts = new Map<string, number>();
+
+  rows.forEach((row) => {
+    const date = new Date(row.FromTime);
+    if (Number.isNaN(date.getTime())) {
+      return;
+    }
+
+    const dateKey = formatDateKeyInTimeZone(date, timezone);
+    counts.set(dateKey, (counts.get(dateKey) ?? 0) + 1);
+  });
+
+  const days = Array.from({ length: 7 }, (_, index) => {
+    const dateKey = addDaysToDateKey(weekStartDateKey, index);
+    return {
+      label: formatWeekdayLabel(dateKey),
+      count: counts.get(dateKey) ?? 0,
+    };
+  });
+  const busyDays = [...days]
+    .filter((day) => day.count > 0)
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label))
+    .slice(0, BUSY_DAY_LIMIT);
+  const peak = Math.max(...days.map((day) => day.count));
+
+  if (peak <= 0) {
+    return {
+      busyDays,
+      underutilizedDays: [],
+    };
+  }
+
+  const threshold = Math.max(1, Math.floor(peak * 0.5));
+
+  return {
+    busyDays,
+    underutilizedDays: days
+      .filter((day) => day.count < threshold)
+      .sort((left, right) => left.count - right.count || left.label.localeCompare(right.label))
+      .slice(0, UNDERUTILIZED_LIMIT),
+  };
+}
+
+async function fetchOptionalPreviousWeekData(input: {
+  clinicId: string;
+  clinicCode: string;
+  timezone: string;
+  weekStartDateKey: string;
+  weekEndDateKey: string;
+  authorizationHeader?: string;
+}) {
+  const previousRange = getPreviousWeekRangeFromRange({
+    weekStartDateKey: input.weekStartDateKey,
+    weekEndDateKey: input.weekEndDateKey,
+    timezone: input.timezone,
+  });
+
+  try {
+    const [appointments, orders] = await Promise.all([
+      fetchAllAppointmentsForWeek({
+        clinicCode: input.clinicCode,
+        startIso: previousRange.startIso,
+        endIso: previousRange.endIso,
+        authorizationHeader: input.authorizationHeader,
+      }),
+      fetchAllOrdersForWeek({
+        clinicId: input.clinicId,
+        startIso: previousRange.startIso,
+        endIso: previousRange.endIso,
+        authorizationHeader: input.authorizationHeader,
+      }),
+    ]);
+
+    return {
+      range: previousRange,
+      appointments,
+      orders,
+    };
+  } catch (error) {
+    console.warn("[GT_V2Report][GT Growth AI] previous-week summary comparison failed", {
+      clinicId: input.clinicId,
+      clinicCode: input.clinicCode,
+      weekStartDateKey: input.weekStartDateKey,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+    return null;
+  }
+}
+
 function normalizeSections(sections: WeeklySummarySection[] | undefined) {
   if (!sections?.length) {
     return [...DEFAULT_WEEKLY_SUMMARY_SECTIONS];
@@ -410,6 +572,14 @@ export async function buildWeeklySummaryReport(input: {
       authorizationHeader: input.authorizationHeader,
     }),
   ]);
+  const previousWeekData = await fetchOptionalPreviousWeekData({
+    clinicId: input.clinicId,
+    clinicCode: input.clinicCode,
+    timezone,
+    weekStartDateKey: range.weekStartDateKey,
+    weekEndDateKey: range.weekEndDateKey,
+    authorizationHeader: input.authorizationHeader,
+  });
   const appointmentCounts = summarizeAppointmentCounts(appointments);
   const serviceSummary = summarizeByLabel(appointments, (row) => row.ServiceName);
   const therapistSummary = summarizeByLabel(appointments, (row) => row.PractitionerName || "Unassigned");
@@ -422,6 +592,52 @@ export async function buildWeeklySummaryReport(input: {
   const totalAppointments = appointments.length;
   const totalPaymentAmount = payments.reduce((total, payment) => total + payment.amount, 0);
   const clinicName = input.clinicName || appointments[0]?.ClinicName || input.clinicCode;
+  const previousAppointmentCounts = previousWeekData
+    ? summarizeAppointmentCounts(previousWeekData.appointments)
+    : null;
+  const previousPayments = previousWeekData
+    ? mapPaymentRows({
+        orders: previousWeekData.orders,
+        startIso: previousWeekData.range.startIso,
+        endIso: previousWeekData.range.endIso,
+      })
+    : null;
+  const previousWeekTotalPaymentAmount =
+    previousPayments?.reduce((total, payment) => total + payment.amount, 0) ?? null;
+  const previousWeekAppointmentCount = previousWeekData?.appointments.length ?? null;
+  const previousWeekCancelledAppointments = previousAppointmentCounts?.cancelledCount ?? null;
+  const weekOverWeekRevenueChangePercent = percentageChange(totalPaymentAmount, previousWeekTotalPaymentAmount);
+  const weekOverWeekAppointmentChangePercent = percentageChange(totalAppointments, previousWeekAppointmentCount);
+  const { busyDays, underutilizedDays } = summarizeBusyDays(
+    appointments,
+    timezone,
+    range.weekStartDateKey,
+  );
+  const busyHours = summarizeBusyHours(appointments, timezone);
+  const underutilizedHours = summarizeUnderutilizedHours(appointments, timezone);
+  const packageSalesSummary: string | null = null;
+  const customerRetentionOpportunityCount: number | null = null;
+  const gtGrowthAi = buildWeeklySummaryReportAiPayload({
+    weekStartDateKey: range.weekStartDateKey,
+    weekEndDateKey: range.weekEndDateKey,
+    weeklyAppointmentCount: totalAppointments,
+    weeklyCompletedAppointments: appointmentCounts.completedCount,
+    weeklyCancelledAppointments: appointmentCounts.cancelledCount,
+    weeklyNoShowAppointments: appointmentCounts.noShowCount,
+    weeklyRevenue: totalPaymentAmount,
+    weekOverWeekRevenueChangePercent,
+    weekOverWeekAppointmentChangePercent,
+    previousWeekRevenue: previousWeekTotalPaymentAmount,
+    previousWeekAppointmentCount,
+    previousWeekCancelledAppointments,
+    topServices: serviceSummary.slice(0, TOP_SERVICE_LIMIT),
+    topTherapists: therapistSummary.slice(0, TOP_SERVICE_LIMIT),
+    busyDays,
+    underutilizedDays,
+    underutilizedHours,
+    packageSalesSummary,
+    customerRetentionOpportunityCount,
+  });
 
   return {
     clinicName,
@@ -437,6 +653,8 @@ export async function buildWeeklySummaryReport(input: {
       noShowAppointments: appointmentCounts.noShowCount,
       completionRatePercent:
         totalAppointments > 0 ? Math.round((appointmentCounts.completedCount / totalAppointments) * 100) : null,
+      cancellationRatePercent: percentageRate(appointmentCounts.cancelledCount, totalAppointments),
+      noShowRatePercent: percentageRate(appointmentCounts.noShowCount, totalAppointments),
     },
     serviceSummary,
     therapistSummary,
@@ -444,9 +662,20 @@ export async function buildWeeklySummaryReport(input: {
       totalPaymentAmount,
       paymentCount: payments.length,
       paymentMethods,
+      previousWeekTotalPaymentAmount,
+      weekOverWeekRevenueChangePercent,
     },
     topServices: summarizeTopServices(serviceSummary),
-    busyHours: summarizeBusyHours(appointments, timezone),
+    busyHours,
+    busyDays,
+    underutilizedDays,
+    underutilizedHours,
+    weekOverWeekAppointmentChangePercent,
+    previousWeekAppointmentCount,
+    previousWeekCancelledAppointments,
+    packageSalesSummary,
+    customerRetentionOpportunityCount,
+    gtGrowthAi,
   } satisfies WeeklySummaryReportSummary;
 }
 
@@ -467,6 +696,20 @@ export function formatWeeklySummaryTelegramMessage(report: WeeklySummaryReportSu
     lines.push(`Completed: ${report.appointmentSummary.completedAppointments}`);
     lines.push(`Cancelled: ${report.appointmentSummary.cancelledAppointments}`);
     lines.push(`No-show: ${report.appointmentSummary.noShowAppointments}`);
+    lines.push(
+      `Cancellation rate: ${
+        report.appointmentSummary.cancellationRatePercent === null
+          ? "No appointment data"
+          : `${report.appointmentSummary.cancellationRatePercent}%`
+      }`,
+    );
+    lines.push(
+      `No-show rate: ${
+        report.appointmentSummary.noShowRatePercent === null
+          ? "No appointment data"
+          : `${report.appointmentSummary.noShowRatePercent}%`
+      }`,
+    );
     lines.push(
       `Completion rate: ${
         report.appointmentSummary.completionRatePercent === null
@@ -512,6 +755,12 @@ export function formatWeeklySummaryTelegramMessage(report: WeeklySummaryReportSu
     lines.push("", "💰 Payments by Method");
     lines.push(`Total received: ${formatMoney(report.paymentSummary.totalPaymentAmount)}`);
     lines.push(`Transactions: ${report.paymentSummary.paymentCount}`);
+    if (report.paymentSummary.previousWeekTotalPaymentAmount !== null) {
+      lines.push(`Last week received: ${formatMoney(report.paymentSummary.previousWeekTotalPaymentAmount)}`);
+    }
+    if (report.paymentSummary.weekOverWeekRevenueChangePercent !== null) {
+      lines.push(`Revenue WoW: ${report.paymentSummary.weekOverWeekRevenueChangePercent}%`);
+    }
     if (report.paymentSummary.paymentMethods.length === 0) {
       lines.push("No payment records found this week.");
     } else {
@@ -530,6 +779,14 @@ export function formatWeeklySummaryTelegramMessage(report: WeeklySummaryReportSu
         lines.push(`${entry.label} - ${entry.count} appointments`);
       });
     }
+  }
+
+  const aiActionLines = getReportAiActionLines(report.gtGrowthAi);
+  if (aiActionLines.length > 0) {
+    lines.push("", "AI Actions:");
+    aiActionLines.forEach((action, index) => {
+      lines.push(`${index + 1}. ${action}`);
+    });
   }
 
   return lines.join("\n");

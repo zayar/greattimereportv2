@@ -164,8 +164,8 @@ export async function buildTodayOwnerAiReport(input: {
     customInstruction: input.customInstruction ?? null,
     facts,
   });
-  const { appointments: _appointments, ...appointmentFacts } = appointmentReport;
-  const { payments: _payments, ...paymentFacts } = paymentReport;
+  const { appointments: _appointments, gtGrowthAi: _appointmentGrowthAi, ...appointmentFacts } = appointmentReport;
+  const { payments: _payments, gtGrowthAi: _paymentGrowthAi, ...paymentFacts } = paymentReport;
 
   return {
     clinicName,

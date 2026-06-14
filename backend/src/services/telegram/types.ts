@@ -1,4 +1,5 @@
 import type { AiLanguage } from "../ai/language.js";
+import type { ReportAiPayload } from "../../types/report-ai.js";
 
 export type TelegramChatType = "private" | "group" | "supergroup" | "channel";
 
@@ -175,9 +176,15 @@ export interface TodayAppointmentReportSummary {
   completedCount: number;
   cancelledCount: number;
   noShowCount: number;
+  cancellationRatePercent: number | null;
+  noShowRatePercent: number | null;
   appointments: TodayAppointmentReportItem[];
   topServices: Array<{ serviceName: string; count: number }>;
   therapistLoad: Array<{ therapistName: string; count: number }>;
+  busyHours: Array<{ label: string; count: number }>;
+  underutilizedHours: Array<{ label: string; count: number }>;
+  completedCustomersWithoutFutureBookingCount: number | null;
+  gtGrowthAi: ReportAiPayload;
 }
 
 export interface TodayPaymentReportItem {
@@ -196,17 +203,25 @@ export interface TodayPaymentReportSummary {
   totalPaymentAmount: number;
   paidInvoiceCount: number;
   paymentCount: number;
+  averageInvoiceValue: number;
+  outstandingAmount: number;
+  partialPaymentInvoiceCount: number;
+  previousDayTotalPaymentAmount: number | null;
+  previousDayPaymentCount: number | null;
+  revenueByServiceOrPackage: Array<{ name: string; count: number; amount: number }>;
+  refundVoidDiscountAmount: number | null;
   payments: TodayPaymentReportItem[];
   paymentMethods: Array<{ paymentMethod: string; count: number; amount: number }>;
   sellerTotals: Array<{ sellerName: string; count: number; amount: number }>;
+  gtGrowthAi: ReportAiPayload;
 }
 
 export interface TodayOwnerAiReportSummary {
   clinicName: string;
   dateKey: string;
   timezone: string;
-  appointmentReport: Omit<TodayAppointmentReportSummary, "appointments">;
-  paymentReport: Omit<TodayPaymentReportSummary, "payments">;
+  appointmentReport: Omit<TodayAppointmentReportSummary, "appointments" | "gtGrowthAi">;
+  paymentReport: Omit<TodayPaymentReportSummary, "payments" | "gtGrowthAi">;
   aiReport: {
     reportTitle: string;
     overallStatus: "good" | "normal" | "watch" | "no_data";
@@ -225,6 +240,8 @@ export interface WeeklySummaryAppointmentSummary {
   cancelledAppointments: number;
   noShowAppointments: number;
   completionRatePercent: number | null;
+  cancellationRatePercent: number | null;
+  noShowRatePercent: number | null;
 }
 
 export interface WeeklySummaryCountItem {
@@ -261,7 +278,18 @@ export interface WeeklySummaryReportSummary {
     totalPaymentAmount: number;
     paymentCount: number;
     paymentMethods: WeeklySummaryPaymentMethodItem[];
+    previousWeekTotalPaymentAmount: number | null;
+    weekOverWeekRevenueChangePercent: number | null;
   };
   topServices: WeeklySummaryTopServiceItem[];
   busyHours: WeeklySummaryBusyHourItem[];
+  busyDays: WeeklySummaryBusyHourItem[];
+  underutilizedDays: WeeklySummaryBusyHourItem[];
+  underutilizedHours: WeeklySummaryBusyHourItem[];
+  weekOverWeekAppointmentChangePercent: number | null;
+  previousWeekAppointmentCount: number | null;
+  previousWeekCancelledAppointments: number | null;
+  packageSalesSummary: string | null;
+  customerRetentionOpportunityCount: number | null;
+  gtGrowthAi: ReportAiPayload;
 }

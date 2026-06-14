@@ -58,6 +58,215 @@
   --luxe-divider: rgba(17, 24, 39, 0.048);
 }
 
+.report-ai-sections {
+  display: grid;
+  gap: 1rem;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 8px;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.06);
+}
+
+.report-ai-sections__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.report-ai-sections__eyebrow,
+.report-ai-sections__feature-key,
+.report-ai-card__topline,
+.report-ai-card__evidence > span,
+.report-ai-card__action > span,
+.report-ai-sections__opportunity span {
+  color: var(--ink-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.report-ai-sections__header h2,
+.report-ai-actions h3,
+.report-ai-card h3 {
+  margin: 0;
+  color: var(--ink);
+}
+
+.report-ai-sections__summary {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.6;
+}
+
+.report-ai-sections__opportunity {
+  display: grid;
+  gap: 0.35rem;
+  border-left: 3px solid #0f766e;
+  padding: 0.8rem 1rem;
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.report-ai-sections__opportunity strong {
+  color: var(--ink);
+  font-size: 0.98rem;
+}
+
+.report-ai-sections__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.9rem;
+}
+
+.report-ai-card {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 8px;
+  padding: 0.95rem;
+  background: #ffffff;
+}
+
+.report-ai-card--warning {
+  border-top: 3px solid #d97706;
+}
+
+.report-ai-card--critical {
+  border-top: 3px solid #dc2626;
+}
+
+.report-ai-card--success {
+  border-top: 3px solid #16a34a;
+}
+
+.report-ai-card--info {
+  border-top: 3px solid #2563eb;
+}
+
+.report-ai-card__topline {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.report-ai-card p {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.55;
+}
+
+.report-ai-card__evidence,
+.report-ai-card__action {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.report-ai-card__evidence dl {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+}
+
+.report-ai-card__evidence div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: baseline;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  padding-bottom: 0.35rem;
+}
+
+.report-ai-card__evidence dt {
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+}
+
+.report-ai-card__evidence dd {
+  display: grid;
+  justify-items: end;
+  margin: 0;
+  color: var(--ink);
+  font-weight: 700;
+  text-align: right;
+}
+
+.report-ai-card__evidence small,
+.report-ai-card__impact {
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.report-ai-card__action strong {
+  color: var(--ink);
+  line-height: 1.45;
+}
+
+.report-ai-actions {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.report-ai-actions ol {
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.report-ai-actions li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: start;
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 8px;
+  padding: 0.8rem;
+  background: #ffffff;
+}
+
+.report-ai-actions li > div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.report-ai-actions strong {
+  color: var(--ink);
+}
+
+.report-ai-actions span,
+.report-ai-actions small {
+  color: var(--ink-muted);
+  line-height: 1.45;
+}
+
+.report-ai-actions__priority {
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  background: rgba(15, 23, 42, 0.08);
+  color: var(--ink);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.report-ai-actions__priority--high {
+  background: rgba(220, 38, 38, 0.12);
+  color: #991b1b;
+}
+
+.report-ai-actions__priority--medium {
+  background: rgba(217, 119, 6, 0.14);
+  color: #92400e;
+}
+
+.report-ai-actions__priority--low {
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
+}
+
 .wallet-workspace {
   position: relative;
   isolation: isolate;

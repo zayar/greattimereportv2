@@ -2,6 +2,10 @@ import {
   fetchApicoreOrdersWithPayments,
   type ApicoreOrderWithPaymentsRow,
 } from "../apicore.service.js";
+import {
+  buildPaymentReportAiPayload,
+  getReportAiActionLines,
+} from "../reports/report-ai-insights.service.js";
 import { sendTelegramMessage } from "./bot.service.js";
 import {
   buildUtcDayRangeForDateKeyInTimeZone,
@@ -200,14 +204,24 @@ function summarizeBySeller(payments: Array<TodayPaymentReportItem & { sortKey: n
     .slice(0, SELLER_PREVIEW_LIMIT);
 }
 
-async function fetchAllOrdersForTodayPayments(input: {
+function parseDateKey(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map((value) => Number(value));
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function addDaysToDateKey(dateKey: string, days: number) {
+  const date = parseDateKey(dateKey);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+async function fetchAllOrdersForPaymentDateKey(input: {
   clinicId: string;
   timezone: string;
+  dateKey: string;
   authorizationHeader?: string;
-  referenceDate?: Date;
 }) {
-  const dateKey = formatDateKeyInTimeZone(input.referenceDate ?? new Date(), input.timezone);
-  const { startIso, endIso } = buildUtcDayRangeForDateKeyInTimeZone(dateKey, input.timezone);
+  const { startIso, endIso } = buildUtcDayRangeForDateKeyInTimeZone(input.dateKey, input.timezone);
 
   const rows: ApicoreOrderWithPaymentsRow[] = [];
   let skip = 0;
@@ -232,10 +246,95 @@ async function fetchAllOrdersForTodayPayments(input: {
   }
 
   return {
-    dateKey,
+    dateKey: input.dateKey,
     startIso,
     endIso,
     rows,
+  };
+}
+
+async function fetchAllOrdersForTodayPayments(input: {
+  clinicId: string;
+  timezone: string;
+  authorizationHeader?: string;
+  referenceDate?: Date;
+}) {
+  return fetchAllOrdersForPaymentDateKey({
+    clinicId: input.clinicId,
+    timezone: input.timezone,
+    dateKey: formatDateKeyInTimeZone(input.referenceDate ?? new Date(), input.timezone),
+    authorizationHeader: input.authorizationHeader,
+  });
+}
+
+async function fetchOptionalPaymentComparison(input: {
+  clinicId: string;
+  timezone: string;
+  dateKey: string;
+  authorizationHeader?: string;
+}) {
+  try {
+    const previousDateKey = addDaysToDateKey(input.dateKey, -1);
+    return await fetchAllOrdersForPaymentDateKey({
+      clinicId: input.clinicId,
+      timezone: input.timezone,
+      dateKey: previousDateKey,
+      authorizationHeader: input.authorizationHeader,
+    });
+  } catch (error) {
+    console.warn("[GT_V2Report][GT Growth AI] previous-day payment comparison failed", {
+      clinicId: input.clinicId,
+      dateKey: input.dateKey,
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+    return null;
+  }
+}
+
+function summarizeOutstandingOrders(orders: ApicoreOrderWithPaymentsRow[]) {
+  const invoiceBalances = new Map<string, number>();
+
+  orders.forEach((order) => {
+    const invoiceNumber = order.order_id?.trim() || order.id;
+    const balance = Math.max(0, parseNumber(order.balance));
+    const paymentStatus = (order.payment_status ?? "").trim().toUpperCase();
+    if (balance > 0 || paymentStatus === "PARTIAL_PAID") {
+      invoiceBalances.set(invoiceNumber, Math.max(invoiceBalances.get(invoiceNumber) ?? 0, balance));
+    }
+  });
+
+  return {
+    outstandingAmount: [...invoiceBalances.values()].reduce((total, amount) => total + amount, 0),
+    partialPaymentInvoiceCount: invoiceBalances.size,
+  };
+}
+
+function buildPaymentSnapshot(input: {
+  rows: ApicoreOrderWithPaymentsRow[];
+  timezone: string;
+  startIso: string;
+  endIso: string;
+}) {
+  const payments = mapPaymentRows({
+    orders: input.rows,
+    timezone: input.timezone,
+    startIso: input.startIso,
+    endIso: input.endIso,
+  });
+  const totalPaymentAmount = payments.reduce((total, payment) => total + payment.amount, 0);
+  const paidInvoiceCount = new Set(payments.map((payment) => payment.invoiceNumber)).size;
+  const outstanding = summarizeOutstandingOrders(input.rows);
+
+  return {
+    payments,
+    totalPaymentAmount,
+    paidInvoiceCount,
+    paymentCount: payments.length,
+    averageInvoiceValue: paidInvoiceCount > 0 ? totalPaymentAmount / paidInvoiceCount : 0,
+    paymentMethods: summarizeByMethod(payments),
+    sellerTotals: summarizeBySeller(payments),
+    outstandingAmount: outstanding.outstandingAmount,
+    partialPaymentInvoiceCount: outstanding.partialPaymentInvoiceCount,
   };
 }
 
@@ -253,25 +352,62 @@ export async function buildTodayPaymentReport(input: {
     authorizationHeader: input.authorizationHeader,
     referenceDate: input.referenceDate,
   });
-  const payments = mapPaymentRows({
-    orders: rows,
+  const previousDayResult = await fetchOptionalPaymentComparison({
+    clinicId: input.clinicId,
+    timezone,
+    dateKey,
+    authorizationHeader: input.authorizationHeader,
+  });
+  const snapshot = buildPaymentSnapshot({
+    rows,
     timezone,
     startIso,
     endIso,
   });
-  const totalPaymentAmount = payments.reduce((total, payment) => total + payment.amount, 0);
-  const paidInvoiceCount = new Set(payments.map((payment) => payment.invoiceNumber)).size;
+  const previousSnapshot = previousDayResult
+    ? buildPaymentSnapshot({
+        rows: previousDayResult.rows,
+        timezone,
+        startIso: previousDayResult.startIso,
+        endIso: previousDayResult.endIso,
+      })
+    : null;
+  const revenueByServiceOrPackage: Array<{ name: string; count: number; amount: number }> = [];
+  const refundVoidDiscountAmount: number | null = null;
+  const gtGrowthAi = buildPaymentReportAiPayload({
+    dateKey,
+    totalPaymentAmount: snapshot.totalPaymentAmount,
+    paymentCount: snapshot.paymentCount,
+    paidInvoiceCount: snapshot.paidInvoiceCount,
+    averageInvoiceValue: snapshot.averageInvoiceValue,
+    paymentMethods: snapshot.paymentMethods,
+    sellerTotals: snapshot.sellerTotals,
+    outstandingAmount: snapshot.outstandingAmount,
+    partialPaymentInvoiceCount: snapshot.partialPaymentInvoiceCount,
+    previousDayTotalPaymentAmount: previousSnapshot?.totalPaymentAmount ?? null,
+    previousDayPaymentCount: previousSnapshot?.paymentCount ?? null,
+    revenueByServiceOrPackage,
+    refundVoidDiscountAmount,
+  });
 
   return {
     clinicName: input.clinicName || "Clinic",
     dateKey,
     timezone,
-    totalPaymentAmount,
-    paidInvoiceCount,
-    paymentCount: payments.length,
-    payments: payments.slice(0, PAYMENT_PREVIEW_LIMIT).map(({ sortKey: _sortKey, ...payment }) => payment),
-    paymentMethods: summarizeByMethod(payments),
-    sellerTotals: summarizeBySeller(payments),
+    totalPaymentAmount: snapshot.totalPaymentAmount,
+    paidInvoiceCount: snapshot.paidInvoiceCount,
+    paymentCount: snapshot.paymentCount,
+    averageInvoiceValue: snapshot.averageInvoiceValue,
+    outstandingAmount: snapshot.outstandingAmount,
+    partialPaymentInvoiceCount: snapshot.partialPaymentInvoiceCount,
+    previousDayTotalPaymentAmount: previousSnapshot?.totalPaymentAmount ?? null,
+    previousDayPaymentCount: previousSnapshot?.paymentCount ?? null,
+    revenueByServiceOrPackage,
+    refundVoidDiscountAmount,
+    payments: snapshot.payments.slice(0, PAYMENT_PREVIEW_LIMIT).map(({ sortKey: _sortKey, ...payment }) => payment),
+    paymentMethods: snapshot.paymentMethods,
+    sellerTotals: snapshot.sellerTotals,
+    gtGrowthAi,
   } satisfies TodayPaymentReportSummary;
 }
 
@@ -285,7 +421,16 @@ export function formatTodayPaymentTelegramMessage(report: TodayPaymentReportSumm
     `စုစုပေါင်း payment amount: ${formatMoney(report.totalPaymentAmount)}`,
     `Paid invoices: ${report.paidInvoiceCount}`,
     `Payment records: ${report.paymentCount}`,
+    `Average invoice: ${formatMoney(report.averageInvoiceValue)}`,
   ];
+
+  if (report.previousDayTotalPaymentAmount !== null) {
+    lines.push(`Previous day amount: ${formatMoney(report.previousDayTotalPaymentAmount)}`);
+  }
+
+  if (report.outstandingAmount > 0 || report.partialPaymentInvoiceCount > 0) {
+    lines.push(`Outstanding/partial: ${formatMoney(report.outstandingAmount)} (${report.partialPaymentInvoiceCount})`);
+  }
 
   if (report.paymentMethods.length > 0) {
     lines.push("", "💳 Payment methods");
@@ -314,6 +459,14 @@ export function formatTodayPaymentTelegramMessage(report: TodayPaymentReportSumm
     lines.push("", "👤 Top sellers");
     report.sellerTotals.forEach((entry) => {
       lines.push(`${entry.sellerName} - ${formatMoney(entry.amount)} (${entry.count})`);
+    });
+  }
+
+  const aiActionLines = getReportAiActionLines(report.gtGrowthAi);
+  if (aiActionLines.length > 0) {
+    lines.push("", "AI Actions:");
+    aiActionLines.forEach((action, index) => {
+      lines.push(`${index + 1}. ${action}`);
     });
   }
 

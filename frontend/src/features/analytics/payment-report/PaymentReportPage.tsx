@@ -4,6 +4,7 @@ import { DateRangeControls } from "../../../components/DateRangeControls";
 import { DataTable } from "../../../components/DataTable";
 import { Panel } from "../../../components/Panel";
 import { PageHeader } from "../../../components/PageHeader";
+import { ReportAiSections } from "../../../components/ReportAiSections";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import { useAccess } from "../../access/AccessProvider";
 import { startOfCurrentMonth, today, daysAgo } from "../../../utils/date";
@@ -390,6 +391,8 @@ export function PaymentReportPage() {
           <strong>{formatCurrency(data?.summary.averageInvoice ?? 0, currency)}</strong>
         </div>
       </div>
+
+      {data?.gtGrowthAi ? <ReportAiSections payload={data.gtGrowthAi} /> : null}
 
       <Panel
         className="analytics-report__panel sales-details-report__panel"
