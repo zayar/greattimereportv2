@@ -22,6 +22,7 @@ import {
   weeklySummaryDaysOfWeek,
   weeklySummarySections,
 } from "../services/telegram/types.js";
+import { gtGrowthAiTelegramTargetPurposes } from "../types/gt-growth-ai-sales-assistant.js";
 import type { TelegramReportType } from "../services/telegram/types.js";
 
 const router = Router();
@@ -65,13 +66,21 @@ const weeklySummarySettingsSchema = z.object({
   weeklySummarySections: z.array(z.enum(weeklySummarySections)).min(1).max(weeklySummarySections.length).optional(),
 });
 
+const gtGrowthAiSalesAssistantSettingsSchema = z.object({
+  targetPurpose: z.enum(gtGrowthAiTelegramTargetPurposes).optional(),
+  isGtGrowthAiSalesAssistantEnabled: z.boolean().optional(),
+  gtGrowthAiSalesAssistantTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  isGtGrowthAiOwnerProgressSummaryEnabled: z.boolean().optional(),
+  gtGrowthAiOwnerProgressSummaryTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+});
+
 const settingsSchema = clinicTargetSchema.extend({
   isTodayAppointmentReportEnabled: z.boolean(),
   reportTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   isTodayPaymentReportEnabled: z.boolean(),
   paymentReportTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   timezone: z.string().min(1),
-}).merge(ownerAiSettingsSchema).merge(weeklySummarySettingsSchema);
+}).merge(ownerAiSettingsSchema).merge(weeklySummarySettingsSchema).merge(gtGrowthAiSalesAssistantSettingsSchema);
 
 const sendTestSchema = clinicTargetSchema.extend({
   reportType: telegramReportTypeSchema.default("appointment"),
@@ -203,6 +212,12 @@ router.post(
       ownerAiReportTime: params.ownerAiReportTime ? normalizeReportTime(params.ownerAiReportTime) : undefined,
       weeklySummaryReportTime: params.weeklySummaryReportTime
         ? normalizeReportTime(params.weeklySummaryReportTime)
+        : undefined,
+      gtGrowthAiSalesAssistantTime: params.gtGrowthAiSalesAssistantTime
+        ? normalizeReportTime(params.gtGrowthAiSalesAssistantTime)
+        : undefined,
+      gtGrowthAiOwnerProgressSummaryTime: params.gtGrowthAiOwnerProgressSummaryTime
+        ? normalizeReportTime(params.gtGrowthAiOwnerProgressSummaryTime)
         : undefined,
       timezone: normalizeTimeZone(params.timezone),
     });

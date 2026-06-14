@@ -12,13 +12,12 @@ import {
   sendTelegramTestReport,
   unlinkTelegramIntegration,
 } from "../../../api/telegram";
-import {
-  fetchGtGrowthAiFeatureAccess,
-  saveGtGrowthAiFeatureAccess,
-} from "../../../api/features";
+import { sendSalesAssistantTasks } from "../../../api/gtGrowthAi";
+import { fetchGtGrowthAiFeatureAccess } from "../../../api/features";
 import type {
   AiLanguage,
   ClinicFeatureAccessStatus,
+  GtGrowthAiTelegramTargetPurpose,
   TelegramDeliveryLogEntry,
   TelegramIntegrationStatus,
   TelegramOwnerAiFocusArea,
@@ -30,10 +29,14 @@ import type {
 } from "../../../types/domain";
 import { useAccess } from "../../access/AccessProvider";
 
-type BusyAction = "load" | "link" | "save" | "unlink" | "test" | "resend" | null;
-type FeatureBusyAction = "save_gt_growth_ai" | null;
+type BusyAction = "load" | "link" | "save" | "unlink" | "test" | "resend" | "sales_test" | null;
 
 type TargetDraft = {
+  targetPurpose: GtGrowthAiTelegramTargetPurpose;
+  salesAssistantEnabled: boolean;
+  salesAssistantTime: string;
+  ownerProgressEnabled: boolean;
+  ownerProgressTime: string;
   appointmentEnabled: boolean;
   appointmentTime: string;
   paymentEnabled: boolean;
@@ -97,6 +100,16 @@ const WEEKLY_SUMMARY_SECTION_OPTIONS: Array<{ value: TelegramWeeklySummarySectio
   { value: "payment_summary", label: "Payment Summary" },
   { value: "top_services", label: "Top Services" },
   { value: "busy_hours", label: "Busy Hours" },
+];
+
+const TELEGRAM_TARGET_PURPOSE_OPTIONS: Array<{ value: GtGrowthAiTelegramTargetPurpose; label: string }> = [
+  { value: "general_reports", label: "General reports" },
+  { value: "owner_group", label: "Owner group" },
+  { value: "sales_lead", label: "Sales lead" },
+  { value: "reception", label: "Reception" },
+  { value: "finance", label: "Finance" },
+  { value: "manager", label: "Manager" },
+  { value: "other", label: "Other" },
 ];
 
 const COMMON_TIMEZONES = [
@@ -190,6 +203,11 @@ function sameWeeklySummarySections(
 
 function buildTargetDraft(target: TelegramTargetStatus): TargetDraft {
   return {
+    targetPurpose: target.targetPurpose,
+    salesAssistantEnabled: target.isGtGrowthAiSalesAssistantEnabled,
+    salesAssistantTime: target.gtGrowthAiSalesAssistantTime,
+    ownerProgressEnabled: target.isGtGrowthAiOwnerProgressSummaryEnabled,
+    ownerProgressTime: target.gtGrowthAiOwnerProgressSummaryTime,
     appointmentEnabled: target.isTodayAppointmentReportEnabled,
     appointmentTime: target.reportTime,
     paymentEnabled: target.isTodayPaymentReportEnabled,
@@ -303,8 +321,6 @@ export function TelegramSettingsPage() {
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [draftsByChatId, setDraftsByChatId] = useState<Record<string, TargetDraft>>({});
   const [gtGrowthAiAccess, setGtGrowthAiAccess] = useState<ClinicFeatureAccessStatus | null>(null);
-  const [gtGrowthAiEnabledDraft, setGtGrowthAiEnabledDraft] = useState(false);
-  const [featureBusyAction, setFeatureBusyAction] = useState<FeatureBusyAction>(null);
   const [isQrOpen, setIsQrOpen] = useState(false);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
   const [qrError, setQrError] = useState<string | null>(null);
@@ -337,7 +353,6 @@ export function TelegramSettingsPage() {
         ]);
         setStatus(nextStatus);
         setGtGrowthAiAccess(nextFeatureAccess.gtGrowthAi);
-        setGtGrowthAiEnabledDraft(nextFeatureAccess.gtGrowthAi.enabled);
       } catch (error) {
         setErrorMessage(getApiErrorMessage(error, "Telegram settings could not be loaded."));
       } finally {
@@ -403,7 +418,12 @@ export function TelegramSettingsPage() {
   const hasChanges = Boolean(
     selectedTarget &&
       selectedDraft &&
-      (selectedDraft.appointmentEnabled !== selectedTarget.isTodayAppointmentReportEnabled ||
+      (selectedDraft.targetPurpose !== selectedTarget.targetPurpose ||
+        selectedDraft.salesAssistantEnabled !== selectedTarget.isGtGrowthAiSalesAssistantEnabled ||
+        selectedDraft.salesAssistantTime !== selectedTarget.gtGrowthAiSalesAssistantTime ||
+        selectedDraft.ownerProgressEnabled !== selectedTarget.isGtGrowthAiOwnerProgressSummaryEnabled ||
+        selectedDraft.ownerProgressTime !== selectedTarget.gtGrowthAiOwnerProgressSummaryTime ||
+        selectedDraft.appointmentEnabled !== selectedTarget.isTodayAppointmentReportEnabled ||
         selectedDraft.appointmentTime !== selectedTarget.reportTime ||
         selectedDraft.paymentEnabled !== selectedTarget.isTodayPaymentReportEnabled ||
         selectedDraft.paymentTime !== selectedTarget.paymentReportTime ||
@@ -422,12 +442,6 @@ export function TelegramSettingsPage() {
         ) ||
         selectedDraft.timezone !== selectedTarget.timezone),
   );
-  const gtGrowthAiHasChanges = Boolean(gtGrowthAiAccess && gtGrowthAiEnabledDraft !== gtGrowthAiAccess.enabled);
-  const gtGrowthAiSaveDisabled =
-    featureBusyAction !== null ||
-    busyAction === "load" ||
-    !gtGrowthAiHasChanges ||
-    gtGrowthAiAccess?.source === "environment";
   const isLinked = (status?.linkedTargetCount ?? 0) > 0;
   const pendingCodeActive = hasActivePendingCode(status);
   const saveButtonLabel = busyAction === "save" ? "Saving..." : "Save target settings";
@@ -609,6 +623,11 @@ export function TelegramSettingsPage() {
         clinicCode: activeClinic.code,
         clinicName: activeClinic.name,
         chatId: selectedTarget.telegramChatId,
+        targetPurpose: selectedDraft.targetPurpose,
+        isGtGrowthAiSalesAssistantEnabled: selectedDraft.salesAssistantEnabled,
+        gtGrowthAiSalesAssistantTime: selectedDraft.salesAssistantTime,
+        isGtGrowthAiOwnerProgressSummaryEnabled: selectedDraft.ownerProgressEnabled,
+        gtGrowthAiOwnerProgressSummaryTime: selectedDraft.ownerProgressTime,
         isTodayAppointmentReportEnabled: selectedDraft.appointmentEnabled,
         reportTime: selectedDraft.appointmentTime,
         isTodayPaymentReportEnabled: selectedDraft.paymentEnabled,
@@ -631,30 +650,6 @@ export function TelegramSettingsPage() {
       setErrorMessage(getApiErrorMessage(error, "Telegram settings could not be saved."));
     } finally {
       setBusyAction(null);
-    }
-  }
-
-  async function handleSaveGtGrowthAiAccess() {
-    setFeatureBusyAction("save_gt_growth_ai");
-    setNotice(null);
-    setErrorMessage(null);
-
-    try {
-      const nextAccess = await saveGtGrowthAiFeatureAccess({
-        clinicId: activeClinic.id,
-        enabled: gtGrowthAiEnabledDraft,
-      });
-      setGtGrowthAiAccess(nextAccess.gtGrowthAi);
-      setGtGrowthAiEnabledDraft(nextAccess.gtGrowthAi.enabled);
-      setNotice(
-        nextAccess.gtGrowthAi.enabled
-          ? "GT Growth AI premium report sections are enabled for this clinic."
-          : "GT Growth AI premium report sections are disabled for this clinic.",
-      );
-    } catch (error) {
-      setErrorMessage(getApiErrorMessage(error, "GT Growth AI access could not be saved."));
-    } finally {
-      setFeatureBusyAction(null);
     }
   }
 
@@ -774,6 +769,33 @@ export function TelegramSettingsPage() {
       await loadStatus(false);
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error, "Report could not be resent."));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function handleSendSalesAssistantTest() {
+    if (!selectedTarget?.telegramChatId || !selectedDraft) {
+      return;
+    }
+
+    setBusyAction("sales_test");
+    setNotice(null);
+    setErrorMessage(null);
+
+    try {
+      const result = await sendSalesAssistantTasks({
+        clinicId: activeClinic.id,
+        clinicCode: activeClinic.code,
+        clinicName: activeClinic.name,
+        targetPurpose: "sales_lead",
+      });
+      setNotice(
+        `GT Growth AI Sales Assistant sent ${result.actionCount} tasks to ${result.salesTargetLabel}.`,
+      );
+      await loadStatus(false);
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error, "GT Growth AI Sales Assistant test could not be sent."));
     } finally {
       setBusyAction(null);
     }
@@ -987,7 +1009,7 @@ export function TelegramSettingsPage() {
         <Panel
           className="telegram-settings__card telegram-settings__card--wide"
           title="GT Growth AI"
-          subtitle="Clinic-level paid feature access for AI insights, business opportunities, evidence, and Myanmar Telegram recommendations."
+          subtitle="Paid feature status for AI insights, Sales Assistant tasks, business opportunities, and Myanmar Telegram recommendations."
           action={
             <span
               className={`telegram-settings__badge telegram-settings__badge--${
@@ -998,25 +1020,6 @@ export function TelegramSettingsPage() {
             </span>
           }
         >
-          <label className="telegram-settings__toggle">
-            <input
-              type="checkbox"
-              checked={gtGrowthAiEnabledDraft}
-              onChange={(event) => setGtGrowthAiEnabledDraft(event.target.checked)}
-              disabled={!gtGrowthAiAccess || gtGrowthAiAccess.source === "environment" || featureBusyAction !== null}
-            />
-            <span className={`telegram-settings__switch ${gtGrowthAiEnabledDraft ? "telegram-settings__switch--on" : ""}`} aria-hidden="true">
-              <span className="telegram-settings__switch-handle" />
-            </span>
-            <div className="telegram-settings__toggle-copy">
-              <strong>Enable GT Growth AI premium report sections</strong>
-              <span>
-                Adds AI summary, evidence, business opportunity, and Myanmar recommended actions to premium appointment,
-                payment, and weekly reports.
-              </span>
-            </div>
-          </label>
-
           <div className="telegram-settings__meta-grid">
             <article className="telegram-settings__meta-card">
               <span>Access source</span>
@@ -1024,7 +1027,7 @@ export function TelegramSettingsPage() {
               <small>
                 {gtGrowthAiAccess?.source === "environment"
                   ? "Cloud Run env enables this clinic, so the setting cannot be changed here."
-                  : "This clinic setting controls the backend premium gate."}
+                  : "Paid entitlement is managed by GreatTime admin or billing, not by merchant settings."}
               </small>
             </article>
 
@@ -1036,23 +1039,152 @@ export function TelegramSettingsPage() {
           </div>
 
           <div className="telegram-settings__callout">
-            <strong>{gtGrowthAiAccess?.enabled ? "Premium AI reports are active" : "Premium AI reports are locked"}</strong>
+            <strong>{gtGrowthAiAccess?.enabled ? "Premium GT Growth AI is active" : "Unlock GT Growth AI Sales Assistant"}</strong>
             <span>
               {gtGrowthAiAccess?.enabled
-                ? "Premium clinics will see the GT Growth AI section in Telegram and AI cards in supported report UI."
-                : "Basic reports remain free. Turn this on to show premium GT Growth AI sections for this clinic."}
+                ? "Paid clinics can receive AI report sections and daily money-making task lists for the sales team."
+                : "Basic reports remain free. Upgrade to send daily rebooking, package, VIP, and payment follow-up tasks to your team."}
             </span>
           </div>
 
-          <div className="telegram-settings__button-row">
-            <button
-              className="button telegram-settings__button telegram-settings__button--primary"
-              onClick={() => void handleSaveGtGrowthAiAccess()}
-              disabled={gtGrowthAiSaveDisabled}
+          <p className="telegram-settings__hint">
+            TODO(gt_growth_ai): connect this status to the production billing/admin entitlement source. Normal merchant users
+            cannot self-enable paid access from this settings page.
+          </p>
+        </Panel>
+
+        <Panel
+          className="telegram-settings__card telegram-settings__card--wide"
+          title="GT Growth AI Sales Assistant"
+          subtitle={
+            gtGrowthAiAccess?.enabled
+              ? "Send daily money-making follow-up tasks to the sales lead and progress summaries to the owner."
+              : "Upgrade to send AI-generated customer follow-up tasks to your sales team."
+          }
+          action={
+            <span
+              className={`telegram-settings__badge telegram-settings__badge--${
+                gtGrowthAiAccess?.enabled ? "linked" : "idle"
+              }`}
             >
-              {featureBusyAction === "save_gt_growth_ai" ? "Saving..." : "Save GT Growth AI access"}
-            </button>
-          </div>
+              {gtGrowthAiAccess?.enabled ? "Available" : "Locked"}
+            </span>
+          }
+        >
+          {!gtGrowthAiAccess?.enabled ? (
+            <div className="telegram-settings__callout">
+              <strong>Unlock GT Growth AI Sales Assistant</strong>
+              <span>
+                GreatTime AI finds customers to rebook, package customers to follow up, VIP customers to recover, and
+                payments to follow up. Upgrade to send daily task lists to your sales team.
+              </span>
+            </div>
+          ) : !selectedTarget || !selectedDraft ? (
+            <div className="inline-note">Link and select a Telegram target before configuring Sales Assistant delivery.</div>
+          ) : (
+            <>
+              <div className="telegram-settings__two-up">
+                <label className="field">
+                  <span>Target purpose</span>
+                  <select
+                    value={selectedDraft.targetPurpose}
+                    onChange={(event) =>
+                      updateSelectedDraft({ targetPurpose: event.target.value as GtGrowthAiTelegramTargetPurpose })
+                    }
+                  >
+                    {TELEGRAM_TARGET_PURPOSE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <article className="telegram-settings__meta-card telegram-settings__meta-card--inline">
+                  <span>Selected target</span>
+                  <strong>{selectedTarget.targetLabel}</strong>
+                  <small>
+                    Customer-level task lists should go to a private sales lead target when possible.
+                  </small>
+                </article>
+              </div>
+
+              <label className="telegram-settings__toggle">
+                <input
+                  type="checkbox"
+                  checked={selectedDraft.salesAssistantEnabled}
+                  onChange={(event) => updateSelectedDraft({ salesAssistantEnabled: event.target.checked })}
+                />
+                <span className={`telegram-settings__switch ${selectedDraft.salesAssistantEnabled ? "telegram-settings__switch--on" : ""}`} aria-hidden="true">
+                  <span className="telegram-settings__switch-handle" />
+                </span>
+                <div className="telegram-settings__toggle-copy">
+                  <strong>Enable daily Sales Assistant tasks</strong>
+                  <span>Send the task list to the linked sales lead target at the selected time.</span>
+                </div>
+              </label>
+
+              <div className="telegram-settings__two-up">
+                <label className="field">
+                  <span>Sales task send time</span>
+                  <input
+                    type="time"
+                    value={selectedDraft.salesAssistantTime || envDefaultTime()}
+                    onChange={(event) => updateSelectedDraft({ salesAssistantTime: event.target.value })}
+                  />
+                </label>
+
+                <label className="field">
+                  <span>Owner progress time</span>
+                  <input
+                    type="time"
+                    value={selectedDraft.ownerProgressTime || envDefaultTime()}
+                    onChange={(event) => updateSelectedDraft({ ownerProgressTime: event.target.value })}
+                  />
+                </label>
+              </div>
+
+              <label className="telegram-settings__toggle">
+                <input
+                  type="checkbox"
+                  checked={selectedDraft.ownerProgressEnabled}
+                  onChange={(event) => updateSelectedDraft({ ownerProgressEnabled: event.target.checked })}
+                />
+                <span className={`telegram-settings__switch ${selectedDraft.ownerProgressEnabled ? "telegram-settings__switch--on" : ""}`} aria-hidden="true">
+                  <span className="telegram-settings__switch-handle" />
+                </span>
+                <div className="telegram-settings__toggle-copy">
+                  <strong>Enable owner progress summary</strong>
+                  <span>Send a concise contacted/booked/purchased progress summary to owner or manager targets.</span>
+                </div>
+              </label>
+
+              <div className="telegram-settings__button-row">
+                <button
+                  className="button telegram-settings__button telegram-settings__button--primary"
+                  onClick={() => void handleSaveSettings()}
+                  disabled={busyAction !== null || !hasChanges}
+                >
+                  {busyAction === "save" ? "Saving..." : "Save Sales Assistant settings"}
+                </button>
+                <button
+                  className="button telegram-settings__button telegram-settings__button--secondary"
+                  onClick={() => void handleSendSalesAssistantTest()}
+                  disabled={busyAction !== null}
+                >
+                  {busyAction === "sales_test" ? "Sending..." : "Send Sales Assistant test"}
+                </button>
+                <button
+                  className="button telegram-settings__button telegram-settings__button--secondary"
+                  onClick={() => {
+                    window.location.href = "/ai/gt-growth-ai-sales-assistant";
+                  }}
+                >
+                  Open Sales Assistant
+                </button>
+              </div>
+            </>
+          )}
         </Panel>
 
         <Panel

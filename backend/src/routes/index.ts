@@ -6,6 +6,7 @@ import apicoreRoutes from "./apicore.routes.js";
 import telegramRoutes from "./telegram.routes.js";
 import commissionRoutes from "./commission.routes.js";
 import featuresRoutes from "./features.routes.js";
+import gtGrowthAiRoutes from "./gt-growth-ai.routes.js";
 
 const router = Router();
 
@@ -26,5 +27,6 @@ router.use("/ai", aiRoutes);
 router.use("/integrations/telegram", telegramRoutes);
 router.use("/commission", commissionRoutes);
 router.use("/features", featuresRoutes);
+router.use("/gt-growth-ai", gtGrowthAiRoutes);
 
 export default router;

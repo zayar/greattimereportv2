@@ -1,6 +1,7 @@
 import { apiClient } from "./http";
 import type {
   AiLanguage,
+  GtGrowthAiTelegramTargetPurpose,
   TelegramIntegrationStatus,
   TelegramOwnerAiFocusArea,
   TelegramOwnerAiTone,
@@ -39,6 +40,11 @@ export async function saveTelegramSettings(payload: ClinicScopedInput & {
   reportTime: string;
   isTodayPaymentReportEnabled: boolean;
   paymentReportTime: string;
+  targetPurpose?: GtGrowthAiTelegramTargetPurpose;
+  isGtGrowthAiSalesAssistantEnabled?: boolean;
+  gtGrowthAiSalesAssistantTime?: string;
+  isGtGrowthAiOwnerProgressSummaryEnabled?: boolean;
+  gtGrowthAiOwnerProgressSummaryTime?: string;
   isOwnerAiReportEnabled?: boolean;
   ownerAiReportTime?: string;
   ownerAiLanguage?: AiLanguage;

@@ -21,6 +21,13 @@ const { hasFeatureAccess } = await import("../src/services/feature-access.servic
 
 const { formatTodayPaymentTelegramMessage } = await import("../src/services/telegram/payment-report.service.ts");
 const { formatGtGrowthAiTelegramSection } = await import("../src/services/telegram/gt-growth-ai-message.ts");
+const {
+  buildLockedSalesAssistantResponse,
+  buildSalesAssistantActionsFromFacts,
+  calculateSalesAssistantPriorityScore,
+  formatSalesAssistantTaskMessage,
+  summarizeSalesAssistantActions,
+} = await import("../src/services/gt-growth-ai/sales-assistant.service.ts");
 
 test("gt_growth_ai feature access is disabled by default and enabled by configured clinic id", async () => {
   const locked = await hasFeatureAccess({ clinicId: "clinic-basic", feature: "gt_growth_ai" });
@@ -310,4 +317,153 @@ test("Telegram payment report includes Myanmar GT Growth AI block when actions e
 
 test("Telegram GT Growth AI formatter stays hidden without premium payload", () => {
   assert.deepEqual(formatGtGrowthAiTelegramSection(undefined), []);
+});
+
+test("GT Growth AI Sales Assistant builds deterministic money-making actions", () => {
+  const actions = buildSalesAssistantActionsFromFacts({
+    clinicId: "clinic-premium",
+    clinicCode: "DEMO",
+    dateKey: "2026-06-14",
+    completedAppointments: [
+      {
+        customerName: "Daw Mya",
+        customerPhone: "09999991234",
+        serviceName: "Thai Massage",
+        therapistName: "Aye Aye",
+        paymentAmount: 450_000,
+      },
+    ],
+    packageFollowUps: [
+      {
+        customerName: "Ko Hla",
+        packageName: "Body Package",
+        purchasedUnits: 10,
+        usedUnits: 4,
+        remainingUnits: 6,
+        daysSinceActivity: 30,
+      },
+    ],
+    packageUpsells: [
+      {
+        customerName: "Ma Nilar",
+        recentVisitCount: 3,
+        recentSpend: 900_000,
+        repeatedService: "Facial",
+        averageInvoiceValue: 300_000,
+      },
+    ],
+    inactiveVipCustomers: [
+      {
+        customerName: "Daw Khin",
+        lifetimeSpend: 5_500_000,
+        averageSpend: 700_000,
+        visitCount: 12,
+        lastVisitDate: "2026-04-01",
+        daysSinceLastVisit: 74,
+        preferredService: "Laser",
+      },
+    ],
+    paymentFollowUps: [
+      {
+        customerName: "Ko Tun",
+        invoiceNumber: "SO-1001",
+        outstandingAmount: 250_000,
+        paymentStatus: "Partial",
+        lastPaymentDate: "2026-06-14",
+      },
+    ],
+  });
+
+  assert.deepEqual(
+    actions.map((action) => action.actionType).sort(),
+    [
+      "inactive_vip_follow_up",
+      "package_usage_follow_up",
+      "package_upsell_opportunity",
+      "payment_follow_up",
+      "rebooking_opportunity",
+    ].sort(),
+  );
+  assert.ok(actions.every((action) => action.suggestedMessage?.language === "my-MM"));
+  assert.ok(actions.every((action) => action.evidence.length > 0));
+  assert.ok(actions.some((action) => action.customer?.phoneMasked === "***1234"));
+
+  const summary = summarizeSalesAssistantActions(actions);
+  assert.equal(summary.totalActions, 5);
+  assert.equal(summary.rebookingCount, 1);
+  assert.equal(summary.packageUsageCount, 1);
+  assert.equal(summary.packageUpsellCount, 1);
+  assert.equal(summary.inactiveVipCount, 1);
+  assert.equal(summary.paymentFollowUpCount, 1);
+  assert.equal(summary.estimatedTotalValue, 1_700_000);
+});
+
+test("GT Growth AI Sales Assistant dedupes repeated action facts", () => {
+  const actions = buildSalesAssistantActionsFromFacts({
+    clinicId: "clinic-premium",
+    dateKey: "2026-06-14",
+    completedAppointments: [
+      { customerName: "Daw Mya", customerPhone: "09999991234", serviceName: "Thai Massage", paymentAmount: 50_000 },
+      { customerName: "Daw Mya", customerPhone: "09999991234", serviceName: "Thai Massage", paymentAmount: 500_000 },
+    ],
+  });
+
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].actionType, "rebooking_opportunity");
+  assert.equal(actions[0].estimatedValue, 500_000);
+});
+
+test("GT Growth AI Sales Assistant handles empty data and locked preview safely", () => {
+  const actions = buildSalesAssistantActionsFromFacts({
+    clinicId: "clinic-premium",
+    dateKey: "2026-06-14",
+  });
+  const locked = buildLockedSalesAssistantResponse({
+    feature: "gt_growth_ai",
+    enabled: false,
+    title: "Unlock GT Growth AI",
+    message: "AI insights and recommended actions are available with GT Growth AI.",
+    lockedReason: "gt_growth_ai is not enabled for this clinic.",
+  });
+
+  assert.deepEqual(actions, []);
+  assert.equal(locked.premium.enabled, false);
+  assert.ok(locked.lockedPreview?.teaserBullets.length);
+  assert.equal(locked.actions, undefined);
+});
+
+test("GT Growth AI Sales Assistant priority scoring is explainable", () => {
+  const score = calculateSalesAssistantPriorityScore({
+    actionType: "payment_follow_up",
+    estimatedValue: 1_200_000,
+    customerImportance: "vip",
+    confidence: "strong",
+  });
+
+  assert.equal(score, 100);
+});
+
+test("GT Growth AI Sales Assistant Telegram task message hides customer details for group targets", () => {
+  const actions = buildSalesAssistantActionsFromFacts({
+    clinicId: "clinic-premium",
+    dateKey: "2026-06-14",
+    completedAppointments: [
+      { customerName: "Daw Mya", customerPhone: "09999991234", serviceName: "Thai Massage", paymentAmount: 450_000 },
+    ],
+  });
+  const summary = summarizeSalesAssistantActions(actions);
+  const privateMessage = formatSalesAssistantTaskMessage({
+    actions,
+    summary,
+    includeCustomerDetails: true,
+  });
+  const groupMessage = formatSalesAssistantTaskMessage({
+    actions,
+    summary,
+    includeCustomerDetails: false,
+  });
+
+  assert.match(privateMessage, /Daw Mya/);
+  assert.doesNotMatch(groupMessage, /Daw Mya/);
+  assert.match(groupMessage, /C1 = contacted/);
 });

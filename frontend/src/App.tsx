@@ -51,6 +51,7 @@ import { TelegramSettingsPage } from "./features/settings/telegram/TelegramSetti
 import { CommissionSettingsPage } from "./features/settings/commission/CommissionSettingsPage";
 import { CommissionRuleEditorPage } from "./features/settings/commission/CommissionRuleEditorPage";
 import { CustomerRelationshipAgentPage } from "./features/ai/customer-relationship/CustomerRelationshipAgentPage";
+import { GtGrowthAiSalesAssistantPage } from "./features/ai/gt-growth-ai-sales-assistant/GtGrowthAiSalesAssistantPage";
 
 export default function App() {
   return (
@@ -110,6 +111,7 @@ export default function App() {
                     <Route path="analytics/customers-by-salesperson" element={<CustomersBySalespersonPage />} />
                     <Route path="analytics/customers" element={<CustomerPortalPage />} />
                     <Route path="analytics/customers/:customerSlug" element={<CustomerDetailPage />} />
+                    <Route path="ai/gt-growth-ai-sales-assistant" element={<GtGrowthAiSalesAssistantPage />} />
                     <Route path="ai/customer-relationship-agent" element={<CustomerRelationshipAgentPage />} />
                     <Route path="settings/sales-document" element={<SalesDocumentSettingsPage />} />
                     <Route path="settings/commission" element={<CommissionSettingsPage />} />

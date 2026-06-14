@@ -4,8 +4,17 @@ import {
   getExpectedTelegramWebhookUrl,
   getTelegramWebhookInfo,
   isTelegramBotConfigured,
+  sendTelegramMessage,
   startTelegramPolling,
 } from "./bot.service.js";
+import {
+  buildSalesAssistantSendPlan,
+  createTelegramTaskSession,
+  formatSalesAssistantProgressMessage,
+  getSalesAssistantProgress,
+  markSalesAssistantActionsAssigned,
+  requireSalesAssistantPremium,
+} from "../gt-growth-ai/sales-assistant.service.js";
 import { sendTrackedTelegramReport } from "./delivery.service.js";
 import { buildTodayAppointmentReport } from "./report.service.js";
 import {
@@ -215,6 +224,9 @@ async function runSchedulerTick() {
           );
         }
       }
+
+      await maybeSendScheduledSalesAssistant(record, now, summary);
+      await maybeSendScheduledOwnerProgress(record, now, summary);
     }
   } catch (error) {
     console.error("[telegram] scheduler tick failed", error);
@@ -251,6 +263,148 @@ async function sendScheduledReport(record: TelegramTargetRecord, reportType: Tel
     weeklySummarySections: record.weeklySummarySections,
     referenceDate,
   });
+}
+
+async function maybeSendScheduledSalesAssistant(
+  record: TelegramTargetRecord,
+  now: Date,
+  summary: TelegramSchedulerRunSummary,
+) {
+  if (
+    !record.telegramChatId ||
+    !record.isGtGrowthAiSalesAssistantEnabled ||
+    record.targetPurpose !== "sales_lead"
+  ) {
+    return;
+  }
+
+  const dateKey = isDueNow(record.gtGrowthAiSalesAssistantTime, record.timezone, null, now);
+  if (!dateKey) {
+    summary.skippedReports += 1;
+    return;
+  }
+
+  const premium = await requireSalesAssistantPremium(record.clinicId).catch(() => null);
+  if (!premium?.enabled) {
+    summary.skippedReports += 1;
+    return;
+  }
+
+  summary.dueReports += 1;
+  const lockId = await tryAcquireTelegramScheduleLock({
+    clinicId: record.clinicId,
+    chatId: record.telegramChatId,
+    reportType: "gt_growth_ai_sales_assistant",
+    dateKey,
+  });
+
+  if (!lockId) {
+    summary.lockedReports += 1;
+    return;
+  }
+
+  try {
+    const plan = await buildSalesAssistantSendPlan({
+      clinicId: record.clinicId,
+      clinicCode: record.clinicCode,
+      clinicName: record.clinicName,
+      dateKey,
+      targetPurpose: "sales_lead",
+    });
+
+    if (!plan.salesTarget?.telegramChatId || !plan.salesMessage) {
+      throw new Error("No linked sales lead target found.");
+    }
+
+    await sendTelegramMessage(plan.salesTarget.telegramChatId, plan.salesMessage);
+    const assigned = await markSalesAssistantActionsAssigned({
+      clinicId: record.clinicId,
+      actions: plan.actions,
+      target: plan.salesTarget,
+    });
+    await createTelegramTaskSession({
+      clinicId: record.clinicId,
+      chatId: plan.salesTarget.telegramChatId,
+      dateKey,
+      actions: assigned,
+    });
+
+    if (plan.ownerTarget?.telegramChatId && plan.ownerMessage) {
+      await sendTelegramMessage(plan.ownerTarget.telegramChatId, plan.ownerMessage);
+    }
+
+    await markTelegramScheduleLockSent(lockId, new Date().toISOString());
+    summary.sentReports += 1;
+    console.log(
+      `[telegram] scheduled GT Growth AI Sales Assistant sent clinicId=${record.clinicId} chatId=${record.telegramChatId} timezone=${record.timezone}`,
+    );
+  } catch (error) {
+    await releaseTelegramScheduleLock(lockId);
+    summary.failedReports += 1;
+    console.error(
+      `[telegram] scheduled GT Growth AI Sales Assistant failed clinicId=${record.clinicId} chatId=${record.telegramChatId} timezone=${record.timezone}`,
+      error,
+    );
+  }
+}
+
+async function maybeSendScheduledOwnerProgress(
+  record: TelegramTargetRecord,
+  now: Date,
+  summary: TelegramSchedulerRunSummary,
+) {
+  if (
+    !record.telegramChatId ||
+    !record.isGtGrowthAiOwnerProgressSummaryEnabled ||
+    (record.targetPurpose !== "owner_group" && record.targetPurpose !== "manager")
+  ) {
+    return;
+  }
+
+  const dateKey = isDueNow(record.gtGrowthAiOwnerProgressSummaryTime, record.timezone, null, now);
+  if (!dateKey) {
+    summary.skippedReports += 1;
+    return;
+  }
+
+  const premium = await requireSalesAssistantPremium(record.clinicId).catch(() => null);
+  if (!premium?.enabled) {
+    summary.skippedReports += 1;
+    return;
+  }
+
+  summary.dueReports += 1;
+  const lockId = await tryAcquireTelegramScheduleLock({
+    clinicId: record.clinicId,
+    chatId: record.telegramChatId,
+    reportType: "gt_growth_ai_owner_progress",
+    dateKey,
+  });
+
+  if (!lockId) {
+    summary.lockedReports += 1;
+    return;
+  }
+
+  try {
+    const progress = await getSalesAssistantProgress({
+      clinicId: record.clinicId,
+      dateKey,
+    });
+    await sendTelegramMessage(record.telegramChatId, formatSalesAssistantProgressMessage(progress.progress));
+    await markTelegramScheduleLockSent(lockId, new Date().toISOString());
+    summary.sentReports += 1;
+    console.log(
+      `[telegram] scheduled GT Growth AI owner progress sent clinicId=${record.clinicId} chatId=${record.telegramChatId} timezone=${record.timezone}`,
+    );
+  } catch (error) {
+    await releaseTelegramScheduleLock(lockId);
+    summary.failedReports += 1;
+    console.error(
+      `[telegram] scheduled GT Growth AI owner progress failed clinicId=${record.clinicId} chatId=${record.telegramChatId} timezone=${record.timezone}`,
+      error,
+    );
+  }
 }
 
 function startTelegramScheduler() {

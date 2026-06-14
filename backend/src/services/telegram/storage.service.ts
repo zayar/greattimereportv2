@@ -2,6 +2,10 @@ import { randomBytes } from "node:crypto";
 import { firestoreDb } from "../../config/firebase.js";
 import { env } from "../../config/env.js";
 import { HttpError } from "../../utils/http-error.js";
+import {
+  gtGrowthAiTelegramTargetPurposes,
+  type GtGrowthAiTelegramTargetPurpose,
+} from "../../types/gt-growth-ai-sales-assistant.js";
 import type { AiLanguage } from "../ai/language.js";
 import { normalizeReportTime, normalizeTimeZone } from "./time.js";
 import {
@@ -28,6 +32,7 @@ import type {
   TelegramLinkCodeRecord,
   TelegramReportSettingsRecord,
   TelegramReportType,
+  TelegramScheduleLockType,
   TelegramTargetRecord,
   TelegramTargetStatus,
   WeeklySummaryDayOfWeek,
@@ -132,6 +137,15 @@ function normalizeWeeklySummarySections(value: unknown, fallback = DEFAULT_WEEKL
   return normalized.length > 0 ? [...new Set(normalized)] : [...fallback];
 }
 
+function normalizeTargetPurpose(
+  value: unknown,
+  fallback: GtGrowthAiTelegramTargetPurpose = "general_reports",
+) {
+  return gtGrowthAiTelegramTargetPurposes.includes(value as GtGrowthAiTelegramTargetPurpose)
+    ? (value as GtGrowthAiTelegramTargetPurpose)
+    : fallback;
+}
+
 function parseReportSettings(
   data: Record<string, unknown> | undefined,
   defaults: TelegramReportSettingsRecord,
@@ -147,6 +161,25 @@ function parseReportSettings(
         : defaults.telegramChatType,
     telegramChatTitle: typeof data?.telegramChatTitle === "string" ? data.telegramChatTitle : defaults.telegramChatTitle,
     telegramLinkedAt: typeof data?.telegramLinkedAt === "string" ? data.telegramLinkedAt : defaults.telegramLinkedAt,
+    targetPurpose: normalizeTargetPurpose(data?.targetPurpose, defaults.targetPurpose),
+    isGtGrowthAiSalesAssistantEnabled:
+      typeof data?.isGtGrowthAiSalesAssistantEnabled === "boolean"
+        ? data.isGtGrowthAiSalesAssistantEnabled
+        : defaults.isGtGrowthAiSalesAssistantEnabled,
+    gtGrowthAiSalesAssistantTime: normalizeReportTime(
+      typeof data?.gtGrowthAiSalesAssistantTime === "string"
+        ? data.gtGrowthAiSalesAssistantTime
+        : defaults.gtGrowthAiSalesAssistantTime,
+    ),
+    isGtGrowthAiOwnerProgressSummaryEnabled:
+      typeof data?.isGtGrowthAiOwnerProgressSummaryEnabled === "boolean"
+        ? data.isGtGrowthAiOwnerProgressSummaryEnabled
+        : defaults.isGtGrowthAiOwnerProgressSummaryEnabled,
+    gtGrowthAiOwnerProgressSummaryTime: normalizeReportTime(
+      typeof data?.gtGrowthAiOwnerProgressSummaryTime === "string"
+        ? data.gtGrowthAiOwnerProgressSummaryTime
+        : defaults.gtGrowthAiOwnerProgressSummaryTime,
+    ),
     isTodayAppointmentReportEnabled:
       typeof data?.isTodayAppointmentReportEnabled === "boolean"
         ? data.isTodayAppointmentReportEnabled
@@ -272,6 +305,11 @@ function buildDefaultReportSettings(input?: {
     telegramChatType: input?.telegramChatType ?? null,
     telegramChatTitle: input?.telegramChatTitle ?? null,
     telegramLinkedAt: input?.telegramLinkedAt ?? null,
+    targetPurpose: "general_reports",
+    isGtGrowthAiSalesAssistantEnabled: false,
+    gtGrowthAiSalesAssistantTime: env.TELEGRAM_REPORT_DEFAULT_TIME,
+    isGtGrowthAiOwnerProgressSummaryEnabled: false,
+    gtGrowthAiOwnerProgressSummaryTime: env.TELEGRAM_REPORT_DEFAULT_TIME,
     isTodayAppointmentReportEnabled: false,
     reportTime: env.TELEGRAM_REPORT_DEFAULT_TIME,
     isTodayPaymentReportEnabled: false,
@@ -526,6 +564,11 @@ function buildStatus(
         telegramChatType: primaryTarget.telegramChatType,
         telegramChatTitle: primaryTarget.telegramChatTitle,
         telegramLinkedAt: primaryTarget.telegramLinkedAt,
+        targetPurpose: primaryTarget.targetPurpose,
+        isGtGrowthAiSalesAssistantEnabled: primaryTarget.isGtGrowthAiSalesAssistantEnabled,
+        gtGrowthAiSalesAssistantTime: primaryTarget.gtGrowthAiSalesAssistantTime,
+        isGtGrowthAiOwnerProgressSummaryEnabled: primaryTarget.isGtGrowthAiOwnerProgressSummaryEnabled,
+        gtGrowthAiOwnerProgressSummaryTime: primaryTarget.gtGrowthAiOwnerProgressSummaryTime,
         isTodayAppointmentReportEnabled: primaryTarget.isTodayAppointmentReportEnabled,
         reportTime: primaryTarget.reportTime,
         isTodayPaymentReportEnabled: primaryTarget.isTodayPaymentReportEnabled,
@@ -645,6 +688,11 @@ async function ensureLegacyTargetMigrated(record: TelegramIntegrationRecord) {
       telegramChatType: record.telegramChatType,
       telegramChatTitle: record.telegramChatTitle,
       telegramLinkedAt: record.telegramLinkedAt,
+      targetPurpose: record.targetPurpose,
+      isGtGrowthAiSalesAssistantEnabled: record.isGtGrowthAiSalesAssistantEnabled,
+      gtGrowthAiSalesAssistantTime: record.gtGrowthAiSalesAssistantTime,
+      isGtGrowthAiOwnerProgressSummaryEnabled: record.isGtGrowthAiOwnerProgressSummaryEnabled,
+      gtGrowthAiOwnerProgressSummaryTime: record.gtGrowthAiOwnerProgressSummaryTime,
       isTodayAppointmentReportEnabled: record.isTodayAppointmentReportEnabled,
       reportTime: record.reportTime,
       isTodayPaymentReportEnabled: record.isTodayPaymentReportEnabled,
@@ -730,6 +778,34 @@ export async function getTelegramIntegrationStatus(input: {
   return buildStatus(cleanedRecord, targets, deliveries);
 }
 
+export async function getTelegramTargetByChatId(chatId: string) {
+  const chatSnapshot = await chatLinkRef(chatId).get();
+  const chatLink = chatSnapshot.data() as
+    | {
+        clinicId?: string;
+        clinicCode?: string;
+        clinicName?: string;
+        telegramChatType?: TelegramChatTarget["type"] | null;
+        telegramChatTitle?: string | null;
+      }
+    | undefined;
+
+  if (!chatLink?.clinicId) {
+    return null;
+  }
+
+  const targetSnapshot = await targetRef(chatLink.clinicId, chatId).get();
+  const target = normalizeTargetRecord(chatLink.clinicId, targetSnapshot.data(), {
+    clinicCode: chatLink.clinicCode,
+    clinicName: chatLink.clinicName,
+    telegramChatId: chatId,
+    telegramChatType: chatLink.telegramChatType,
+    telegramChatTitle: chatLink.telegramChatTitle,
+  });
+
+  return buildTargetStatus(target, []);
+}
+
 export async function updateTelegramReportSettings(input: {
   clinicId: string;
   clinicCode?: string;
@@ -749,6 +825,11 @@ export async function updateTelegramReportSettings(input: {
   weeklySummaryReportTime?: string;
   weeklySummaryDayOfWeek?: WeeklySummaryDayOfWeek;
   weeklySummarySections?: WeeklySummarySection[];
+  targetPurpose?: GtGrowthAiTelegramTargetPurpose;
+  isGtGrowthAiSalesAssistantEnabled?: boolean;
+  gtGrowthAiSalesAssistantTime?: string;
+  isGtGrowthAiOwnerProgressSummaryEnabled?: boolean;
+  gtGrowthAiOwnerProgressSummaryTime?: string;
   timezone: string;
 }) {
   const clinicStatus = await getTelegramIntegrationStatus({
@@ -767,6 +848,17 @@ export async function updateTelegramReportSettings(input: {
     ...existingTarget,
     clinicCode: input.clinicCode ?? existingTarget.clinicCode,
     clinicName: input.clinicName ?? existingTarget.clinicName,
+    targetPurpose: normalizeTargetPurpose(input.targetPurpose, existingTarget.targetPurpose),
+    isGtGrowthAiSalesAssistantEnabled:
+      input.isGtGrowthAiSalesAssistantEnabled ?? existingTarget.isGtGrowthAiSalesAssistantEnabled,
+    gtGrowthAiSalesAssistantTime: normalizeReportTime(
+      input.gtGrowthAiSalesAssistantTime ?? existingTarget.gtGrowthAiSalesAssistantTime,
+    ),
+    isGtGrowthAiOwnerProgressSummaryEnabled:
+      input.isGtGrowthAiOwnerProgressSummaryEnabled ?? existingTarget.isGtGrowthAiOwnerProgressSummaryEnabled,
+    gtGrowthAiOwnerProgressSummaryTime: normalizeReportTime(
+      input.gtGrowthAiOwnerProgressSummaryTime ?? existingTarget.gtGrowthAiOwnerProgressSummaryTime,
+    ),
     isTodayAppointmentReportEnabled: Boolean(input.isTodayAppointmentReportEnabled),
     reportTime: normalizeReportTime(input.reportTime),
     isTodayPaymentReportEnabled: Boolean(input.isTodayPaymentReportEnabled),
@@ -1299,14 +1391,16 @@ export async function listTelegramIntegrationsForScheduling() {
         (record.isTodayAppointmentReportEnabled ||
           record.isTodayPaymentReportEnabled ||
           record.isOwnerAiReportEnabled ||
-          record.isWeeklySummaryReportEnabled),
+          record.isWeeklySummaryReportEnabled ||
+          record.isGtGrowthAiSalesAssistantEnabled ||
+          record.isGtGrowthAiOwnerProgressSummaryEnabled),
     );
 }
 
 export async function tryAcquireTelegramScheduleLock(input: {
   clinicId: string;
   chatId: string;
-  reportType: TelegramReportType;
+  reportType: TelegramScheduleLockType;
   dateKey: string;
 }) {
   const lockId = `${encodeURIComponent(input.clinicId)}_${encodeURIComponent(input.chatId)}_${input.reportType}_${input.dateKey}`;

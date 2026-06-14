@@ -1,5 +1,6 @@
 import { env } from "../../config/env.js";
 import { HttpError } from "../../utils/http-error.js";
+import { buildTelegramSalesAssistantReply } from "../gt-growth-ai/sales-assistant.service.js";
 import { redeemTelegramLinkCode } from "./storage.service.js";
 import type { TelegramChatTarget } from "./types.js";
 
@@ -15,6 +16,9 @@ type TelegramMessage = {
   message_id: number;
   text?: string;
   chat: TelegramChat;
+  from?: {
+    id?: number;
+  };
 };
 
 type TelegramChatMember = {
@@ -129,7 +133,25 @@ function extractLinkCode(text: string) {
 async function sendUsageMessage(chatId: string) {
   await sendTelegramMessage(
     chatId,
-    "GT Telegram link ready.\n\nPrivate chat: send your link code here.\nGroup chat: send /link CODE after adding the bot to the group.",
+    [
+      "GT Telegram link ready.",
+      "",
+      "Private chat: send your link code here.",
+      "Group chat: send /link CODE after adding the bot to the group.",
+      "",
+      "GT Growth AI commands for paid clinics:",
+      "/tasks, /today, C1, B1, P1, S1, M1",
+    ].join("\n"),
+  );
+}
+
+function isSalesAssistantCommand(text: string) {
+  const trimmed = text.trim();
+  return (
+    /^\/tasks(?:@\w+)?$/i.test(trimmed) ||
+    /^\/today(?:@\w+)?$/i.test(trimmed) ||
+    /^([CBPSM])\s*(\d{1,2})$/i.test(trimmed) ||
+    /^\/(contacted|booked|purchased|skipped|message)(?:@\w+)?\s+\d{1,2}$/i.test(trimmed)
   );
 }
 
@@ -209,6 +231,19 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
 
   if (/^\/start(?:@\w+)?$/i.test(text) || /^\/help(?:@\w+)?$/i.test(text)) {
     await sendUsageMessage(chatId);
+    return;
+  }
+
+  if (isSalesAssistantCommand(text)) {
+    const reply = await buildTelegramSalesAssistantReply({
+      chatId,
+      text,
+      telegramUserId: message.from?.id == null ? null : String(message.from.id),
+    });
+
+    if (reply) {
+      await sendTelegramMessage(chatId, reply);
+    }
     return;
   }
 

@@ -1,10 +1,15 @@
 import type { AiLanguage } from "../ai/language.js";
 import type { ReportAiPayload, ReportPremiumAccess } from "../../types/report-ai.js";
+import type { GtGrowthAiTelegramTargetPurpose } from "../../types/gt-growth-ai-sales-assistant.js";
 
 export type TelegramChatType = "private" | "group" | "supergroup" | "channel";
 
 export type TelegramConnectionStatus = "not_linked" | "pending" | "linked";
 export type TelegramReportType = "appointment" | "payment" | "owner_ai" | "weekly_summary";
+export type TelegramScheduleLockType =
+  | TelegramReportType
+  | "gt_growth_ai_sales_assistant"
+  | "gt_growth_ai_owner_progress";
 export type TelegramDeliveryTrigger = "manual_test" | "scheduled" | "resend";
 export type TelegramDeliveryOutcome = "sent" | "failed";
 export const ownerAiReportTones = ["simple", "professional", "friendly"] as const;
@@ -46,6 +51,11 @@ export interface TelegramReportSettingsRecord {
   telegramChatType: TelegramChatType | null;
   telegramChatTitle: string | null;
   telegramLinkedAt: string | null;
+  targetPurpose: GtGrowthAiTelegramTargetPurpose;
+  isGtGrowthAiSalesAssistantEnabled: boolean;
+  gtGrowthAiSalesAssistantTime: string;
+  isGtGrowthAiOwnerProgressSummaryEnabled: boolean;
+  gtGrowthAiOwnerProgressSummaryTime: string;
   isTodayAppointmentReportEnabled: boolean;
   reportTime: string;
   isTodayPaymentReportEnabled: boolean;

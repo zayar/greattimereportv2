@@ -43,6 +43,14 @@ export type TelegramDeliveryTrigger = "manual_test" | "scheduled" | "resend";
 export type TelegramDeliveryOutcome = "sent" | "failed";
 export type TelegramOwnerAiTone = "simple" | "professional" | "friendly";
 export type TelegramOwnerAiFocusArea = "appointments" | "payments" | "risks" | "actions" | "tomorrow";
+export type GtGrowthAiTelegramTargetPurpose =
+  | "general_reports"
+  | "owner_group"
+  | "sales_lead"
+  | "reception"
+  | "finance"
+  | "manager"
+  | "other";
 export type TelegramWeeklySummaryDayOfWeek =
   | "monday"
   | "tuesday"
@@ -85,6 +93,11 @@ export interface TelegramTargetStatus {
   telegramChatType: "private" | "group" | "supergroup" | "channel" | null;
   telegramChatTitle: string | null;
   telegramLinkedAt: string | null;
+  targetPurpose: GtGrowthAiTelegramTargetPurpose;
+  isGtGrowthAiSalesAssistantEnabled: boolean;
+  gtGrowthAiSalesAssistantTime: string;
+  isGtGrowthAiOwnerProgressSummaryEnabled: boolean;
+  gtGrowthAiOwnerProgressSummaryTime: string;
   isTodayAppointmentReportEnabled: boolean;
   reportTime: string;
   isTodayPaymentReportEnabled: boolean;
@@ -256,6 +269,117 @@ export interface ReportPremiumAccess {
     insightCount?: number;
     opportunityCount?: number;
     estimatedOpportunityLabel?: string;
+  };
+}
+
+export type GtGrowthAiSalesActionType =
+  | "rebooking_opportunity"
+  | "package_usage_follow_up"
+  | "package_upsell_opportunity"
+  | "inactive_vip_follow_up"
+  | "payment_follow_up";
+
+export type GtGrowthAiSalesActionStatus =
+  | "new"
+  | "assigned"
+  | "contacted"
+  | "replied"
+  | "booked"
+  | "purchased"
+  | "skipped"
+  | "closed";
+
+export type GtGrowthAiSalesActionUpdateStatus = Exclude<GtGrowthAiSalesActionStatus, "new" | "assigned">;
+
+export type GtGrowthAiActionPriority = "high" | "medium" | "low";
+
+export interface GtGrowthAiSalesActionEvidence {
+  label: string;
+  value: string | number;
+  comparison?: string;
+}
+
+export interface GtGrowthAiSalesAction {
+  id: string;
+  clinicId: string;
+  clinicCode?: string;
+  dateKey: string;
+  actionType: GtGrowthAiSalesActionType;
+  priority: GtGrowthAiActionPriority;
+  priorityScore: number;
+  title: string;
+  summary: string;
+  reason: string;
+  recommendedAction: string;
+  customer?: {
+    customerKey?: string;
+    customerName?: string;
+    phoneMasked?: string;
+    memberId?: string;
+  };
+  evidence: GtGrowthAiSalesActionEvidence[];
+  suggestedMessage?: {
+    language: AiLanguage;
+    text: string;
+  };
+  estimatedValue?: number;
+  estimatedValueLabel?: string;
+  currency?: "MMK";
+  source:
+    | "bigquery"
+    | "daily_appointment_report"
+    | "daily_payment_report"
+    | "weekly_summary_report"
+    | "customer_portal"
+    | "package_portal"
+    | "payment_report";
+  assignedToTargetId?: string | null;
+  assignedToChatId?: string | null;
+  assignedToLabel?: string | null;
+  status: GtGrowthAiSalesActionStatus;
+  statusNote?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  assignedAt?: string | null;
+  lastStatusAt?: string | null;
+  lastStatusByTelegramUserId?: string | null;
+}
+
+export interface GtGrowthAiSalesAssistantSummary {
+  totalActions: number;
+  highPriorityCount: number;
+  rebookingCount: number;
+  packageUsageCount: number;
+  packageUpsellCount: number;
+  inactiveVipCount: number;
+  paymentFollowUpCount: number;
+  estimatedTotalValue?: number;
+  estimatedTotalValueLabel?: string;
+  currency?: "MMK";
+}
+
+export interface GtGrowthAiSalesAssistantProgress {
+  assigned: number;
+  contacted: number;
+  replied: number;
+  booked: number;
+  purchased: number;
+  skipped: number;
+  closed: number;
+  pending: number;
+  estimatedOpportunityHandled?: number;
+  estimatedOpportunityHandledLabel?: string;
+  currency?: "MMK";
+}
+
+export interface GtGrowthAiSalesAssistantResponse {
+  premium: ReportPremiumAccess;
+  summary?: GtGrowthAiSalesAssistantSummary;
+  actions?: GtGrowthAiSalesAction[];
+  lockedPreview?: {
+    title: string;
+    message: string;
+    teaserBullets: string[];
   };
 }
 
