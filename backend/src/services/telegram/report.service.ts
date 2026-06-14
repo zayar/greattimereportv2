@@ -144,8 +144,9 @@ async function fetchAllAppointmentsForToday(input: {
   timezone: string;
   authorizationHeader?: string;
   referenceDate?: Date;
+  dateKey?: string;
 }) {
-  const dateKey = formatDateKeyInTimeZone(input.referenceDate ?? new Date(), input.timezone);
+  const dateKey = input.dateKey ?? formatDateKeyInTimeZone(input.referenceDate ?? new Date(), input.timezone);
   const { startIso, endIso } = buildUtcDayRangeForDateKeyInTimeZone(dateKey, input.timezone);
 
   return {
@@ -164,6 +165,7 @@ export async function getTodayAppointmentsForClinic(input: {
   timezone?: string;
   authorizationHeader?: string;
   referenceDate?: Date;
+  dateKey?: string;
 }) {
   const timezone = normalizeTimeZone(input.timezone);
   return fetchAllAppointmentsForToday({
@@ -171,6 +173,7 @@ export async function getTodayAppointmentsForClinic(input: {
     timezone,
     authorizationHeader: input.authorizationHeader,
     referenceDate: input.referenceDate,
+    dateKey: input.dateKey,
   });
 }
 
@@ -406,6 +409,7 @@ export async function buildTodayAppointmentReport(input: {
   timezone?: string;
   authorizationHeader?: string;
   referenceDate?: Date;
+  dateKey?: string;
 }) {
   const timezone = normalizeTimeZone(input.timezone);
   const { dateKey, rows } = await getTodayAppointmentsForClinic({
@@ -413,6 +417,7 @@ export async function buildTodayAppointmentReport(input: {
     timezone,
     authorizationHeader: input.authorizationHeader,
     referenceDate: input.referenceDate,
+    dateKey: input.dateKey,
   });
   const counts = summarizeAppointmentCounts(rows);
   const appointments = mapAppointments(rows, timezone);

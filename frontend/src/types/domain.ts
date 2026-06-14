@@ -1337,6 +1337,72 @@ export interface PaymentReportResponse {
   gtGrowthAi?: ReportAiPayload;
 }
 
+export interface AppointmentReportResponse {
+  clinicName: string;
+  dateKey: string;
+  timezone: string;
+  totalAppointments: number;
+  upcomingCount: number;
+  completedCount: number;
+  cancelledCount: number;
+  noShowCount: number;
+  cancellationRatePercent: number | null;
+  noShowRatePercent: number | null;
+  appointments: Array<{
+    time: string;
+    customerName: string;
+    serviceName: string;
+    therapistName: string;
+    status: string;
+  }>;
+  topServices: Array<{ serviceName: string; count: number }>;
+  therapistLoad: Array<{ therapistName: string; count: number }>;
+  busyHours: Array<{ label: string; count: number }>;
+  underutilizedHours: Array<{ label: string; count: number }>;
+  completedCustomersWithoutFutureBookingCount: number | null;
+  premium?: ReportPremiumAccess;
+  gtGrowthAi?: ReportAiPayload;
+}
+
+export interface WeeklySummaryReportResponse {
+  clinicName: string;
+  dateKey: string;
+  weekStartDateKey: string;
+  weekEndDateKey: string;
+  timezone: string;
+  selectedSections: TelegramWeeklySummarySection[];
+  appointmentSummary: {
+    totalAppointments: number;
+    completedAppointments: number;
+    cancelledAppointments: number;
+    noShowAppointments: number;
+    completionRatePercent: number | null;
+    cancellationRatePercent: number | null;
+    noShowRatePercent: number | null;
+  };
+  serviceSummary: Array<{ name: string; count: number }>;
+  therapistSummary: Array<{ name: string; count: number }>;
+  paymentSummary: {
+    totalPaymentAmount: number;
+    paymentCount: number;
+    paymentMethods: Array<{ paymentMethod: string; count: number; amount: number }>;
+    previousWeekTotalPaymentAmount: number | null;
+    weekOverWeekRevenueChangePercent: number | null;
+  };
+  topServices: Array<{ name: string; count: number; percentage: number | null }>;
+  busyHours: Array<{ label: string; count: number }>;
+  busyDays: Array<{ label: string; count: number }>;
+  underutilizedDays: Array<{ label: string; count: number }>;
+  underutilizedHours: Array<{ label: string; count: number }>;
+  weekOverWeekAppointmentChangePercent: number | null;
+  previousWeekAppointmentCount: number | null;
+  previousWeekCancelledAppointments: number | null;
+  packageSalesSummary: string | null;
+  customerRetentionOpportunityCount: number | null;
+  premium?: ReportPremiumAccess;
+  gtGrowthAi?: ReportAiPayload;
+}
+
 export interface WalletAccountSummaryRow {
   id?: string;
   name: string;

@@ -21,6 +21,8 @@ import { getPaymentReport } from "../services/reports/payment-report.service.js"
 import { getSalesBySellerReport } from "../services/reports/sales-by-seller.service.js";
 import { getDailyTreatmentReport } from "../services/reports/daily-treatment.service.js";
 import { getSalesReport } from "../services/reports/sales-report.service.js";
+import { buildTodayAppointmentReport } from "../services/telegram/report.service.js";
+import { buildWeeklySummaryReport } from "../services/telegram/weekly-summary-report.service.js";
 import { getBankingSummary } from "../services/reports/banking-summary.service.js";
 import { getCustomersBySalespersonReport } from "../services/reports/customers-by-salesperson.service.js";
 import {
@@ -44,6 +46,8 @@ import {
 import { asyncHandler } from "../utils/async-handler.js";
 
 const router = Router();
+
+const dateKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
 const baseAnalyticsSchema = z.object({
   clinicId: z.string().min(1),
@@ -468,6 +472,60 @@ router.get(
       includeZeroValues: params.includeZeroValues,
       limit: params.pageSize,
       offset: (params.page - 1) * params.pageSize,
+    });
+
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/appointment-report",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = z
+      .object({
+        clinicId: z.string().min(1),
+        clinicCode: z.string().min(1),
+        clinicName: z.string().optional(),
+        date: dateKeySchema,
+        timezone: z.string().default(""),
+      })
+      .parse(req.query);
+
+    const data = await buildTodayAppointmentReport({
+      clinicId: params.clinicId,
+      clinicCode: params.clinicCode,
+      clinicName: params.clinicName,
+      timezone: params.timezone,
+      dateKey: params.date,
+      authorizationHeader: req.headers.authorization,
+    });
+
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/weekly-summary-report",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = z
+      .object({
+        clinicId: z.string().min(1),
+        clinicCode: z.string().min(1),
+        clinicName: z.string().optional(),
+        weekStartDate: dateKeySchema.optional(),
+        timezone: z.string().default(""),
+      })
+      .parse(req.query);
+
+    const data = await buildWeeklySummaryReport({
+      clinicId: params.clinicId,
+      clinicCode: params.clinicCode,
+      clinicName: params.clinicName,
+      timezone: params.timezone,
+      weekStartDateKey: params.weekStartDate,
+      authorizationHeader: req.headers.authorization,
     });
 
     res.json({ success: true, data });

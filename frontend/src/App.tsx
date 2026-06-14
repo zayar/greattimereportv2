@@ -22,6 +22,8 @@ import { OfferListPage } from "./features/offers/OfferListPage";
 import { CustomerBehaviorPage } from "./features/analytics/customer-behavior/CustomerBehaviorPage";
 import { ServiceBehaviorPage } from "./features/analytics/service-behavior/ServiceBehaviorPage";
 import { PaymentReportPage } from "./features/analytics/payment-report/PaymentReportPage";
+import { AppointmentReportPage } from "./features/analytics/appointment-report/AppointmentReportPage";
+import { WeeklySummaryReportPage } from "./features/analytics/weekly-summary-report/WeeklySummaryReportPage";
 import { SalesBySellerPage } from "./features/analytics/sales-by-seller/SalesBySellerPage";
 import { DailyTreatmentPage } from "./features/analytics/daily-treatment/DailyTreatmentPage";
 import { BankingSummaryPage } from "./features/analytics/banking-summary/BankingSummaryPage";
@@ -94,12 +96,14 @@ export default function App() {
                     <Route path="analytics/banking-summary" element={<BankingSummaryPage />} />
                     <Route path="analytics/customer-behavior" element={<CustomerBehaviorPage />} />
                     <Route path="analytics/service-behavior" element={<ServiceBehaviorPage />} />
+                    <Route path="analytics/appointment-report" element={<AppointmentReportPage />} />
                     <Route path="analytics/therapists" element={<TherapistPortalPage />} />
                     <Route path="analytics/therapists/:therapistSlug" element={<TherapistDetailPage />} />
                     <Route path="analytics/services" element={<ServicePortalPage />} />
                     <Route path="analytics/services/:serviceSlug" element={<ServiceDetailPage />} />
                     <Route path="analytics/packages" element={<PackagePortalPage />} />
                     <Route path="analytics/payment-report" element={<PaymentReportPage />} />
+                    <Route path="analytics/weekly-summary-report" element={<WeeklySummaryReportPage />} />
                     <Route path="analytics/commission" element={<CommissionReportPage />} />
                     <Route path="analytics/daily-treatment" element={<DailyTreatmentPage />} />
                     <Route path="analytics/sales-by-seller" element={<SalesBySellerPage />} />

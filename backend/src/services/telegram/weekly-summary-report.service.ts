@@ -71,6 +71,24 @@ function getPreviousCompletedWeekRange(referenceDate: Date, timezone: string) {
   };
 }
 
+function getWeekRangeForStartDate(input: {
+  weekStartDateKey: string;
+  timezone: string;
+  referenceDate?: Date;
+}) {
+  const weekEndDateKey = addDaysToDateKey(input.weekStartDateKey, 6);
+  const startRange = buildUtcDayRangeForDateKeyInTimeZone(input.weekStartDateKey, input.timezone);
+  const endRange = buildUtcDayRangeForDateKeyInTimeZone(weekEndDateKey, input.timezone);
+
+  return {
+    dateKey: formatDateKeyInTimeZone(input.referenceDate ?? new Date(), input.timezone),
+    weekStartDateKey: input.weekStartDateKey,
+    weekEndDateKey,
+    startIso: startRange.startIso,
+    endIso: endRange.endIso,
+  };
+}
+
 function getPreviousWeekRangeFromRange(range: {
   weekStartDateKey: string;
   weekEndDateKey: string;
@@ -558,9 +576,16 @@ export async function buildWeeklySummaryReport(input: {
   sections?: WeeklySummarySection[];
   authorizationHeader?: string;
   referenceDate?: Date;
+  weekStartDateKey?: string;
 }) {
   const timezone = normalizeTimeZone(input.timezone);
-  const range = getPreviousCompletedWeekRange(input.referenceDate ?? new Date(), timezone);
+  const range = input.weekStartDateKey
+    ? getWeekRangeForStartDate({
+        weekStartDateKey: input.weekStartDateKey,
+        timezone,
+        referenceDate: input.referenceDate,
+      })
+    : getPreviousCompletedWeekRange(input.referenceDate ?? new Date(), timezone);
   const [appointments, orders] = await Promise.all([
     fetchAllAppointmentsForWeek({
       clinicCode: input.clinicCode,

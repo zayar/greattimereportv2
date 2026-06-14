@@ -1,5 +1,6 @@
 import { apiClient } from "./http";
 import type {
+  AppointmentReportResponse,
   BankingSummaryResponse,
   CustomerPortalBookingsResponse,
   CustomerQuickViewResponse,
@@ -29,6 +30,7 @@ import type {
   ServicePortalListResponse,
   ServicePortalOverviewResponse,
   ServicePortalPaymentsResponse,
+  WeeklySummaryReportResponse,
 } from "../types/domain";
 
 type BaseParams = {
@@ -343,6 +345,34 @@ export async function fetchPaymentReport(
 ) {
   const response = await apiClient.get<{ success: true; data: PaymentReportResponse }>(
     "/analytics/payment-report",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchAppointmentReport(
+  params: Pick<BaseParams, "clinicId" | "clinicCode"> & {
+    clinicName?: string;
+    date: string;
+    timezone: string;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: AppointmentReportResponse }>(
+    "/analytics/appointment-report",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchWeeklySummaryReport(
+  params: Pick<BaseParams, "clinicId" | "clinicCode"> & {
+    clinicName?: string;
+    weekStartDate: string;
+    timezone: string;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: WeeklySummaryReportResponse }>(
+    "/analytics/weekly-summary-report",
     { params },
   );
   return response.data.data;

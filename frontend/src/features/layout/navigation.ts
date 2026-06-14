@@ -81,8 +81,11 @@ export const navigationSections: NavigationSection[] = [
     ],
   },
   {
-    title: "AI",
+    title: "GT Growth AI",
     items: [
+      { to: "/analytics/appointment-report", label: "Daily Appointment Report" },
+      { to: "/analytics/payment-report", label: "Daily Payment Report" },
+      { to: "/analytics/weekly-summary-report", label: "Weekly Summary Report" },
       { to: "/ai/customer-relationship-agent", label: "Customer Relationship Agent" },
     ],
   },
