@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 process.env.APICORE_GRAPHQL_URL ??= "https://example.com/graphql";
+process.env.GT_GROWTH_AI_ENABLED_CLINIC_IDS ??= "clinic-premium";
 
 const {
   buildAppointmentReportAiPayload,
@@ -10,7 +11,68 @@ const {
   getReportAiActionLines,
 } = await import("../src/services/reports/report-ai-insights.service.ts");
 
+const {
+  buildDailyPaymentGrowthEvidenceFromAggregates,
+  buildWeeklySummaryGrowthEvidenceFromAggregates,
+} = await import("../src/services/reports/gt-growth-ai-evidence.service.ts");
+
+const { hasFeatureAccess } = await import("../src/services/feature-access.service.ts");
+
 const { formatTodayPaymentTelegramMessage } = await import("../src/services/telegram/payment-report.service.ts");
+
+test("gt_growth_ai feature access is disabled by default and enabled by configured clinic id", async () => {
+  const locked = await hasFeatureAccess({ clinicId: "clinic-basic", feature: "gt_growth_ai" });
+  const enabled = await hasFeatureAccess({ clinicId: "clinic-premium", feature: "gt_growth_ai" });
+
+  assert.equal(locked.enabled, false);
+  assert.equal(locked.feature, "gt_growth_ai");
+  assert.equal(enabled.enabled, true);
+});
+
+test("daily payment evidence builder calculates service and package revenue evidence", () => {
+  const evidence = buildDailyPaymentGrowthEvidenceFromAggregates({
+    totalRevenue: 1_000_000,
+    serviceRevenue: [
+      { name: "Facial", count: 2, amount: 600_000 },
+      { name: "Massage", count: 1, amount: 200_000 },
+    ],
+    topPackages: [{ name: "Glow Package", count: 1, amount: 300_000 }],
+    packageSummary: { totalAmount: 300_000, count: 1 },
+    sellerRevenue: [
+      { name: "Top Seller", count: 2, amount: 700_000 },
+      { name: "Low Seller", count: 1, amount: 100_000 },
+    ],
+    paymentMethods: [
+      { paymentMethod: "Cash", count: 2, amount: 750_000 },
+      { paymentMethod: "KBZPay", count: 1, amount: 250_000 },
+    ],
+    outstanding: { outstandingAmount: 50_000, affectedInvoiceCount: 1 },
+  });
+
+  assert.equal(evidence.serviceRevenue[0].name, "Facial");
+  assert.equal(evidence.serviceRevenue[0].sharePercent, 60);
+  assert.equal(evidence.packageRevenue?.sharePercent, 30);
+  assert.equal(evidence.sellerRevenue.revenueGap, 600_000);
+  assert.equal(evidence.paymentMethodRevenue[0].sharePercent, 75);
+  assert.equal(evidence.outstanding?.affectedInvoiceCount, 1);
+});
+
+test("weekly evidence builder calculates package and rebooking opportunity evidence", () => {
+  const evidence = buildWeeklySummaryGrowthEvidenceFromAggregates({
+    totalWeeklyRevenue: 2_000_000,
+    averageRevenuePerCompletedCustomer: 100_000,
+    packageSummary: { totalAmount: 500_000, count: 2, previousTotalAmount: 250_000 },
+    topPackages: [{ name: "Skin Package", count: 2, amount: 500_000 }],
+    serviceRevenue: [{ name: "Laser", count: 4, amount: 900_000 }],
+    rebooking: { completedCustomers: 10, customersWithoutFutureBooking: 3 },
+  });
+
+  assert.equal(evidence.packageSales?.sharePercent, 25);
+  assert.equal(evidence.packageSales?.weekOverWeekChangePercent, 100);
+  assert.equal(evidence.customerRebookingOpportunity?.customersWithoutFutureBooking, 3);
+  assert.equal(evidence.customerRebookingOpportunity?.estimatedValue, 300_000);
+  assert.equal(evidence.serviceRevenue[0].name, "Laser");
+});
 
 test("appointment AI payload is safe for empty report data", () => {
   const payload = buildAppointmentReportAiPayload(
@@ -79,6 +141,7 @@ test("appointment AI payload generates supported insights from deterministic fac
   );
   assert.ok(payload.nextActions.some((action) => action.actionType === "rebook_customer"));
   assert.match(payload.summary, /Thai Massage/);
+  assert.equal(payload.businessOpportunity?.opportunityType, "rebooking");
 });
 
 test("payment AI payload does not invent package insight when service breakdown is missing", () => {
@@ -125,13 +188,21 @@ test("payment AI payload generates revenue and collection actions from calculate
       previousDayPaymentCount: 6,
       revenueByServiceOrPackage: [],
       refundVoidDiscountAmount: null,
+      packageRevenueEvidence: {
+        totalAmount: 250_000,
+        count: 1,
+        sharePercent: 41.7,
+        topPackages: [{ name: "Glow Package", count: 1, amount: 250_000, sharePercent: 41.7, averageRevenue: 250_000 }],
+      },
     },
     "2026-06-13T00:00:00.000Z",
   );
 
   assert.ok(payload.insights.some((insight) => insight.id === "daily-payment-revenue-drop"));
   assert.ok(payload.insights.some((insight) => insight.id === "daily-payment-collection-risk"));
+  assert.ok(payload.insights.some((insight) => insight.id === "daily-payment-package-sales-opportunity"));
   assert.ok(payload.nextActions.some((action) => action.actionType === "follow_up_payment"));
+  assert.equal(payload.businessOpportunity?.opportunityType, "collection");
 });
 
 test("weekly AI payload handles missing comparison data and still builds an action plan", () => {
@@ -155,12 +226,27 @@ test("weekly AI payload handles missing comparison data and still builds an acti
       underutilizedDays: [],
       underutilizedHours: [],
       packageSalesSummary: null,
+      packageSalesEvidence: {
+        totalAmount: 600_000,
+        count: 2,
+        sharePercent: 24,
+        weekOverWeekChangePercent: 20,
+        topPackages: [{ name: "Facial Package", count: 2, amount: 600_000, sharePercent: 24, averageRevenue: 300_000 }],
+      },
       customerRetentionOpportunityCount: null,
+      customerRebookingOpportunityEvidence: {
+        completedCustomers: 12,
+        customersWithoutFutureBooking: 4,
+        estimatedValue: 500_000,
+        estimatedValueLabel: null,
+      },
     },
     "2026-06-13T00:00:00.000Z",
   );
 
   assert.ok(payload.insights.some((insight) => insight.id === "weekly-summary-next-week-action-plan"));
+  assert.ok(payload.insights.some((insight) => insight.id === "weekly-summary-package-sales"));
+  assert.ok(payload.insights.some((insight) => insight.id === "weekly-summary-rebooking-opportunity"));
   assert.ok(payload.dataQualityNotes.some((note) => note.includes("Week-over-week revenue comparison was unavailable")));
 });
 
@@ -201,6 +287,12 @@ test("Telegram payment report includes concise AI Actions when actions exist", (
     payments: [],
     paymentMethods: [{ paymentMethod: "Cash", count: 2, amount: 400_000 }],
     sellerTotals: [],
+    premium: {
+      feature: "gt_growth_ai",
+      enabled: true,
+      title: "GT Growth AI",
+      message: "AI insights and recommended actions are enabled for this clinic.",
+    },
     gtGrowthAi,
   });
 

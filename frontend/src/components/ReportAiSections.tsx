@@ -1,7 +1,8 @@
-import type { ReportAiPayload } from "../types/domain";
+import type { ReportAiEvidenceItem, ReportAiPayload, ReportPremiumAccess } from "../types/domain";
 
 type Props = {
-  payload: ReportAiPayload;
+  payload?: ReportAiPayload | null;
+  premium?: ReportPremiumAccess | null;
 };
 
 function formatEvidenceValue(value: string | number) {
@@ -12,7 +13,59 @@ function priorityLabel(priority: string) {
   return priority.charAt(0).toUpperCase() + priority.slice(1);
 }
 
-export function ReportAiSections({ payload }: Props) {
+function EvidenceList({ evidence }: { evidence: ReportAiEvidenceItem[] }) {
+  if (evidence.length === 0) {
+    return null;
+  }
+
+  return (
+    <dl>
+      {evidence.map((item) => (
+        <div key={item.label}>
+          <dt>{item.label}</dt>
+          <dd>
+            {formatEvidenceValue(item.value)}
+            {item.comparison ? <small>{item.comparison}</small> : null}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+export function ReportAiSections({ payload, premium }: Props) {
+  if (premium && !premium.enabled) {
+    return (
+      <section className="report-ai-sections report-ai-sections--locked" aria-label="GT Growth AI locked">
+        <div className="report-ai-sections__header">
+          <div>
+            <span className="report-ai-sections__eyebrow">GT Growth AI</span>
+            <h2>{premium.title || "Unlock GT Growth AI"}</h2>
+          </div>
+          <span className="report-ai-sections__feature-key">{premium.feature}</span>
+        </div>
+        <p className="report-ai-sections__summary">
+          {premium.message ||
+            "Get AI insights, recommended actions, and business opportunities based on your report data."}
+        </p>
+        {premium.teaser?.estimatedOpportunityLabel ? (
+          <div className="report-ai-sections__opportunity">
+            <span>Business Opportunity</span>
+            <strong>{premium.teaser.estimatedOpportunityLabel}</strong>
+          </div>
+        ) : null}
+        <div className="report-ai-locked">
+          <strong>{premium.upgradeMessage || "Upgrade to see AI recommendations."}</strong>
+          <span>Unlock revenue opportunities, customer follow-up ideas, package sales signals, and next actions.</span>
+        </div>
+      </section>
+    );
+  }
+
+  if (!payload) {
+    return null;
+  }
+
   const hasInsights = payload.insights.length > 0;
   const hasActions = payload.nextActions.length > 0;
 
@@ -35,7 +88,23 @@ export function ReportAiSections({ payload }: Props) {
       {payload.businessOpportunity ? (
         <div className="report-ai-sections__opportunity">
           <span>Business Opportunity</span>
-          <strong>{payload.businessOpportunity}</strong>
+          <strong>{payload.businessOpportunity.title}</strong>
+          <p>{payload.businessOpportunity.summary}</p>
+          {payload.businessOpportunity.estimatedValueLabel || payload.businessOpportunity.estimatedValue != null ? (
+            <small>
+              Estimated value:{" "}
+              {payload.businessOpportunity.estimatedValueLabel ??
+                formatEvidenceValue(payload.businessOpportunity.estimatedValue ?? "")}
+            </small>
+          ) : null}
+          <div className="report-ai-card__evidence">
+            <span>Why AI recommends this</span>
+            <EvidenceList evidence={payload.businessOpportunity.evidence} />
+          </div>
+          <div className="report-ai-card__action">
+            <span>Recommended action</span>
+            <strong>{payload.businessOpportunity.recommendedAction}</strong>
+          </div>
         </div>
       ) : null}
 
@@ -51,17 +120,7 @@ export function ReportAiSections({ payload }: Props) {
               <p>{insight.summary}</p>
               <div className="report-ai-card__evidence">
                 <span>Why AI recommends this</span>
-                <dl>
-                  {insight.evidence.map((item) => (
-                    <div key={`${insight.id}-${item.label}`}>
-                      <dt>{item.label}</dt>
-                      <dd>
-                        {formatEvidenceValue(item.value)}
-                        {item.comparison ? <small>{item.comparison}</small> : null}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
+                <EvidenceList evidence={insight.evidence} />
               </div>
               <div className="report-ai-card__action">
                 <span>Recommended action</span>
@@ -83,6 +142,8 @@ export function ReportAiSections({ payload }: Props) {
                   <strong>{action.title}</strong>
                   <span>{action.description}</span>
                   <small>{action.reason}</small>
+                  {action.suggestedOwner ? <small>Owner: {action.suggestedOwner}</small> : null}
+                  {action.dueDate ? <small>Due: {action.dueDate}</small> : null}
                 </div>
                 <span className={`report-ai-actions__priority report-ai-actions__priority--${action.priority}`}>
                   {priorityLabel(action.priority)}

@@ -1,5 +1,6 @@
 import {
   GT_GROWTH_AI_FEATURE_GATE,
+  type ReportBusinessOpportunity,
   type ReportAiInsight,
   type ReportAiPayload,
   type ReportAiReportType,
@@ -20,6 +21,18 @@ type AmountCountItem = {
   name: string;
   count: number;
   amount: number;
+};
+
+type RevenueEvidenceItem = AmountCountItem & {
+  sharePercent?: number | null;
+  averageRevenue?: number | null;
+};
+
+type PaymentMethodRevenueEvidenceItem = {
+  paymentMethod: string;
+  count: number;
+  amount: number;
+  sharePercent?: number | null;
 };
 
 export type AppointmentReportAiInput = {
@@ -56,6 +69,14 @@ export type PaymentReportAiInput = {
   previousDayTotalPaymentAmount: number | null;
   previousDayPaymentCount: number | null;
   revenueByServiceOrPackage: AmountCountItem[];
+  serviceRevenueEvidence?: RevenueEvidenceItem[];
+  packageRevenueEvidence?: {
+    totalAmount: number;
+    count: number;
+    sharePercent: number | null;
+    topPackages: RevenueEvidenceItem[];
+  } | null;
+  paymentMethodRevenueEvidence?: PaymentMethodRevenueEvidenceItem[];
   refundVoidDiscountAmount: number | null;
 };
 
@@ -78,7 +99,21 @@ export type WeeklySummaryReportAiInput = {
   underutilizedDays: CountItem[];
   underutilizedHours: CountItem[];
   packageSalesSummary: string | null;
+  packageSalesEvidence?: {
+    totalAmount: number;
+    count: number;
+    sharePercent: number | null;
+    weekOverWeekChangePercent: number | null;
+    topPackages: RevenueEvidenceItem[];
+  } | null;
+  serviceRevenueEvidence?: RevenueEvidenceItem[];
   customerRetentionOpportunityCount: number | null;
+  customerRebookingOpportunityEvidence?: {
+    completedCustomers: number;
+    customersWithoutFutureBooking: number;
+    estimatedValue: number | null;
+    estimatedValueLabel: string | null;
+  } | null;
 };
 
 function roundOne(value: number) {
@@ -119,21 +154,20 @@ function buildPayload(params: {
   summary: string;
   insights: ReportAiInsight[];
   nextActions: ReportNextAction[];
-  businessOpportunity: string | null;
+  businessOpportunity: ReportBusinessOpportunity | null;
   dataQualityNotes: string[];
 }): ReportAiPayload {
   return {
     featureGate: GT_GROWTH_AI_FEATURE_GATE,
     isPremiumFeature: true,
-    entitlementChecked: false,
+    entitlementChecked: true,
     generatedAt: params.generatedAt,
     summary: params.summary,
     insights: params.insights,
     nextActions: params.nextActions,
     businessOpportunity: params.businessOpportunity,
     dataQualityNotes: [
-      // TODO(gt_growth_ai): apply entitlement checks here when subscriptions are available.
-      "GT Growth AI fields are prepared as premium report sections. Billing entitlement is not checked yet.",
+      "Premium access was checked before GT Growth AI fields were returned.",
       ...params.dataQualityNotes,
     ],
   };
@@ -143,8 +177,8 @@ function insight(params: Omit<ReportAiInsight, "createdAt"> & { createdAt: strin
   return params;
 }
 
-function firstNonEmpty(items: Array<string | null | undefined>, fallback: string | null) {
-  return items.map((item) => item?.trim() ?? "").find(Boolean) ?? fallback;
+function buildBusinessOpportunity(params: ReportBusinessOpportunity) {
+  return params;
 }
 
 function summarizeActionTitles(actions: ReportNextAction[]) {
@@ -384,16 +418,43 @@ export function buildAppointmentReportAiPayload(
     });
   }
 
-  const businessOpportunity = firstNonEmpty(
-    [
-      input.completedCustomersWithoutFutureBookingCount != null &&
-      input.completedCustomersWithoutFutureBookingCount > 0
-        ? `Rebooking ${input.completedCustomersWithoutFutureBookingCount.toLocaleString("en-US")} completed customer(s) is today's clearest growth opportunity.`
-        : null,
-      underutilizedHour ? `Filling ${underutilizedHour.label} is today's visible schedule opportunity.` : null,
-    ],
-    null,
-  );
+  const businessOpportunity =
+    input.completedCustomersWithoutFutureBookingCount != null &&
+    input.completedCustomersWithoutFutureBookingCount > 0
+      ? buildBusinessOpportunity({
+          id: "daily-appointment-rebooking-business-opportunity",
+          reportType: "daily_appointment",
+          title: "Rebooking opportunity",
+          summary: `Rebooking ${input.completedCustomersWithoutFutureBookingCount.toLocaleString("en-US")} completed customer(s) is today's clearest growth opportunity.`,
+          opportunityType: "rebooking",
+          estimatedValueLabel: "Estimated value unavailable without reliable average revenue.",
+          confidence: "medium",
+          evidence: [
+            { label: "Completed appointments", value: input.completedAppointments },
+            {
+              label: "Completed customers without future booking",
+              value: input.completedCustomersWithoutFutureBookingCount,
+            },
+          ],
+          recommendedAction: "Ask receptionist to rebook customers before they leave.",
+        })
+      : underutilizedHour
+        ? buildBusinessOpportunity({
+            id: "daily-appointment-schedule-utilization-business-opportunity",
+            reportType: "daily_appointment",
+            title: "Fill underbooked schedule capacity",
+            summary: `Filling ${underutilizedHour.label} is today's visible schedule opportunity.`,
+            opportunityType: "schedule_utilization",
+            estimatedValueLabel: "Opportunity value depends on service mix and available capacity.",
+            confidence: "low",
+            evidence: [
+              { label: "Underbooked slot", value: underutilizedHour.label },
+              { label: "Current bookings", value: underutilizedHour.count },
+            ],
+            recommendedAction:
+              "Create a same-day promotion for this time slot or contact customers due for follow-up.",
+          })
+        : null;
 
   return buildPayload({
     generatedAt,
@@ -419,9 +480,13 @@ function buildPaymentSummary(input: PaymentReportAiInput, actions: ReportNextAct
       : change != null && change <= -15
         ? `Revenue is ${formatSignedPercent(change)} versus previous day.`
         : null;
+  const topRevenueLine: RevenueEvidenceItem | undefined =
+    input.serviceRevenueEvidence?.[0] ?? input.revenueByServiceOrPackage[0];
   const opportunity =
-    input.revenueByServiceOrPackage[0]?.name
-      ? `${input.revenueByServiceOrPackage[0].name} is the strongest visible revenue line.`
+    input.packageRevenueEvidence && input.packageRevenueEvidence.totalAmount > 0
+      ? `Package sales contributed ${formatMoney(input.packageRevenueEvidence.totalAmount)} today.`
+      : topRevenueLine?.name
+        ? `${topRevenueLine.name} is the strongest visible revenue line.`
       : input.sellerTotals.length >= 2
         ? "Seller revenue distribution can be reviewed today."
         : null;
@@ -450,8 +515,12 @@ export function buildPaymentReportAiPayload(
     dataQualityNotes.push("Previous-day payment comparison was unavailable.");
   }
 
-  if (input.revenueByServiceOrPackage.length === 0) {
+  if ((input.serviceRevenueEvidence?.length ?? input.revenueByServiceOrPackage.length) === 0) {
     dataQualityNotes.push("Service/package revenue breakdown was unavailable in this report source.");
+  }
+
+  if (!input.packageRevenueEvidence) {
+    dataQualityNotes.push("Package revenue evidence was unavailable or no package sales were found.");
   }
 
   if (input.refundVoidDiscountAmount == null) {
@@ -492,24 +561,63 @@ export function buildPaymentReportAiPayload(
     });
   }
 
-  const packageLine = input.revenueByServiceOrPackage.find((row) => row.name.toLowerCase().includes("package"));
-  if (packageLine) {
+  const packageEvidence = input.packageRevenueEvidence;
+  if (packageEvidence && (packageEvidence.totalAmount > 0 || packageEvidence.count > 0)) {
+    const topPackage = packageEvidence.topPackages[0];
     insights.push(
       insight({
         id: "daily-payment-package-sales-opportunity",
         reportType: "daily_payment",
         category: "package",
         severity: "success",
-        title: "Package sales signal found",
-        summary: `${packageLine.name} contributed ${formatMoney(packageLine.amount)} today.`,
+        title: "Package revenue opportunity found",
+        summary: `Package sales contributed ${formatMoney(packageEvidence.totalAmount)} today.`,
         evidence: [
-          { label: "Package/service line", value: packageLine.name },
-          { label: "Revenue", value: formatMoney(packageLine.amount) },
-          { label: "Invoice count", value: packageLine.count },
+          { label: "Package revenue today", value: formatMoney(packageEvidence.totalAmount) },
+          { label: "Package sales count", value: packageEvidence.count },
+          {
+            label: "Package revenue share",
+            value: packageEvidence.sharePercent == null ? "Not available" : formatPercent(packageEvidence.sharePercent),
+          },
+          ...(topPackage
+            ? [{ label: "Top package", value: topPackage.name, comparison: formatMoney(topPackage.amount) }]
+            : []),
         ],
-        recommendedAction: "Offer package upgrade to repeat customers who paid for single treatments.",
+        recommendedAction: "Ask staff to offer packages to repeat customers who paid for single services today.",
         estimatedImpact: "May increase future prepaid revenue and repeat bookings.",
-        confidence: "medium",
+        confidence: packageEvidence.sharePercent == null ? "low" : "medium",
+        createdAt: generatedAt,
+      }),
+    );
+  }
+
+  const topServiceRevenue: RevenueEvidenceItem | undefined =
+    input.serviceRevenueEvidence?.[0] ?? input.revenueByServiceOrPackage[0];
+  if (topServiceRevenue && topServiceRevenue.amount > 0) {
+    insights.push(
+      insight({
+        id: "daily-payment-top-service-revenue-driver",
+        reportType: "daily_payment",
+        category: "revenue",
+        severity: "success",
+        title: "Top service is driving today's revenue",
+        summary: `${topServiceRevenue.name} generated ${formatMoney(topServiceRevenue.amount)} in visible service revenue today.`,
+        evidence: [
+          { label: "Top service", value: topServiceRevenue.name },
+          { label: "Revenue from top service", value: formatMoney(topServiceRevenue.amount) },
+          {
+            label: "Share of total revenue",
+            value:
+              topServiceRevenue.sharePercent == null ? "Not available" : formatPercent(topServiceRevenue.sharePercent),
+          },
+          { label: "Service count", value: topServiceRevenue.count },
+          ...(topServiceRevenue.averageRevenue != null
+            ? [{ label: "Average revenue per service", value: formatMoney(topServiceRevenue.averageRevenue) }]
+            : []),
+        ],
+        recommendedAction: "Promote this service again during weak time slots or to similar customers.",
+        estimatedImpact: "Can help repeat today's strongest revenue driver.",
+        confidence: topServiceRevenue.sharePercent == null ? "low" : "medium",
         createdAt: generatedAt,
       }),
     );
@@ -575,15 +683,68 @@ export function buildPaymentReportAiPayload(
     }
   }
 
-  const businessOpportunity = firstNonEmpty(
-    [
-      input.outstandingAmount > 0 ? `Collecting ${formatMoney(input.outstandingAmount)} before closing is the clearest payment opportunity.` : null,
-      input.revenueByServiceOrPackage[0]
-        ? `${input.revenueByServiceOrPackage[0].name} can be used as today's upgrade or repeat-sale anchor.`
-        : null,
-    ],
-    null,
-  );
+  const businessOpportunity =
+    input.outstandingAmount > 0
+      ? buildBusinessOpportunity({
+          id: "daily-payment-collection-business-opportunity",
+          reportType: "daily_payment",
+          title: "Recover outstanding payment",
+          summary: `Collecting ${formatMoney(input.outstandingAmount)} before closing is the clearest payment opportunity.`,
+          opportunityType: "collection",
+          estimatedValue: input.outstandingAmount,
+          estimatedValueLabel: formatMoney(input.outstandingAmount),
+          currency: "MMK",
+          confidence: "medium",
+          evidence: [
+            { label: "Outstanding amount", value: formatMoney(input.outstandingAmount) },
+            { label: "Affected invoices", value: input.partialPaymentInvoiceCount },
+          ],
+          recommendedAction: "Follow up unpaid or partial invoices before closing.",
+        })
+      : packageEvidence && (packageEvidence.totalAmount > 0 || packageEvidence.count > 0)
+        ? buildBusinessOpportunity({
+            id: "daily-payment-package-business-opportunity",
+            reportType: "daily_payment",
+            title: "Grow package sales",
+            summary: `Package sales contributed ${formatMoney(packageEvidence.totalAmount)} today; repeat this offer with single-service repeat customers.`,
+            opportunityType: "package_sales",
+            estimatedValueLabel: "Upside depends on repeat customer package conversion.",
+            currency: "MMK",
+            confidence: packageEvidence.sharePercent == null ? "low" : "medium",
+            evidence: [
+              { label: "Package revenue today", value: formatMoney(packageEvidence.totalAmount) },
+              { label: "Package sales count", value: packageEvidence.count },
+              {
+                label: "Package revenue share",
+                value: packageEvidence.sharePercent == null ? "Not available" : formatPercent(packageEvidence.sharePercent),
+              },
+            ],
+            recommendedAction: "Ask staff to offer packages to repeat customers who paid for single services today.",
+          })
+        : topServiceRevenue && topServiceRevenue.amount > 0
+          ? buildBusinessOpportunity({
+              id: "daily-payment-top-service-business-opportunity",
+              reportType: "daily_payment",
+              title: "Repeat top service demand",
+              summary: `${topServiceRevenue.name} can be used as today's upgrade or repeat-sale anchor.`,
+              opportunityType: "revenue_growth",
+              estimatedValueLabel: "Opportunity value depends on promotion conversion.",
+              currency: "MMK",
+              confidence: topServiceRevenue.sharePercent == null ? "low" : "medium",
+              evidence: [
+                { label: "Top service", value: topServiceRevenue.name },
+                { label: "Revenue from top service", value: formatMoney(topServiceRevenue.amount) },
+                {
+                  label: "Share of total revenue",
+                  value:
+                    topServiceRevenue.sharePercent == null
+                      ? "Not available"
+                      : formatPercent(topServiceRevenue.sharePercent),
+                },
+              ],
+              recommendedAction: "Promote this service again during weak time slots or to similar customers.",
+            })
+          : null;
 
   return buildPayload({
     generatedAt,
@@ -603,8 +764,10 @@ function buildWeeklySummary(input: WeeklySummaryReportAiInput, actions: ReportNe
   const positive =
     input.weekOverWeekRevenueChangePercent != null && input.weekOverWeekRevenueChangePercent > 0
       ? `Revenue is ${formatSignedPercent(input.weekOverWeekRevenueChangePercent)} week over week.`
-      : input.topServices[0]
-        ? `${input.topServices[0].name} is the strongest service this week.`
+      : input.serviceRevenueEvidence?.[0]
+        ? `${input.serviceRevenueEvidence[0].name} is the strongest revenue service this week.`
+        : input.topServices[0]
+          ? `${input.topServices[0].name} is the strongest service this week.`
         : null;
   const risk =
     input.previousWeekCancelledAppointments != null &&
@@ -614,11 +777,14 @@ function buildWeeklySummary(input: WeeklySummaryReportAiInput, actions: ReportNe
         ? `Revenue is ${formatSignedPercent(input.weekOverWeekRevenueChangePercent)} week over week.`
         : null;
   const opportunity =
-    input.underutilizedDays[0]
-      ? `${input.underutilizedDays[0].label} is the weakest day pattern.`
-      : input.customerRetentionOpportunityCount != null && input.customerRetentionOpportunityCount > 0
-        ? `${input.customerRetentionOpportunityCount.toLocaleString("en-US")} customer follow-up opportunity(s) were found.`
-        : null;
+    input.customerRebookingOpportunityEvidence &&
+    input.customerRebookingOpportunityEvidence.customersWithoutFutureBooking > 0
+      ? `${input.customerRebookingOpportunityEvidence.customersWithoutFutureBooking.toLocaleString("en-US")} customer rebooking opportunity(s) were found.`
+      : input.underutilizedDays[0]
+        ? `${input.underutilizedDays[0].label} is the weakest day pattern.`
+        : input.customerRetentionOpportunityCount != null && input.customerRetentionOpportunityCount > 0
+          ? `${input.customerRetentionOpportunityCount.toLocaleString("en-US")} customer follow-up opportunity(s) were found.`
+          : null;
   const action = summarizeActionTitles(actions)[0] ?? "Review next week's bookings, rebooking follow-up, and payment collection.";
 
   return [
@@ -648,11 +814,11 @@ export function buildWeeklySummaryReportAiPayload(
     dataQualityNotes.push("Week-over-week appointment comparison was unavailable.");
   }
 
-  if (!input.packageSalesSummary) {
+  if (!input.packageSalesSummary && !input.packageSalesEvidence) {
     dataQualityNotes.push("Package sales summary was unavailable in this weekly report source.");
   }
 
-  if (input.customerRetentionOpportunityCount == null) {
+  if (input.customerRetentionOpportunityCount == null && !input.customerRebookingOpportunityEvidence) {
     dataQualityNotes.push("Customer retention or rebooking opportunity data was unavailable in this weekly report source.");
   }
 
@@ -748,6 +914,108 @@ export function buildWeeklySummaryReportAiPayload(
     });
   }
 
+  const packageSales = input.packageSalesEvidence;
+  if (packageSales && (packageSales.totalAmount > 0 || packageSales.count > 0)) {
+    const topPackage = packageSales.topPackages[0];
+    insights.push(
+      insight({
+        id: "weekly-summary-package-sales",
+        reportType: "weekly_summary",
+        category: "package",
+        severity: packageSales.weekOverWeekChangePercent != null && packageSales.weekOverWeekChangePercent < 0 ? "warning" : "success",
+        title:
+          packageSales.weekOverWeekChangePercent != null && packageSales.weekOverWeekChangePercent < 0
+            ? "Package sales need attention this week"
+            : "Package sales contributed this week",
+        summary: `Package sales contributed ${formatMoney(packageSales.totalAmount)} this week.`,
+        evidence: [
+          { label: "Package revenue", value: formatMoney(packageSales.totalAmount) },
+          { label: "Package sales count", value: packageSales.count },
+          {
+            label: "Share of weekly revenue",
+            value: packageSales.sharePercent == null ? "Not available" : formatPercent(packageSales.sharePercent),
+          },
+          ...(packageSales.weekOverWeekChangePercent != null
+            ? [{ label: "Package revenue WoW", value: formatSignedPercent(packageSales.weekOverWeekChangePercent) }]
+            : []),
+          ...(topPackage ? [{ label: "Top package", value: topPackage.name, comparison: formatMoney(topPackage.amount) }] : []),
+        ],
+        recommendedAction:
+          "Repeat the package offer strategy next week and focus on the best-performing package.",
+        estimatedImpact: "May increase prepaid revenue and improve customer continuity.",
+        confidence: packageSales.sharePercent == null ? "low" : "medium",
+        createdAt: generatedAt,
+      }),
+    );
+  }
+
+  const rebookingEvidence = input.customerRebookingOpportunityEvidence;
+  if (rebookingEvidence && rebookingEvidence.customersWithoutFutureBooking > 0) {
+    insights.push(
+      insight({
+        id: "weekly-summary-rebooking-opportunity",
+        reportType: "weekly_summary",
+        category: "customer",
+        severity: "success",
+        title: "Customers need next booking",
+        summary: `${rebookingEvidence.customersWithoutFutureBooking.toLocaleString("en-US")} completed customer(s) have no future booking in the visible schedule.`,
+        evidence: [
+          { label: "Completed customers this week", value: rebookingEvidence.completedCustomers },
+          { label: "Customers without future booking", value: rebookingEvidence.customersWithoutFutureBooking },
+          ...(rebookingEvidence.estimatedValue != null
+            ? [{ label: "Estimated rebooking opportunity", value: formatMoney(rebookingEvidence.estimatedValue) }]
+            : rebookingEvidence.estimatedValueLabel
+              ? [{ label: "Estimated rebooking opportunity", value: rebookingEvidence.estimatedValueLabel }]
+              : []),
+        ],
+        recommendedAction: "Assign receptionist to contact these customers within 48 hours.",
+        estimatedImpact:
+          rebookingEvidence.estimatedValue != null
+            ? `May recover up to ${formatMoney(rebookingEvidence.estimatedValue)} if average revenue holds.`
+            : "May improve repeat visits and protect next week's demand.",
+        confidence: rebookingEvidence.estimatedValue != null ? "medium" : "low",
+        createdAt: generatedAt,
+      }),
+    );
+    appendNextActionFromInsight(nextActions, {
+      id: "weekly-summary-rebook-completed-customers",
+      priority: "high",
+      actionType: "rebook_customer",
+      title: `Rebook ${rebookingEvidence.customersWithoutFutureBooking.toLocaleString("en-US")} customer(s)`,
+      description: "Contact completed customers who do not have a visible future booking.",
+      reason: "These customers completed service this week and no future booking was found.",
+      suggestedOwner: "Reception",
+      dueDate: input.weekEndDateKey,
+    });
+  }
+
+  const topServiceRevenue = input.serviceRevenueEvidence?.[0];
+  if (topServiceRevenue && topServiceRevenue.amount > 0) {
+    insights.push(
+      insight({
+        id: "weekly-summary-top-service-revenue-driver",
+        reportType: "weekly_summary",
+        category: "revenue",
+        severity: "success",
+        title: "Top services drove weekly revenue",
+        summary: `${topServiceRevenue.name} generated ${formatMoney(topServiceRevenue.amount)} in visible weekly service revenue.`,
+        evidence: [
+          { label: "Top service", value: topServiceRevenue.name },
+          { label: "Revenue", value: formatMoney(topServiceRevenue.amount) },
+          { label: "Appointment or sale count", value: topServiceRevenue.count },
+          {
+            label: "Share of weekly revenue",
+            value: topServiceRevenue.sharePercent == null ? "Not available" : formatPercent(topServiceRevenue.sharePercent),
+          },
+        ],
+        recommendedAction: "Promote top services during underbooked days next week.",
+        estimatedImpact: "Can focus next week's promotion around proven demand.",
+        confidence: topServiceRevenue.sharePercent == null ? "low" : "medium",
+        createdAt: generatedAt,
+      }),
+    );
+  }
+
   const weakSlot = input.underutilizedHours[0] ?? input.underutilizedDays[0];
   if (weakSlot) {
     insights.push(
@@ -825,13 +1093,80 @@ export function buildWeeklySummaryReportAiPayload(
     );
   }
 
-  const businessOpportunity = firstNonEmpty(
-    [
-      weakSlot ? `A targeted promotion for ${weakSlot.label} is the clearest schedule opportunity for next week.` : null,
-      input.topServices[0] ? `${input.topServices[0].name} can anchor next week's follow-up and package offers.` : null,
-    ],
-    null,
-  );
+  const businessOpportunity =
+    rebookingEvidence && rebookingEvidence.customersWithoutFutureBooking > 0
+      ? buildBusinessOpportunity({
+          id: "weekly-summary-rebooking-business-opportunity",
+          reportType: "weekly_summary",
+          title: "Recover rebooking opportunities",
+          summary: `${rebookingEvidence.customersWithoutFutureBooking.toLocaleString("en-US")} completed customer(s) need a next booking.`,
+          opportunityType: "rebooking",
+          estimatedValue: rebookingEvidence.estimatedValue ?? undefined,
+          estimatedValueLabel:
+            rebookingEvidence.estimatedValue != null
+              ? formatMoney(rebookingEvidence.estimatedValue)
+              : (rebookingEvidence.estimatedValueLabel ?? "Estimated value unavailable."),
+          currency: "MMK",
+          confidence: rebookingEvidence.estimatedValue != null ? "medium" : "low",
+          evidence: [
+            { label: "Completed customers this week", value: rebookingEvidence.completedCustomers },
+            { label: "Customers without future booking", value: rebookingEvidence.customersWithoutFutureBooking },
+          ],
+          recommendedAction: "Assign receptionist to contact these customers within 48 hours.",
+        })
+      : packageSales && (packageSales.totalAmount > 0 || packageSales.count > 0)
+        ? buildBusinessOpportunity({
+            id: "weekly-summary-package-business-opportunity",
+            reportType: "weekly_summary",
+            title: "Improve package sales",
+            summary: `Package sales contributed ${formatMoney(packageSales.totalAmount)} this week.`,
+            opportunityType: "package_sales",
+            estimatedValueLabel: "Upside depends on next week's package conversion.",
+            currency: "MMK",
+            confidence: packageSales.sharePercent == null ? "low" : "medium",
+            evidence: [
+              { label: "Package revenue", value: formatMoney(packageSales.totalAmount) },
+              { label: "Package sales count", value: packageSales.count },
+              {
+                label: "Share of weekly revenue",
+                value: packageSales.sharePercent == null ? "Not available" : formatPercent(packageSales.sharePercent),
+              },
+            ],
+            recommendedAction:
+              "Repeat the package offer strategy next week and focus on the best-performing package.",
+          })
+        : weakSlot
+          ? buildBusinessOpportunity({
+              id: "weekly-summary-schedule-utilization-business-opportunity",
+              reportType: "weekly_summary",
+              title: "Fill weak schedule capacity",
+              summary: `A targeted promotion for ${weakSlot.label} is the clearest schedule opportunity for next week.`,
+              opportunityType: "schedule_utilization",
+              estimatedValueLabel: "Opportunity value depends on bookings converted in the weak slot.",
+              confidence: "low",
+              evidence: [
+                { label: "Weakest day/time", value: weakSlot.label },
+                { label: "Booking count", value: weakSlot.count },
+              ],
+              recommendedAction: "Create a targeted promotion for this weak slot next week.",
+            })
+          : topServiceRevenue && topServiceRevenue.amount > 0
+            ? buildBusinessOpportunity({
+                id: "weekly-summary-top-service-business-opportunity",
+                reportType: "weekly_summary",
+                title: "Repeat top service demand",
+                summary: `${topServiceRevenue.name} can anchor next week's follow-up and package offers.`,
+                opportunityType: "revenue_growth",
+                estimatedValueLabel: "Opportunity value depends on promotion conversion.",
+                currency: "MMK",
+                confidence: topServiceRevenue.sharePercent == null ? "low" : "medium",
+                evidence: [
+                  { label: "Top service", value: topServiceRevenue.name },
+                  { label: "Revenue", value: formatMoney(topServiceRevenue.amount) },
+                ],
+                recommendedAction: "Promote top services during underbooked days next week.",
+              })
+            : null;
 
   return buildPayload({
     generatedAt,
@@ -843,8 +1178,8 @@ export function buildWeeklySummaryReportAiPayload(
   });
 }
 
-export function getReportAiActionLines(payload: ReportAiPayload, limit = 3) {
-  return payload.nextActions.slice(0, limit).map((action) => action.title);
+export function getReportAiActionLines(payload: ReportAiPayload | null | undefined, limit = 3) {
+  return (payload?.nextActions ?? []).slice(0, limit).map((action) => action.title);
 }
 
 export function getInsightReportTypes(insights: ReportAiInsight[]) {

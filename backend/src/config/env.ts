@@ -35,6 +35,8 @@ const envSchema = z.object({
   BQ_LOCATION: z.string().default("US"),
   BQ_MAIN_DATA_VIEW: z.string().default("MainDataView"),
   BQ_MAIN_PAYMENT_VIEW: z.string().default("MainPaymentView"),
+  GT_GROWTH_AI_DEFAULT_ENABLED: booleanEnv(false),
+  GT_GROWTH_AI_ENABLED_CLINIC_IDS: z.string().default(""),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_BOT_USERNAME: z.string().optional(),
   TELEGRAM_LINK_CODE_TTL_MINUTES: z.coerce.number().int().positive().default(15),

@@ -4,6 +4,8 @@ import {
   getReportAiActionLines,
   percentageRate,
 } from "../reports/report-ai-insights.service.js";
+import { hasFeatureAccess } from "../feature-access.service.js";
+import { GT_GROWTH_AI_FEATURE_GATE } from "../../types/report-ai.js";
 import { sendTelegramMessage } from "./bot.service.js";
 import {
   buildUtcDayRangeForDateKeyInTimeZone,
@@ -398,6 +400,7 @@ async function fetchSameWeekdayBenchmark(input: {
 }
 
 export async function buildTodayAppointmentReport(input: {
+  clinicId?: string;
   clinicCode: string;
   clinicName?: string;
   timezone?: string;
@@ -434,22 +437,32 @@ export async function buildTodayAppointmentReport(input: {
   ]);
   const cancellationRatePercent = percentageRate(counts.cancelledCount, rows.length);
   const noShowRatePercent = percentageRate(counts.noShowCount, rows.length);
-  const gtGrowthAi = buildAppointmentReportAiPayload({
-    dateKey,
-    totalAppointments: rows.length,
-    completedAppointments: counts.completedCount,
-    upcomingAppointments: counts.upcomingCount,
-    cancelledAppointments: counts.cancelledCount,
-    noShowAppointments: counts.noShowCount,
-    cancellationRatePercent,
-    noShowRatePercent,
-    busyHours,
-    underutilizedHours,
-    topServices: topServices.map((service) => ({ name: service.serviceName, count: service.count })),
-    therapistLoad: therapistLoad.map((therapist) => ({ name: therapist.therapistName, count: therapist.count })),
-    completedCustomersWithoutFutureBookingCount,
-    comparison,
+  const premium = await hasFeatureAccess({
+    clinicId: input.clinicId,
+    feature: GT_GROWTH_AI_FEATURE_GATE,
+    teaser: {
+      insightCount: rows.length > 0 ? 1 : 0,
+      opportunityCount: completedCustomersWithoutFutureBookingCount ? 1 : undefined,
+    },
   });
+  const gtGrowthAi = premium.enabled
+    ? buildAppointmentReportAiPayload({
+        dateKey,
+        totalAppointments: rows.length,
+        completedAppointments: counts.completedCount,
+        upcomingAppointments: counts.upcomingCount,
+        cancelledAppointments: counts.cancelledCount,
+        noShowAppointments: counts.noShowCount,
+        cancellationRatePercent,
+        noShowRatePercent,
+        busyHours,
+        underutilizedHours,
+        topServices: topServices.map((service) => ({ name: service.serviceName, count: service.count })),
+        therapistLoad: therapistLoad.map((therapist) => ({ name: therapist.therapistName, count: therapist.count })),
+        completedCustomersWithoutFutureBookingCount,
+        comparison,
+      })
+    : undefined;
 
   return {
     clinicName,
@@ -468,7 +481,8 @@ export async function buildTodayAppointmentReport(input: {
     busyHours,
     underutilizedHours,
     completedCustomersWithoutFutureBookingCount,
-    gtGrowthAi,
+    premium,
+    ...(gtGrowthAi ? { gtGrowthAi } : {}),
   } satisfies TodayAppointmentReportSummary;
 }
 
@@ -532,6 +546,7 @@ export function formatTodayAppointmentTelegramMessage(report: TodayAppointmentRe
 
 export async function sendTodayAppointmentReport(input: {
   chatId: string;
+  clinicId?: string;
   clinicCode: string;
   clinicName?: string;
   timezone?: string;

@@ -1,5 +1,9 @@
 import { analyticsTables } from "../../config/bigquery.js";
+import { GT_GROWTH_AI_FEATURE_GATE } from "../../types/report-ai.js";
 import { runAnalyticsQuery } from "../bigquery.service.js";
+import { hasFeatureAccess } from "../feature-access.service.js";
+import { getDailyPaymentGrowthEvidence } from "./gt-growth-ai-evidence.service.js";
+import { buildPaymentReportAiPayload } from "./report-ai-insights.service.js";
 
 function parseNumber(value: unknown) {
   if (typeof value === "number") {
@@ -15,6 +19,7 @@ function parseNumber(value: unknown) {
 }
 
 export async function getPaymentReport(params: {
+  clinicId: string;
   clinicCode: string;
   fromDate: string;
   toDate: string;
@@ -385,7 +390,7 @@ export async function getPaymentReport(params: {
     ),
   ]);
 
-  return {
+  const report = {
     summary: {
       totalAmount: parseNumber(summaryRows[0]?.totalAmount),
       invoiceCount: parseNumber(summaryRows[0]?.invoiceCount),
@@ -424,5 +429,62 @@ export async function getPaymentReport(params: {
       invoiceNetTotal: parseNumber(row.invoiceNetTotal),
     })),
     totalCount: parseNumber(totalRows[0]?.totalCount),
+  };
+
+  const premium = await hasFeatureAccess({
+    clinicId: params.clinicId,
+    feature: GT_GROWTH_AI_FEATURE_GATE,
+    teaser: {
+      insightCount: report.summary.totalAmount > 0 ? 1 : 0,
+    },
+  });
+  const isSingleDayReport = params.fromDate === params.toDate;
+  const growthEvidence =
+    premium.enabled && isSingleDayReport
+      ? await getDailyPaymentGrowthEvidence({
+          clinicCode: params.clinicCode,
+          dateKey: params.fromDate,
+          totalRevenue: report.summary.totalAmount,
+        })
+      : null;
+  const paymentMethods = report.methods.map((method) => ({
+    paymentMethod: method.paymentMethod,
+    count: method.transactionCount,
+    amount: method.totalAmount,
+  }));
+  const gtGrowthAi =
+    premium.enabled && isSingleDayReport
+      ? buildPaymentReportAiPayload({
+          dateKey: params.fromDate,
+          totalPaymentAmount: report.summary.totalAmount,
+          paymentCount: paymentMethods.reduce((total, method) => total + method.count, 0),
+          paidInvoiceCount: report.summary.invoiceCount,
+          averageInvoiceValue: report.summary.averageInvoice,
+          paymentMethods,
+          sellerTotals: (growthEvidence?.sellerRevenue.sellers ?? []).map((seller) => ({
+            sellerName: seller.name,
+            count: seller.count,
+            amount: seller.amount,
+          })),
+          outstandingAmount: growthEvidence?.outstanding?.outstandingAmount ?? 0,
+          partialPaymentInvoiceCount: growthEvidence?.outstanding?.affectedInvoiceCount ?? 0,
+          previousDayTotalPaymentAmount: null,
+          previousDayPaymentCount: null,
+          revenueByServiceOrPackage: (growthEvidence?.serviceRevenue ?? []).map((row) => ({
+            name: row.name,
+            count: row.count,
+            amount: row.amount,
+          })),
+          serviceRevenueEvidence: growthEvidence?.serviceRevenue,
+          packageRevenueEvidence: growthEvidence?.packageRevenue,
+          paymentMethodRevenueEvidence: growthEvidence?.paymentMethodRevenue,
+          refundVoidDiscountAmount: null,
+        })
+      : undefined;
+
+  return {
+    ...report,
+    premium,
+    ...(gtGrowthAi ? { gtGrowthAi } : {}),
   };
 }

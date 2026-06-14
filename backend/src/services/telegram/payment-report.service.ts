@@ -6,6 +6,9 @@ import {
   buildPaymentReportAiPayload,
   getReportAiActionLines,
 } from "../reports/report-ai-insights.service.js";
+import { hasFeatureAccess } from "../feature-access.service.js";
+import { getDailyPaymentGrowthEvidence } from "../reports/gt-growth-ai-evidence.service.js";
+import { GT_GROWTH_AI_FEATURE_GATE } from "../../types/report-ai.js";
 import { sendTelegramMessage } from "./bot.service.js";
 import {
   buildUtcDayRangeForDateKeyInTimeZone,
@@ -340,6 +343,7 @@ function buildPaymentSnapshot(input: {
 
 export async function buildTodayPaymentReport(input: {
   clinicId: string;
+  clinicCode?: string;
   clinicName?: string;
   timezone?: string;
   authorizationHeader?: string;
@@ -372,23 +376,49 @@ export async function buildTodayPaymentReport(input: {
         endIso: previousDayResult.endIso,
       })
     : null;
-  const revenueByServiceOrPackage: Array<{ name: string; count: number; amount: number }> = [];
-  const refundVoidDiscountAmount: number | null = null;
-  const gtGrowthAi = buildPaymentReportAiPayload({
-    dateKey,
-    totalPaymentAmount: snapshot.totalPaymentAmount,
-    paymentCount: snapshot.paymentCount,
-    paidInvoiceCount: snapshot.paidInvoiceCount,
-    averageInvoiceValue: snapshot.averageInvoiceValue,
-    paymentMethods: snapshot.paymentMethods,
-    sellerTotals: snapshot.sellerTotals,
-    outstandingAmount: snapshot.outstandingAmount,
-    partialPaymentInvoiceCount: snapshot.partialPaymentInvoiceCount,
-    previousDayTotalPaymentAmount: previousSnapshot?.totalPaymentAmount ?? null,
-    previousDayPaymentCount: previousSnapshot?.paymentCount ?? null,
-    revenueByServiceOrPackage,
-    refundVoidDiscountAmount,
+  const premium = await hasFeatureAccess({
+    clinicId: input.clinicId,
+    feature: GT_GROWTH_AI_FEATURE_GATE,
+    teaser: {
+      insightCount: snapshot.totalPaymentAmount > 0 ? 1 : 0,
+      estimatedOpportunityLabel: snapshot.outstandingAmount > 0 ? formatMoney(snapshot.outstandingAmount) : undefined,
+    },
   });
+  const growthEvidence =
+    premium.enabled && input.clinicCode
+      ? await getDailyPaymentGrowthEvidence({
+          clinicCode: input.clinicCode,
+          dateKey,
+          totalRevenue: snapshot.totalPaymentAmount,
+        })
+      : null;
+  const revenueByServiceOrPackage = (growthEvidence?.serviceRevenue ?? []).map((row) => ({
+    name: row.name,
+    count: row.count,
+    amount: row.amount,
+  }));
+  const refundVoidDiscountAmount: number | null = null;
+  const gtGrowthAi = premium.enabled
+    ? buildPaymentReportAiPayload({
+        dateKey,
+        totalPaymentAmount: snapshot.totalPaymentAmount,
+        paymentCount: snapshot.paymentCount,
+        paidInvoiceCount: snapshot.paidInvoiceCount,
+        averageInvoiceValue: snapshot.averageInvoiceValue,
+        paymentMethods: snapshot.paymentMethods,
+        sellerTotals: snapshot.sellerTotals,
+        outstandingAmount: growthEvidence?.outstanding?.outstandingAmount ?? snapshot.outstandingAmount,
+        partialPaymentInvoiceCount:
+          growthEvidence?.outstanding?.affectedInvoiceCount ?? snapshot.partialPaymentInvoiceCount,
+        previousDayTotalPaymentAmount: previousSnapshot?.totalPaymentAmount ?? null,
+        previousDayPaymentCount: previousSnapshot?.paymentCount ?? null,
+        revenueByServiceOrPackage,
+        serviceRevenueEvidence: growthEvidence?.serviceRevenue,
+        packageRevenueEvidence: growthEvidence?.packageRevenue,
+        paymentMethodRevenueEvidence: growthEvidence?.paymentMethodRevenue,
+        refundVoidDiscountAmount,
+      })
+    : undefined;
 
   return {
     clinicName: input.clinicName || "Clinic",
@@ -407,7 +437,8 @@ export async function buildTodayPaymentReport(input: {
     payments: snapshot.payments.slice(0, PAYMENT_PREVIEW_LIMIT).map(({ sortKey: _sortKey, ...payment }) => payment),
     paymentMethods: snapshot.paymentMethods,
     sellerTotals: snapshot.sellerTotals,
-    gtGrowthAi,
+    premium,
+    ...(gtGrowthAi ? { gtGrowthAi } : {}),
   } satisfies TodayPaymentReportSummary;
 }
 
@@ -476,6 +507,7 @@ export function formatTodayPaymentTelegramMessage(report: TodayPaymentReportSumm
 export async function sendTodayPaymentReport(input: {
   chatId: string;
   clinicId: string;
+  clinicCode?: string;
   clinicName?: string;
   timezone?: string;
   authorizationHeader?: string;

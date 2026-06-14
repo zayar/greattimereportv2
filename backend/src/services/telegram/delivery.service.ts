@@ -46,6 +46,7 @@ export async function sendTrackedTelegramReport(input: {
       const sent = await sendTodayPaymentReport({
         chatId: input.chatId,
         clinicId: input.clinicId,
+        clinicCode: input.clinicCode,
         clinicName: input.clinicName,
         timezone,
         authorizationHeader: input.authorizationHeader,
@@ -138,6 +139,7 @@ export async function sendTrackedTelegramReport(input: {
 
     const sent = await sendTodayAppointmentReport({
       chatId: input.chatId,
+      clinicId: input.clinicId,
       clinicCode: input.clinicCode,
       clinicName: input.clinicName,
       timezone,

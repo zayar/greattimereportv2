@@ -392,7 +392,9 @@ export function PaymentReportPage() {
         </div>
       </div>
 
-      {data?.gtGrowthAi ? <ReportAiSections payload={data.gtGrowthAi} /> : null}
+      {data?.gtGrowthAi || data?.premium ? (
+        <ReportAiSections payload={data.gtGrowthAi ?? null} premium={data.premium ?? null} />
+      ) : null}
 
       <Panel
         className="analytics-report__panel sales-details-report__panel"

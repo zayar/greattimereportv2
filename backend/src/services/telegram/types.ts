@@ -1,5 +1,5 @@
 import type { AiLanguage } from "../ai/language.js";
-import type { ReportAiPayload } from "../../types/report-ai.js";
+import type { ReportAiPayload, ReportPremiumAccess } from "../../types/report-ai.js";
 
 export type TelegramChatType = "private" | "group" | "supergroup" | "channel";
 
@@ -184,7 +184,8 @@ export interface TodayAppointmentReportSummary {
   busyHours: Array<{ label: string; count: number }>;
   underutilizedHours: Array<{ label: string; count: number }>;
   completedCustomersWithoutFutureBookingCount: number | null;
-  gtGrowthAi: ReportAiPayload;
+  premium: ReportPremiumAccess;
+  gtGrowthAi?: ReportAiPayload;
 }
 
 export interface TodayPaymentReportItem {
@@ -213,15 +214,16 @@ export interface TodayPaymentReportSummary {
   payments: TodayPaymentReportItem[];
   paymentMethods: Array<{ paymentMethod: string; count: number; amount: number }>;
   sellerTotals: Array<{ sellerName: string; count: number; amount: number }>;
-  gtGrowthAi: ReportAiPayload;
+  premium: ReportPremiumAccess;
+  gtGrowthAi?: ReportAiPayload;
 }
 
 export interface TodayOwnerAiReportSummary {
   clinicName: string;
   dateKey: string;
   timezone: string;
-  appointmentReport: Omit<TodayAppointmentReportSummary, "appointments" | "gtGrowthAi">;
-  paymentReport: Omit<TodayPaymentReportSummary, "payments" | "gtGrowthAi">;
+  appointmentReport: Omit<TodayAppointmentReportSummary, "appointments" | "gtGrowthAi" | "premium">;
+  paymentReport: Omit<TodayPaymentReportSummary, "payments" | "gtGrowthAi" | "premium">;
   aiReport: {
     reportTitle: string;
     overallStatus: "good" | "normal" | "watch" | "no_data";
@@ -291,5 +293,6 @@ export interface WeeklySummaryReportSummary {
   previousWeekCancelledAppointments: number | null;
   packageSalesSummary: string | null;
   customerRetentionOpportunityCount: number | null;
-  gtGrowthAi: ReportAiPayload;
+  premium: ReportPremiumAccess;
+  gtGrowthAi?: ReportAiPayload;
 }

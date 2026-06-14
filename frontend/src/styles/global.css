@@ -114,6 +114,38 @@
   font-size: 0.98rem;
 }
 
+.report-ai-sections__opportunity p,
+.report-ai-sections__opportunity small {
+  margin: 0;
+  color: var(--ink-muted);
+  line-height: 1.5;
+}
+
+.report-ai-sections--locked {
+  border-style: dashed;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.84)),
+    linear-gradient(135deg, rgba(7, 65, 66, 0.08), rgba(249, 197, 180, 0.16));
+}
+
+.report-ai-locked {
+  display: grid;
+  gap: 0.35rem;
+  border: 1px solid rgba(7, 65, 66, 0.12);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  background: rgba(7, 65, 66, 0.06);
+}
+
+.report-ai-locked strong {
+  color: var(--brand);
+}
+
+.report-ai-locked span {
+  color: var(--ink-muted);
+  line-height: 1.45;
+}
+
 .report-ai-sections__grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));

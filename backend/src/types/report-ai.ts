@@ -14,6 +14,14 @@ export type ReportAiCategory =
 
 export type ReportAiSeverity = "info" | "warning" | "critical" | "success";
 
+export type ReportAiConfidence = "low" | "medium" | "high";
+
+export interface ReportAiEvidenceItem {
+  label: string;
+  value: string | number;
+  comparison?: string;
+}
+
 export interface ReportAiInsight {
   id: string;
   reportType: ReportAiReportType;
@@ -21,14 +29,10 @@ export interface ReportAiInsight {
   severity: ReportAiSeverity;
   title: string;
   summary: string;
-  evidence: Array<{
-    label: string;
-    value: string | number;
-    comparison?: string;
-  }>;
+  evidence: ReportAiEvidenceItem[];
   recommendedAction: string;
   estimatedImpact?: string;
-  confidence: "low" | "medium" | "high";
+  confidence: ReportAiConfidence;
   createdAt: string;
 }
 
@@ -50,6 +54,45 @@ export interface ReportNextAction {
   dueDate?: string;
 }
 
+export type ReportBusinessOpportunityType =
+  | "revenue_growth"
+  | "package_sales"
+  | "rebooking"
+  | "collection"
+  | "schedule_utilization"
+  | "staff_performance"
+  | "customer_retention";
+
+export interface ReportBusinessOpportunity {
+  id: string;
+  reportType: ReportAiReportType;
+  title: string;
+  summary: string;
+  opportunityType: ReportBusinessOpportunityType;
+  estimatedValue?: number;
+  estimatedValueLabel?: string;
+  currency?: string;
+  confidence: ReportAiConfidence;
+  evidence: ReportAiEvidenceItem[];
+  recommendedAction: string;
+}
+
+export interface ReportPremiumTeaser {
+  insightCount?: number;
+  opportunityCount?: number;
+  estimatedOpportunityLabel?: string;
+}
+
+export interface ReportPremiumAccess {
+  feature: typeof GT_GROWTH_AI_FEATURE_GATE;
+  enabled: boolean;
+  title: string;
+  message: string;
+  upgradeMessage?: string;
+  lockedReason?: string;
+  teaser?: ReportPremiumTeaser;
+}
+
 export interface ReportAiPayload {
   featureGate: typeof GT_GROWTH_AI_FEATURE_GATE;
   isPremiumFeature: true;
@@ -58,6 +101,6 @@ export interface ReportAiPayload {
   summary: string;
   insights: ReportAiInsight[];
   nextActions: ReportNextAction[];
-  businessOpportunity: string | null;
+  businessOpportunity: ReportBusinessOpportunity | null;
   dataQualityNotes: string[];
 }

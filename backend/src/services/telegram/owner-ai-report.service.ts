@@ -135,6 +135,7 @@ export async function buildTodayOwnerAiReport(input: {
   const timezone = normalizeTimeZone(input.timezone);
   const [appointmentReport, paymentReport] = await Promise.all([
     buildTodayAppointmentReport({
+      clinicId: input.clinicId,
       clinicCode: input.clinicCode,
       clinicName: input.clinicName,
       timezone,
@@ -143,6 +144,7 @@ export async function buildTodayOwnerAiReport(input: {
     }),
     buildTodayPaymentReport({
       clinicId: input.clinicId,
+      clinicCode: input.clinicCode,
       clinicName: input.clinicName,
       timezone,
       authorizationHeader: input.authorizationHeader,
@@ -164,8 +166,18 @@ export async function buildTodayOwnerAiReport(input: {
     customInstruction: input.customInstruction ?? null,
     facts,
   });
-  const { appointments: _appointments, gtGrowthAi: _appointmentGrowthAi, ...appointmentFacts } = appointmentReport;
-  const { payments: _payments, gtGrowthAi: _paymentGrowthAi, ...paymentFacts } = paymentReport;
+  const {
+    appointments: _appointments,
+    gtGrowthAi: _appointmentGrowthAi,
+    premium: _appointmentPremium,
+    ...appointmentFacts
+  } = appointmentReport;
+  const {
+    payments: _payments,
+    gtGrowthAi: _paymentGrowthAi,
+    premium: _paymentPremium,
+    ...paymentFacts
+  } = paymentReport;
 
   return {
     clinicName,

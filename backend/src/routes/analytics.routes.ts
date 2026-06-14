@@ -459,6 +459,7 @@ router.get(
       .parse(req.query);
 
     const data = await getPaymentReport({
+      clinicId: params.clinicId,
       clinicCode: params.clinicCode,
       fromDate: params.fromDate,
       toDate: params.toDate,

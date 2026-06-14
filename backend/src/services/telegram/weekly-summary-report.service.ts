@@ -10,6 +10,9 @@ import {
   percentageChange,
   percentageRate,
 } from "../reports/report-ai-insights.service.js";
+import { hasFeatureAccess } from "../feature-access.service.js";
+import { getWeeklySummaryGrowthEvidence } from "../reports/gt-growth-ai-evidence.service.js";
+import { GT_GROWTH_AI_FEATURE_GATE } from "../../types/report-ai.js";
 import { sendTelegramMessage } from "./bot.service.js";
 import { summarizeAppointmentCounts } from "./report.service.js";
 import {
@@ -615,29 +618,64 @@ export async function buildWeeklySummaryReport(input: {
   );
   const busyHours = summarizeBusyHours(appointments, timezone);
   const underutilizedHours = summarizeUnderutilizedHours(appointments, timezone);
-  const packageSalesSummary: string | null = null;
-  const customerRetentionOpportunityCount: number | null = null;
-  const gtGrowthAi = buildWeeklySummaryReportAiPayload({
+  const premium = await hasFeatureAccess({
+    clinicId: input.clinicId,
+    feature: GT_GROWTH_AI_FEATURE_GATE,
+    teaser: {
+      insightCount: totalAppointments > 0 || totalPaymentAmount > 0 ? 1 : 0,
+      opportunityCount: underutilizedDays.length > 0 ? 1 : undefined,
+    },
+  });
+  const previousRangeForEvidence = getPreviousWeekRangeFromRange({
     weekStartDateKey: range.weekStartDateKey,
     weekEndDateKey: range.weekEndDateKey,
-    weeklyAppointmentCount: totalAppointments,
-    weeklyCompletedAppointments: appointmentCounts.completedCount,
-    weeklyCancelledAppointments: appointmentCounts.cancelledCount,
-    weeklyNoShowAppointments: appointmentCounts.noShowCount,
-    weeklyRevenue: totalPaymentAmount,
-    weekOverWeekRevenueChangePercent,
-    weekOverWeekAppointmentChangePercent,
-    previousWeekRevenue: previousWeekTotalPaymentAmount,
-    previousWeekAppointmentCount,
-    previousWeekCancelledAppointments,
-    topServices: serviceSummary.slice(0, TOP_SERVICE_LIMIT),
-    topTherapists: therapistSummary.slice(0, TOP_SERVICE_LIMIT),
-    busyDays,
-    underutilizedDays,
-    underutilizedHours,
-    packageSalesSummary,
-    customerRetentionOpportunityCount,
+    timezone,
   });
+  const averageRevenuePerCompletedCustomer =
+    appointmentCounts.completedCount > 0 ? totalPaymentAmount / appointmentCounts.completedCount : null;
+  const growthEvidence = premium.enabled
+    ? await getWeeklySummaryGrowthEvidence({
+        clinicCode: input.clinicCode,
+        weekStartDateKey: range.weekStartDateKey,
+        weekEndDateKey: range.weekEndDateKey,
+        previousWeekStartDateKey: previousRangeForEvidence.weekStartDateKey,
+        previousWeekEndDateKey: previousRangeForEvidence.weekEndDateKey,
+        totalWeeklyRevenue: totalPaymentAmount,
+        averageRevenuePerCompletedCustomer,
+      })
+    : null;
+  const packageSalesSummary =
+    growthEvidence?.packageSales != null
+      ? `${formatMoney(growthEvidence.packageSales.totalAmount)} from ${growthEvidence.packageSales.count.toLocaleString("en-US")} package sale(s)`
+      : null;
+  const customerRetentionOpportunityCount =
+    growthEvidence?.customerRebookingOpportunity?.customersWithoutFutureBooking ?? null;
+  const gtGrowthAi = premium.enabled
+    ? buildWeeklySummaryReportAiPayload({
+        weekStartDateKey: range.weekStartDateKey,
+        weekEndDateKey: range.weekEndDateKey,
+        weeklyAppointmentCount: totalAppointments,
+        weeklyCompletedAppointments: appointmentCounts.completedCount,
+        weeklyCancelledAppointments: appointmentCounts.cancelledCount,
+        weeklyNoShowAppointments: appointmentCounts.noShowCount,
+        weeklyRevenue: totalPaymentAmount,
+        weekOverWeekRevenueChangePercent,
+        weekOverWeekAppointmentChangePercent,
+        previousWeekRevenue: previousWeekTotalPaymentAmount,
+        previousWeekAppointmentCount,
+        previousWeekCancelledAppointments,
+        topServices: serviceSummary.slice(0, TOP_SERVICE_LIMIT),
+        topTherapists: therapistSummary.slice(0, TOP_SERVICE_LIMIT),
+        busyDays,
+        underutilizedDays,
+        underutilizedHours,
+        packageSalesSummary,
+        packageSalesEvidence: growthEvidence?.packageSales,
+        serviceRevenueEvidence: growthEvidence?.serviceRevenue,
+        customerRetentionOpportunityCount,
+        customerRebookingOpportunityEvidence: growthEvidence?.customerRebookingOpportunity,
+      })
+    : undefined;
 
   return {
     clinicName,
@@ -675,7 +713,8 @@ export async function buildWeeklySummaryReport(input: {
     previousWeekCancelledAppointments,
     packageSalesSummary,
     customerRetentionOpportunityCount,
-    gtGrowthAi,
+    premium,
+    ...(gtGrowthAi ? { gtGrowthAi } : {}),
   } satisfies WeeklySummaryReportSummary;
 }
 
