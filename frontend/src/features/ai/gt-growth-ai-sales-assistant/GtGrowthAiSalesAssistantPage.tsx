@@ -648,7 +648,13 @@ export function GtGrowthAiSalesAssistantPage() {
                         </td>
                         <td>
                           <strong>{action.customer?.customerName ?? "Customer"}</strong>
-                          <small>{action.customer?.phoneMasked ?? action.customer?.memberId ?? "Masked details"}</small>
+                          <small>
+                            {action.detail?.contactPhone ??
+                              action.customer?.phoneNumber ??
+                              action.customer?.phoneMasked ??
+                              action.customer?.memberId ??
+                              "Masked details"}
+                          </small>
                         </td>
                         <td>
                           <strong>{formatActionType(action.actionType)}</strong>

@@ -25,6 +25,7 @@ const {
   buildLockedSalesAssistantResponse,
   buildSalesAssistantActionsFromFacts,
   calculateSalesAssistantPriorityScore,
+  formatSalesAssistantDetailMessage,
   formatSalesAssistantTaskMessage,
   interpretSalesAssistantInstruction,
   summarizeSalesAssistantActions,
@@ -356,12 +357,22 @@ test("GT Growth AI Sales Assistant builds deterministic money-making actions", (
     inactiveVipCustomers: [
       {
         customerName: "Daw Khin",
+        customerPhone: "09777770000",
         lifetimeSpend: 5_500_000,
         averageSpend: 700_000,
         visitCount: 12,
         lastVisitDate: "2026-04-01",
         daysSinceLastVisit: 74,
         preferredService: "Laser",
+        remainingPackages: [
+          {
+            packageName: "Laser Package",
+            purchasedUnits: 10,
+            usedUnits: 7,
+            remainingUnits: 3,
+            daysSinceActivity: 74,
+          },
+        ],
       },
     ],
     paymentFollowUps: [
@@ -388,6 +399,7 @@ test("GT Growth AI Sales Assistant builds deterministic money-making actions", (
   assert.ok(actions.every((action) => action.suggestedMessage?.language === "my-MM"));
   assert.ok(actions.every((action) => action.evidence.length > 0));
   assert.ok(actions.some((action) => action.customer?.phoneMasked === "***1234"));
+  assert.ok(actions.some((action) => action.customer?.phoneNumber === "09777770000"));
 
   const summary = summarizeSalesAssistantActions(actions);
   assert.equal(summary.totalActions, 5);
@@ -545,4 +557,43 @@ test("GT Growth AI Sales Assistant Telegram task message hides customer details 
   assert.match(privateMessage, /Daw Mya/);
   assert.doesNotMatch(groupMessage, /Daw Mya/);
   assert.match(groupMessage, /C1 = contacted/);
+});
+
+test("GT Growth AI Sales Assistant detail message includes phone and remaining package context", () => {
+  const actions = buildSalesAssistantActionsFromFacts({
+    clinicId: "clinic-premium",
+    dateKey: "2026-06-14",
+    inactiveVipCustomers: [
+      {
+        customerName: "Daw Khin",
+        customerPhone: "09777770000",
+        lifetimeSpend: 5_500_000,
+        visitCount: 12,
+        lastVisitDate: "2026-04-01",
+        daysSinceLastVisit: 74,
+        preferredService: "Laser",
+        preferredTherapist: "Aye Aye",
+        remainingPackages: [
+          {
+            packageName: "Laser Package",
+            purchasedUnits: 10,
+            usedUnits: 7,
+            remainingUnits: 3,
+            daysSinceActivity: 74,
+          },
+        ],
+      },
+    ],
+  });
+  const detail = formatSalesAssistantDetailMessage({
+    action: actions[0],
+    index: "1",
+    language: "my-MM",
+  });
+
+  assert.match(detail, /09777770000/);
+  assert.match(detail, /Lifetime spend: 5,500,000 MMK/);
+  assert.match(detail, /Last check-in\/visit: 2026-04-01/);
+  assert.match(detail, /Laser Package: 3 remaining/);
+  assert.match(detail, /M1 = customer message/);
 });

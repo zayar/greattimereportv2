@@ -72,6 +72,26 @@ export interface GtGrowthAiSalesActionEvidence {
   comparison?: string;
 }
 
+export interface GtGrowthAiSalesActionRemainingPackage {
+  packageName: string;
+  remainingUnits?: number | null;
+  purchasedUnits?: number | null;
+  usedUnits?: number | null;
+  lastVisitDate?: string | null;
+  daysSinceActivity?: number | null;
+}
+
+export interface GtGrowthAiSalesActionDetail {
+  contactPhone?: string;
+  lastService?: string | null;
+  lastVisitDate?: string | null;
+  daysSinceLastVisit?: number | null;
+  lifetimeSpend?: number | null;
+  totalVisits?: number | null;
+  preferredTherapist?: string | null;
+  remainingPackages?: GtGrowthAiSalesActionRemainingPackage[];
+}
+
 export interface GtGrowthAiSalesAction {
   id: string;
   clinicId: string;
@@ -88,8 +108,10 @@ export interface GtGrowthAiSalesAction {
     customerKey?: string;
     customerName?: string;
     phoneMasked?: string;
+    phoneNumber?: string;
     memberId?: string;
   };
+  detail?: GtGrowthAiSalesActionDetail;
   evidence: GtGrowthAiSalesActionEvidence[];
   suggestedMessage?: {
     language: "my-MM" | "en-US";

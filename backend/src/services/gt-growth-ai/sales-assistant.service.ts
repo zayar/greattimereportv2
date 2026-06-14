@@ -8,6 +8,8 @@ import {
   type GtGrowthAiActionPriority,
   type GtGrowthAiSalesAction,
   type GtGrowthAiSalesActionEvidence,
+  type GtGrowthAiSalesActionDetail,
+  type GtGrowthAiSalesActionRemainingPackage,
   type GtGrowthAiSalesActionStatus,
   type GtGrowthAiSalesActionType,
   type GtGrowthAiSalesActionUpdateStatus,
@@ -86,6 +88,7 @@ type BuildActionFactsInput = {
   }>;
   inactiveVipCustomers?: Array<{
     customerName: string;
+    customerPhone?: string | null;
     memberId?: string | null;
     lifetimeSpend?: number | null;
     averageSpend?: number | null;
@@ -94,6 +97,7 @@ type BuildActionFactsInput = {
     daysSinceLastVisit?: number | null;
     preferredService?: string | null;
     preferredTherapist?: string | null;
+    remainingPackages?: GtGrowthAiSalesActionRemainingPackage[];
   }>;
   paymentFollowUps?: Array<{
     customerName: string;
@@ -368,6 +372,7 @@ function buildBaseAction(input: {
   dateKey: string;
   actionType: GtGrowthAiSalesActionType;
   customerName?: string;
+  phoneNumber?: string;
   phoneMasked?: string;
   memberId?: string | null;
   customerKey?: string;
@@ -377,6 +382,7 @@ function buildBaseAction(input: {
   reason: string;
   recommendedAction: string;
   evidence: GtGrowthAiSalesActionEvidence[];
+  detail?: GtGrowthAiSalesActionDetail;
   estimatedValue?: number | null;
   estimatedValueLabel?: string;
   source: GtGrowthAiSalesAction["source"];
@@ -406,8 +412,10 @@ function buildBaseAction(input: {
       customerKey: input.customerKey,
       customerName: input.customerName,
       phoneMasked: input.phoneMasked,
+      phoneNumber: input.phoneNumber,
       memberId: cleanText(input.memberId) || undefined,
     },
+    detail: input.detail,
     evidence: input.evidence,
     suggestedMessage: input.suggestedMessage,
     ...(input.estimatedValue != null && input.estimatedValue > 0
@@ -461,6 +469,7 @@ export function buildSalesAssistantActionsFromFacts(
         dateKey: input.dateKey,
         actionType: "rebooking_opportunity",
         customerName: name,
+        phoneNumber: cleanText(row.customerPhone) || undefined,
         phoneMasked: maskPhone(row.customerPhone),
         memberId: row.memberId,
         customerKey: key,
@@ -475,6 +484,11 @@ export function buildSalesAssistantActionsFromFacts(
           ...(row.therapistName ? [{ label: "Preferred therapist", value: row.therapistName }] : []),
           ...(moneyLabel(estimatedValue) ? [{ label: "Last payment amount", value: moneyLabel(estimatedValue)! }] : []),
         ],
+        detail: {
+          contactPhone: cleanText(row.customerPhone) || undefined,
+          lastService: serviceName,
+          lastVisitDate: input.dateKey,
+        },
         estimatedValue,
         estimatedValueLabel: "Potential rebooking value based on recent visit history",
         source: "daily_appointment_report",
@@ -503,6 +517,7 @@ export function buildSalesAssistantActionsFromFacts(
         dateKey: input.dateKey,
         actionType: "package_usage_follow_up",
         customerName: name,
+        phoneNumber: cleanText(row.customerPhone) || undefined,
         phoneMasked: maskPhone(row.customerPhone),
         memberId: row.memberId,
         customerKey: key,
@@ -519,6 +534,23 @@ export function buildSalesAssistantActionsFromFacts(
           ...(row.lastVisitDate ? [{ label: "Last usage date", value: row.lastVisitDate }] : []),
           ...(row.daysSinceActivity != null ? [{ label: "Days since activity", value: row.daysSinceActivity }] : []),
         ],
+        detail: {
+          contactPhone: cleanText(row.customerPhone) || undefined,
+          lastService: packageName,
+          lastVisitDate: row.lastVisitDate,
+          daysSinceLastVisit: row.daysSinceActivity ?? null,
+          preferredTherapist: row.therapist ?? null,
+          remainingPackages: [
+            {
+              packageName,
+              purchasedUnits: row.purchasedUnits,
+              usedUnits: row.usedUnits,
+              remainingUnits: row.remainingUnits,
+              lastVisitDate: row.lastVisitDate,
+              daysSinceActivity: row.daysSinceActivity,
+            },
+          ],
+        },
         estimatedValueLabel: "Package retention opportunity",
         source: "package_portal",
         suggestedMessage: {
@@ -560,6 +592,10 @@ export function buildSalesAssistantActionsFromFacts(
           { label: "Repeated service/category", value: repeatedService },
           { label: "Active package found", value: "No active package evidence in payment rows" },
         ],
+        detail: {
+          lastService: repeatedService,
+          totalVisits: row.recentVisitCount,
+        },
         estimatedValue,
         estimatedValueLabel: "Potential package sales opportunity",
         source: "payment_report",
@@ -587,6 +623,8 @@ export function buildSalesAssistantActionsFromFacts(
         dateKey: input.dateKey,
         actionType: "inactive_vip_follow_up",
         customerName: name,
+        phoneNumber: cleanText(row.customerPhone) || undefined,
+        phoneMasked: maskPhone(row.customerPhone),
         memberId: row.memberId,
         customerKey: key,
         dedupeSuffix: key,
@@ -602,6 +640,16 @@ export function buildSalesAssistantActionsFromFacts(
           ...(row.preferredService ? [{ label: "Preferred service", value: row.preferredService }] : []),
           ...(row.preferredTherapist ? [{ label: "Preferred therapist", value: row.preferredTherapist }] : []),
         ],
+        detail: {
+          contactPhone: cleanText(row.customerPhone) || undefined,
+          lifetimeSpend: row.lifetimeSpend ?? null,
+          totalVisits: row.visitCount ?? null,
+          lastVisitDate: row.lastVisitDate ?? null,
+          daysSinceLastVisit: row.daysSinceLastVisit ?? null,
+          lastService: row.preferredService ?? null,
+          preferredTherapist: row.preferredTherapist ?? null,
+          remainingPackages: row.remainingPackages ?? [],
+        },
         estimatedValueLabel: "High-value customer retention opportunity",
         source: "customer_portal",
         suggestedMessage: {
@@ -692,6 +740,10 @@ function normalizeAction(id: string, data: Record<string, unknown> | undefined):
     reason: cleanText(typeof data.reason === "string" ? data.reason : undefined),
     recommendedAction: cleanText(typeof data.recommendedAction === "string" ? data.recommendedAction : undefined),
     customer: data.customer && typeof data.customer === "object" ? (data.customer as GtGrowthAiSalesAction["customer"]) : undefined,
+    detail:
+      data.detail && typeof data.detail === "object"
+        ? (data.detail as GtGrowthAiSalesAction["detail"])
+        : undefined,
     evidence: Array.isArray(data.evidence) ? (data.evidence as GtGrowthAiSalesActionEvidence[]) : [],
     suggestedMessage:
       data.suggestedMessage && typeof data.suggestedMessage === "object"
@@ -917,6 +969,7 @@ async function collectSourceFacts(input: {
   ]);
 
   const dayPayments = dayPaymentReport.status === "fulfilled" ? dayPaymentReport.value : null;
+  const remainingPackagesByCustomer = new Map<string, GtGrowthAiSalesActionRemainingPackage[]>();
   const paymentByCustomer = new Map<string, number>();
   (dayPayments?.rows ?? []).forEach((row) => {
     const key = customerKey({ customerName: row.customerName, memberId: row.memberId });
@@ -928,6 +981,28 @@ async function collectSourceFacts(input: {
   }
 
   if (packageReport.status === "fulfilled") {
+    for (const row of packageReport.value.followUpRows) {
+      if (row.remainingUnits <= 0) {
+        continue;
+      }
+
+      const key = customerKey({
+        customerName: row.customerName,
+        memberId: row.memberId,
+        phone: row.customerPhone,
+      });
+      const current = remainingPackagesByCustomer.get(key) ?? [];
+      current.push({
+        packageName: row.packageName,
+        purchasedUnits: row.purchasedUnits,
+        usedUnits: row.usedUnits,
+        remainingUnits: row.remainingUnits,
+        lastVisitDate: row.lastVisitDate,
+        daysSinceActivity: row.daysSinceActivity,
+      });
+      remainingPackagesByCustomer.set(key, current);
+    }
+
     facts.packageFollowUps = packageReport.value.followUpRows
       .filter(
         (row) =>
@@ -1009,6 +1084,7 @@ async function collectSourceFacts(input: {
       .slice(0, 10)
       .map((row) => ({
         customerName: row.customerName,
+        customerPhone: row.phoneNumber,
         memberId: row.memberId,
         lifetimeSpend: row.lifetimeSpend,
         averageSpend: row.averageSpend,
@@ -1017,6 +1093,13 @@ async function collectSourceFacts(input: {
         daysSinceLastVisit: row.daysSinceLastVisit,
         preferredService: row.lastService,
         preferredTherapist: row.primaryTherapist,
+        remainingPackages: remainingPackagesByCustomer.get(
+          customerKey({
+            customerName: row.customerName,
+            memberId: row.memberId,
+            phone: row.phoneNumber,
+          }),
+        ) ?? [],
       }));
   }
 
@@ -1458,7 +1541,7 @@ export function formatSalesAssistantTaskMessage(input: {
 
     lines.push("Reply:");
     lines.push("C1 = contacted, B1 = booked, P1 = purchased, S1 = skipped");
-    lines.push("M1 = customer message ကိုပြ");
+    lines.push("D1 = detail, M1 = customer message");
     lines.push("/tasks = ဒီနေ့ task ပြန်ကြည့်");
 
     return lines.join("\n").trim();
@@ -1490,10 +1573,103 @@ export function formatSalesAssistantTaskMessage(input: {
 
   lines.push("Reply:");
   lines.push("C1 = contacted, B1 = booked, P1 = purchased, S1 = skipped");
-  lines.push("M1 = show suggested message");
+  lines.push("D1 = show detail, M1 = show suggested message");
   lines.push("/tasks = show today's tasks");
 
   return lines.join("\n").trim();
+}
+
+function evidenceValue(action: GtGrowthAiSalesAction, label: string) {
+  return action.evidence.find((item) => item.label.toLowerCase() === label.toLowerCase())?.value;
+}
+
+function formatRemainingPackageLines(packages: GtGrowthAiSalesActionRemainingPackage[] | undefined) {
+  if (!packages?.length) {
+    return ["- No remaining package evidence found in Package Portal."];
+  }
+
+  return packages.slice(0, 5).map((item) => {
+    const remaining = item.remainingUnits == null ? "unknown" : item.remainingUnits;
+    const used = item.usedUnits == null ? "unknown" : item.usedUnits;
+    const purchased = item.purchasedUnits == null ? "unknown" : item.purchasedUnits;
+    const inactive = item.daysSinceActivity == null ? "" : ` · inactive ${item.daysSinceActivity} days`;
+    return `- ${item.packageName}: ${remaining} remaining / ${used} used / ${purchased} purchased${inactive}`;
+  });
+}
+
+export function formatSalesAssistantDetailMessage(input: {
+  action: GtGrowthAiSalesAction;
+  index: string;
+  language?: GtGrowthAiSalesAssistantLanguage;
+}) {
+  const action = input.action;
+  const detail = action.detail ?? {};
+  const phone = detail.contactPhone || action.customer?.phoneNumber || action.customer?.phoneMasked || "Not available";
+  const lifetimeSpend = detail.lifetimeSpend ?? Number(String(evidenceValue(action, "Lifetime spend") ?? "").replace(/[^0-9.]/g, ""));
+  const visits = detail.totalVisits ?? evidenceValue(action, "Total visits");
+  const lastVisit = detail.lastVisitDate ?? evidenceValue(action, "Last visit date") ?? evidenceValue(action, "Last usage date");
+  const daysInactive = detail.daysSinceLastVisit ?? evidenceValue(action, "Days since last visit") ?? evidenceValue(action, "Days since activity");
+  const lastService = detail.lastService ?? evidenceValue(action, "Preferred service") ?? evidenceValue(action, "Service");
+  const therapist = detail.preferredTherapist ?? evidenceValue(action, "Preferred therapist");
+  const packages = formatRemainingPackageLines(detail.remainingPackages);
+
+  if ((input.language ?? DEFAULT_SALES_ASSISTANT_SETTINGS.language) === "my-MM") {
+    return [
+      `Customer Detail — Task ${input.index}`,
+      "",
+      `Customer: ${action.customer?.customerName ?? "Customer"}`,
+      `Phone: ${phone}`,
+      `Action: ${actionTypeLabelMyanmar(action.actionType)}`,
+      "",
+      "Why selected:",
+      `- Priority score: ${action.priorityScore}`,
+      lifetimeSpend > 0 ? `- Lifetime spend: ${moneyLabel(lifetimeSpend)}` : null,
+      visits ? `- Total visits: ${visits}` : null,
+      lastVisit ? `- Last check-in/visit: ${lastVisit}` : null,
+      daysInactive != null ? `- Days inactive: ${daysInactive}` : null,
+      lastService ? `- Last/preferred service: ${lastService}` : null,
+      therapist ? `- Preferred therapist: ${therapist}` : null,
+      "",
+      "Remaining package/service:",
+      ...packages,
+      "",
+      `Recommended action: ${actionRecommendationMyanmar(action)}`,
+      "",
+      "Reply:",
+      `M${input.index} = customer message`,
+      `C${input.index} = contacted, B${input.index} = booked, P${input.index} = purchased`,
+    ]
+      .filter((line): line is string => line != null)
+      .join("\n");
+  }
+
+  return [
+    `Customer Detail — Task ${input.index}`,
+    "",
+    `Customer: ${action.customer?.customerName ?? "Customer"}`,
+    `Phone: ${phone}`,
+    `Action: ${actionTypeLabel(action.actionType)}`,
+    "",
+    "Why selected:",
+    `- Priority score: ${action.priorityScore}`,
+    lifetimeSpend > 0 ? `- Lifetime spend: ${moneyLabel(lifetimeSpend)}` : null,
+    visits ? `- Total visits: ${visits}` : null,
+    lastVisit ? `- Last check-in/visit: ${lastVisit}` : null,
+    daysInactive != null ? `- Days inactive: ${daysInactive}` : null,
+    lastService ? `- Last/preferred service: ${lastService}` : null,
+    therapist ? `- Preferred therapist: ${therapist}` : null,
+    "",
+    "Remaining package/service:",
+    ...packages,
+    "",
+    `Recommended action: ${action.recommendedAction}`,
+    "",
+    "Reply:",
+    `M${input.index} = customer message`,
+    `C${input.index} = contacted, B${input.index} = booked, P${input.index} = purchased`,
+  ]
+    .filter((line): line is string => line != null)
+    .join("\n");
 }
 
 export function formatSalesAssistantOwnerSummary(input: {
@@ -1686,29 +1862,34 @@ export async function buildSalesAssistantSendPlan(input: {
 }
 
 type ParsedStatusCommand = {
-  status: GtGrowthAiSalesActionUpdateStatus | "message";
+  status: GtGrowthAiSalesActionUpdateStatus | "message" | "details";
   index: string;
 };
 
 function parseStatusCommand(text: string): ParsedStatusCommand | null {
   const trimmed = text.trim();
-  const compact = trimmed.match(/^([CBPSM])\s*(\d{1,2})$/i);
+  const compact = trimmed.match(/^([CBPSMD])\s*(\d{1,2})$/i);
   if (compact) {
     const code = compact[1].toUpperCase();
     const index = compact[2];
-    const statusByCode: Record<string, GtGrowthAiSalesActionUpdateStatus | "message"> = {
+    const statusByCode: Record<string, GtGrowthAiSalesActionUpdateStatus | "message" | "details"> = {
       C: "contacted",
       B: "booked",
       P: "purchased",
       S: "skipped",
       M: "message",
+      D: "details",
     };
     return { status: statusByCode[code], index };
   }
 
-  const slash = trimmed.match(/^\/(contacted|booked|purchased|skipped|message)(?:@\w+)?\s+(\d{1,2})$/i);
+  const slash = trimmed.match(/^\/(contacted|booked|purchased|skipped|message|details|detail)(?:@\w+)?\s+(\d{1,2})$/i);
   if (!slash) {
     return null;
+  }
+
+  if (slash[1].toLowerCase() === "details" || slash[1].toLowerCase() === "detail") {
+    return { status: "details", index: slash[2] };
   }
 
   return {
@@ -1796,6 +1977,19 @@ export async function buildTelegramSalesAssistantReply(input: {
   const action = normalizeAction(actionSnapshot.id, actionSnapshot.data());
   if (!action || action.clinicId !== target.clinicId) {
     return "That task is no longer available for this clinic.";
+  }
+
+  if (command.status === "details") {
+    if (target.telegramChatType !== "private") {
+      return "Customer phone and package details are available only in a private sales lead chat.";
+    }
+
+    const settings = await getSalesAssistantSettings({ clinicId: target.clinicId });
+    return formatSalesAssistantDetailMessage({
+      action,
+      index: command.index,
+      language: settings.language,
+    });
   }
 
   if (command.status === "message") {

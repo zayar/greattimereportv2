@@ -332,7 +332,25 @@ export interface GtGrowthAiSalesAction {
     customerKey?: string;
     customerName?: string;
     phoneMasked?: string;
+    phoneNumber?: string;
     memberId?: string;
+  };
+  detail?: {
+    contactPhone?: string;
+    lastService?: string | null;
+    lastVisitDate?: string | null;
+    daysSinceLastVisit?: number | null;
+    lifetimeSpend?: number | null;
+    totalVisits?: number | null;
+    preferredTherapist?: string | null;
+    remainingPackages?: Array<{
+      packageName: string;
+      remainingUnits?: number | null;
+      purchasedUnits?: number | null;
+      usedUnits?: number | null;
+      lastVisitDate?: string | null;
+      daysSinceActivity?: number | null;
+    }>;
   };
   evidence: GtGrowthAiSalesActionEvidence[];
   suggestedMessage?: {
