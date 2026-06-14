@@ -19,6 +19,7 @@ const {
 const { hasFeatureAccess } = await import("../src/services/feature-access.service.ts");
 
 const { formatTodayPaymentTelegramMessage } = await import("../src/services/telegram/payment-report.service.ts");
+const { formatGtGrowthAiTelegramSection } = await import("../src/services/telegram/gt-growth-ai-message.ts");
 
 test("gt_growth_ai feature access is disabled by default and enabled by configured clinic id", async () => {
   const locked = await hasFeatureAccess({ clinicId: "clinic-basic", feature: "gt_growth_ai" });
@@ -250,7 +251,7 @@ test("weekly AI payload handles missing comparison data and still builds an acti
   assert.ok(payload.dataQualityNotes.some((note) => note.includes("Week-over-week revenue comparison was unavailable")));
 });
 
-test("Telegram payment report includes concise AI Actions when actions exist", () => {
+test("Telegram payment report includes Myanmar GT Growth AI block when actions exist", () => {
   const gtGrowthAi = buildPaymentReportAiPayload(
     {
       dateKey: "2026-06-13",
@@ -296,6 +297,16 @@ test("Telegram payment report includes concise AI Actions when actions exist", (
     gtGrowthAi,
   });
 
-  assert.match(message, /AI Actions:/);
+  assert.match(message, /GT Growth AI/);
+  assert.match(message, /အကျဉ်းချုပ်:/);
+  assert.match(message, /ဘာကြောင့်အရေးကြီးလဲ:/);
+  assert.match(message, /လုပ်ငန်းအခွင့်အလမ်း:/);
+  assert.match(message, /လုပ်ဆောင်ရန်:/);
+  assert.match(message, /မရှင်းလင်းသေးသော payment များကို ပိတ်ချိန်မတိုင်မီ follow-up လုပ်ပါ/);
+  assert.doesNotMatch(message, /AI Actions:/);
   assert.ok(getReportAiActionLines(gtGrowthAi).length <= 3);
+});
+
+test("Telegram GT Growth AI formatter stays hidden without premium payload", () => {
+  assert.deepEqual(formatGtGrowthAiTelegramSection(undefined), []);
 });

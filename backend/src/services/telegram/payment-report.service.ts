@@ -4,12 +4,12 @@ import {
 } from "../apicore.service.js";
 import {
   buildPaymentReportAiPayload,
-  getReportAiActionLines,
 } from "../reports/report-ai-insights.service.js";
 import { hasFeatureAccess } from "../feature-access.service.js";
 import { getDailyPaymentGrowthEvidence } from "../reports/gt-growth-ai-evidence.service.js";
 import { GT_GROWTH_AI_FEATURE_GATE } from "../../types/report-ai.js";
 import { sendTelegramMessage } from "./bot.service.js";
+import { formatGtGrowthAiTelegramSection } from "./gt-growth-ai-message.js";
 import {
   buildUtcDayRangeForDateKeyInTimeZone,
   formatDateKeyInTimeZone,
@@ -493,12 +493,9 @@ export function formatTodayPaymentTelegramMessage(report: TodayPaymentReportSumm
     });
   }
 
-  const aiActionLines = getReportAiActionLines(report.gtGrowthAi);
-  if (aiActionLines.length > 0) {
-    lines.push("", "AI Actions:");
-    aiActionLines.forEach((action, index) => {
-      lines.push(`${index + 1}. ${action}`);
-    });
+  const gtGrowthAiLines = formatGtGrowthAiTelegramSection(report.gtGrowthAi);
+  if (gtGrowthAiLines.length > 0) {
+    lines.push("", ...gtGrowthAiLines);
   }
 
   return lines.join("\n");
