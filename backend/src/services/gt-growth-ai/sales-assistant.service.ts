@@ -178,6 +178,28 @@ function moneyLabel(value: number | null | undefined) {
   return `${Math.round(value).toLocaleString("en-US")} MMK`;
 }
 
+function stripUndefinedDeep(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item) => item !== undefined)
+      .map((item) => stripUndefinedDeep(item));
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, item]) => item !== undefined)
+        .map(([key, item]) => [key, stripUndefinedDeep(item)]),
+    );
+  }
+
+  return value;
+}
+
+function toFirestoreData(action: GtGrowthAiSalesAction) {
+  return stripUndefinedDeep(action) as Record<string, unknown>;
+}
+
 function priorityFromScore(score: number): GtGrowthAiActionPriority {
   if (score >= 75) {
     return "high";
@@ -659,7 +681,7 @@ async function upsertActions(actions: GtGrowthAiSalesAction[], forceRefresh = fa
             updatedAt: timestamp,
           };
 
-    await ref.set(nextAction, { merge: true });
+    await ref.set(toFirestoreData(nextAction), { merge: true });
     saved.push(nextAction);
   }
 
@@ -969,7 +991,7 @@ export async function updateSalesAssistantActionStatus(input: {
     lastStatusByTelegramUserId: input.updatedByTelegramUserId ?? action.lastStatusByTelegramUserId ?? null,
   };
 
-  await ref.set(nextAction, { merge: true });
+  await ref.set(toFirestoreData(nextAction), { merge: true });
   return nextAction;
 }
 
@@ -996,7 +1018,7 @@ export async function markSalesAssistantActionsAssigned(input: {
       updatedAt: timestamp,
     };
 
-    await actionCollection().doc(action.id).set(nextAction, { merge: true });
+    await actionCollection().doc(action.id).set(toFirestoreData(nextAction), { merge: true });
     assigned.push(nextAction);
   }
 
