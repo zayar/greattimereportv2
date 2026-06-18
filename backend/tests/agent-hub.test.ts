@@ -11,6 +11,7 @@ const { buildAgentResponse } = await import("../src/services/agent-hub/response-
 const { resolveAgent } = await import("../src/services/agent-hub/supervisor.ts")
 const { assertToolAllowed } = await import("../src/services/agent-hub/tool-executor.ts")
 const { createAgentToolRegistry, getAgentToolAllowlist } = await import("../src/services/agent-hub/tool-registry.ts")
+const { buildLockedAgentHubResponse } = await import("../src/services/agent-hub/agent-hub.service.ts")
 const { isAgentLearningSchedulerSecretValid } = await import("../src/routes/agent-learning.routes.ts")
 
 test("supervisor routes four agent domains and respects explicit override", () => {
@@ -138,4 +139,28 @@ test("scheduler secret helper rejects missing or incorrect secrets", () => {
   assert.equal(isAgentLearningSchedulerSecretValid("scheduler-secret"), true)
   assert.equal(isAgentLearningSchedulerSecretValid("wrong"), false)
   assert.equal(isAgentLearningSchedulerSecretValid(undefined), false)
+})
+
+test("locked Agent Hub response is structured instead of a raw 403 chat failure", () => {
+  const response = buildLockedAgentHubResponse({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "appointment",
+      message: "How many appointments today?",
+    },
+    premium: {
+      feature: "gt_growth_ai",
+      enabled: false,
+      title: "Unlock GT Growth AI",
+      message: "AI insights and recommended actions are available with GT Growth AI.",
+      upgradeMessage: "Upgrade to see AI recommendations.",
+      lockedReason: "gt_growth_ai is not enabled for this clinic.",
+    },
+  })
+
+  assert.equal(response.dataStatus, "not_ready")
+  assert.equal(response.intent, "feature_locked")
+  assert.equal(response.sources[0]?.tool, "gt_growth_ai_feature_gate")
+  assert.match(response.assistantMessage, /Upgrade/)
 })

@@ -19,6 +19,7 @@ import type {
   GreatTimeAgentEntityContext,
   GreatTimeRequestedAgentId,
 } from "./types.js";
+import type { ReportPremiumAccess } from "../../types/report-ai.js";
 
 function inferAgentFromEntity(ref: GreatTimeAgentEntityContext | null): GreatTimeRequestedAgentId | null {
   if (!ref) {
@@ -194,6 +195,64 @@ export async function askAgentHub(params: {
   ]);
 
   return response;
+}
+
+export function buildLockedAgentHubResponse(params: {
+  request: GreatTimeAgentChatRequest;
+  premium: ReportPremiumAccess;
+}): GreatTimeAgentChatResponse {
+  const request = params.request;
+  const plan = planAgentRequest({ request });
+  const sessionId = request.sessionId ?? newId("session");
+  const requestId = request.requestId ?? newId("req");
+  const responseId = newId("resp");
+  const message =
+    params.premium.upgradeMessage ??
+    params.premium.message ??
+    "GT Growth AI is not enabled for this clinic.";
+
+  return {
+    sessionId,
+    requestId,
+    responseId,
+    requestedAgent: plan.requestedAgent,
+    resolvedAgent: plan.resolvedAgent,
+    autoMode: plan.autoMode,
+    intent: "feature_locked",
+    assistantMessage: message,
+    summary: message,
+    recommendations: [
+      {
+        title: params.premium.title || "Unlock GT Growth AI",
+        message,
+        sourceTools: [],
+      },
+    ],
+    followUpQuestions: [],
+    sources: [
+      {
+        tool: "gt_growth_ai_feature_gate",
+        sourceName: "GT Growth AI feature access",
+        checkedAt: nowIso(),
+        dataStatus: "not_ready",
+        live: false,
+      },
+    ],
+    dataStatus: "not_ready",
+    warnings: [
+      {
+        type: "feature_locked",
+        title: params.premium.title || "GT Growth AI locked",
+        message: params.premium.lockedReason ?? params.premium.message,
+      },
+    ],
+    actions: [
+      {
+        type: "read_only_agent_response",
+        detail: "No GreatTime records were changed.",
+      },
+    ],
+  };
 }
 
 export async function readAgentHubSession(params: {

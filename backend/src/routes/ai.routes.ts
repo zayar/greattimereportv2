@@ -29,7 +29,11 @@ import {
   getLatestCustomerRelationshipLearningRun,
   searchCustomerRelationshipProfiles,
 } from "../services/reports/customer-relationship-profile.repository.js";
-import { askAgentHub, readAgentHubSession } from "../services/agent-hub/agent-hub.service.js";
+import {
+  askAgentHub,
+  buildLockedAgentHubResponse,
+  readAgentHubSession,
+} from "../services/agent-hub/agent-hub.service.js";
 import { resolveAgentClinicContext } from "../services/agent-hub/clinic-context.service.js";
 import { saveAgentFeedback } from "../services/agent-hub/feedback.repository.js";
 import {
@@ -159,6 +163,8 @@ async function requireGtGrowthAi(clinicId: string) {
       premium: access,
     });
   }
+
+  return access;
 }
 
 router.post(
@@ -166,7 +172,21 @@ router.post(
   requireClinicAccess("body", "clinicId"),
   asyncHandler(async (req, res) => {
     const params = agentChatRequestSchema.parse(req.body);
-    await requireGtGrowthAi(params.clinicId);
+    const premium = await hasFeatureAccess({
+      clinicId: params.clinicId,
+      feature: GT_GROWTH_AI_FEATURE_GATE,
+    });
+    if (!premium.enabled) {
+      res.json({
+        success: true,
+        data: buildLockedAgentHubResponse({
+          request: params,
+          premium,
+        }),
+      });
+      return;
+    }
+
     const clinic = resolveAgentClinicContext({
       user: req.user,
       clinicId: params.clinicId,

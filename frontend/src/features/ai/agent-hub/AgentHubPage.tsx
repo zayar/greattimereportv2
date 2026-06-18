@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { isAxiosError } from "axios";
 import { askGreatTimeAgentHub, recordGreatTimeAgentFeedback } from "../../../api/ai";
 import { DateRangeControls } from "../../../components/DateRangeControls";
 import { ErrorState, EmptyState } from "../../../components/StatusViews";
@@ -75,6 +76,17 @@ function formatCell(value: unknown) {
   }
 
   return String(value);
+}
+
+function getAgentHubErrorMessage(error: unknown) {
+  if (isAxiosError(error)) {
+    const data = error.response?.data as { error?: unknown; details?: unknown } | undefined;
+    if (typeof data?.error === "string" && data.error.trim()) {
+      return data.error;
+    }
+  }
+
+  return error instanceof Error ? error.message : "Agent Hub could not answer.";
 }
 
 function AgentTable({
@@ -181,7 +193,7 @@ export function AgentHubPage() {
           turn.id === turnId
             ? {
                 ...turn,
-                error: submitError instanceof Error ? submitError.message : "Agent Hub could not answer.",
+                error: getAgentHubErrorMessage(submitError),
               }
             : turn,
         ),
