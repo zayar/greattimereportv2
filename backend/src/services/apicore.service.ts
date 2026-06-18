@@ -58,6 +58,70 @@ const BOOKING_DETAILS_QUERY = `
   }
 `;
 
+const CHECK_INS_QUERY = `
+  query AgentHubCheckIns(
+    $where: CheckInWhereInput
+    $orderBy: [CheckInOrderByWithRelationInput!]
+    $take: Int
+    $skip: Int
+    $clinicMembersWhere2: ClinicMemberWhereInput
+  ) {
+    checkIns(where: $where, orderBy: $orderBy, take: $take, skip: $skip) {
+      id
+      in_time
+      out_time
+      status
+      created_at
+      isUsePurchaseService
+      merchant_note
+      order_id
+      service {
+        id
+        name
+      }
+      practitioner {
+        id
+        name
+      }
+      member {
+        name
+        phonenumber
+        clinic_members(where: $clinicMembersWhere2) {
+          name
+          phonenumber
+          clinic_id
+        }
+      }
+      booking {
+        service_helper {
+          id
+          name
+        }
+      }
+      orders {
+        order_id
+        discount
+        tax
+        total
+        net_total
+        payment_method
+        payment_status
+        seller {
+          display_name
+        }
+      }
+      helper {
+        name
+      }
+    }
+    aggregateCheckIn(where: $where) {
+      _count {
+        _all
+      }
+    }
+  }
+`;
+
 const PAYMENT_REPORT_QUERY = `
   query GetPaymentReport(
     $clinicCode: String!
@@ -181,6 +245,55 @@ export type ApicorePaymentReportRow = {
   InvoiceNetTotal: number | string;
 };
 
+export type ApicoreCheckInRow = {
+  id: string;
+  in_time: string;
+  out_time?: string | null;
+  status: string;
+  created_at: string;
+  isUsePurchaseService?: boolean | null;
+  merchant_note?: string | null;
+  order_id?: string | null;
+  service?: {
+    id?: string | null;
+    name?: string | null;
+  } | null;
+  practitioner?: {
+    id?: string | null;
+    name?: string | null;
+  } | null;
+  member?: {
+    name?: string | null;
+    phonenumber?: string | null;
+    clinic_members?: Array<{
+      name?: string | null;
+      phonenumber?: string | null;
+      clinic_id?: string | null;
+    }> | null;
+  } | null;
+  booking?: {
+    service_helper?: {
+      id?: string | null;
+      name?: string | null;
+    } | null;
+  } | null;
+  orders?: Array<{
+    order_id?: string | null;
+    discount?: number | string | null;
+    tax?: number | string | null;
+    total?: number | string | null;
+    net_total?: number | string | null;
+    payment_method?: string | null;
+    payment_status?: string | null;
+    seller?: {
+      display_name?: string | null;
+    } | null;
+  }> | null;
+  helper?: {
+    name?: string | null;
+  } | null;
+};
+
 export type ApicoreOrderPaymentRow = {
   payment_amount: number | string;
   payment_method?: string | null;
@@ -226,6 +339,15 @@ type PaymentReportPayload = {
   getPaymentReport?: {
     data?: ApicorePaymentReportRow[];
     totalCount?: number;
+  } | null;
+};
+
+type CheckInsPayload = {
+  checkIns?: ApicoreCheckInRow[] | null;
+  aggregateCheckIn?: {
+    _count?: {
+      _all?: number | null;
+    } | null;
   } | null;
 };
 
@@ -532,6 +654,68 @@ export async function fetchApicoreBookingDetails(params: {
   return {
     data: payload.data?.getBookingDetails?.data ?? [],
     totalCount: payload.data?.getBookingDetails?.totalCount ?? 0,
+  };
+}
+
+export async function fetchApicoreCheckIns(params: {
+  clinicId: string;
+  startDate: string;
+  endDate: string;
+  status?: string;
+  skip?: number;
+  take?: number;
+  authorizationHeader?: string;
+}) {
+  const andFilters: Array<Record<string, unknown>> = [
+    {
+      in_time: {
+        gte: params.startDate,
+      },
+    },
+    {
+      in_time: {
+        lte: params.endDate,
+      },
+    },
+    {
+      clinic_id: {
+        equals: params.clinicId,
+      },
+    },
+  ];
+
+  if (params.status) {
+    andFilters.push({
+      status: {
+        in: [params.status],
+      },
+    });
+  }
+
+  const payload = await executeApicoreQueryWithFallback<CheckInsPayload>({
+    requestBody: {
+      query: CHECK_INS_QUERY,
+      variables: {
+        where: {
+          AND: andFilters,
+        },
+        clinicMembersWhere2: {
+          clinic_id: {
+            equals: params.clinicId,
+          },
+        },
+        orderBy: [{ in_time: "desc" }],
+        take: params.take ?? 200,
+        skip: params.skip ?? 0,
+      },
+    },
+    authorizationHeader: params.authorizationHeader,
+    errorMessage: "Check-in query failed.",
+  });
+
+  return {
+    data: payload.data?.checkIns ?? [],
+    totalCount: payload.data?.aggregateCheckIn?._count?._all ?? 0,
   };
 }
 

@@ -249,6 +249,64 @@ export async function searchCustomerRelationshipProfiles(input: CustomerRelation
   };
 }
 
+export async function searchCustomerRelationshipProfilesBounded(input: CustomerRelationshipProfileSearchInput) {
+  const limit = Math.min(Math.max(input.limit ?? 25, 1), 100);
+  let query: FirebaseFirestore.Query<FirebaseFirestore.DocumentData> = profilesCollection().where(
+    "clinicId",
+    "==",
+    input.clinicId,
+  );
+
+  if (input.riskLevel) {
+    query = query.where("riskLevel", "==", input.riskLevel);
+  }
+
+  if (input.segment) {
+    query = query.where("segments", "array-contains", input.segment);
+  }
+
+  const snapshot = await query.limit(limit * 2).get();
+  const search = normalizeSearch(input.search);
+  const sortBy = input.sortBy ?? "priorityScore";
+  const direction = input.sortDirection ?? "desc";
+
+  const rows = snapshot.docs
+    .map((doc) => doc.data())
+    .filter(isProfile)
+    .map(normalizeCustomerRelationshipProfile)
+    .filter((profile) => {
+      if (!search) {
+        return true;
+      }
+
+      return (
+        profile.customerName.toLowerCase().includes(search) ||
+        profile.customerPhoneMasked.toLowerCase().includes(search) ||
+        (profile.memberId ?? "").toLowerCase().includes(search)
+      );
+    });
+
+  rows.sort((left, right) => {
+    let result = 0;
+
+    if (sortBy === "lastVisitDate") {
+      result = compareNullableDate(left.lastVisitDate, right.lastVisitDate);
+    } else {
+      result = Number(left[sortBy] ?? 0) - Number(right[sortBy] ?? 0);
+    }
+
+    return direction === "asc" ? result : -result;
+  });
+
+  const offset = input.offset ?? 0;
+
+  return {
+    rows: rows.slice(offset, offset + limit),
+    totalCount: rows.length,
+    bounded: true,
+  };
+}
+
 export async function getCustomerRelationshipProfileByKey(params: {
   clinicId: string;
   customerKey: string;

@@ -58,6 +58,10 @@ const envSchema = z.object({
   TELEGRAM_POLLING_INTERVAL_MS: z.coerce.number().int().positive().default(5_000),
   APICORE_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
   FIREBASE_AUTH_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+  AGENT_LEARNING_ENABLED: booleanEnv(false),
+  AGENT_LEARNING_SCHEDULER_SECRET: z.string().optional(),
+  AGENT_LEARNING_DEFAULT_LOOKBACK_DAYS: z.coerce.number().int().positive().default(365),
+  AGENT_STALE_THRESHOLD_HOURS: z.coerce.number().int().positive().default(24),
 });
 
 export const env = envSchema.parse(process.env);

@@ -7,6 +7,7 @@ import telegramRoutes from "./telegram.routes.js";
 import commissionRoutes from "./commission.routes.js";
 import featuresRoutes from "./features.routes.js";
 import gtGrowthAiRoutes from "./gt-growth-ai.routes.js";
+import agentLearningRoutes from "./agent-learning.routes.js";
 
 const router = Router();
 
@@ -28,5 +29,6 @@ router.use("/integrations/telegram", telegramRoutes);
 router.use("/commission", commissionRoutes);
 router.use("/features", featuresRoutes);
 router.use("/gt-growth-ai", gtGrowthAiRoutes);
+router.use("/internal", agentLearningRoutes);
 
 export default router;

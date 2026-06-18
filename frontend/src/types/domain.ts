@@ -702,6 +702,104 @@ export interface CustomerRelationshipFollowUpMessage {
   usedFallback: boolean;
 }
 
+export type GreatTimeAgentId = "finance" | "customer_relationship" | "business" | "appointment";
+export type GreatTimeRequestedAgentId = GreatTimeAgentId | "auto";
+
+export type AgentDataStatus =
+  | "ok"
+  | "partial"
+  | "no_activity"
+  | "not_found"
+  | "unavailable"
+  | "not_ready"
+  | "stale";
+
+export interface GreatTimeAgentEntityContext {
+  entityType: "customer" | "appointment" | "service" | "practitioner" | "invoice";
+  entityId: string;
+  displayName?: string;
+  customerKey?: string;
+  customerName?: string;
+  customerPhone?: string;
+  memberId?: string;
+  appointmentId?: string;
+  serviceName?: string;
+  practitionerName?: string;
+  invoiceNumber?: string;
+  sourceResponseId?: string;
+  rank?: number;
+}
+
+export interface GreatTimeAgentMetric {
+  label: string;
+  value: string | number;
+  unit?: string;
+  helperText?: string;
+}
+
+export interface GreatTimeAgentTable {
+  title: string;
+  columns: Array<{ key: string; title: string }>;
+  rows: Array<Record<string, unknown>>;
+}
+
+export interface GreatTimeAgentSource {
+  tool: string;
+  sourceName: string;
+  checkedAt: string;
+  period?: string;
+  dataStatus: AgentDataStatus;
+  freshnessSeconds?: number;
+  live?: boolean;
+}
+
+export interface GreatTimeAgentWarning {
+  type: string;
+  title: string;
+  message: string;
+}
+
+export interface GreatTimeAgentRecommendation {
+  title?: string;
+  message: string;
+  sourceTools: string[];
+}
+
+export interface GreatTimeAgentChatRequest {
+  sessionId?: string;
+  clinicId: string;
+  clinicCode?: string;
+  agent?: GreatTimeRequestedAgentId;
+  message: string;
+  aiLanguage?: AiLanguage;
+  fromDate?: string;
+  toDate?: string;
+  timezone?: string;
+  requestId?: string;
+  entityContext?: GreatTimeAgentEntityContext;
+}
+
+export interface GreatTimeAgentChatResponse {
+  sessionId: string;
+  requestId: string;
+  responseId: string;
+  requestedAgent: GreatTimeRequestedAgentId;
+  resolvedAgent: GreatTimeAgentId;
+  autoMode: boolean;
+  intent: string;
+  assistantMessage: string;
+  summary?: string;
+  metrics?: GreatTimeAgentMetric[];
+  tables?: GreatTimeAgentTable[];
+  recommendations?: GreatTimeAgentRecommendation[];
+  followUpQuestions?: string[];
+  sources: GreatTimeAgentSource[];
+  dataStatus: AgentDataStatus;
+  warnings?: GreatTimeAgentWarning[];
+  entityContext?: GreatTimeAgentEntityContext;
+  actions: Array<{ type: "read_only_agent_response"; detail?: string }>;
+}
+
 export interface AppointmentRow {
   bookingid: string;
   FromTime: string;

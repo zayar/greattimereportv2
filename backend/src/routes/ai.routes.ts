@@ -4,6 +4,7 @@ import { env } from "../config/env.js";
 import { verifyFirebaseToken } from "../middleware/auth.js";
 import { requireClinicAccess } from "../middleware/clinic-access.js";
 import { asyncHandler } from "../utils/async-handler.js";
+import { HttpError } from "../utils/http-error.js";
 import { resolveAiLanguage } from "../services/ai/language.js";
 import {
   generateCustomerInsight,
@@ -28,6 +29,16 @@ import {
   getLatestCustomerRelationshipLearningRun,
   searchCustomerRelationshipProfiles,
 } from "../services/reports/customer-relationship-profile.repository.js";
+import { askAgentHub, readAgentHubSession } from "../services/agent-hub/agent-hub.service.js";
+import { resolveAgentClinicContext } from "../services/agent-hub/clinic-context.service.js";
+import { saveAgentFeedback } from "../services/agent-hub/feedback.repository.js";
+import {
+  agentChatRequestSchema,
+  agentFeedbackSchema,
+  agentSessionParamsSchema,
+} from "../services/agent-hub/schemas.js";
+import { hasFeatureAccess } from "../services/feature-access.service.js";
+import { GT_GROWTH_AI_FEATURE_GATE } from "../types/report-ai.js";
 
 const router = Router();
 
@@ -136,6 +147,77 @@ const customerRelationshipFeedbackSchema = customerRelationshipBaseSchema.extend
 });
 
 router.use(verifyFirebaseToken);
+
+async function requireGtGrowthAi(clinicId: string) {
+  const access = await hasFeatureAccess({
+    clinicId,
+    feature: GT_GROWTH_AI_FEATURE_GATE,
+  });
+
+  if (!access.enabled) {
+    throw new HttpError(403, access.lockedReason ?? "GT Growth AI is not enabled for this clinic.", {
+      premium: access,
+    });
+  }
+}
+
+router.post(
+  "/agent/chat",
+  requireClinicAccess("body", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = agentChatRequestSchema.parse(req.body);
+    await requireGtGrowthAi(params.clinicId);
+    const clinic = resolveAgentClinicContext({
+      user: req.user,
+      clinicId: params.clinicId,
+      clinicCode: params.clinicCode,
+    });
+    const data = await askAgentHub({
+      request: params,
+      clinic,
+      requestContext: {
+        userId: req.user?.userId ?? req.user?.uid ?? "unknown",
+        userEmail: req.user?.email,
+        authorizationHeader: req.headers.authorization,
+      },
+    });
+
+    res.json({ success: true, data });
+  }),
+);
+
+router.post(
+  "/agent/feedback",
+  requireClinicAccess("body", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = agentFeedbackSchema.parse(req.body);
+    await requireGtGrowthAi(params.clinicId);
+    const data = await saveAgentFeedback({
+      ...params,
+      userId: req.user?.userId ?? req.user?.uid ?? "unknown",
+      userEmail: req.user?.email,
+    });
+
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/agent/session/:sessionId",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const pathParams = agentSessionParamsSchema.parse(req.params);
+    const queryParams = z.object({ clinicId: z.string().min(1) }).parse(req.query);
+    await requireGtGrowthAi(queryParams.clinicId);
+    const data = await readAgentHubSession({
+      clinicId: queryParams.clinicId,
+      userId: req.user?.userId ?? req.user?.uid ?? "unknown",
+      sessionId: pathParams.sessionId,
+    });
+
+    res.json({ success: true, data });
+  }),
+);
 
 router.post(
   "/executive-summary",

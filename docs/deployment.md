@@ -42,6 +42,7 @@ Required GitHub secret:
 - `GCP_SERVICE_ACCOUNT_KEY`
 - `FIREBASE_SERVICE_ACCOUNT_JSON`
 - `TELEGRAM_SCHEDULER_SECRET` for Cloud Scheduler triggered Telegram sends
+- `AGENT_LEARNING_SCHEDULER_SECRET` for Cloud Scheduler triggered Agent Hub learning ticks
 
 `FIREBASE_SERVICE_ACCOUNT_JSON` can be the same JSON as `GCP_SERVICE_ACCOUNT_KEY` if that service account has both:
 - the deployment roles listed below
@@ -79,6 +80,30 @@ Optional GitHub repository variables for Telegram reliability tuning:
 - `TELEGRAM_WEBHOOK_WATCHDOG_INTERVAL_MS`
 - `APICORE_REQUEST_TIMEOUT_MS`
 - `FIREBASE_AUTH_REQUEST_TIMEOUT_MS`
+
+Optional GitHub repository variables for Agent Hub scheduled learning:
+- `AGENT_LEARNING_ENABLED` (defaults to `false`)
+- `AGENT_LEARNING_DEFAULT_LOOKBACK_DAYS` (defaults to `365`)
+- `AGENT_STALE_THRESHOLD_HOURS` (defaults to `24`)
+
+Recommended Agent Hub scheduler setup:
+- Set `AGENT_LEARNING_ENABLED=true` only after `AGENT_LEARNING_SCHEDULER_SECRET` is configured.
+- Invoke `POST {APP_BASE_URL}/api/internal/agent-learning/tick` from Cloud Scheduler with header `x-agent-learning-scheduler-secret`.
+- Send placeholder-safe JSON such as:
+
+```json
+{
+  "clinicIds": ["CLINIC_ID"],
+  "clinicCodesById": {
+    "CLINIC_ID": "CLINIC_CODE"
+  },
+  "jobTypes": ["customer_profiles", "finance_daily_snapshot", "service_practitioner_profiles", "appointment_daily_profile"]
+}
+```
+
+- Recommended cadence: every 5 minutes for optional appointment snapshots, nightly for customer/finance/service/practitioner/appointment profiles, hourly or nightly for feedback learning, morning for owner brief cards, and weekly for business review cards.
+- The production scheduler must be external, such as Cloud Scheduler or private Cloud Run/OIDC. Do not rely on an in-process interval for Agent Hub learning.
+- Current live appointment data does not expose `treatment_started_at`; see [APPOINTMENT_LIFECYCLE_DATA_CONTRACT.md](/Users/zayarmin/Development/GreatTime%20Platform/GT_V2Report/docs/APPOINTMENT_LIFECYCLE_DATA_CONTRACT.md).
 
 Recommended Telegram scheduler setup:
 - Set `APP_BASE_URL` to the public backend base URL and set the `TELEGRAM_SCHEDULER_SECRET` GitHub secret.
