@@ -52,6 +52,47 @@ test("planner extracts relative periods and blocks write requests", () => {
   })
   assert.equal(plan.intent, "unsupported_write_request")
   assert.deepEqual(plan.toolNames, [])
+
+  const collectPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "finance",
+      message: "Please collect payment from the first customer",
+    },
+    now,
+  })
+  assert.equal(collectPlan.intent, "unsupported_write_request")
+  assert.deepEqual(collectPlan.toolNames, [])
+})
+
+test("planner does not block read-only questions that mention collected or cancelled data", () => {
+  const now = new Date("2026-06-18T06:00:00.000Z")
+
+  const paymentPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "How much did we collect today by payment method?",
+    },
+    now,
+  })
+  assert.equal(paymentPlan.resolvedAgent, "finance")
+  assert.equal(paymentPlan.intent, "payment_method_breakdown")
+  assert.deepEqual(paymentPlan.toolNames, ["get_payment_summary", "get_payment_method_breakdown"])
+
+  const appointmentPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "appointment",
+      message: "Show cancelled and no-show appointments today",
+    },
+    now,
+  })
+  assert.equal(appointmentPlan.intent, "cancelled_no_show")
+  assert.deepEqual(appointmentPlan.toolNames, ["get_cancelled_no_show_customers"])
 })
 
 test("appointment lifecycle does not claim treatment state from CHECKIN alone", () => {

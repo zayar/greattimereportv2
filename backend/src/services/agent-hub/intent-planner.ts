@@ -9,8 +9,12 @@ import type {
   GreatTimeAgentIntentPlan,
 } from "./types.js";
 
-const WRITE_REQUEST =
-  /(create|book|cancel|reschedule|update|delete|refund|collect|charge|send|message|sms|write back|edit|ပြင်|ဖျက်|ချိန်းပေး|ပို့)/i;
+const WRITE_ACTION =
+  /(?:create|book|cancel|reschedule|update|delete|refund|collect|charge|send|message|sms|write\s+back|edit)/i;
+const WRITE_REQUEST = new RegExp(
+  `^(?:please\\s+)?${WRITE_ACTION.source}\\b|\\b(?:can you|could you|please|help me|i need you to|i want you to)\\s+${WRITE_ACTION.source}\\b|(?:ပြင်|ဖျက်|ချိန်းပေး|ပို့)`,
+  "i",
+);
 
 function dateFromUtc(date: Date) {
   return toIsoDate(date);
