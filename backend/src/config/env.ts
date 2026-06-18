@@ -38,6 +38,7 @@ const envSchema = z.object({
   GT_GROWTH_AI_DEFAULT_ENABLED: booleanEnv(false),
   GT_GROWTH_AI_ENABLED_CLINIC_IDS: z.string().default(""),
   GT_GROWTH_AI_FEATURE_STORE_ENABLED: booleanEnv(true),
+  GT_GROWTH_AI_ADMIN_EMAILS: z.string().default("zayar@datafocus.cloud"),
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_BOT_USERNAME: z.string().optional(),
   TELEGRAM_LINK_CODE_TTL_MINUTES: z.coerce.number().int().positive().default(15),

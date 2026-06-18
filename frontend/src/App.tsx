@@ -50,6 +50,7 @@ import { SalesDocumentSettingsPage } from "./features/settings/sales-document/Sa
 import { TelegramSettingsPage } from "./features/settings/telegram/TelegramSettingsPage";
 import { CommissionSettingsPage } from "./features/settings/commission/CommissionSettingsPage";
 import { CommissionRuleEditorPage } from "./features/settings/commission/CommissionRuleEditorPage";
+import { AiControlPanelPage } from "./features/settings/ai-control-panel/AiControlPanelPage";
 import { CustomerRelationshipAgentPage } from "./features/ai/customer-relationship/CustomerRelationshipAgentPage";
 import { GtGrowthAiSalesAssistantPage } from "./features/ai/gt-growth-ai-sales-assistant/GtGrowthAiSalesAssistantPage";
 import { AgentHubPage } from "./features/ai/agent-hub/AgentHubPage";
@@ -119,6 +120,7 @@ export default function App() {
                     <Route path="settings/commission" element={<CommissionSettingsPage />} />
                     <Route path="settings/commission/rules/new" element={<CommissionRuleEditorPage />} />
                     <Route path="settings/commission/rules/:ruleId" element={<CommissionRuleEditorPage />} />
+                    <Route path="settings/ai-control-panel" element={<AiControlPanelPage />} />
                     <Route path="settings/telegram" element={<TelegramSettingsPage />} />
                   </Route>
                 </Routes>

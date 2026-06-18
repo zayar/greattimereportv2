@@ -31,6 +31,9 @@ Required GitHub repository variables for frontend build:
 - `VITE_FIREBASE_APP_ID`
 - `VITE_FIREBASE_MEASUREMENT_ID`
 
+Optional GitHub repository variables for frontend feature visibility:
+- `VITE_AI_CONTROL_PANEL_ADMIN_EMAILS` controls who sees the AI Control Panel menu; default is `zayar@datafocus.cloud`
+
 ## Cloud Run backend
 
 Configured files:
@@ -61,6 +64,12 @@ Required GitHub repository variables:
 - `BQ_LOCATION`
 - `BQ_MAIN_DATA_VIEW`
 - `BQ_MAIN_PAYMENT_VIEW`
+
+Optional GitHub repository variables for GT Growth AI access:
+- `GT_GROWTH_AI_DEFAULT_ENABLED` enables GT Growth AI for every clinic when set to `true`
+- `GT_GROWTH_AI_ENABLED_CLINIC_IDS` enables GT Growth AI for a comma-separated set of clinic IDs
+- `GT_GROWTH_AI_FEATURE_STORE_ENABLED` lets the AI Control Panel read and write per-clinic access in Firestore
+- `GT_GROWTH_AI_ADMIN_EMAILS` controls who can use the AI Control Panel; default is `zayar@datafocus.cloud`
 
 Optional GitHub repository variables for Cloud Run runtime sizing:
 - `CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT`

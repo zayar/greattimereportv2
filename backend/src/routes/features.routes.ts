@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { verifyFirebaseToken } from "../middleware/auth.js";
 import { requireClinicAccess } from "../middleware/clinic-access.js";
+import { requireAiControlPanelAdmin } from "../services/ai-control-panel-access.service.js";
 import {
   getClinicGtGrowthAiAccess,
   updateClinicGtGrowthAiAccess,
@@ -41,6 +42,8 @@ router.post(
   "/gt-growth-ai",
   requireClinicAccess("body", "clinicId"),
   asyncHandler(async (req, res) => {
+    requireAiControlPanelAdmin(req);
+
     const params = clinicFeatureUpdateSchema.parse(req.body);
     const gtGrowthAi = await updateClinicGtGrowthAiAccess({
       clinicId: params.clinicId,

@@ -5,6 +5,7 @@ import { navigationSections, type NavigationItem } from "./navigation";
 import { useAccess } from "../access/AccessProvider";
 import { useSession } from "../auth/SessionProvider";
 import { AiLanguageSelector } from "../ai/AiLanguageSelector";
+import { canAccessAiControlPanel } from "../ai/adminAccess";
 import { EmptyState, ErrorState, ScreenLoader } from "../../components/StatusViews";
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "gt-v2report-sidebar-collapsed";
@@ -42,6 +43,21 @@ function isNavigationItemActive(item: NavigationItem, pathname: string): boolean
   return item.children?.some((child) => isNavigationItemActive(child, pathname)) ?? false;
 }
 
+function filterNavigationItems(items: NavigationItem[], canUseAiControlPanel: boolean): NavigationItem[] {
+  return items.flatMap((item) => {
+    if (item.requiresAiControlPanelAdmin && !canUseAiControlPanel) {
+      return [];
+    }
+
+    if (!item.children?.length) {
+      return [item];
+    }
+
+    const children = filterNavigationItems(item.children, canUseAiControlPanel);
+    return children.length > 0 ? [{ ...item, children }] : [];
+  });
+}
+
 export function AppShell() {
   const { loading, error, clinics, canSwitchClinics, currentBusiness, currentClinic, selectClinic } = useAccess();
   const { gtUser, logout } = useSession();
@@ -54,15 +70,26 @@ export function AppShell() {
     return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
   });
   const location = useLocation();
+  const canUseAiControlPanel = canAccessAiControlPanel(gtUser?.email);
+  const visibleNavigationSections = useMemo(
+    () =>
+      navigationSections
+        .map((section) => ({
+          ...section,
+          items: filterNavigationItems(section.items, canUseAiControlPanel),
+        }))
+        .filter((section) => section.items.length > 0),
+    [canUseAiControlPanel],
+  );
 
   const pageTitle = useMemo(() => {
-    const items = navigationSections.flatMap((section) => flattenNavigationItems(section.items));
+    const items = visibleNavigationSections.flatMap((section) => flattenNavigationItems(section.items));
     const currentItem =
       items.find((item) => item.to === location.pathname) ??
       items.find((item) => item.to && location.pathname.startsWith(`${item.to}/`));
 
     return currentItem?.label ?? "GT V2 Report";
-  }, [location.pathname]);
+  }, [location.pathname, visibleNavigationSections]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -175,7 +202,7 @@ export function AppShell() {
         </div>
 
         <nav className="nav-sections">
-          {navigationSections.map((section) => (
+          {visibleNavigationSections.map((section) => (
             <div key={section.title} className="nav-section">
               <span className="nav-section__title">{section.title}</span>
               {renderNavigationItems(section.items)}

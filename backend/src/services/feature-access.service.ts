@@ -5,6 +5,7 @@ import {
   type ReportPremiumAccess,
   type ReportPremiumTeaser,
 } from "../types/report-ai.js";
+import { HttpError } from "../utils/http-error.js";
 
 const FEATURE_ACCESS_COLLECTION = "gt_v2report_feature_access";
 
@@ -223,6 +224,10 @@ export async function updateClinicGtGrowthAiAccess(input: {
   updatedByUserId?: string | null;
   updatedByEmail?: string | null;
 }) {
+  if (!env.GT_GROWTH_AI_FEATURE_STORE_ENABLED) {
+    throw new HttpError(503, "GT Growth AI feature store is not enabled.");
+  }
+
   const clinicId = input.clinicId.trim();
   const updatedAt = new Date().toISOString();
 

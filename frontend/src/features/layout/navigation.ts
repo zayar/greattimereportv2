@@ -2,6 +2,7 @@ export type NavigationItem = {
   label: string;
   to?: string;
   children?: NavigationItem[];
+  requiresAiControlPanelAdmin?: boolean;
 };
 
 export type NavigationSection = {
@@ -108,6 +109,7 @@ export const navigationSections: NavigationSection[] = [
     items: [
       { to: "/settings/commission", label: "Commission rules" },
       { to: "/settings/telegram", label: "Telegram" },
+      { to: "/settings/ai-control-panel", label: "AI Control Panel", requiresAiControlPanelAdmin: true },
       { to: "/settings/sales-document", label: "Sales document designer" },
     ],
   },
