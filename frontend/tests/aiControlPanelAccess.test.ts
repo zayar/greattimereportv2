@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canAccessAiControlPanel, parseAiControlPanelAdminEmails } from "../src/features/ai/adminAccess";
+import {
+  canAccessAiControlPanel,
+  parseAiControlPanelAdminEmails,
+  resolveAiControlPanelAdminEmails,
+} from "../src/features/ai/adminAccess";
 
 test("AI Control Panel is visible only to the allowlisted owner email", () => {
   assert.equal(canAccessAiControlPanel("zayar@datafocus.cloud"), true);
@@ -15,4 +19,11 @@ test("AI Control Panel admin parser trims and normalizes emails", () => {
   assert.equal(emails.has("zayar@datafocus.cloud"), true);
   assert.equal(emails.has("owner@example.com"), true);
   assert.equal(emails.has(""), false);
+});
+
+test("AI Control Panel admin config falls back when build env is blank", () => {
+  assert.equal(resolveAiControlPanelAdminEmails(""), "zayar@datafocus.cloud");
+  assert.equal(resolveAiControlPanelAdminEmails("   "), "zayar@datafocus.cloud");
+  assert.equal(resolveAiControlPanelAdminEmails(undefined), "zayar@datafocus.cloud");
+  assert.equal(resolveAiControlPanelAdminEmails("owner@example.com"), "owner@example.com");
 });

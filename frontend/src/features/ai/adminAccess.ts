@@ -1,9 +1,13 @@
 const DEFAULT_AI_CONTROL_PANEL_ADMIN_EMAILS = "zayar@datafocus.cloud";
 
+export function resolveAiControlPanelAdminEmails(value?: string | null) {
+  const configuredValue = value?.trim() ?? "";
+  return configuredValue || DEFAULT_AI_CONTROL_PANEL_ADMIN_EMAILS;
+}
+
 function readConfiguredAdminEmails() {
-  return (
-    (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_AI_CONTROL_PANEL_ADMIN_EMAILS ??
-    DEFAULT_AI_CONTROL_PANEL_ADMIN_EMAILS
+  return resolveAiControlPanelAdminEmails(
+    (import.meta as unknown as { env?: Record<string, string | undefined> }).env?.VITE_AI_CONTROL_PANEL_ADMIN_EMAILS,
   );
 }
 
