@@ -1,7 +1,13 @@
 import { z } from "zod";
 import { getServiceBehaviorReport } from "../../reports/service-behavior.service.js";
 import { isTreatmentStartUnsupportedIntent } from "../appointment-lifecycle.js";
-import { fetchLiveAppointmentSnapshot, liveAppointmentEntityRef, type LiveAppointmentRow } from "../appointment-live.service.js";
+import {
+  fetchLiveAppointmentSnapshot,
+  isActiveCheckedInAppointment,
+  isCountableTodayAppointment,
+  liveAppointmentEntityRef,
+  type LiveAppointmentRow,
+} from "../appointment-live.service.js";
 import { limitRows, nowIso } from "../safety.js";
 import type { AgentToolDefinition, AgentToolInput, AgentToolResult } from "../types.js";
 
@@ -54,6 +60,15 @@ async function snapshot(input: AgentToolInput) {
 
 async function getLiveAppointmentCounts(input: AgentToolInput): Promise<AgentToolResult> {
   const data = await snapshot(input);
+  const countableRows = data.rows.filter(isCountableTodayAppointment);
+  const activeCheckedInRows = countableRows.filter(isActiveCheckedInAppointment);
+  const countableLifecycle = {
+    booked: countableRows.filter((row) => row.lifecycleState === "booked").length,
+    activeCheckedIn: activeCheckedInRows.length,
+    checkedOut: countableRows.filter((row) => row.lifecycleState === "checked_out").length,
+    cancelled: countableRows.filter((row) => row.lifecycleState === "cancelled").length,
+    noShow: countableRows.filter((row) => row.lifecycleState === "no_show").length,
+  };
 
   return {
     toolName: "get_live_appointment_counts",
@@ -62,18 +77,18 @@ async function getLiveAppointmentCounts(input: AgentToolInput): Promise<AgentToo
     period: input.period.toDate,
     dataStatus: data.dataStatus,
     live: true,
-    summary: `Live appointment snapshot has ${data.rows.length.toLocaleString("en-US")} rows for ${input.period.toDate}.`,
+    summary: `Today's appointment snapshot has ${countableRows.length.toLocaleString("en-US")} appointment${countableRows.length === 1 ? "" : "s"} for ${input.period.toDate}, excluding merchant-cancelled rows.`,
     metrics: [
-      { label: "Total live rows", value: data.rows.length },
-      { label: "Booked", value: data.countsByLifecycle.booked ?? 0 },
-      { label: "Checked in", value: data.countsByLifecycle.arrived_start_unknown ?? 0, helperText: "Treatment start is not confirmed by current source fields." },
-      { label: "Checked out", value: data.countsByLifecycle.checked_out ?? 0 },
-      { label: "Cancelled", value: data.countsByLifecycle.cancelled ?? 0 },
-      { label: "No-show", value: data.countsByLifecycle.no_show ?? 0 },
+      { label: "Total appointments today", value: countableRows.length, helperText: "Excludes MERCHANT_CANCEL rows." },
+      { label: "Booked", value: countableLifecycle.booked },
+      { label: "Checked in now", value: countableLifecycle.activeCheckedIn, helperText: "Has check-in time and no check-out time." },
+      { label: "Checked out", value: countableLifecycle.checkedOut },
+      { label: "Cancelled", value: countableLifecycle.cancelled },
+      { label: "No-show", value: countableLifecycle.noShow },
     ],
-    tables: [liveTable("Live appointment rows", data.rows)],
+    tables: [liveTable("Today's appointment rows", countableRows)],
     warnings: data.warnings,
-    entityRefs: data.rows.map((row, index) => liveAppointmentEntityRef(row, index + 1)),
+    entityRefs: countableRows.map((row, index) => liveAppointmentEntityRef(row, index + 1)),
   };
 }
 
@@ -117,7 +132,7 @@ async function listLiveAppointments(input: AgentToolInput): Promise<AgentToolRes
 
 async function getCheckedInCustomers(input: AgentToolInput): Promise<AgentToolResult> {
   const data = await snapshot(input);
-  const rows = data.rows.filter((row) => row.lifecycleState === "arrived_start_unknown");
+  const rows = data.rows.filter(isActiveCheckedInAppointment);
 
   return {
     toolName: "get_checked_in_customers",
@@ -126,15 +141,15 @@ async function getCheckedInCustomers(input: AgentToolInput): Promise<AgentToolRe
     period: input.period.toDate,
     dataStatus: rows.length ? data.dataStatus : "no_activity",
     live: true,
-    summary: `${rows.length.toLocaleString("en-US")} customer${rows.length === 1 ? "" : "s"} are checked in or arrived, with treatment-start status unknown.`,
-    metrics: [{ label: "Checked in", value: rows.length, helperText: "Mapped to arrived_start_unknown." }],
-    tables: [liveTable("Checked-in customers", rows)],
+    summary: `${rows.length.toLocaleString("en-US")} appointment${rows.length === 1 ? "" : "s"} are checked in right now and have not checked out.`,
+    metrics: [{ label: "Checked in now", value: rows.length, helperText: "Has check-in time and no check-out time." }],
+    tables: [liveTable("Checked-in appointments not checked out", rows)],
     warnings: [
       ...data.warnings,
       {
-        type: "state_inferred",
-        title: "Treatment start unknown",
-        message: "`CHECKIN` confirms arrival/check-in, not whether treatment has started.",
+        type: "active_check_in_definition",
+        title: "Checked-in definition",
+        message: "This count uses rows with check-in time and no check-out time.",
       },
     ],
     entityRefs: rows.map((row, index) => liveAppointmentEntityRef(row, index + 1)),

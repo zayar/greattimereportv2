@@ -32,6 +32,31 @@ function normalizeText(value: string | null | undefined, fallback = "Unknown") {
   return text || fallback;
 }
 
+function normalizeRawStatus(value?: string | null) {
+  return value?.trim().toUpperCase().replace(/[\s-]+/g, "_") ?? "";
+}
+
+export function isMerchantCancelledAppointment(row: Pick<LiveAppointmentRow, "rawStatus">) {
+  return normalizeRawStatus(row.rawStatus) === "MERCHANT_CANCEL";
+}
+
+export function isActiveCheckedInAppointment(
+  row: Pick<LiveAppointmentRow, "checkInTime" | "checkOutTime" | "lifecycleState" | "rawStatus">,
+) {
+  return (
+    Boolean(row.checkInTime) &&
+    !row.checkOutTime &&
+    !isMerchantCancelledAppointment(row) &&
+    row.lifecycleState !== "checked_out" &&
+    row.lifecycleState !== "cancelled" &&
+    row.lifecycleState !== "no_show"
+  );
+}
+
+export function isCountableTodayAppointment(row: Pick<LiveAppointmentRow, "rawStatus">) {
+  return !isMerchantCancelledAppointment(row);
+}
+
 function bookingToLiveRow(row: ApicoreBookingDetailsRow): LiveAppointmentRow {
   const lifecycle = normalizeAppointmentLifecycle({ rawStatus: row.status });
 

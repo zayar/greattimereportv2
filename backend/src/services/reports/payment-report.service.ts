@@ -330,16 +330,58 @@ export async function getPaymentReport(params: {
       `
         WITH RawData AS (
           SELECT
+            InvoiceNumber AS invoiceNumber,
             COALESCE(PaymentMethod, 'Unknown') AS paymentMethod,
-            CAST(COALESCE(PaymentAmount, NetTotal) AS FLOAT64) AS paymentAmount
+            PaymentType AS paymentType,
+            PaymentNote AS paymentNote,
+            CAST(PaymentAmount AS FLOAT64) AS paymentAmount,
+            CAST(NetTotal AS FLOAT64) AS invoiceNetTotal
           FROM ${analyticsTables.mainPaymentView}
           WHERE ${methodWhere}
+        ),
+        DedupPaymentAmounts AS (
+          SELECT
+            invoiceNumber,
+            paymentMethod,
+            paymentType,
+            paymentNote,
+            paymentAmount
+          FROM RawData
+          WHERE paymentAmount IS NOT NULL AND paymentAmount > 0
+          GROUP BY invoiceNumber, paymentMethod, paymentType, paymentNote, paymentAmount
+        ),
+        MethodPayments AS (
+          SELECT
+            invoiceNumber,
+            paymentMethod,
+            SUM(paymentAmount) AS paymentAmount
+          FROM DedupPaymentAmounts
+          GROUP BY invoiceNumber, paymentMethod
+        ),
+        InvoiceMethods AS (
+          SELECT
+            invoiceNumber,
+            paymentMethod,
+            MAX(invoiceNetTotal) AS invoiceNetTotal
+          FROM RawData
+          GROUP BY invoiceNumber, paymentMethod
+        ),
+        InvoiceMethodAmounts AS (
+          SELECT
+            invoice.invoiceNumber,
+            invoice.paymentMethod,
+            COALESCE(payment.paymentAmount, invoice.invoiceNetTotal, 0) AS totalAmount
+          FROM InvoiceMethods AS invoice
+          LEFT JOIN MethodPayments AS payment
+            ON invoice.invoiceNumber = payment.invoiceNumber
+            AND invoice.paymentMethod = payment.paymentMethod
         )
         SELECT
           paymentMethod,
-          COALESCE(SUM(paymentAmount), 0) AS totalAmount,
+          COALESCE(SUM(totalAmount), 0) AS totalAmount,
           COUNT(*) AS transactionCount
-        FROM RawData
+        FROM InvoiceMethodAmounts
+        WHERE @includeZeroValues OR totalAmount != 0
         GROUP BY paymentMethod
         ORDER BY totalAmount DESC
       `,

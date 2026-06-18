@@ -154,7 +154,7 @@ function detectAppointmentIntent(message: string) {
   if (/in progress|started treatment|ကုသနေ/i.test(message)) {
     return "treatment_in_progress";
   }
-  if (/who|list|they|them|first|second|third|ဘယ်သူ/i.test(message) && /check[- ]?in|arrived|ရောက်/i.test(message)) {
+  if (/who|list|they|them|first|second|third|ဘယ်သူ/i.test(message) && /check[- ]?in|checked[- ]?in|checked in|arrived|ရောက်/i.test(message)) {
     return "checked_in_customers";
   }
   if (/check[- ]?out|completed|ပြီး/i.test(message)) {
@@ -172,8 +172,8 @@ function detectAppointmentIntent(message: string) {
   if (/who|list|they|them|ဘယ်သူ/i.test(message)) {
     return "checked_in_customers";
   }
-  if (/check[- ]?in|arrived|ရောက်/i.test(message)) {
-    return "live_state_counts";
+  if (/check[- ]?in|checked[- ]?in|checked in|arrived|ရောက်/i.test(message)) {
+    return "checked_in_customers";
   }
   return "appointment_summary";
 }

@@ -5,6 +5,7 @@ process.env.APICORE_GRAPHQL_URL ??= "https://example.com/graphql"
 process.env.AGENT_LEARNING_SCHEDULER_SECRET ??= "scheduler-secret"
 
 const { normalizeAppointmentLifecycle } = await import("../src/services/agent-hub/appointment-lifecycle.ts")
+const { isActiveCheckedInAppointment, isCountableTodayAppointment } = await import("../src/services/agent-hub/appointment-live.service.ts")
 const { resolveEntityReference } = await import("../src/services/agent-hub/entity-context.ts")
 const { extractAgentPeriod, planAgentRequest } = await import("../src/services/agent-hub/intent-planner.ts")
 const { buildAgentResponse } = await import("../src/services/agent-hub/response-builder.ts")
@@ -93,6 +94,44 @@ test("planner does not block read-only questions that mention collected or cance
   })
   assert.equal(appointmentPlan.intent, "cancelled_no_show")
   assert.deepEqual(appointmentPlan.toolNames, ["get_cancelled_no_show_customers"])
+})
+
+test("planner maps checked-in appointment questions to active check-in rows", () => {
+  const plan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "How many appointments are checked in right now?",
+    },
+  })
+
+  assert.equal(plan.resolvedAgent, "appointment")
+  assert.equal(plan.intent, "checked_in_customers")
+  assert.deepEqual(plan.toolNames, ["get_checked_in_customers"])
+})
+
+test("appointment helpers count active checked-ins and exclude merchant cancellations from totals", () => {
+  assert.equal(
+    isActiveCheckedInAppointment({
+      checkInTime: "2026-06-18T08:00:00.000Z",
+      checkOutTime: null,
+      lifecycleState: "arrived_start_unknown",
+      rawStatus: "CHECKIN",
+    }),
+    true,
+  )
+  assert.equal(
+    isActiveCheckedInAppointment({
+      checkInTime: "2026-06-18T08:00:00.000Z",
+      checkOutTime: "2026-06-18T09:00:00.000Z",
+      lifecycleState: "checked_out",
+      rawStatus: "CHECKOUT",
+    }),
+    false,
+  )
+  assert.equal(isCountableTodayAppointment({ rawStatus: "MERCHANT_CANCEL" }), false)
+  assert.equal(isCountableTodayAppointment({ rawStatus: "MEMBER_CANCEL" }), true)
 })
 
 test("appointment lifecycle does not claim treatment state from CHECKIN alone", () => {
