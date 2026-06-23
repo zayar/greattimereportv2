@@ -53,9 +53,10 @@ function followUpsForAgent(plan: GreatTimeAgentIntentPlan) {
   }
 
   return [
-    "Who are the checked-in customers?",
+    "Show all appointments today.",
+    "How many appointments are scheduled today?",
     "Show checked-out customers today.",
-    "Which customers are definitely waiting for treatment?",
+    "Which customers may not have started treatment?",
   ];
 }
 

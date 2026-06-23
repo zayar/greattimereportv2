@@ -87,7 +87,7 @@ const SUGGESTIONS: Record<GreatTimeRequestedAgentId, string[]> = {
     "What needs attention in the clinic today?",
     "How much did we collect today by payment method?",
     "Which customers should we follow up first?",
-    "How many appointments are checked in right now?",
+    "How many appointments are scheduled today?",
   ],
   finance: [
     "How much did we collect today by payment method?",
@@ -108,10 +108,10 @@ const SUGGESTIONS: Record<GreatTimeRequestedAgentId, string[]> = {
     "Where are the strongest revenue opportunities?",
   ],
   appointment: [
+    "Show all appointments today.",
+    "How many appointments are scheduled today?",
     "How many appointments are checked in right now?",
-    "Who are the checked-in customers?",
-    "Which customers have not started treatment?",
-    "What schedule risks should front desk handle now?",
+    "Which customers may not have started treatment?",
   ],
 };
 

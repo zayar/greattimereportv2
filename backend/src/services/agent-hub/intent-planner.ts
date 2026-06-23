@@ -148,7 +148,8 @@ function detectBusinessIntent(message: string) {
 }
 
 function detectAppointmentIntent(message: string) {
-  if (/waiting|not started|မစ/i.test(message)) {
+  const asksAppointmentLedger = /appointment|appointments|booking|bookings|schedule|ချိန်း|ဘိုကင်/i.test(message);
+  if (/waiting|not\s+(?:have\s+)?started|have\s+not\s+started|has\s+not\s+started|haven't\s+started|hasn't\s+started|မစ/i.test(message)) {
     return "waiting_customers";
   }
   if (/in progress|started treatment|ကုသနေ/i.test(message)) {
@@ -169,11 +170,14 @@ function detectAppointmentIntent(message: string) {
   if (/detail|first|second|third/i.test(message)) {
     return "appointment_detail";
   }
-  if (/who|list|they|them|ဘယ်သူ/i.test(message)) {
-    return "checked_in_customers";
-  }
   if (/check[- ]?in|checked[- ]?in|checked in|arrived|ရောက်/i.test(message)) {
     return "checked_in_customers";
+  }
+  if (/live|right now|currently|now|ယခု|အခု/i.test(message) && asksAppointmentLedger) {
+    return "live_appointment_counts";
+  }
+  if (/who|list|show|view|display|all|scheduled|today|count|total|how many|ဘယ်သူ/i.test(message) && asksAppointmentLedger) {
+    return /who|list|show|view|display|all|ဘယ်သူ/i.test(message) ? "appointment_list" : "appointment_summary";
   }
   return "appointment_summary";
 }
@@ -231,6 +235,11 @@ function toolsForIntent(agentId: GreatTimeAgentId, intent: string) {
   }
 
   switch (intent) {
+    case "appointment_summary":
+    case "appointment_list":
+      return ["get_appointment_ledger"];
+    case "live_appointment_counts":
+      return ["get_live_appointment_counts"];
     case "checked_in_customers":
       return ["get_checked_in_customers"];
     case "checked_out_customers":
@@ -239,13 +248,13 @@ function toolsForIntent(agentId: GreatTimeAgentId, intent: string) {
       return ["get_cancelled_no_show_customers"];
     case "waiting_customers":
     case "treatment_in_progress":
-      return ["list_live_appointments"];
+      return ["get_treatment_start_proxy"];
     case "appointment_detail":
       return ["get_appointment_detail"];
     case "appointment_trend":
       return ["get_appointment_trends"];
     default:
-      return ["get_live_appointment_counts"];
+      return ["get_appointment_ledger"];
   }
 }
 

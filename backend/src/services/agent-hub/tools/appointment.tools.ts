@@ -1,6 +1,7 @@
 import { z } from "zod";
+import { fetchApicoreBookingDetails, type ApicoreBookingDetailsRow } from "../../apicore.service.js";
 import { getServiceBehaviorReport } from "../../reports/service-behavior.service.js";
-import { isTreatmentStartUnsupportedIntent } from "../appointment-lifecycle.js";
+import { normalizeAppointmentLifecycle } from "../appointment-lifecycle.js";
 import {
   fetchLiveAppointmentSnapshot,
   isActiveCheckedInAppointment,
@@ -8,10 +9,16 @@ import {
   liveAppointmentEntityRef,
   type LiveAppointmentRow,
 } from "../appointment-live.service.js";
-import { limitRows, nowIso } from "../safety.js";
-import type { AgentToolDefinition, AgentToolInput, AgentToolResult } from "../types.js";
+import { buildUtcDayRangeForDateKey } from "../../telegram/time.js";
+import { limitRows, maskPhone, nowIso } from "../safety.js";
+import type { AgentDataStatus, AgentToolDefinition, AgentToolInput, AgentToolResult } from "../types.js";
 
 const toolInputSchema = z.custom<AgentToolInput>(() => true);
+const LEDGER_PAGE_SIZE = 200;
+const LEDGER_MAX_FETCH_ROWS = 1_000;
+const LEDGER_TABLE_ROWS = 30;
+const OPEN_TREATMENT_STATUSES = new Set(["REQUEST", "REQUESTED", "BOOKED", "BOOKING", "CHECKIN", "CHECK_IN"]);
+const CHECKED_IN_LEDGER_STATUSES = new Set(["CHECKIN", "CHECK_IN"]);
 
 function tableRows(rows: LiveAppointmentRow[]) {
   return rows.map((row) => ({
@@ -47,6 +54,194 @@ function liveTable(title: string, rows: LiveAppointmentRow[]) {
   };
 }
 
+function normalizeText(value: string | null | undefined, fallback = "Unknown") {
+  const text = value?.trim();
+  return text || fallback;
+}
+
+function normalizeStatus(value: string | null | undefined) {
+  return value?.trim().toUpperCase().replace(/[\s-]+/g, "_") ?? "";
+}
+
+function periodLabel(input: AgentToolInput) {
+  return input.period.fromDate === input.period.toDate
+    ? input.period.fromDate
+    : `${input.period.fromDate} to ${input.period.toDate}`;
+}
+
+function ledgerTableRows(rows: ApicoreBookingDetailsRow[]) {
+  return rows.map((row) => {
+    const lifecycle = normalizeAppointmentLifecycle({ rawStatus: row.status });
+
+    return {
+      appointmentId: row.bookingid,
+      scheduledFrom: row.FromTime,
+      scheduledTo: row.ToTime,
+      customerName: normalizeText(row.MemberName),
+      customerPhoneMasked: maskPhone(row.MemberPhoneNumber),
+      serviceName: normalizeText(row.ServiceName),
+      practitionerName: normalizeText(row.PractitionerName),
+      helperName: normalizeText(row.HelperName, ""),
+      rawStatus: row.status,
+      lifecycleState: lifecycle.state,
+    };
+  });
+}
+
+function ledgerTable(title: string, rows: ApicoreBookingDetailsRow[]) {
+  return {
+    title,
+    columns: [
+      { key: "scheduledFrom", title: "Time" },
+      { key: "customerName", title: "Customer" },
+      { key: "customerPhoneMasked", title: "Phone" },
+      { key: "serviceName", title: "Service" },
+      { key: "practitionerName", title: "Practitioner" },
+      { key: "rawStatus", title: "Status" },
+      { key: "helperName", title: "Helper" },
+    ],
+    rows: ledgerTableRows(limitRows(rows, LEDGER_TABLE_ROWS)),
+  };
+}
+
+function appointmentLedgerEntityRef(row: ApicoreBookingDetailsRow, rank: number) {
+  return {
+    entityType: "appointment" as const,
+    entityId: row.bookingid,
+    appointmentId: row.bookingid,
+    displayName: normalizeText(row.MemberName),
+    customerName: normalizeText(row.MemberName),
+    customerPhone: row.MemberPhoneNumber,
+    serviceName: normalizeText(row.ServiceName),
+    practitionerName: normalizeText(row.PractitionerName),
+    rank,
+  };
+}
+
+async function fetchAppointmentLedger(input: AgentToolInput) {
+  const checkedAt = nowIso();
+  const startRange = buildUtcDayRangeForDateKey(input.period.fromDate);
+  const endRange = buildUtcDayRangeForDateKey(input.period.toDate);
+  const warnings: NonNullable<AgentToolResult["warnings"]> = [];
+  const rows: ApicoreBookingDetailsRow[] = [];
+  let totalCount = Number.POSITIVE_INFINITY;
+  let skip = 0;
+  let dataStatus: AgentDataStatus = "ok";
+  let mismatchedRows = 0;
+
+  while (rows.length < totalCount && rows.length < LEDGER_MAX_FETCH_ROWS) {
+    const take = Math.min(LEDGER_PAGE_SIZE, LEDGER_MAX_FETCH_ROWS - rows.length);
+    const result = await fetchApicoreBookingDetails({
+      clinicCode: input.clinic.clinicCode,
+      startDate: startRange.startIso,
+      endDate: endRange.endIso,
+      skip,
+      take,
+      authorizationHeader: input.requestContext.authorizationHeader,
+    });
+
+    totalCount = result.totalCount;
+
+    const filteredRows = result.data.filter((row) => {
+      const matchesClinic =
+        row.ClinicID === input.clinic.clinicId &&
+        row.ClinicCode.toLowerCase() === input.clinic.clinicCode.toLowerCase();
+      if (!matchesClinic) {
+        mismatchedRows += 1;
+      }
+      return matchesClinic;
+    });
+
+    rows.push(...filteredRows);
+
+    if (result.data.length === 0) {
+      break;
+    }
+
+    skip += result.data.length;
+  }
+
+  if (mismatchedRows > 0) {
+    warnings.push({
+      type: "clinic_context_mismatch",
+      title: "Clinic context mismatch",
+      message: "Some booking rows did not match the authorized clinic and were excluded.",
+    });
+  }
+
+  if (!Number.isFinite(totalCount)) {
+    totalCount = rows.length;
+  }
+
+  if (rows.length < totalCount) {
+    dataStatus = totalCount > 0 ? "partial" : "no_activity";
+    warnings.push({
+      type: "appointment_ledger_truncated",
+      title: "Appointment ledger limited",
+      message: `The source reported ${totalCount.toLocaleString("en-US")} appointments, and the agent loaded the first ${rows.length.toLocaleString("en-US")} rows for detail.`,
+    });
+  } else if (totalCount === 0) {
+    dataStatus = "no_activity";
+  }
+
+  rows.sort((left, right) => new Date(left.FromTime).getTime() - new Date(right.FromTime).getTime());
+
+  return {
+    checkedAt,
+    totalCount,
+    rows,
+    dataStatus,
+    warnings,
+  };
+}
+
+function ledgerStatusMetrics(rows: ApicoreBookingDetailsRow[], totalCount: number) {
+  const counts = rows.reduce(
+    (summary, row) => {
+      const status = normalizeStatus(row.status);
+      if (status === "CHECKOUT" || status === "CHECKED_OUT") {
+        summary.checkedOut += 1;
+      } else if (status === "NO_SHOW") {
+        summary.noShow += 1;
+      } else if (status === "MERCHANT_CANCEL" || status === "MEMBER_CANCEL" || status === "CANCEL") {
+        summary.cancelled += 1;
+      } else {
+        summary.open += 1;
+      }
+
+      return summary;
+    },
+    { open: 0, checkedOut: 0, cancelled: 0, noShow: 0 },
+  );
+
+  const helperText = rows.length < totalCount ? `Status counts are based on ${rows.length.toLocaleString("en-US")} loaded rows.` : undefined;
+
+  return [
+    { label: "Appointments", value: totalCount, helperText: "APICORE booking ledger total." },
+    { label: "Open / upcoming", value: counts.open, helperText },
+    { label: "Checked out", value: counts.checkedOut, helperText },
+    { label: "Cancelled", value: counts.cancelled, helperText },
+    { label: "No-show", value: counts.noShow, helperText },
+  ];
+}
+
+function isOpenTreatmentCandidate(row: ApicoreBookingDetailsRow) {
+  return OPEN_TREATMENT_STATUSES.has(normalizeStatus(row.status));
+}
+
+function isCheckedInLedgerCandidate(row: ApicoreBookingDetailsRow) {
+  return CHECKED_IN_LEDGER_STATUSES.has(normalizeStatus(row.status));
+}
+
+function treatmentStartProxyWarning(): NonNullable<AgentToolResult["warnings"]>[number] {
+  return {
+    type: "treatment_start_proxy",
+    title: "Treatment start is inferred",
+    message:
+      "APICORE does not expose a treatment_started_at event here, so this uses booking status as a proxy and does not confirm exact treatment-start time.",
+  };
+}
+
 async function snapshot(input: AgentToolInput) {
   return fetchLiveAppointmentSnapshot({
     clinicId: input.clinic.clinicId,
@@ -56,6 +251,69 @@ async function snapshot(input: AgentToolInput) {
     authorizationHeader: input.requestContext.authorizationHeader,
     rowLimit: 200,
   });
+}
+
+async function getAppointmentLedger(input: AgentToolInput): Promise<AgentToolResult> {
+  const data = await fetchAppointmentLedger(input);
+  const label = periodLabel(input);
+
+  return {
+    toolName: "get_appointment_ledger",
+    sourceName: "APICORE appointment ledger",
+    checkedAt: data.checkedAt,
+    period: label,
+    dataStatus: data.dataStatus,
+    live: true,
+    summary: `Appointment ledger has ${data.totalCount.toLocaleString("en-US")} appointment${data.totalCount === 1 ? "" : "s"} for ${label}.`,
+    metrics: ledgerStatusMetrics(data.rows, data.totalCount),
+    tables: [ledgerTable("Appointments", data.rows)],
+    warnings: data.warnings,
+    entityRefs: data.rows.map((row, index) => appointmentLedgerEntityRef(row, index + 1)),
+  };
+}
+
+async function getTreatmentStartProxy(input: AgentToolInput): Promise<AgentToolResult> {
+  const data = await fetchAppointmentLedger(input);
+  const label = periodLabel(input);
+  const rows =
+    input.intent === "treatment_in_progress"
+      ? data.rows.filter(isCheckedInLedgerCandidate)
+      : data.rows.filter(isOpenTreatmentCandidate);
+  const checkedInRows = rows.filter(isCheckedInLedgerCandidate);
+  const statusLabel =
+    input.intent === "treatment_in_progress"
+      ? "checked-in appointments"
+      : "appointments that are not completed, cancelled, or no-show";
+  const dataStatus: AgentDataStatus = rows.length ? data.dataStatus : "no_activity";
+
+  return {
+    toolName: "get_treatment_start_proxy",
+    sourceName: "APICORE appointment ledger",
+    checkedAt: data.checkedAt,
+    period: label,
+    dataStatus,
+    live: true,
+    summary: `APICORE does not confirm exact treatment-start time. Using booking status as a proxy, ${rows.length.toLocaleString("en-US")} ${statusLabel} were found for ${label}.`,
+    metrics: [
+      {
+        label: input.intent === "treatment_in_progress" ? "Checked-in proxy" : "Not-started proxy",
+        value: rows.length,
+        helperText:
+          input.intent === "treatment_in_progress"
+            ? "Rows with CHECKIN status; exact in-treatment state is not available."
+            : "Rows with REQUEST, BOOKED, or CHECKIN status.",
+      },
+      { label: "Checked in", value: checkedInRows.length, helperText: "Rows with CHECKIN status." },
+      {
+        label: "Booked / requested",
+        value: rows.length - checkedInRows.length,
+        helperText: "Rows not yet completed, cancelled, or no-show.",
+      },
+    ],
+    tables: [ledgerTable(input.intent === "treatment_in_progress" ? "Checked-in proxy rows" : "Treatment not-started proxy rows", rows)],
+    warnings: [...data.warnings, treatmentStartProxyWarning()],
+    entityRefs: rows.map((row, index) => appointmentLedgerEntityRef(row, index + 1)),
+  };
 }
 
 async function getLiveAppointmentCounts(input: AgentToolInput): Promise<AgentToolResult> {
@@ -94,28 +352,6 @@ async function getLiveAppointmentCounts(input: AgentToolInput): Promise<AgentToo
 
 async function listLiveAppointments(input: AgentToolInput): Promise<AgentToolResult> {
   const data = await snapshot(input);
-
-  if (isTreatmentStartUnsupportedIntent(input.intent)) {
-    return {
-      toolName: "list_live_appointments",
-      sourceName: "APICORE live bookings and check-ins",
-      checkedAt: data.checkedAt,
-      period: input.period.toDate,
-      dataStatus: "not_ready",
-      live: true,
-      tables: [liveTable("Checked-in customers with unknown treatment-start state", data.rows.filter((row) => row.lifecycleState === "arrived_start_unknown"))],
-      warnings: [
-        ...data.warnings,
-        {
-          type: "treatment_start_not_available",
-          title: "Treatment start is not confirmed",
-          message:
-            "Current APICORE fields expose check-in and check-out times but no treatment_started_at event, so waiting/in-progress status cannot be confirmed.",
-        },
-      ],
-      entityRefs: data.rows.map((row, index) => liveAppointmentEntityRef(row, index + 1)),
-    };
-  }
 
   return {
     toolName: "list_live_appointments",
@@ -249,6 +485,28 @@ async function getAppointmentTrends(input: AgentToolInput): Promise<AgentToolRes
 
 export function createAppointmentTools(): AgentToolDefinition[] {
   return [
+    {
+      name: "get_appointment_ledger",
+      agentId: "appointment",
+      description: "Get appointment ledger rows and counts from APICORE booking details.",
+      inputSchema: toolInputSchema,
+      sourceName: "APICORE appointment ledger",
+      live: true,
+      maxRows: LEDGER_TABLE_ROWS,
+      timeoutMs: 20_000,
+      execute: getAppointmentLedger,
+    },
+    {
+      name: "get_treatment_start_proxy",
+      agentId: "appointment",
+      description: "List appointments where treatment start is inferred from APICORE booking status.",
+      inputSchema: toolInputSchema,
+      sourceName: "APICORE appointment ledger",
+      live: true,
+      maxRows: LEDGER_TABLE_ROWS,
+      timeoutMs: 20_000,
+      execute: getTreatmentStartProxy,
+    },
     {
       name: "get_live_appointment_counts",
       agentId: "appointment",

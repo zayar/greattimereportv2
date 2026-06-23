@@ -123,6 +123,44 @@ test("planner maps checked-in appointment questions to active check-in rows", ()
   assert.deepEqual(plan.toolNames, ["get_checked_in_customers"])
 })
 
+test("planner maps general appointment questions to the APICORE appointment ledger", () => {
+  const countPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "appointment",
+      message: "How many appointments today?",
+    },
+  })
+  assert.equal(countPlan.intent, "appointment_summary")
+  assert.deepEqual(countPlan.toolNames, ["get_appointment_ledger"])
+
+  const listPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "appointment",
+      message: "List all appointments today",
+    },
+  })
+  assert.equal(listPlan.intent, "appointment_list")
+  assert.deepEqual(listPlan.toolNames, ["get_appointment_ledger"])
+})
+
+test("planner maps treatment-start appointment questions to the APICORE status proxy", () => {
+  const plan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "appointment",
+      message: "Which customers may not have started treatment?",
+    },
+  })
+
+  assert.equal(plan.intent, "waiting_customers")
+  assert.deepEqual(plan.toolNames, ["get_treatment_start_proxy"])
+})
+
 test("appointment helpers count active checked-ins and exclude merchant cancellations from totals", () => {
   assert.equal(
     isActiveCheckedInAppointment({
