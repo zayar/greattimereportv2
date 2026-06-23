@@ -12,6 +12,7 @@ const { buildAgentResponse } = await import("../src/services/agent-hub/response-
 const { resolveAgent } = await import("../src/services/agent-hub/supervisor.ts")
 const { assertToolAllowed } = await import("../src/services/agent-hub/tool-executor.ts")
 const { createAgentToolRegistry, getAgentToolAllowlist } = await import("../src/services/agent-hub/tool-registry.ts")
+const { extractInvoiceSearch } = await import("../src/services/agent-hub/tools/finance.tools.ts")
 const { buildLockedAgentHubResponse } = await import("../src/services/agent-hub/agent-hub.service.ts")
 const { evaluateMemoryCandidate, buildMemoryRecord } = await import("../src/services/agent-hub/memory/memory-policy.ts")
 const { rankMemoriesForRequest } = await import("../src/services/agent-hub/memory/memory-retriever.ts")
@@ -99,6 +100,12 @@ test("planner does not block read-only questions that mention collected or cance
   })
   assert.equal(appointmentPlan.intent, "cancelled_no_show")
   assert.deepEqual(appointmentPlan.toolNames, ["get_cancelled_no_show_customers"])
+})
+
+test("invoice detail search ignores generic time and display words", () => {
+  assert.equal(extractInvoiceSearch("Show today invoice detail."), "")
+  assert.equal(extractInvoiceSearch("Show invoice ABC-12345 detail"), "ABC-12345")
+  assert.equal(extractInvoiceSearch("Show invoice detail for Aung Aung"), "Aung Aung")
 })
 
 test("planner maps checked-in appointment questions to active check-in rows", () => {

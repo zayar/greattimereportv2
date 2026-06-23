@@ -26,8 +26,23 @@ function paymentReportParams(input: AgentToolInput, search = "") {
   };
 }
 
-function extractInvoiceSearch(message: string) {
-  return message.match(/\b[A-Z]{1,5}[-_/]?\d{3,}\b/i)?.[0] ?? message.replace(/invoice|detail|voucher/gi, "").trim().slice(0, 80);
+export function extractInvoiceSearch(message: string) {
+  const invoiceNumber = message.match(/\b[A-Z]{1,5}[-_/]?\d{3,}\b/i)?.[0];
+  if (invoiceNumber) {
+    return invoiceNumber;
+  }
+
+  const cleaned = message
+    .replace(
+      /\b(?:show|list|get|give|please|today|now|right\s+now|invoice|invoices|detail|details|voucher|vouchers|payment|payments|for|the|a|an)\b/gi,
+      " ",
+    )
+    .replace(/(?:ဒီနေ့|ယခု|အခု|ဘောက်ချာ)/gi, " ")
+    .replace(/[?.!,]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return cleaned.length >= 2 ? cleaned.slice(0, 80) : "";
 }
 
 async function getSalesSummary(input: AgentToolInput): Promise<AgentToolResult> {
@@ -247,28 +262,38 @@ async function getCustomerPaymentHistory(input: AgentToolInput): Promise<AgentTo
 async function getInvoiceDetail(input: AgentToolInput): Promise<AgentToolResult> {
   const search = input.entityContext?.invoiceNumber ?? extractInvoiceSearch(input.request.message);
   const report = await getPaymentReport(paymentReportParams(input, search));
+  const rows = limitRows(report.rows, 20);
+  const dataStatus = rows.length > 0 ? "ok" : search ? "not_found" : "no_activity";
 
   return {
     toolName: "get_invoice_detail",
     sourceName: "BigQuery payment report",
     checkedAt: nowIso(),
     period: periodLabel(input),
-    dataStatus: report.rows.length > 0 ? "ok" : "not_found",
+    dataStatus,
     live: false,
-    tables: [
-      {
-        title: "Invoice detail",
-        columns: [
-          { key: "dateLabel", title: "Date" },
-          { key: "invoiceNumber", title: "Invoice" },
-          { key: "customerName", title: "Customer" },
-          { key: "serviceName", title: "Service" },
-          { key: "paymentMethod", title: "Method" },
-          { key: "invoiceNetTotal", title: "Invoice total" },
-        ],
-        rows: limitRows(report.rows, 20),
-      },
-    ],
+    summary:
+      rows.length > 0
+        ? undefined
+        : search
+          ? `No invoice detail rows matched "${search}" for ${input.period.label}.`
+          : `No invoice detail rows were found for ${input.period.label}.`,
+    tables: rows.length
+      ? [
+          {
+            title: "Invoice detail",
+            columns: [
+              { key: "dateLabel", title: "Date" },
+              { key: "invoiceNumber", title: "Invoice" },
+              { key: "customerName", title: "Customer" },
+              { key: "serviceName", title: "Service" },
+              { key: "paymentMethod", title: "Method" },
+              { key: "invoiceNetTotal", title: "Invoice total" },
+            ],
+            rows,
+          },
+        ]
+      : undefined,
     entityRefs: report.rows.slice(0, 10).map((row, index) => ({
       entityType: "invoice",
       entityId: row.invoiceNumber,
