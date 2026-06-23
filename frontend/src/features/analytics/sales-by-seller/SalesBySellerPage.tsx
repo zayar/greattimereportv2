@@ -186,7 +186,7 @@ export function SalesBySellerPage() {
     <div className="page-stack page-stack--workspace analytics-report sales-by-person-report">
       <PageHeader
         eyebrow="Revenue"
-        title="Sales by sales person"
+        title="Sales by person"
         description="Seller ranking and invoice-level attribution in one focused workspace."
       />
 
@@ -259,7 +259,7 @@ export function SalesBySellerPage() {
         </div>
       </section>
 
-      {error ? <ErrorState label="Sales by sales person could not be loaded" detail={error} /> : null}
+      {error ? <ErrorState label="Sales by person could not be loaded" detail={error} /> : null}
 
       <div className="sales-details-report__summary">
         <div className="sales-details-report__summary-card">

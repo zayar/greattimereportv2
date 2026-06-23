@@ -1,8 +1,11 @@
+import { Link } from "react-router-dom";
 import type { ReportAiEvidenceItem, ReportAiPayload, ReportPremiumAccess } from "../types/domain";
 
 type Props = {
   payload?: ReportAiPayload | null;
   premium?: ReportPremiumAccess | null;
+  compact?: boolean;
+  ctaHref?: string;
 };
 
 function formatEvidenceValue(value: string | number) {
@@ -33,8 +36,29 @@ function EvidenceList({ evidence }: { evidence: ReportAiEvidenceItem[] }) {
   );
 }
 
-export function ReportAiSections({ payload, premium }: Props) {
+export function ReportAiSections({ payload, premium, compact = false, ctaHref = "/ai/agent-hub" }: Props) {
   if (premium && !premium.enabled) {
+    if (compact) {
+      return (
+        <section className="report-ai-compact report-ai-compact--locked" aria-label="GT Growth AI availability">
+          <div className="report-ai-compact__copy">
+            <span className="report-ai-compact__eyebrow">GT Growth AI</span>
+            <h2>{premium.title || "AI insights unavailable"}</h2>
+            <p>
+              {premium.message ||
+                "AI insights and recommended actions are available when this clinic has GT Growth AI access."}
+            </p>
+            {premium.teaser?.estimatedOpportunityLabel ? (
+              <small>Opportunity: {premium.teaser.estimatedOpportunityLabel}</small>
+            ) : null}
+          </div>
+          <Link className="button button--secondary" to={ctaHref}>
+            Open Agent workspace
+          </Link>
+        </section>
+      );
+    }
+
     return (
       <section className="report-ai-sections report-ai-sections--locked" aria-label="GT Growth AI locked">
         <div className="report-ai-sections__header">
@@ -71,6 +95,48 @@ export function ReportAiSections({ payload, premium }: Props) {
 
   if (!payload.summary && !hasInsights && !hasActions && !payload.businessOpportunity) {
     return null;
+  }
+
+  if (compact) {
+    const leadInsight = payload.insights[0];
+    const summary =
+      payload.summary ??
+      payload.businessOpportunity?.summary ??
+      leadInsight?.summary ??
+      "AI reviewed this report and found the most relevant next actions.";
+    const actions = payload.nextActions.slice(0, 3);
+
+    return (
+      <section className="report-ai-compact" aria-label="GT Growth AI report insights">
+        <div className="report-ai-compact__copy">
+          <span className="report-ai-compact__eyebrow">GT Growth AI</span>
+          <h2>{payload.businessOpportunity?.title ?? leadInsight?.title ?? "AI insight"}</h2>
+          <p>{summary}</p>
+          {payload.businessOpportunity?.estimatedValueLabel || payload.businessOpportunity?.estimatedValue != null ? (
+            <small>
+              Estimated value:{" "}
+              {payload.businessOpportunity.estimatedValueLabel ??
+                formatEvidenceValue(payload.businessOpportunity.estimatedValue ?? "")}
+            </small>
+          ) : null}
+        </div>
+
+        {actions.length ? (
+          <ol className="report-ai-compact__actions">
+            {actions.map((action) => (
+              <li key={action.id}>
+                <strong>{action.title}</strong>
+                <span>{action.description}</span>
+              </li>
+            ))}
+          </ol>
+        ) : null}
+
+        <Link className="button button--secondary" to={ctaHref}>
+          Continue in Agent workspace
+        </Link>
+      </section>
+    );
   }
 
   return (

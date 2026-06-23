@@ -284,7 +284,7 @@ export function CheckInOutPage() {
     <div className="page-stack page-stack--workspace analytics-report internal-workspace checkin-report">
       <PageHeader
         eyebrow="Operational"
-        title="Check In/Out"
+        title="Check in / out"
         description="Core-database treatment flow visibility for arrivals, checkouts, therapist delivery, and related sales context."
         actions={
           <div className="filter-row internal-workspace__filters checkin-report__filters">

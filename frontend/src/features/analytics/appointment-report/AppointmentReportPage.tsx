@@ -16,11 +16,45 @@ type AppointmentRow = AppointmentReportResponse["appointments"][number] & {
 };
 
 function formatRate(value: number | null | undefined) {
-  return value == null ? "No data" : `${value}%`;
+  return value == null ? "—" : `${value}%`;
 }
 
 function formatCount(value: number | null | undefined) {
+  return value == null ? "—" : value.toLocaleString("en-US");
+}
+
+function formatCountValue(value: number | null | undefined) {
   return (value ?? 0).toLocaleString("en-US");
+}
+
+function formatCompletionRate(completed: number | null | undefined, total: number | null | undefined) {
+  if (!total) {
+    return "No completed-rate signal yet";
+  }
+
+  return `${Math.round(((completed ?? 0) / total) * 100)}% completion rate`;
+}
+
+function getAppointmentStatusTone(status: string) {
+  const normalized = status.toLowerCase();
+
+  if (normalized.includes("complete") || normalized.includes("done") || normalized.includes("finished")) {
+    return "success";
+  }
+
+  if (normalized.includes("cancel") || normalized.includes("no-show") || normalized.includes("no show")) {
+    return "danger";
+  }
+
+  if (normalized.includes("check") || normalized.includes("progress") || normalized.includes("start")) {
+    return "warning";
+  }
+
+  if (normalized.includes("book") || normalized.includes("upcoming") || normalized.includes("confirm")) {
+    return "info";
+  }
+
+  return "neutral";
 }
 
 export function AppointmentReportPage() {
@@ -78,25 +112,31 @@ export function AppointmentReportPage() {
       })),
     [data?.appointments],
   );
+  const cancelledNoShowCount = data ? (data.cancelledCount ?? 0) + (data.noShowCount ?? 0) : null;
 
   if (!currentClinic) {
     return (
-      <div className="page-stack page-stack--workspace analytics-report sales-details-report">
+      <div className="page-stack page-stack--workspace analytics-report appointment-report">
         <EmptyState label="No clinic selected" detail="Choose a clinic to view the appointment report." />
       </div>
     );
   }
 
   return (
-    <div className="page-stack page-stack--workspace analytics-report sales-details-report">
+    <div className="page-stack page-stack--workspace analytics-report appointment-report">
       <PageHeader
-        eyebrow="GT Growth AI"
-        title="Daily Appointment Report"
-        description="Appointment flow, utilization signals, rebooking opportunities, and premium AI actions for one clinic day."
+        title="Daily appointments"
+        description="Monitor today’s schedule, completion, cancellations, and rebooking opportunities."
+        actions={
+          <div className={`appointment-report__freshness ${loading ? "appointment-report__freshness--loading" : ""}`.trim()}>
+            <span>{loading ? "Refreshing" : error ? "Issue" : "Updated"}</span>
+            <strong>{data?.dateKey ?? date}</strong>
+          </div>
+        }
       />
 
-      <section className="sales-details-report__toolbar">
-        <div className="sales-details-report__toolbar-group sales-details-report__toolbar-group--filters">
+      <section className="appointment-report__filters" aria-label="Appointment report filters">
+        <div className="appointment-report__filter-fields">
           <label className="field">
             <span>Report date</span>
             <input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
@@ -105,7 +145,7 @@ export function AppointmentReportPage() {
             <span>Timezone</span>
             <input value={timezone} onChange={(event) => setTimezone(event.target.value)} />
           </label>
-          <button className="button button--secondary" onClick={() => setDate(today())}>
+          <button type="button" className="button button--secondary" onClick={() => setDate(today())}>
             Today
           </button>
         </div>
@@ -113,41 +153,42 @@ export function AppointmentReportPage() {
 
       {error ? <ErrorState label="Appointment report could not be loaded" detail={error} /> : null}
 
-      <div className="sales-details-report__summary">
-        <div className="sales-details-report__summary-card">
-          <span className="sales-details-report__summary-label">Appointments</span>
+      <div className="appointment-report__kpis">
+        <article className="appointment-kpi">
+          <span>Appointments</span>
           <strong>{formatCount(data?.totalAppointments)}</strong>
-        </div>
-        <div className="sales-details-report__summary-card">
-          <span className="sales-details-report__summary-label">Completed</span>
+          <small>{data ? `${rows.length.toLocaleString("en-US")} rows shown` : "Waiting for report data"}</small>
+        </article>
+        <article className="appointment-kpi appointment-kpi--success">
+          <span>Completed</span>
           <strong>{formatCount(data?.completedCount)}</strong>
-        </div>
-        <div className="sales-details-report__summary-card">
-          <span className="sales-details-report__summary-label">Upcoming</span>
+          <small>{formatCompletionRate(data?.completedCount, data?.totalAppointments)}</small>
+        </article>
+        <article className="appointment-kpi">
+          <span>Upcoming</span>
           <strong>{formatCount(data?.upcomingCount)}</strong>
-        </div>
-        <div className="sales-details-report__summary-card">
-          <span className="sales-details-report__summary-label">Cancel / no-show</span>
-          <strong>
-            {formatRate(data?.cancellationRatePercent)} / {formatRate(data?.noShowRatePercent)}
-          </strong>
-        </div>
-        <div className="sales-details-report__summary-card">
-          <span className="sales-details-report__summary-label">Rebooking opportunity</span>
-          <strong>
-            {data?.completedCustomersWithoutFutureBookingCount == null
-              ? "No data"
-              : formatCount(data.completedCustomersWithoutFutureBookingCount)}
-          </strong>
-        </div>
+          <small>Appointments still ahead</small>
+        </article>
+        <article className="appointment-kpi appointment-kpi--danger">
+          <span>Cancelled / no-show</span>
+          <strong>{formatCount(cancelledNoShowCount)}</strong>
+          <small>
+            {formatRate(data?.cancellationRatePercent)} cancelled · {formatRate(data?.noShowRatePercent)} no-show
+          </small>
+        </article>
+        <article className="appointment-kpi appointment-kpi--warning">
+          <span>Rebooking opportunity</span>
+          <strong>{formatCount(data?.completedCustomersWithoutFutureBookingCount)}</strong>
+          <small>Completed customers without a future booking</small>
+        </article>
       </div>
 
       {data?.gtGrowthAi || data?.premium ? (
-        <ReportAiSections payload={data.gtGrowthAi ?? null} premium={data.premium ?? null} />
+        <ReportAiSections payload={data.gtGrowthAi ?? null} premium={data.premium ?? null} compact ctaHref="/ai/agent-hub" />
       ) : null}
 
       <Panel
-        className="analytics-report__panel sales-details-report__panel"
+        className="analytics-report__panel appointment-report__panel"
         title="Appointments"
         subtitle={`${rows.length.toLocaleString("en-US")} appointments shown for ${data?.dateKey ?? date}.`}
       >
@@ -160,11 +201,43 @@ export function AppointmentReportPage() {
             rows={rows}
             rowKey={(row) => row.rowId}
             columns={[
-              { key: "time", header: "Time", render: (row) => row.time },
-              { key: "customer", header: "Customer", render: (row) => row.customerName },
-              { key: "service", header: "Service", render: (row) => row.serviceName },
-              { key: "therapist", header: "Therapist", render: (row) => row.therapistName },
-              { key: "status", header: "Status", render: (row) => row.status },
+              { key: "time", header: "Time", render: (row) => <strong className="appointment-table__time">{row.time}</strong> },
+              {
+                key: "customer",
+                header: "Customer",
+                render: (row) => (
+                  <span className="appointment-table__primary" title={row.customerName}>
+                    {row.customerName}
+                  </span>
+                ),
+              },
+              {
+                key: "service",
+                header: "Service",
+                render: (row) => (
+                  <span title={row.serviceName} className="appointment-table__service">
+                    {row.serviceName}
+                  </span>
+                ),
+              },
+              {
+                key: "therapist",
+                header: "Therapist",
+                render: (row) => (
+                  <span title={row.therapistName}>
+                    {row.therapistName}
+                  </span>
+                ),
+              },
+              {
+                key: "status",
+                header: "Status",
+                render: (row) => (
+                  <span className={`status-chip status-chip--${getAppointmentStatusTone(row.status)}`.trim()}>
+                    {row.status}
+                  </span>
+                ),
+              },
             ]}
           />
         ) : null}
@@ -178,7 +251,7 @@ export function AppointmentReportPage() {
               rowKey={(row) => row.serviceName}
               columns={[
                 { key: "service", header: "Service", render: (row) => row.serviceName },
-                { key: "count", header: "Appointments", render: (row) => formatCount(row.count) },
+                { key: "count", header: "Appointments", render: (row) => formatCountValue(row.count) },
               ]}
             />
           ) : (
@@ -193,7 +266,7 @@ export function AppointmentReportPage() {
               rowKey={(row) => row.therapistName}
               columns={[
                 { key: "therapist", header: "Therapist", render: (row) => row.therapistName },
-                { key: "count", header: "Appointments", render: (row) => formatCount(row.count) },
+                { key: "count", header: "Appointments", render: (row) => formatCountValue(row.count) },
               ]}
             />
           ) : (
@@ -208,7 +281,7 @@ export function AppointmentReportPage() {
               rowKey={(row) => row.label}
               columns={[
                 { key: "hour", header: "Hour", render: (row) => row.label },
-                { key: "count", header: "Appointments", render: (row) => formatCount(row.count) },
+                { key: "count", header: "Appointments", render: (row) => formatCountValue(row.count) },
               ]}
             />
           ) : (
@@ -223,7 +296,7 @@ export function AppointmentReportPage() {
               rowKey={(row) => row.label}
               columns={[
                 { key: "hour", header: "Hour", render: (row) => row.label },
-                { key: "count", header: "Appointments", render: (row) => formatCount(row.count) },
+                { key: "count", header: "Appointments", render: (row) => formatCountValue(row.count) },
               ]}
             />
           ) : (

@@ -38,12 +38,12 @@ export const directoryItems: DirectoryItem[] = [
     featured: true,
   },
   {
-    id: "customer-relationship-agent",
-    title: "Customer Relationship Agent",
-    description: "Learn customer behavior, find priority follow-ups, and generate owner-safe messages.",
-    route: "/ai/customer-relationship-agent",
+    id: "agent-workspace",
+    title: "Agent workspace",
+    description: "Ask across finance, customers, business trends, and appointment flow.",
+    route: "/ai/agent-hub",
     group: "Featured",
-    eyebrow: "AI Agent",
+    eyebrow: "AI",
     window: "year",
     featured: true,
   },
@@ -68,7 +68,7 @@ export const directoryItems: DirectoryItem[] = [
   },
   {
     id: "sales-details",
-    title: "Sales details",
+    title: "Daily payments",
     description: "Invoice lines, discounts, and service-level sales detail.",
     route: "/analytics/payment-report",
     group: "Revenue",
@@ -77,7 +77,7 @@ export const directoryItems: DirectoryItem[] = [
   },
   {
     id: "sales-by-salesperson",
-    title: "Sales by sales person",
+    title: "Sales by person",
     description: "Seller ranking with transaction-level drilldown.",
     route: "/analytics/sales-by-seller",
     group: "Revenue",
@@ -86,7 +86,7 @@ export const directoryItems: DirectoryItem[] = [
   },
   {
     id: "commission-report",
-    title: "Commission report",
+    title: "Commission",
     description: "Rule-based monthly commission snapshots with staff payout drilldown.",
     route: "/analytics/commission",
     group: "Revenue",
@@ -95,7 +95,7 @@ export const directoryItems: DirectoryItem[] = [
   },
   {
     id: "customer-by-salesperson",
-    title: "Customer by salesperson",
+    title: "Customers by salesperson",
     description: "Customers attributed to each sales person and their spend.",
     route: "/analytics/customers-by-salesperson",
     group: "Revenue",
@@ -149,7 +149,7 @@ export const directoryItems: DirectoryItem[] = [
   },
   {
     id: "check-in-out",
-    title: "Check In/Out",
+    title: "Check in / out",
     description: "Arrival-to-checkout treatment flow with therapist, helper, and order context.",
     route: "/operational/check-in-out",
     group: "Operations",

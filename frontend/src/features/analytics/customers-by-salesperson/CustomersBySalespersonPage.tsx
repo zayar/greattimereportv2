@@ -191,7 +191,7 @@ export function CustomersBySalespersonPage() {
     <div className="page-stack page-stack--workspace analytics-report customer-salesperson-report">
       <PageHeader
         eyebrow="Revenue"
-        title="Customer by salesperson"
+        title="Customers by salesperson"
         description="Select a sales person, then load the customer list attributed to them."
         actions={
           <div className="filter-row analytics-report__filters">
@@ -206,7 +206,7 @@ export function CustomersBySalespersonPage() {
         }
       />
 
-      {error ? <ErrorState label="Customer by salesperson could not be loaded" detail={error} /> : null}
+      {error ? <ErrorState label="Customers by salesperson could not be loaded" detail={error} /> : null}
 
       <Panel
         className="analytics-report__panel customer-salesperson-report__selector-panel"

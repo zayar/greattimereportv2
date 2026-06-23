@@ -114,13 +114,13 @@ const quickAccessConfig: HomeCardConfig[] = [
     cta: "View Directory →",
   },
   {
-    id: "customer-relationship-agent",
-    title: "Customer Relationship Agent",
-    description: "Learn customer behavior, find priority follow-ups, and generate owner-safe messages.",
-    eyebrow: "AI Agent",
+    id: "agent-workspace",
+    title: "Agent workspace",
+    description: "Ask across finance, customers, business trends, and live appointment flow.",
+    eyebrow: "AI",
     iconNode: <IconAgent />,
     tone: "tertiary",
-    cta: "Open Agent →",
+    cta: "Ask GT →",
   },
 ];
 
@@ -145,7 +145,7 @@ const reportCardsConfig: HomeCardConfig[] = [
   },
   {
     id: "sales-by-salesperson",
-    title: "Sales by Person",
+    title: "Sales by person",
     description: "Staff commission tracking",
     eyebrow: "Performance",
     iconNode: <IconPerformance />,
@@ -154,7 +154,7 @@ const reportCardsConfig: HomeCardConfig[] = [
   },
   {
     id: "customer-by-salesperson",
-    title: "Customer by Salesperson",
+    title: "Customers by salesperson",
     description: "Relationship assignments",
     eyebrow: "CRM",
     iconNode: <IconCRM />,

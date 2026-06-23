@@ -51,8 +51,6 @@ import { TelegramSettingsPage } from "./features/settings/telegram/TelegramSetti
 import { CommissionSettingsPage } from "./features/settings/commission/CommissionSettingsPage";
 import { CommissionRuleEditorPage } from "./features/settings/commission/CommissionRuleEditorPage";
 import { AiControlPanelPage } from "./features/settings/ai-control-panel/AiControlPanelPage";
-import { CustomerRelationshipAgentPage } from "./features/ai/customer-relationship/CustomerRelationshipAgentPage";
-import { GtGrowthAiSalesAssistantPage } from "./features/ai/gt-growth-ai-sales-assistant/GtGrowthAiSalesAssistantPage";
 import { AgentHubPage } from "./features/ai/agent-hub/AgentHubPage";
 
 export default function App() {
@@ -114,8 +112,8 @@ export default function App() {
                     <Route path="analytics/customers" element={<CustomerPortalPage />} />
                     <Route path="analytics/customers/:customerSlug" element={<CustomerDetailPage />} />
                     <Route path="ai/agent-hub" element={<AgentHubPage />} />
-                    <Route path="ai/gt-growth-ai-sales-assistant" element={<GtGrowthAiSalesAssistantPage />} />
-                    <Route path="ai/customer-relationship-agent" element={<CustomerRelationshipAgentPage />} />
+                    <Route path="ai/gt-growth-ai-sales-assistant" element={<Navigate to="/ai/agent-hub" replace />} />
+                    <Route path="ai/customer-relationship-agent" element={<Navigate to="/ai/agent-hub" replace />} />
                     <Route path="settings/sales-document" element={<SalesDocumentSettingsPage />} />
                     <Route path="settings/commission" element={<CommissionSettingsPage />} />
                     <Route path="settings/commission/rules/new" element={<CommissionRuleEditorPage />} />

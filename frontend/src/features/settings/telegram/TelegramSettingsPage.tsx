@@ -117,7 +117,7 @@ const REPORT_ROUTING_COLUMNS = [
   { key: "payment", label: "Payment" },
   { key: "weekly", label: "Weekly" },
   { key: "owner_ai", label: "AI Owner" },
-  { key: "sales_assistant", label: "Sales Assistant" },
+  { key: "sales_assistant", label: "AI tasks" },
   { key: "owner_progress", label: "Owner Progress" },
 ] as const;
 
@@ -830,11 +830,11 @@ export function TelegramSettingsPage() {
         targetChatId: selectedTarget.telegramChatId,
       });
       setNotice(
-        `GT Growth AI Sales Assistant sent ${result.actionCount} task${result.actionCount === 1 ? "" : "s"} to ${result.salesTargetLabel}. Check that Telegram chat, or send /tasks there to refresh.`,
+        `GT Growth AI sent ${result.actionCount} task${result.actionCount === 1 ? "" : "s"} to ${result.salesTargetLabel}. Check that Telegram chat, or send /tasks there to refresh.`,
       );
       await loadStatus(false);
     } catch (error) {
-      setErrorMessage(getApiErrorMessage(error, "GT Growth AI Sales Assistant test could not be sent."));
+      setErrorMessage(getApiErrorMessage(error, "GT Growth AI task test could not be sent."));
     } finally {
       setBusyAction(null);
     }
@@ -1110,7 +1110,7 @@ export function TelegramSettingsPage() {
         <Panel
           className="telegram-settings__card telegram-settings__card--wide"
           title="GT Growth AI"
-          subtitle="Paid feature status for AI insights, Sales Assistant tasks, business opportunities, and Myanmar Telegram recommendations."
+          subtitle="Paid feature status for AI insights, task delivery, business opportunities, and Myanmar Telegram recommendations."
           action={
             <span
               className={`telegram-settings__badge telegram-settings__badge--${
@@ -1140,7 +1140,7 @@ export function TelegramSettingsPage() {
           </div>
 
           <div className="telegram-settings__callout">
-            <strong>{gtGrowthAiAccess?.enabled ? "Premium GT Growth AI is active" : "Unlock GT Growth AI Sales Assistant"}</strong>
+            <strong>{gtGrowthAiAccess?.enabled ? "Premium GT Growth AI is active" : "Unlock GT Growth AI task delivery"}</strong>
             <span>
               {gtGrowthAiAccess?.enabled
                 ? "Paid clinics can receive AI report sections and daily money-making task lists for the sales team."
@@ -1156,7 +1156,7 @@ export function TelegramSettingsPage() {
 
         <Panel
           className="telegram-settings__card telegram-settings__card--wide"
-          title="GT Growth AI Sales Assistant"
+          title="GT Growth AI task delivery"
           subtitle={
             gtGrowthAiAccess?.enabled
               ? "Send daily money-making follow-up tasks to the sales lead and progress summaries to the owner."
@@ -1174,14 +1174,14 @@ export function TelegramSettingsPage() {
         >
           {!gtGrowthAiAccess?.enabled ? (
             <div className="telegram-settings__callout">
-              <strong>Unlock GT Growth AI Sales Assistant</strong>
+              <strong>Unlock GT Growth AI task delivery</strong>
               <span>
                 GreatTime AI finds customers to rebook, package customers to follow up, VIP customers to recover, and
                 payments to follow up. Upgrade to send daily task lists to your sales team.
               </span>
             </div>
           ) : !selectedTarget || !selectedDraft ? (
-            <div className="inline-note">Link and select a Telegram target before configuring Sales Assistant delivery.</div>
+            <div className="inline-note">Link and select a Telegram target before configuring AI task delivery.</div>
           ) : (
             <>
               <div className="telegram-settings__two-up">
@@ -1220,7 +1220,7 @@ export function TelegramSettingsPage() {
                   <span className="telegram-settings__switch-handle" />
                 </span>
                 <div className="telegram-settings__toggle-copy">
-                  <strong>Enable daily Sales Assistant tasks</strong>
+                  <strong>Enable daily AI tasks</strong>
                   <span>Send the task list to the linked sales lead target at the selected time.</span>
                 </div>
               </label>
@@ -1266,22 +1266,22 @@ export function TelegramSettingsPage() {
                   onClick={() => void handleSaveSettings()}
                   disabled={busyAction !== null || !hasChanges}
                 >
-                  {busyAction === "save" ? "Saving..." : "Save Sales Assistant settings"}
+                  {busyAction === "save" ? "Saving..." : "Save AI task settings"}
                 </button>
                 <button
                   className="button telegram-settings__button telegram-settings__button--secondary"
                   onClick={() => void handleSendSalesAssistantTest()}
                   disabled={busyAction !== null}
                 >
-                  {busyAction === "sales_test" ? "Sending..." : "Send Sales Assistant test"}
+                  {busyAction === "sales_test" ? "Sending..." : "Send AI task test"}
                 </button>
                 <button
                   className="button telegram-settings__button telegram-settings__button--secondary"
                   onClick={() => {
-                    window.location.href = "/ai/gt-growth-ai-sales-assistant";
+                    window.location.href = "/ai/agent-hub";
                   }}
                 >
-                  Open Sales Assistant
+                  Open Agent workspace
                 </button>
               </div>
             </>
