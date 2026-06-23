@@ -1,5 +1,9 @@
 import { firestoreDb } from "../../config/firebase.js";
 import { nowIso, sanitizeError } from "./safety.js";
+import {
+  GT_AGENT_LEARNING_SCHEDULES_COLLECTION,
+  GT_AGENT_LEARNING_WATERMARKS_COLLECTION,
+} from "./memory/memory-types.js";
 
 const LEARNING_RUNS_COLLECTION = "gtAgentLearningRunsV1";
 const LOCKS_COLLECTION = "gtAgentLearningLocksV1";
@@ -7,10 +11,41 @@ const LOCKS_COLLECTION = "gtAgentLearningLocksV1";
 export type AgentLearningJobType =
   | "customer_profiles"
   | "finance_daily_snapshot"
+  | "service_profiles"
+  | "practitioner_profiles"
   | "service_practitioner_profiles"
+  | "appointment_operational_snapshot"
   | "appointment_daily_profile"
   | "feedback_learning"
-  | "owner_insight_cards";
+  | "recommendation_outcome_observer"
+  | "owner_insight_cards"
+  | "weekly_business_review"
+  | "memory_maintenance";
+
+export type AgentLearningRunCounts = {
+  scanned: number;
+  created: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+};
+
+export type AgentLearningScheduleRecord = {
+  id: string;
+  clinicId: string;
+  clinicCode: string;
+  timezone: string;
+  enabled: boolean;
+  enabledJobTypes: AgentLearningJobType[];
+  cadenceOverrides?: Partial<Record<AgentLearningJobType, string>>;
+  operatingDays?: number[];
+  localOpeningTime?: string | null;
+  localClosingTime?: string | null;
+  operationalSnapshotIntervalMinutes?: 15 | 30 | 60;
+  offHoursOperationalSnapshotEnabled?: boolean;
+  updatedAt?: string;
+  updatedBy?: string | null;
+};
 
 function lockId(params: { clinicId: string; jobType: AgentLearningJobType; bucket: string }) {
   return `${encodeURIComponent(params.clinicId)}__${params.jobType}__${params.bucket}`;
@@ -55,7 +90,9 @@ export async function saveAgentLearningRun(params: {
   bucket: string;
   status: "started" | "completed" | "skipped" | "failed";
   rowCount?: number;
+  counts?: Partial<AgentLearningRunCounts>;
   sourceWatermark?: string | null;
+  nextExpectedRunAt?: string | null;
   error?: unknown;
 }) {
   const id = `${lockId(params)}__${params.status}__${Date.now().toString(36)}`;
@@ -67,8 +104,72 @@ export async function saveAgentLearningRun(params: {
     bucket: params.bucket,
     status: params.status,
     rowCount: params.rowCount ?? 0,
+    counts: {
+      scanned: params.counts?.scanned ?? params.rowCount ?? 0,
+      created: params.counts?.created ?? 0,
+      updated: params.counts?.updated ?? 0,
+      skipped: params.counts?.skipped ?? 0,
+      failed: params.counts?.failed ?? (params.status === "failed" ? 1 : 0),
+    },
     sourceWatermark: params.sourceWatermark ?? null,
+    nextExpectedRunAt: params.nextExpectedRunAt ?? null,
     error: params.error ? sanitizeError(params.error) : null,
     createdAt: nowIso(),
   });
+}
+
+function watermarkId(params: { clinicId: string; jobType: AgentLearningJobType }) {
+  return `${encodeURIComponent(params.clinicId)}__${params.jobType}`;
+}
+
+export async function getAgentLearningWatermark(params: {
+  clinicId: string;
+  jobType: AgentLearningJobType;
+}) {
+  const snapshot = await firestoreDb()
+    .collection(GT_AGENT_LEARNING_WATERMARKS_COLLECTION)
+    .doc(watermarkId(params))
+    .get();
+  const data = snapshot.data();
+
+  return typeof data?.sourceWatermark === "string" ? data.sourceWatermark : null;
+}
+
+export async function saveAgentLearningWatermark(params: {
+  clinicId: string;
+  jobType: AgentLearningJobType;
+  sourceWatermark: string;
+  bucket: string;
+}) {
+  await firestoreDb().collection(GT_AGENT_LEARNING_WATERMARKS_COLLECTION).doc(watermarkId(params)).set(
+    {
+      clinicId: params.clinicId,
+      jobType: params.jobType,
+      sourceWatermark: params.sourceWatermark,
+      bucket: params.bucket,
+      updatedAt: nowIso(),
+    },
+    { merge: true },
+  );
+}
+
+function isScheduleRecord(data: FirebaseFirestore.DocumentData | undefined): data is AgentLearningScheduleRecord {
+  return Boolean(data?.clinicId && data?.clinicCode && data?.timezone && Array.isArray(data?.enabledJobTypes));
+}
+
+export async function listAgentLearningSchedules(params?: {
+  clinicIds?: string[];
+  limit?: number;
+}) {
+  const snapshot = await firestoreDb()
+    .collection(GT_AGENT_LEARNING_SCHEDULES_COLLECTION)
+    .limit(Math.min(Math.max(params?.limit ?? 200, 1), 500))
+    .get();
+  const clinicFilter = new Set(params?.clinicIds ?? []);
+
+  return snapshot.docs
+    .map((doc) => ({ id: doc.id, ...doc.data() }))
+    .filter(isScheduleRecord)
+    .filter((schedule) => schedule.enabled)
+    .filter((schedule) => (clinicFilter.size ? clinicFilter.has(schedule.clinicId) : true));
 }

@@ -1,29 +1,257 @@
+import { createHash } from "node:crypto";
 import { env } from "../../config/env.js";
+import { formatDateKeyInTimeZone, formatTimeKeyInTimeZone, normalizeTimeZone } from "../telegram/time.js";
 import { getPaymentReport } from "../reports/payment-report.service.js";
 import { getSalesReport } from "../reports/sales-report.service.js";
 import { runCustomerRelationshipLearning } from "../reports/customer-relationship-learning.service.js";
 import { getServiceBehaviorReport } from "../reports/service-behavior.service.js";
 import { getTherapistPortalReport } from "../reports/therapist-portal.service.js";
+import { searchCustomerRelationshipProfiles } from "../reports/customer-relationship-profile.repository.js";
 import { fetchLiveAppointmentSnapshot } from "./appointment-live.service.js";
+import { listUnprocessedAgentFeedback, markAgentFeedbackProcessed } from "./feedback.repository.js";
 import {
   acquireAgentLearningLock,
+  getAgentLearningWatermark,
+  listAgentLearningSchedules,
   saveAgentLearningRun,
+  saveAgentLearningWatermark,
   type AgentLearningJobType,
+  type AgentLearningRunCounts,
+  type AgentLearningScheduleRecord,
 } from "./learning.repository.js";
+import { learnMemoriesFromFeedbackEvents } from "./memory/memory-writer.js";
+import { getInsightCardById, saveFactSnapshot, saveInsightCard } from "./memory/memory.repository.js";
+import type { AgentDataStatus } from "./types.js";
 
-const DEFAULT_JOB_TYPES: AgentLearningJobType[] = [
+export const DEFAULT_JOB_TYPES: AgentLearningJobType[] = [
   "customer_profiles",
   "finance_daily_snapshot",
-  "service_practitioner_profiles",
+  "service_profiles",
+  "practitioner_profiles",
+  "appointment_operational_snapshot",
   "appointment_daily_profile",
   "feedback_learning",
+  "recommendation_outcome_observer",
   "owner_insight_cards",
+  "weekly_business_review",
+  "memory_maintenance",
 ];
 
-function previousDateKey(dateKey: string) {
+type AgentLearningJobOutcome = {
+  rowCount: number;
+  counts: AgentLearningRunCounts;
+  sourceWatermark: string;
+  dataStatus?: AgentDataStatus;
+};
+
+const DAILY_JOBS = new Set<AgentLearningJobType>([
+  "customer_profiles",
+  "finance_daily_snapshot",
+  "service_profiles",
+  "practitioner_profiles",
+  "appointment_daily_profile",
+  "owner_insight_cards",
+  "memory_maintenance",
+]);
+const HOURLY_JOBS = new Set<AgentLearningJobType>(["feedback_learning", "recommendation_outcome_observer"]);
+
+function emptyCounts(overrides?: Partial<AgentLearningRunCounts>): AgentLearningRunCounts {
+  return {
+    scanned: overrides?.scanned ?? 0,
+    created: overrides?.created ?? 0,
+    updated: overrides?.updated ?? 0,
+    skipped: overrides?.skipped ?? 0,
+    failed: overrides?.failed ?? 0,
+  };
+}
+
+function stableId(prefix: string, parts: string[]) {
+  return `${prefix}_${createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 24)}`;
+}
+
+function addDays(dateKey: string, days: number) {
   const date = new Date(`${dateKey}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() - 1);
+  date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
+}
+
+function previousDateKey(dateKey: string) {
+  return addDays(dateKey, -1);
+}
+
+function nextExpiry(hours: number) {
+  return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+}
+
+export function buildLearningBucket(params: {
+  jobType: AgentLearningJobType;
+  now?: Date;
+  timezone?: string;
+  operationalIntervalMinutes?: 15 | 30 | 60;
+}) {
+  const now = params.now ?? new Date();
+  const timezone = normalizeTimeZone(params.timezone || env.DEFAULT_TIMEZONE);
+  const dateKey = formatDateKeyInTimeZone(now, timezone);
+  const timeKey = formatTimeKeyInTimeZone(now, timezone);
+  const [hour, minute] = timeKey.split(":").map(Number);
+
+  if (params.jobType === "appointment_operational_snapshot") {
+    const interval = params.operationalIntervalMinutes ?? 15;
+    const bucketMinute = Math.floor(minute / interval) * interval;
+    return `${dateKey}T${String(hour).padStart(2, "0")}:${String(bucketMinute).padStart(2, "0")}+${timezone}`;
+  }
+
+  if (HOURLY_JOBS.has(params.jobType)) {
+    return `${dateKey}T${String(hour).padStart(2, "0")}:00+${timezone}`;
+  }
+
+  if (params.jobType === "weekly_business_review") {
+    const date = new Date(`${dateKey}T00:00:00.000Z`);
+    const diff = date.getUTCDay() === 0 ? -6 : 1 - date.getUTCDay();
+    date.setUTCDate(date.getUTCDate() + diff);
+    return `${date.toISOString().slice(0, 10)}+${timezone}`;
+  }
+
+  return DAILY_JOBS.has(params.jobType) ? `${dateKey}+${timezone}` : `${dateKey}+${timezone}`;
+}
+
+function isWithinOperatingHours(schedule: AgentLearningScheduleRecord, now: Date) {
+  const timezone = normalizeTimeZone(schedule.timezone);
+  const dateKey = formatDateKeyInTimeZone(now, timezone);
+  const timeKey = formatTimeKeyInTimeZone(now, timezone);
+  const day = new Date(`${dateKey}T00:00:00.000Z`).getUTCDay();
+  const operatingDays = schedule.operatingDays?.length ? schedule.operatingDays : [0, 1, 2, 3, 4, 5, 6];
+  const opening = schedule.localOpeningTime ?? "00:00";
+  const closing = schedule.localClosingTime ?? "23:59";
+
+  return operatingDays.includes(day) && timeKey >= opening && timeKey <= closing;
+}
+
+export function isScheduleDueForJob(params: {
+  schedule: AgentLearningScheduleRecord;
+  jobType: AgentLearningJobType;
+  now?: Date;
+}) {
+  if (!params.schedule.enabled || !params.schedule.enabledJobTypes.includes(params.jobType)) {
+    return false;
+  }
+
+  if (params.jobType === "appointment_operational_snapshot") {
+    return isWithinOperatingHours(params.schedule, params.now ?? new Date()) || Boolean(params.schedule.offHoursOperationalSnapshotEnabled);
+  }
+
+  return true;
+}
+
+async function saveSnapshot(params: {
+  clinicId: string;
+  clinicCode: string;
+  snapshotType: string;
+  bucket: string;
+  source: string;
+  checkedAt: string;
+  dataStatus: AgentDataStatus;
+  dateRange?: { fromDate: string; toDate: string; timezone?: string };
+  summary: Record<string, unknown>;
+  ttlHours?: number;
+}) {
+  await saveFactSnapshot({
+    id: stableId("fact", [params.clinicId, params.snapshotType, params.bucket]),
+    clinicId: params.clinicId,
+    clinicCode: params.clinicCode,
+    snapshotType: params.snapshotType,
+    bucket: params.bucket,
+    source: params.source,
+    checkedAt: params.checkedAt,
+    dataStatus: params.dataStatus,
+    dateRange: params.dateRange,
+    summary: params.summary,
+    expiresAt: params.ttlHours ? nextExpiry(params.ttlHours) : null,
+  });
+}
+
+async function runFeedbackLearningJob(params: { clinicId: string }): Promise<AgentLearningJobOutcome> {
+  const feedbackEvents = await listUnprocessedAgentFeedback({ clinicId: params.clinicId, limit: 100 });
+  const learned = await learnMemoriesFromFeedbackEvents(feedbackEvents);
+  await markAgentFeedbackProcessed({
+    feedbackIds: feedbackEvents.map((event) => event.id),
+  });
+
+  return {
+    rowCount: feedbackEvents.length,
+    counts: emptyCounts({
+      scanned: feedbackEvents.length,
+      created: learned.length,
+      skipped: feedbackEvents.length - learned.length,
+    }),
+    sourceWatermark: feedbackEvents.at(-1)?.createdAt ?? new Date().toISOString(),
+  };
+}
+
+async function runOwnerInsightCardsJob(params: {
+  clinicId: string;
+  clinicCode: string;
+  bucket: string;
+}): Promise<AgentLearningJobOutcome> {
+  const result = await searchCustomerRelationshipProfiles({
+    clinicId: params.clinicId,
+    segment: "unused_package_balance",
+    sortBy: "priorityScore",
+    sortDirection: "desc",
+    limit: 10,
+    offset: 0,
+  });
+  const checkedAt = new Date().toISOString();
+  let created = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  for (const profile of result.rows.filter((row) => row.remainingPackageSessions > 0).slice(0, 5)) {
+    const dedupeKey = `unused_package_recovery:${profile.customerKey}`;
+    const id = stableId("card", [params.clinicId, dedupeKey]);
+    const existing = await getInsightCardById(id);
+
+    if (
+      existing &&
+      ["dismissed", "remind_later", "done"].includes(existing.status) &&
+      new Date(existing.expiresAt).getTime() > Date.now()
+    ) {
+      skipped += 1;
+      continue;
+    }
+
+    await saveInsightCard({
+      id,
+      clinicId: params.clinicId,
+      dedupeKey,
+      type: "unused_package_recovery",
+      impactArea: "customer_growth",
+      title: "Unused package recovery opportunity",
+      summary: `${profile.customerName} has ${profile.remainingPackageSessions} unused package session(s).`,
+      basePriorityScore: Math.min(100, Math.max(30, profile.priorityScore)),
+      personalizedPriorityScore: Math.min(100, Math.max(30, profile.priorityScore + 8)),
+      evidenceRefs: [`customerRelationshipProfiles:${profile.customerKey}`],
+      sourceTools: ["customer_profiles"],
+      checkedAt,
+      expiresAt: nextExpiry(7 * 24),
+      status: existing?.status === "viewed" ? "viewed" : "new",
+      verificationNeeded: true,
+      createdAt: existing?.createdAt ?? checkedAt,
+      updatedAt: checkedAt,
+    });
+
+    if (existing) {
+      updated += 1;
+    } else {
+      created += 1;
+    }
+  }
+
+  return {
+    rowCount: result.rows.length,
+    counts: emptyCounts({ scanned: result.rows.length, created, updated, skipped }),
+    sourceWatermark: checkedAt,
+  };
 }
 
 async function runJob(params: {
@@ -31,7 +259,9 @@ async function runJob(params: {
   clinicCode: string;
   jobType: AgentLearningJobType;
   dateKey: string;
-}) {
+  bucket: string;
+  timezone: string;
+}): Promise<AgentLearningJobOutcome> {
   switch (params.jobType) {
     case "customer_profiles": {
       const summary = await runCustomerRelationshipLearning({
@@ -39,7 +269,14 @@ async function runJob(params: {
         clinicCode: params.clinicCode,
         lookbackDays: Number(env.AGENT_LEARNING_DEFAULT_LOOKBACK_DAYS),
       });
-      return { rowCount: summary.profilesSaved, sourceWatermark: summary.learnedAt };
+      return {
+        rowCount: summary.profilesSaved,
+        counts: emptyCounts({
+          scanned: summary.totalCustomersAnalyzed,
+          created: summary.profilesSaved,
+        }),
+        sourceWatermark: summary.learnedAt,
+      };
     }
     case "finance_daily_snapshot": {
       const [sales, payments] = await Promise.all([
@@ -63,49 +300,323 @@ async function runJob(params: {
           offset: 0,
         }),
       ]);
+      const checkedAt = new Date().toISOString();
+      await saveSnapshot({
+        clinicId: params.clinicId,
+        clinicCode: params.clinicCode,
+        snapshotType: "finance_daily_snapshot",
+        bucket: params.bucket,
+        source: "BigQuery sales and payment reports",
+        checkedAt,
+        dataStatus: "ok",
+        dateRange: { fromDate: params.dateKey, toDate: params.dateKey, timezone: params.timezone },
+        summary: {
+          sales: sales.summary,
+          payments: payments.summary,
+          paymentMethodCount: payments.methods.length,
+        },
+      });
       return {
         rowCount: sales.summary.invoiceCount + payments.methods.length,
+        counts: emptyCounts({
+          scanned: sales.summary.invoiceCount + payments.methods.length,
+          created: 1,
+        }),
         sourceWatermark: params.dateKey,
       };
     }
-    case "service_practitioner_profiles": {
-      const [service, practitioner] = await Promise.all([
-        getServiceBehaviorReport({
-          clinicCode: params.clinicCode,
+    case "service_practitioner_profiles":
+    case "service_profiles": {
+      const service = await getServiceBehaviorReport({
+        clinicCode: params.clinicCode,
+        fromDate: previousDateKey(params.dateKey),
+        toDate: params.dateKey,
+        granularity: "month",
+      });
+      const checkedAt = new Date().toISOString();
+      await saveSnapshot({
+        clinicId: params.clinicId,
+        clinicCode: params.clinicCode,
+        snapshotType: "service_profiles",
+        bucket: params.bucket,
+        source: "BigQuery service behavior report",
+        checkedAt,
+        dataStatus: "ok",
+        dateRange: {
           fromDate: previousDateKey(params.dateKey),
           toDate: params.dateKey,
-          granularity: "month",
-        }),
-        getTherapistPortalReport({
-          clinicCode: params.clinicCode,
-          fromDate: previousDateKey(params.dateKey),
-          toDate: params.dateKey,
-          search: "",
-          serviceCategory: "",
-          sortBy: "treatmentsCompleted",
-          sortDirection: "desc",
-        }),
-      ]);
+          timezone: params.timezone,
+        },
+        summary: {
+          summary: service.summary,
+          topServiceCount: service.topServices.length,
+        },
+      });
       return {
-        rowCount: service.topServices.length + practitioner.leaderboard.length,
+        rowCount: service.topServices.length,
+        counts: emptyCounts({ scanned: service.topServices.length, created: 1 }),
         sourceWatermark: params.dateKey,
       };
     }
-    case "appointment_daily_profile": {
+    case "practitioner_profiles": {
+      const practitioner = await getTherapistPortalReport({
+        clinicCode: params.clinicCode,
+        fromDate: previousDateKey(params.dateKey),
+        toDate: params.dateKey,
+        search: "",
+        serviceCategory: "",
+        sortBy: "treatmentsCompleted",
+        sortDirection: "desc",
+      });
+      const checkedAt = new Date().toISOString();
+      await saveSnapshot({
+        clinicId: params.clinicId,
+        clinicCode: params.clinicCode,
+        snapshotType: "practitioner_profiles",
+        bucket: params.bucket,
+        source: "BigQuery therapist portal report",
+        checkedAt,
+        dataStatus: "ok",
+        dateRange: {
+          fromDate: previousDateKey(params.dateKey),
+          toDate: params.dateKey,
+          timezone: params.timezone,
+        },
+        summary: {
+          summary: practitioner.summary,
+          leaderboardCount: practitioner.leaderboard.length,
+        },
+      });
+      return {
+        rowCount: practitioner.leaderboard.length,
+        counts: emptyCounts({ scanned: practitioner.leaderboard.length, created: 1 }),
+        sourceWatermark: params.dateKey,
+      };
+    }
+    case "appointment_operational_snapshot": {
       const snapshot = await fetchLiveAppointmentSnapshot({
         clinicId: params.clinicId,
         clinicCode: params.clinicCode,
         dateKey: params.dateKey,
-        timezone: env.DEFAULT_TIMEZONE,
+        timezone: params.timezone,
       });
-      return { rowCount: snapshot.rows.length, sourceWatermark: snapshot.checkedAt };
+      await saveSnapshot({
+        clinicId: params.clinicId,
+        clinicCode: params.clinicCode,
+        snapshotType: "appointment_operational_snapshot",
+        bucket: params.bucket,
+        source: "APICORE live appointment snapshot",
+        checkedAt: snapshot.checkedAt,
+        dataStatus: snapshot.dataStatus,
+        dateRange: { fromDate: params.dateKey, toDate: params.dateKey, timezone: params.timezone },
+        summary: {
+          rowCount: snapshot.rows.length,
+          lifecycleCounts: snapshot.countsByLifecycle,
+        },
+        ttlHours: 1,
+      });
+      return {
+        rowCount: snapshot.rows.length,
+        counts: emptyCounts({ scanned: snapshot.rows.length, created: 1 }),
+        sourceWatermark: snapshot.checkedAt,
+      };
+    }
+    case "appointment_daily_profile": {
+      const settledDateKey = previousDateKey(params.dateKey);
+      const snapshot = await fetchLiveAppointmentSnapshot({
+        clinicId: params.clinicId,
+        clinicCode: params.clinicCode,
+        dateKey: settledDateKey,
+        timezone: params.timezone,
+      });
+      await saveSnapshot({
+        clinicId: params.clinicId,
+        clinicCode: params.clinicCode,
+        snapshotType: "appointment_daily_profile",
+        bucket: params.bucket,
+        source: "APICORE daily appointment aggregate",
+        checkedAt: snapshot.checkedAt,
+        dataStatus: snapshot.dataStatus,
+        dateRange: { fromDate: settledDateKey, toDate: settledDateKey, timezone: params.timezone },
+        summary: {
+          rowCount: snapshot.rows.length,
+          lifecycleCounts: snapshot.countsByLifecycle,
+        },
+      });
+      return {
+        rowCount: snapshot.rows.length,
+        counts: emptyCounts({ scanned: snapshot.rows.length, created: 1 }),
+        sourceWatermark: snapshot.checkedAt,
+      };
     }
     case "feedback_learning":
+      return runFeedbackLearningJob({ clinicId: params.clinicId });
     case "owner_insight_cards":
-      return { rowCount: 0, sourceWatermark: params.dateKey };
+      return runOwnerInsightCardsJob({
+        clinicId: params.clinicId,
+        clinicCode: params.clinicCode,
+        bucket: params.bucket,
+      });
+    case "recommendation_outcome_observer":
+    case "weekly_business_review":
+    case "memory_maintenance":
+      return {
+        rowCount: 0,
+        counts: emptyCounts({ skipped: 1 }),
+        sourceWatermark: params.dateKey,
+        dataStatus: "not_ready",
+      };
     default:
-      return { rowCount: 0, sourceWatermark: params.dateKey };
+      return {
+        rowCount: 0,
+        counts: emptyCounts({ skipped: 1 }),
+        sourceWatermark: params.dateKey,
+        dataStatus: "not_ready",
+      };
   }
+}
+
+async function runClinicJobs(params: {
+  clinicId: string;
+  clinicCode?: string;
+  timezone: string;
+  jobTypes: AgentLearningJobType[];
+  dateKey: string;
+  dryRun: boolean;
+  operationalIntervalMinutes?: 15 | 30 | 60;
+}) {
+  const results: Array<{
+    clinicId: string;
+    jobType: AgentLearningJobType;
+    status: "completed" | "skipped" | "failed";
+    rowCount: number;
+  }> = [];
+
+  for (const jobType of params.jobTypes) {
+    const bucket = buildLearningBucket({
+      jobType,
+      timezone: params.timezone,
+      operationalIntervalMinutes: params.operationalIntervalMinutes,
+    });
+
+    if (!params.clinicCode) {
+      await saveAgentLearningRun({
+        clinicId: params.clinicId,
+        jobType,
+        bucket,
+        status: "skipped",
+        rowCount: 0,
+        counts: emptyCounts({ skipped: 1 }),
+        error: "Missing clinicCode for scheduled job.",
+      });
+      results.push({ clinicId: params.clinicId, jobType, status: "skipped", rowCount: 0 });
+      continue;
+    }
+
+    if (params.dryRun) {
+      results.push({ clinicId: params.clinicId, jobType, status: "skipped", rowCount: 0 });
+      continue;
+    }
+
+    const acquired = await acquireAgentLearningLock({ clinicId: params.clinicId, jobType, bucket });
+    if (!acquired) {
+      results.push({ clinicId: params.clinicId, jobType, status: "skipped", rowCount: 0 });
+      continue;
+    }
+
+    await saveAgentLearningRun({
+      clinicId: params.clinicId,
+      clinicCode: params.clinicCode,
+      jobType,
+      bucket,
+      status: "started",
+    });
+
+    try {
+      const previousWatermark = await getAgentLearningWatermark({
+        clinicId: params.clinicId,
+        jobType,
+      });
+      if (previousWatermark === bucket && jobType !== "feedback_learning") {
+        await saveAgentLearningRun({
+          clinicId: params.clinicId,
+          clinicCode: params.clinicCode,
+          jobType,
+          bucket,
+          status: "skipped",
+          rowCount: 0,
+          counts: emptyCounts({ skipped: 1 }),
+          sourceWatermark: previousWatermark,
+        });
+        results.push({ clinicId: params.clinicId, jobType, status: "skipped", rowCount: 0 });
+        continue;
+      }
+
+      const outcome = await runJob({
+        clinicId: params.clinicId,
+        clinicCode: params.clinicCode,
+        jobType,
+        dateKey: params.dateKey,
+        bucket,
+        timezone: params.timezone,
+      });
+      await saveAgentLearningWatermark({
+        clinicId: params.clinicId,
+        jobType,
+        bucket,
+        sourceWatermark: outcome.sourceWatermark,
+      });
+      await saveAgentLearningRun({
+        clinicId: params.clinicId,
+        clinicCode: params.clinicCode,
+        jobType,
+        bucket,
+        status: "completed",
+        rowCount: outcome.rowCount,
+        counts: outcome.counts,
+        sourceWatermark: outcome.sourceWatermark,
+      });
+      results.push({ clinicId: params.clinicId, jobType, status: "completed", rowCount: outcome.rowCount });
+    } catch (error) {
+      await saveAgentLearningRun({
+        clinicId: params.clinicId,
+        clinicCode: params.clinicCode,
+        jobType,
+        bucket,
+        status: "failed",
+        rowCount: 0,
+        counts: emptyCounts({ failed: 1 }),
+        error,
+      });
+      results.push({ clinicId: params.clinicId, jobType, status: "failed", rowCount: 0 });
+    }
+  }
+
+  return results;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>,
+) {
+  const results: R[] = [];
+  let index = 0;
+
+  async function runNext() {
+    const currentIndex = index;
+    index += 1;
+
+    if (currentIndex >= items.length) {
+      return;
+    }
+
+    results[currentIndex] = await worker(items[currentIndex]);
+    await runNext();
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, runNext));
+  return results;
 }
 
 export async function runAgentLearningTick(params: {
@@ -113,6 +624,9 @@ export async function runAgentLearningTick(params: {
   clinicCodesById?: Record<string, string>;
   jobTypes?: AgentLearningJobType[];
   dateKey?: string;
+  timezone?: string;
+  dryRun?: boolean;
+  operationalIntervalMinutes?: 15 | 30 | 60;
 }) {
   if (!env.AGENT_LEARNING_ENABLED) {
     return {
@@ -121,70 +635,73 @@ export async function runAgentLearningTick(params: {
     };
   }
 
-  const dateKey = params.dateKey ?? new Date().toISOString().slice(0, 10);
+  const timezone = normalizeTimeZone(params.timezone || env.DEFAULT_TIMEZONE);
+  const dateKey = params.dateKey ?? formatDateKeyInTimeZone(new Date(), timezone);
   const jobTypes = params.jobTypes?.length ? params.jobTypes : DEFAULT_JOB_TYPES;
   const clinicIds = params.clinicIds ?? Object.keys(params.clinicCodesById ?? {});
-  const results: Array<{
-    clinicId: string;
-    jobType: AgentLearningJobType;
-    status: "completed" | "skipped" | "failed";
-    rowCount: number;
-  }> = [];
-
-  for (const clinicId of clinicIds) {
-    const clinicCode = params.clinicCodesById?.[clinicId];
-
-    for (const jobType of jobTypes) {
-      if (!clinicCode) {
-        await saveAgentLearningRun({
-          clinicId,
-          jobType,
-          bucket: dateKey,
-          status: "skipped",
-          rowCount: 0,
-          error: "Missing clinicCode for scheduled job.",
-        });
-        results.push({ clinicId, jobType, status: "skipped", rowCount: 0 });
-        continue;
-      }
-
-      const acquired = await acquireAgentLearningLock({ clinicId, jobType, bucket: dateKey });
-      if (!acquired) {
-        results.push({ clinicId, jobType, status: "skipped", rowCount: 0 });
-        continue;
-      }
-
-      await saveAgentLearningRun({ clinicId, clinicCode, jobType, bucket: dateKey, status: "started" });
-
-      try {
-        const outcome = await runJob({ clinicId, clinicCode, jobType, dateKey });
-        await saveAgentLearningRun({
-          clinicId,
-          clinicCode,
-          jobType,
-          bucket: dateKey,
-          status: "completed",
-          rowCount: outcome.rowCount,
-          sourceWatermark: outcome.sourceWatermark,
-        });
-        results.push({ clinicId, jobType, status: "completed", rowCount: outcome.rowCount });
-      } catch (error) {
-        await saveAgentLearningRun({
-          clinicId,
-          clinicCode,
-          jobType,
-          bucket: dateKey,
-          status: "failed",
-          rowCount: 0,
-          error,
-        });
-        results.push({ clinicId, jobType, status: "failed", rowCount: 0 });
-      }
-    }
-  }
+  const perClinicResults = await mapWithConcurrency(
+    clinicIds,
+    env.AGENT_LEARNING_MAX_CLINIC_CONCURRENCY,
+    (clinicId) =>
+      runClinicJobs({
+        clinicId,
+        clinicCode: params.clinicCodesById?.[clinicId],
+        timezone,
+        jobTypes,
+        dateKey,
+        dryRun: Boolean(params.dryRun),
+        operationalIntervalMinutes: params.operationalIntervalMinutes,
+      }),
+  );
 
   return {
     enabled: true,
-    results,
+    dryRun: Boolean(params.dryRun),
+    results: perClinicResults.flat(),
+  };
+}
+
+export async function runAgentLearningForSchedules(params?: {
+  clinicIds?: string[];
+  jobTypes?: AgentLearningJobType[];
+  dryRun?: boolean;
+  now?: Date;
+}) {
+  if (!env.AGENT_LEARNING_ENABLED) {
+    return {
+      enabled: false,
+      schedules: 0,
+      results: [],
+    };
+  }
+
+  const now = params?.now ?? new Date();
+  const schedules = await listAgentLearningSchedules({ clinicIds: params?.clinicIds });
+  const perScheduleResults = await mapWithConcurrency(schedules, env.AGENT_LEARNING_MAX_CLINIC_CONCURRENCY, async (schedule) => {
+    const jobTypes = (params?.jobTypes?.length ? params.jobTypes : schedule.enabledJobTypes).filter((jobType) =>
+      isScheduleDueForJob({ schedule, jobType, now }),
+    );
+
+    if (jobTypes.length === 0) {
+      return [];
+    }
+
+    const dateKey = formatDateKeyInTimeZone(now, schedule.timezone);
+    return runClinicJobs({
+      clinicId: schedule.clinicId,
+      clinicCode: schedule.clinicCode,
+      timezone: schedule.timezone,
+      jobTypes,
+      dateKey,
+      dryRun: Boolean(params?.dryRun),
+      operationalIntervalMinutes: schedule.operationalSnapshotIntervalMinutes ?? 15,
+    });
+  });
+
+  return {
+    enabled: true,
+    dryRun: Boolean(params?.dryRun),
+    schedules: schedules.length,
+    results: perScheduleResults.flat(),
   };
 }

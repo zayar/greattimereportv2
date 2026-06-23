@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { createAiProvider } from "../ai/provider.js";
+import type { GtAgentRelevantMemory } from "./memory/memory-types.js";
 import type { GreatTimeAgentChatResponse } from "./types.js";
 
 const narrativeSchema = z.object({
@@ -10,11 +11,19 @@ function stripJsonFences(payload: string) {
   return payload.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
 }
 
-function buildNarrativePrompt(response: GreatTimeAgentChatResponse) {
+function buildMemoryDirectives(memories: GtAgentRelevantMemory[]) {
+  return memories
+    .filter((memory) => ["response_style", "language_preference", "priority_preference"].includes(memory.memoryType))
+    .slice(0, 4)
+    .map((memory) => memory.content);
+}
+
+function buildNarrativePrompt(response: GreatTimeAgentChatResponse, memories: GtAgentRelevantMemory[]) {
   return JSON.stringify({
     instruction:
       "Write one concise GreatTime owner-facing answer from these fixed facts. Do not add, remove, recalculate, or change any number. Return JSON only: {\"assistantMessage\":\"...\"}.",
     language: response.requestedAgent === "auto" ? "match user preference if obvious" : "concise",
+    memoryDirectives: buildMemoryDirectives(memories),
     agent: response.resolvedAgent,
     intent: response.intent,
     dataStatus: response.dataStatus,
@@ -34,14 +43,17 @@ function buildNarrativePrompt(response: GreatTimeAgentChatResponse) {
   });
 }
 
-export async function enhanceAgentResponseNarrative(response: GreatTimeAgentChatResponse) {
+export async function enhanceAgentResponseNarrative(
+  response: GreatTimeAgentChatResponse,
+  options?: { memories?: GtAgentRelevantMemory[] },
+) {
   const provider = createAiProvider();
   if (!provider) {
     return response;
   }
 
   try {
-    const raw = await provider.generateJson(buildNarrativePrompt(response));
+    const raw = await provider.generateJson(buildNarrativePrompt(response, options?.memories ?? []));
     const parsed = narrativeSchema.safeParse(JSON.parse(stripJsonFences(raw)));
 
     if (!parsed.success) {

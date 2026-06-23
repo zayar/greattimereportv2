@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { env } from "../config/env.js";
-import { agentLearningTickSchema } from "../services/agent-hub/schemas.js";
-import { runAgentLearningTick } from "../services/agent-hub/learning-worker.js";
+import { agentLearningRunAllSchema, agentLearningTickSchema } from "../services/agent-hub/schemas.js";
+import { runAgentLearningForSchedules, runAgentLearningTick } from "../services/agent-hub/learning-worker.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { HttpError } from "../utils/http-error.js";
 
@@ -35,6 +35,24 @@ router.post(
       clinicCodesById: params.clinicCodesById,
       jobTypes: params.jobTypes,
       dateKey: params.date,
+      timezone: params.timezone,
+      dryRun: params.dryRun,
+      operationalIntervalMinutes: params.operationalIntervalMinutes,
+    });
+
+    res.json({ success: true, data });
+  }),
+);
+
+router.post(
+  "/agent-learning/run-all",
+  asyncHandler(async (req, res) => {
+    requireSchedulerSecret(req.header("x-agent-learning-scheduler-secret"));
+    const params = agentLearningRunAllSchema.parse(req.body ?? {});
+    const data = await runAgentLearningForSchedules({
+      clinicIds: params.clinicIds,
+      jobTypes: params.jobTypes,
+      dryRun: params.dryRun,
     });
 
     res.json({ success: true, data });

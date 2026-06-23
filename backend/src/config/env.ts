@@ -59,10 +59,16 @@ const envSchema = z.object({
   TELEGRAM_POLLING_INTERVAL_MS: z.coerce.number().int().positive().default(5_000),
   APICORE_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
   FIREBASE_AUTH_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+  AGENT_MEMORY_V2_ENABLED: booleanEnv(false),
   AGENT_LEARNING_ENABLED: booleanEnv(false),
   AGENT_LEARNING_SCHEDULER_SECRET: z.string().optional(),
   AGENT_LEARNING_DEFAULT_LOOKBACK_DAYS: z.coerce.number().int().positive().default(365),
   AGENT_STALE_THRESHOLD_HOURS: z.coerce.number().int().positive().default(24),
+  AGENT_LEARNING_SCHEDULER_JOB_NAME: z.string().default("gt-v2report-agent-learning-scheduler"),
+  AGENT_LEARNING_SCHEDULER_CRON: z.string().default("*/15 * * * *"),
+  AGENT_LEARNING_SCHEDULER_TIME_ZONE: z.string().default("Asia/Yangon"),
+  AGENT_OPERATIONAL_SNAPSHOT_INTERVAL_MINUTES: z.coerce.number().int().refine((value) => [15, 30, 60].includes(value)).default(15),
+  AGENT_LEARNING_MAX_CLINIC_CONCURRENCY: z.coerce.number().int().positive().default(3),
 });
 
 export const env = envSchema.parse(process.env);

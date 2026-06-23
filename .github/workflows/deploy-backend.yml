@@ -122,6 +122,15 @@ jobs:
           TELEGRAM_POLLING_INTERVAL_MS: ${{ vars.TELEGRAM_POLLING_INTERVAL_MS }}
           APICORE_REQUEST_TIMEOUT_MS: ${{ vars.APICORE_REQUEST_TIMEOUT_MS }}
           FIREBASE_AUTH_REQUEST_TIMEOUT_MS: ${{ vars.FIREBASE_AUTH_REQUEST_TIMEOUT_MS }}
+          AGENT_MEMORY_V2_ENABLED: ${{ vars.AGENT_MEMORY_V2_ENABLED }}
+          AGENT_LEARNING_ENABLED: ${{ vars.AGENT_LEARNING_ENABLED }}
+          AGENT_LEARNING_DEFAULT_LOOKBACK_DAYS: ${{ vars.AGENT_LEARNING_DEFAULT_LOOKBACK_DAYS }}
+          AGENT_STALE_THRESHOLD_HOURS: ${{ vars.AGENT_STALE_THRESHOLD_HOURS }}
+          AGENT_LEARNING_SCHEDULER_JOB_NAME: ${{ vars.AGENT_LEARNING_SCHEDULER_JOB_NAME }}
+          AGENT_LEARNING_SCHEDULER_CRON: ${{ vars.AGENT_LEARNING_SCHEDULER_CRON }}
+          AGENT_LEARNING_SCHEDULER_TIME_ZONE: ${{ vars.AGENT_LEARNING_SCHEDULER_TIME_ZONE }}
+          AGENT_OPERATIONAL_SNAPSHOT_INTERVAL_MINUTES: ${{ vars.AGENT_OPERATIONAL_SNAPSHOT_INTERVAL_MINUTES }}
+          AGENT_LEARNING_MAX_CLINIC_CONCURRENCY: ${{ vars.AGENT_LEARNING_MAX_CLINIC_CONCURRENCY }}
           FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
           FIREBASE_WEB_API_KEY: ${{ secrets.FIREBASE_WEB_API_KEY }}
           APICORE_SERVICE_PASSWORD: ${{ secrets.APICORE_SERVICE_PASSWORD }}
@@ -129,6 +138,7 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_SCHEDULER_SECRET: ${{ secrets.TELEGRAM_SCHEDULER_SECRET }}
           TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
+          AGENT_LEARNING_SCHEDULER_SECRET: ${{ secrets.AGENT_LEARNING_SCHEDULER_SECRET }}
         run: |
           node <<'NODE'
           const fs = require("node:fs");
@@ -176,6 +186,16 @@ jobs:
             TELEGRAM_POLLING_INTERVAL_MS: process.env.TELEGRAM_POLLING_INTERVAL_MS,
             APICORE_REQUEST_TIMEOUT_MS: process.env.APICORE_REQUEST_TIMEOUT_MS,
             FIREBASE_AUTH_REQUEST_TIMEOUT_MS: process.env.FIREBASE_AUTH_REQUEST_TIMEOUT_MS,
+            AGENT_MEMORY_V2_ENABLED: process.env.AGENT_MEMORY_V2_ENABLED,
+            AGENT_LEARNING_ENABLED: process.env.AGENT_LEARNING_ENABLED,
+            AGENT_LEARNING_SCHEDULER_SECRET: process.env.AGENT_LEARNING_SCHEDULER_SECRET,
+            AGENT_LEARNING_DEFAULT_LOOKBACK_DAYS: process.env.AGENT_LEARNING_DEFAULT_LOOKBACK_DAYS,
+            AGENT_STALE_THRESHOLD_HOURS: process.env.AGENT_STALE_THRESHOLD_HOURS,
+            AGENT_LEARNING_SCHEDULER_JOB_NAME: process.env.AGENT_LEARNING_SCHEDULER_JOB_NAME,
+            AGENT_LEARNING_SCHEDULER_CRON: process.env.AGENT_LEARNING_SCHEDULER_CRON,
+            AGENT_LEARNING_SCHEDULER_TIME_ZONE: process.env.AGENT_LEARNING_SCHEDULER_TIME_ZONE,
+            AGENT_OPERATIONAL_SNAPSHOT_INTERVAL_MINUTES: process.env.AGENT_OPERATIONAL_SNAPSHOT_INTERVAL_MINUTES,
+            AGENT_LEARNING_MAX_CLINIC_CONCURRENCY: process.env.AGENT_LEARNING_MAX_CLINIC_CONCURRENCY,
           };
 
           const env = {
@@ -295,5 +315,54 @@ jobs:
               --http-method=POST \
               --headers="x-telegram-scheduler-secret=${TELEGRAM_SCHEDULER_SECRET}" \
               --attempt-deadline=30s \
+              --quiet
+          fi
+
+      - name: Upsert Agent Learning Cloud Scheduler job
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          CLOUD_RUN_REGION: ${{ vars.CLOUD_RUN_REGION }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          AGENT_LEARNING_SCHEDULER_SECRET: ${{ secrets.AGENT_LEARNING_SCHEDULER_SECRET }}
+          AGENT_LEARNING_SCHEDULER_JOB_NAME: ${{ vars.AGENT_LEARNING_SCHEDULER_JOB_NAME }}
+          AGENT_LEARNING_SCHEDULER_CRON: ${{ vars.AGENT_LEARNING_SCHEDULER_CRON }}
+          AGENT_LEARNING_SCHEDULER_TIME_ZONE: ${{ vars.AGENT_LEARNING_SCHEDULER_TIME_ZONE }}
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$AGENT_LEARNING_SCHEDULER_SECRET" ]; then
+            echo "Skipping Agent Learning Cloud Scheduler job because APP_BASE_URL or AGENT_LEARNING_SCHEDULER_SECRET is not configured."
+            exit 0
+          fi
+
+          JOB_NAME="${AGENT_LEARNING_SCHEDULER_JOB_NAME:-gt-v2report-agent-learning-scheduler}"
+          JOB_SCHEDULE="${AGENT_LEARNING_SCHEDULER_CRON:-*/15 * * * *}"
+          JOB_TIME_ZONE="${AGENT_LEARNING_SCHEDULER_TIME_ZONE:-Asia/Yangon}"
+          SCHEDULER_URI="${APP_BASE_URL%/}/api/internal/agent-learning/run-all"
+          echo "Using Agent Learning Cloud Scheduler schedule: ${JOB_SCHEDULE} (${JOB_TIME_ZONE})"
+
+          if gcloud scheduler jobs describe "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --location "$CLOUD_RUN_REGION" >/dev/null 2>&1; then
+            gcloud scheduler jobs update http "$JOB_NAME" \
+              --project "$GCP_PROJECT_ID" \
+              --location "$CLOUD_RUN_REGION" \
+              --schedule="$JOB_SCHEDULE" \
+              --time-zone="$JOB_TIME_ZONE" \
+              --uri="$SCHEDULER_URI" \
+              --http-method=POST \
+              --update-headers="Content-Type=application/json,x-agent-learning-scheduler-secret=${AGENT_LEARNING_SCHEDULER_SECRET}" \
+              --message-body='{}' \
+              --attempt-deadline=120s \
+              --quiet
+          else
+            gcloud scheduler jobs create http "$JOB_NAME" \
+              --project "$GCP_PROJECT_ID" \
+              --location "$CLOUD_RUN_REGION" \
+              --schedule="$JOB_SCHEDULE" \
+              --time-zone="$JOB_TIME_ZONE" \
+              --uri="$SCHEDULER_URI" \
+              --http-method=POST \
+              --headers="Content-Type=application/json,x-agent-learning-scheduler-secret=${AGENT_LEARNING_SCHEDULER_SECRET}" \
+              --message-body='{}' \
+              --attempt-deadline=120s \
               --quiet
           fi

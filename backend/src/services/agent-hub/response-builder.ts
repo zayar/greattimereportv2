@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { combineStatuses, newId, nowIso } from "./safety.js";
 import type {
   AgentToolResult,
@@ -58,6 +59,35 @@ function followUpsForAgent(plan: GreatTimeAgentIntentPlan) {
   ];
 }
 
+function stableRecommendationId(params: {
+  clinicId: string;
+  sessionId: string;
+  requestId: string;
+  resolvedAgent: string;
+  intent: string;
+  index: number;
+  title?: string;
+  message: string;
+}) {
+  const hash = createHash("sha256")
+    .update(
+      [
+        params.clinicId,
+        params.sessionId,
+        params.requestId,
+        params.resolvedAgent,
+        params.intent,
+        params.index,
+        params.title ?? "",
+        params.message,
+      ].join("|"),
+    )
+    .digest("hex")
+    .slice(0, 24);
+
+  return `rec_${hash}`;
+}
+
 export function buildAgentResponse(params: {
   request: GreatTimeAgentChatRequest;
   plan: GreatTimeAgentIntentPlan;
@@ -71,7 +101,23 @@ export function buildAgentResponse(params: {
   const dataStatus = params.unsupportedReason ? "not_ready" : combineStatuses(sourceStatuses);
   const metrics = params.toolResults.flatMap((result) => result.metrics ?? []);
   const tables = params.toolResults.flatMap((result) => result.tables ?? []);
-  const recommendations = params.toolResults.flatMap((result) => result.recommendations ?? []);
+  const recommendations = params.toolResults
+    .flatMap((result) => result.recommendations ?? [])
+    .map((recommendation, index) => ({
+      ...recommendation,
+      recommendationId:
+        recommendation.recommendationId ??
+        stableRecommendationId({
+          clinicId: params.request.clinicId,
+          sessionId: params.sessionId,
+          requestId: params.requestId,
+          resolvedAgent: params.plan.resolvedAgent,
+          intent: params.plan.intent,
+          index,
+          title: recommendation.title,
+          message: recommendation.message,
+        }),
+    }));
   const warnings = [
     ...(params.plan.warnings ?? []),
     ...params.toolResults.flatMap((result) => result.warnings ?? []),

@@ -13,6 +13,11 @@ const { resolveAgent } = await import("../src/services/agent-hub/supervisor.ts")
 const { assertToolAllowed } = await import("../src/services/agent-hub/tool-executor.ts")
 const { createAgentToolRegistry, getAgentToolAllowlist } = await import("../src/services/agent-hub/tool-registry.ts")
 const { buildLockedAgentHubResponse } = await import("../src/services/agent-hub/agent-hub.service.ts")
+const { evaluateMemoryCandidate, buildMemoryRecord } = await import("../src/services/agent-hub/memory/memory-policy.ts")
+const { rankMemoriesForRequest } = await import("../src/services/agent-hub/memory/memory-retriever.ts")
+const { buildMemoryRecordsFromFeedbackEvents } = await import("../src/services/agent-hub/memory/memory-writer.ts")
+const { buildSessionSummaryFromTurn, isSessionSummaryFresh } = await import("../src/services/agent-hub/session.repository.ts")
+const { buildLearningBucket, isScheduleDueForJob } = await import("../src/services/agent-hub/learning-worker.ts")
 const { isAgentLearningSchedulerSecretValid } = await import("../src/routes/agent-learning.routes.ts")
 
 test("supervisor routes four agent domains and respects explicit override", () => {
@@ -213,6 +218,286 @@ test("response builder keeps tool metrics and source metadata grounded", () => {
   assert.equal(response.sources[0]?.tool, "get_sales_summary")
   assert.equal(response.dataStatus, "ok")
   assert.equal(response.actions[0]?.type, "read_only_agent_response")
+})
+
+test("response builder assigns stable recommendation IDs", () => {
+  const baseParams = {
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "customer_relationship" as const,
+      message: "Show unused package opportunities",
+    },
+    sessionId: "session-1",
+    requestId: "request-1",
+    plan: {
+      requestedAgent: "customer_relationship" as const,
+      resolvedAgent: "customer_relationship" as const,
+      autoMode: false,
+      intent: "unused_package_balance",
+      toolNames: ["search_customer_profiles"],
+      period: { fromDate: "2026-06-18", toDate: "2026-06-18", label: "today" },
+    },
+    toolResults: [
+      {
+        toolName: "search_customer_profiles",
+        sourceName: "profiles",
+        checkedAt: "2026-06-18T00:00:00.000Z",
+        dataStatus: "ok" as const,
+        live: false,
+        recommendations: [{ title: "Unused package", message: "Follow up unused package customers.", sourceTools: ["search_customer_profiles"] }],
+      },
+    ],
+  }
+  const first = buildAgentResponse(baseParams)
+  const second = buildAgentResponse(baseParams)
+
+  assert.ok(first.recommendations?.[0]?.recommendationId?.startsWith("rec_"))
+  assert.equal(first.recommendations?.[0]?.recommendationId, second.recommendations?.[0]?.recommendationId)
+})
+
+test("memory policy rejects missing scope, transient exact metrics, secrets, and PII", () => {
+  assert.equal(
+    evaluateMemoryCandidate({
+      clinicId: "",
+      memoryType: "response_style",
+      content: "Owner prefers concise answers.",
+      source: "explicit_user",
+    }).accepted,
+    false,
+  )
+  assert.equal(
+    evaluateMemoryCandidate({
+      clinicId: "clinic-1",
+      memoryType: "clinic_pattern",
+      content: "Today sales are 500,000 MMK.",
+      source: "system_observed",
+    }).accepted,
+    false,
+  )
+  assert.equal(
+    evaluateMemoryCandidate({
+      clinicId: "clinic-1",
+      memoryType: "response_style",
+      content: "Bearer abc.def.ghi",
+      source: "explicit_user",
+    }).accepted,
+    false,
+  )
+  assert.equal(
+    evaluateMemoryCandidate({
+      clinicId: "clinic-1",
+      memoryType: "entity_pattern",
+      content: "Customer phone is 09999999999.",
+      source: "system_observed",
+    }).accepted,
+    false,
+  )
+})
+
+test("memory policy activates explicit preferences and promotes repeated evidence", () => {
+  const explicit = buildMemoryRecord({
+    clinicId: "clinic-1",
+    userId: "user-1",
+    memoryType: "response_style",
+    content: "Owner prefers concise answers.",
+    source: "explicit_user",
+  })
+  assert.equal(explicit?.status, "active")
+  assert.ok((explicit?.confidence ?? 0) > 0.9)
+
+  const repeated = buildMemoryRecord({
+    clinicId: "clinic-1",
+    userId: "user-1",
+    memoryType: "response_style",
+    content: "Owner often marks responses too long; prefer concise answers for this area.",
+    source: "feedback",
+    evidenceCount: 2,
+  })
+  assert.equal(repeated?.status, "active")
+})
+
+test("feedback learning extracts explicit and repeated preference memories", () => {
+  const records = buildMemoryRecordsFromFeedbackEvents([
+    {
+      id: "fb-1",
+      clinicId: "clinic-1",
+      userId: "user-1",
+      sessionId: "session-1",
+      responseId: "resp-1",
+      rating: "helpful",
+      feedbackType: "remember_this",
+      note: "Please keep answers short and show unused-package opportunities first.",
+      createdAt: "2026-06-18T00:00:00.000Z",
+      resolvedAgent: "customer_relationship",
+      intent: "unused_package_balance",
+    },
+    {
+      id: "fb-2",
+      clinicId: "clinic-1",
+      userId: "user-1",
+      sessionId: "session-1",
+      responseId: "resp-2",
+      rating: "not_helpful",
+      feedbackType: "too_long",
+      createdAt: "2026-06-18T01:00:00.000Z",
+      resolvedAgent: "finance",
+      intent: "sales_summary",
+    },
+    {
+      id: "fb-3",
+      clinicId: "clinic-1",
+      userId: "user-1",
+      sessionId: "session-1",
+      responseId: "resp-3",
+      rating: "not_helpful",
+      feedbackType: "too_long",
+      createdAt: "2026-06-18T02:00:00.000Z",
+      resolvedAgent: "finance",
+      intent: "sales_summary",
+    },
+  ])
+
+  assert.ok(records.some((record) => record.memoryType === "response_style" && record.status === "active"))
+  assert.ok(records.some((record) => record.memoryType === "priority_preference" && record.status === "active"))
+  assert.ok(records.some((record) => record.source === "feedback" && record.evidenceCount === 2 && record.status === "active"))
+})
+
+test("memory retrieval ranks exact scoped active memories and isolates clinics", () => {
+  const now = new Date("2026-06-18T00:00:00.000Z")
+  const memories = [
+    buildMemoryRecord(
+      {
+        clinicId: "clinic-1",
+        userId: "user-1",
+        agentId: "customer_relationship",
+        intent: "unused_package_balance",
+        memoryType: "priority_preference",
+        content: "Owner wants unused-package recovery opportunities shown before lower-priority recommendations.",
+        source: "explicit_user",
+      },
+      now.toISOString(),
+    ),
+    buildMemoryRecord(
+      {
+        clinicId: "clinic-2",
+        userId: "user-1",
+        memoryType: "response_style",
+        content: "Other clinic preference.",
+        source: "explicit_user",
+      },
+      now.toISOString(),
+    ),
+  ].filter(Boolean)
+
+  const ranked = rankMemoriesForRequest({
+    memories,
+    clinicId: "clinic-1",
+    userId: "user-1",
+    request: { message: "Show unused package balance customers" },
+    plan: { resolvedAgent: "customer_relationship", intent: "unused_package_balance" },
+    now,
+  })
+
+  assert.equal(ranked.length, 1)
+  assert.match(ranked[0].content, /unused-package/)
+})
+
+test("session summary has bounded fields and expires after TTL", () => {
+  const summary = buildSessionSummaryFromTurn({
+    clinicId: "clinic-1",
+    userId: "user-1",
+    sessionId: "session-1",
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      message: "Show unused package customers today",
+      fromDate: "2026-06-18",
+      toDate: "2026-06-18",
+      timezone: "Asia/Yangon",
+    },
+    response: {
+      sessionId: "session-1",
+      requestId: "request-1",
+      responseId: "resp-1",
+      requestedAgent: "customer_relationship",
+      resolvedAgent: "customer_relationship",
+      autoMode: false,
+      intent: "unused_package_balance",
+      assistantMessage: "Summary",
+      summary: "Summary",
+      recommendations: [{ recommendationId: "rec-1", message: "Follow up.", sourceTools: [] }],
+      followUpQuestions: [],
+      sources: [],
+      dataStatus: "ok",
+      actions: [{ type: "read_only_agent_response" }],
+    },
+    entityRefs: [{ entityType: "customer", entityId: "c-1", displayName: "Customer", rank: 1 }],
+    usedMemories: [],
+    now: "2026-06-18T00:00:00.000Z",
+  })
+
+  assert.equal(summary.lastRecommendationIds[0], "rec-1")
+  assert.equal(summary.activeEntityRefs.length, 1)
+  assert.equal(isSessionSummaryFresh(summary, new Date("2026-06-18T12:00:00.000Z").getTime()), true)
+  assert.equal(isSessionSummaryFresh(summary, new Date("2026-06-19T01:00:00.000Z").getTime()), false)
+})
+
+test("learning bucket calculation respects Asia/Yangon local time and operational intervals", () => {
+  const now = new Date("2026-06-22T18:45:00.000Z")
+
+  assert.equal(
+    buildLearningBucket({
+      jobType: "appointment_operational_snapshot",
+      now,
+      timezone: "Asia/Yangon",
+      operationalIntervalMinutes: 15,
+    }),
+    "2026-06-23T01:15+Asia/Yangon",
+  )
+  assert.equal(
+    buildLearningBucket({
+      jobType: "feedback_learning",
+      now,
+      timezone: "Asia/Yangon",
+    }),
+    "2026-06-23T01:00+Asia/Yangon",
+  )
+  assert.equal(
+    buildLearningBucket({
+      jobType: "finance_daily_snapshot",
+      now,
+      timezone: "Asia/Yangon",
+    }),
+    "2026-06-23+Asia/Yangon",
+  )
+})
+
+test("schedule due helper skips closed clinics unless off-hours monitoring is enabled", () => {
+  const schedule = {
+    id: "schedule-1",
+    clinicId: "clinic-1",
+    clinicCode: "ABC",
+    timezone: "Asia/Yangon",
+    enabled: true,
+    enabledJobTypes: ["appointment_operational_snapshot" as const],
+    operatingDays: [2],
+    localOpeningTime: "09:00",
+    localClosingTime: "18:00",
+    operationalSnapshotIntervalMinutes: 15 as const,
+    offHoursOperationalSnapshotEnabled: false,
+  }
+  const afterHours = new Date("2026-06-23T14:00:00.000Z")
+
+  assert.equal(isScheduleDueForJob({ schedule, jobType: "appointment_operational_snapshot", now: afterHours }), false)
+  assert.equal(
+    isScheduleDueForJob({
+      schedule: { ...schedule, offHoursOperationalSnapshotEnabled: true },
+      jobType: "appointment_operational_snapshot",
+      now: afterHours,
+    }),
+    true,
+  )
 })
 
 test("scheduler secret helper rejects missing or incorrect secrets", () => {

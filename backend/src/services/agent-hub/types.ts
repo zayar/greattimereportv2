@@ -58,6 +58,9 @@ export type GreatTimeAgentTable = {
 };
 
 export type GreatTimeAgentRecommendation = {
+  recommendationId?: string;
+  recommendationType?: string;
+  targetCustomerKey?: string;
   title?: string;
   message: string;
   sourceTools: string[];
@@ -93,6 +96,7 @@ export type GreatTimeAgentChatResponse = {
   tables?: GreatTimeAgentTable[];
   recommendations?: GreatTimeAgentRecommendation[];
   followUpQuestions?: string[];
+  usedMemoryIds?: string[];
   sources: GreatTimeAgentSource[];
   dataStatus: AgentDataStatus;
   warnings?: GreatTimeAgentWarning[];
@@ -179,6 +183,7 @@ export type AgentRunTrace = {
   sourceStatuses: AgentDataStatus[];
   dataStatus: AgentDataStatus;
   fallbackUsed: boolean;
+  usedMemoryIds?: string[];
   createdAt: string;
   sanitizedError?: string;
 };
@@ -187,7 +192,34 @@ export type AgentFeedbackInput = {
   clinicId: string;
   sessionId: string;
   responseId: string;
+  requestId?: string | null;
+  recommendationId?: string | null;
+  feedbackType?:
+    | "helpful"
+    | "not_helpful"
+    | "wrong_data"
+    | "too_long"
+    | "too_short"
+    | "remember_this"
+    | "correction";
   rating: "helpful" | "not_helpful";
   note?: string | null;
-  outcome?: "messaged" | "replied" | "booked" | "no_reply" | "not_interested" | null;
+  outcome?:
+    | "shown"
+    | "accepted"
+    | "dismissed"
+    | "contacted"
+    | "messaged"
+    | "replied"
+    | "booked"
+    | "paid"
+    | "visited"
+    | "no_reply"
+    | "not_interested"
+    | "remind_later"
+    | "failed"
+    | null;
+  resolvedAgent?: GreatTimeAgentId | null;
+  intent?: string | null;
+  sourceTools?: string[];
 };

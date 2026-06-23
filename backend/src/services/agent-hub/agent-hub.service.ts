@@ -5,6 +5,8 @@ import { planAgentRequest } from "./intent-planner.js";
 import { enhanceAgentResponseNarrative } from "./narrative.service.js";
 import { buildAgentResponse } from "./response-builder.js";
 import { newId, nowIso, sanitizeError } from "./safety.js";
+import { applyMemoryPreferencesToResponse } from "./memory/memory-writer.js";
+import { retrieveMemoryContext } from "./memory/memory-retriever.js";
 import {
   getAgentSession,
   getAgentSessionEntityRefs,
@@ -121,6 +123,12 @@ export async function askAgentHub(params: {
     plan: initialPlan,
     entityContext: request.entityContext,
   });
+  const memoryContext = await retrieveMemoryContext({
+    clinicId: params.clinic.clinicId,
+    userId: params.requestContext.userId,
+    request,
+    plan,
+  }).catch(() => ({ memories: [], usedMemoryIds: [] }));
 
   const toolResults = plan.unsupportedReason
     ? []
@@ -146,7 +154,10 @@ export async function askAgentHub(params: {
     toolResults,
     unsupportedReason: plan.unsupportedReason,
   });
-  const response = await enhanceAgentResponseNarrative(deterministicResponse);
+  const narrativeResponse = await enhanceAgentResponseNarrative(deterministicResponse, {
+    memories: memoryContext.memories,
+  });
+  const response = applyMemoryPreferencesToResponse(narrativeResponse, memoryContext.memories);
   const entityRefs = toolResults.flatMap((result) => result.entityRefs ?? []).map((ref) => ({
     ...ref,
     sourceResponseId: response.responseId,
@@ -157,8 +168,10 @@ export async function askAgentHub(params: {
       clinicId: params.clinic.clinicId,
       userId: params.requestContext.userId,
       sessionId,
+      request,
       response,
       entityRefs,
+      usedMemories: memoryContext.memories,
     }),
     saveAgentRunTrace({
       clinicId: params.clinic.clinicId,
@@ -173,6 +186,7 @@ export async function askAgentHub(params: {
       sourceStatuses: response.sources.map((source) => source.dataStatus),
       dataStatus: response.dataStatus,
       fallbackUsed: true,
+      usedMemoryIds: memoryContext.usedMemoryIds,
       createdAt: nowIso(),
     }).catch((error) =>
       saveAgentRunTrace({
@@ -188,6 +202,7 @@ export async function askAgentHub(params: {
         sourceStatuses: response.sources.map((source) => source.dataStatus),
         dataStatus: response.dataStatus,
         fallbackUsed: true,
+        usedMemoryIds: memoryContext.usedMemoryIds,
         createdAt: nowIso(),
         sanitizedError: sanitizeError(error),
       }),
@@ -223,6 +238,8 @@ export function buildLockedAgentHubResponse(params: {
     summary: message,
     recommendations: [
       {
+        recommendationId: `rec_feature_locked_${requestId}`,
+        recommendationType: "feature_upgrade",
         title: params.premium.title || "Unlock GT Growth AI",
         message,
         sourceTools: [],

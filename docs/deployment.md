@@ -91,14 +91,22 @@ Optional GitHub repository variables for Telegram reliability tuning:
 - `FIREBASE_AUTH_REQUEST_TIMEOUT_MS`
 
 Optional GitHub repository variables for Agent Hub scheduled learning:
+- `AGENT_MEMORY_V2_ENABLED` (defaults to `false`)
 - `AGENT_LEARNING_ENABLED` (defaults to `false`)
 - `AGENT_LEARNING_DEFAULT_LOOKBACK_DAYS` (defaults to `365`)
 - `AGENT_STALE_THRESHOLD_HOURS` (defaults to `24`)
+- `AGENT_LEARNING_SCHEDULER_JOB_NAME` (defaults to `gt-v2report-agent-learning-scheduler`)
+- `AGENT_LEARNING_SCHEDULER_CRON` (defaults to `*/15 * * * *`)
+- `AGENT_LEARNING_SCHEDULER_TIME_ZONE` (defaults to `Asia/Yangon`)
+- `AGENT_OPERATIONAL_SNAPSHOT_INTERVAL_MINUTES` (defaults to `15`; allowed values are `15`, `30`, `60`)
+- `AGENT_LEARNING_MAX_CLINIC_CONCURRENCY` (defaults to `3`)
 
 Recommended Agent Hub scheduler setup:
-- Set `AGENT_LEARNING_ENABLED=true` only after `AGENT_LEARNING_SCHEDULER_SECRET` is configured.
-- Invoke `POST {APP_BASE_URL}/api/internal/agent-learning/tick` from Cloud Scheduler with header `x-agent-learning-scheduler-secret`.
-- Send placeholder-safe JSON such as:
+- Set `AGENT_MEMORY_V2_ENABLED=true` and `AGENT_LEARNING_ENABLED=true` only after `AGENT_LEARNING_SCHEDULER_SECRET` is configured.
+- The backend deploy workflow creates or updates one Cloud Scheduler job that invokes `POST {APP_BASE_URL}/api/internal/agent-learning/run-all` with header `x-agent-learning-scheduler-secret`.
+- Store enabled clinic schedule records in Firestore collection `gtAgentLearningSchedulesV1`.
+- Each schedule record should include `clinicId`, verified `clinicCode`, `timezone`, `enabled`, `enabledJobTypes`, optional `cadenceOverrides`, `operatingDays`, `localOpeningTime`, `localClosingTime`, `operationalSnapshotIntervalMinutes`, and audit fields.
+- Use `POST {APP_BASE_URL}/api/internal/agent-learning/tick` only for targeted testing or recovery. Send placeholder-safe JSON such as:
 
 ```json
 {
@@ -106,12 +114,13 @@ Recommended Agent Hub scheduler setup:
   "clinicCodesById": {
     "CLINIC_ID": "CLINIC_CODE"
   },
-  "jobTypes": ["customer_profiles", "finance_daily_snapshot", "service_practitioner_profiles", "appointment_daily_profile"]
+  "jobTypes": ["customer_profiles", "finance_daily_snapshot", "service_profiles", "practitioner_profiles", "appointment_daily_profile"]
 }
 ```
 
-- Recommended cadence: every 5 minutes for optional appointment snapshots, nightly for customer/finance/service/practitioner/appointment profiles, hourly or nightly for feedback learning, morning for owner brief cards, and weekly for business review cards.
+- Recommended cost-aware cadence: every 15 minutes during clinic operating hours for `appointment_operational_snapshot`, hourly for `feedback_learning` and `recommendation_outcome_observer`, nightly for customer/service/practitioner/finance/appointment profiles, daily morning for `owner_insight_cards`, Monday morning for `weekly_business_review`, and Sunday early morning for `memory_maintenance`.
 - The production scheduler must be external, such as Cloud Scheduler or private Cloud Run/OIDC. Do not rely on an in-process interval for Agent Hub learning.
+- Scheduled jobs persist V2 artifacts in `gtAgentFactSnapshotsV2`, `gtAgentInsightCardsV2`, `gtAgentLearningWatermarksV2`, `gtAgentUserPreferencesV2`, `gtAgentClinicMemoriesV2`, and `gtAgentRecommendationOutcomesV2`.
 - Current live appointment data does not expose `treatment_started_at`; see [APPOINTMENT_LIFECYCLE_DATA_CONTRACT.md](/Users/zayarmin/Development/GreatTime%20Platform/GT_V2Report/docs/APPOINTMENT_LIFECYCLE_DATA_CONTRACT.md).
 
 Recommended Telegram scheduler setup:
