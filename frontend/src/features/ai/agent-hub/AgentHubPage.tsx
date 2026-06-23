@@ -6,6 +6,11 @@ import { ErrorState, EmptyState } from "../../../components/StatusViews";
 import { useAccess } from "../../access/AccessProvider";
 import { AI_LANGUAGE_OPTIONS, useAiPreferences } from "../AiPreferencesProvider";
 import { daysAgo, today } from "../../../utils/date";
+import autoAgentAvatar from "../../../../CFO_agent.jpg";
+import financeAgentAvatar from "../../../../Finance_agent.jpg";
+import appointmentAgentAvatar from "../../../../Inventory_agent.jpg";
+import relationshipAgentAvatar from "../../../../relationship_agent.jpg";
+import businessAgentAvatar from "../../../../Sales_agent.jpg";
 import type {
   GreatTimeAgentChatResponse,
   GreatTimeAgentEntityContext,
@@ -30,6 +35,8 @@ type AgentOption = {
   label: string;
   description: string;
   icon: AgentIconName;
+  avatar: string;
+  avatarAlt: string;
 };
 
 const AGENT_OPTIONS: AgentOption[] = [
@@ -38,30 +45,40 @@ const AGENT_OPTIONS: AgentOption[] = [
     label: "Auto",
     description: "Selects the right specialization for each question.",
     icon: "auto",
+    avatar: autoAgentAvatar,
+    avatarAlt: "Auto specialization portrait",
   },
   {
     value: "finance",
     label: "Finance",
     description: "Payments, revenue, invoices, and settlement details.",
     icon: "finance",
+    avatar: financeAgentAvatar,
+    avatarAlt: "Finance specialization portrait",
   },
   {
     value: "customer_relationship",
     label: "Customer relationship",
     description: "Retention, follow-up priorities, packages, and churn risk.",
     icon: "relationship",
+    avatar: relationshipAgentAvatar,
+    avatarAlt: "Customer relationship specialization portrait",
   },
   {
     value: "business",
     label: "Business",
     description: "Clinic health, services, staff load, and trend signals.",
     icon: "business",
+    avatar: businessAgentAvatar,
+    avatarAlt: "Business specialization portrait",
   },
   {
     value: "appointment",
     label: "Appointment",
     description: "Live schedule, check-in flow, and treatment readiness.",
     icon: "appointment",
+    avatar: appointmentAgentAvatar,
+    avatarAlt: "Appointment specialization portrait",
   },
 ];
 
@@ -201,6 +218,17 @@ function AgentModeIcon({ name }: { name: AgentIconName }) {
         </svg>
       );
   }
+}
+
+function AgentAvatar({ agent, size = "small" }: { agent: AgentOption; size?: "small" | "large" }) {
+  return (
+    <span className={`agent-avatar agent-avatar--${size}`.trim()}>
+      <img src={agent.avatar} alt={agent.avatarAlt} loading="lazy" />
+      <span className="agent-avatar__badge" aria-hidden="true">
+        <AgentModeIcon name={agent.icon} />
+      </span>
+    </span>
+  );
 }
 
 function AgentTable({
@@ -409,9 +437,7 @@ export function AgentHubPage() {
                 onClick={() => setAgent(option.value)}
                 aria-pressed={agent === option.value}
               >
-                <span className="agent-mode__icon">
-                  <AgentModeIcon name={option.icon} />
-                </span>
+                <AgentAvatar agent={option} />
                 <span className="agent-mode__copy">
                   <strong>{option.label}</strong>
                   <small>{option.description}</small>
@@ -425,16 +451,16 @@ export function AgentHubPage() {
           <div className="agent-conversation__scroll">
             {turns.length === 0 ? (
               <section className="agent-welcome">
-                <span className="agent-welcome__icon" aria-hidden="true">
-                  <AgentModeIcon name={activeAgent.icon} />
-                </span>
-                <div>
-                  <p className="agent-welcome__eyebrow">{activeAgent.label} active</p>
-                  <h2>Start with a clinic question.</h2>
-                  <p>
-                    Keep Auto selected when you want GreatTime to route the question to the right specialization.
-                    You can also choose a focused mode from the left.
-                  </p>
+                <div className="agent-welcome__intro">
+                  <AgentAvatar agent={activeAgent} size="large" />
+                  <div>
+                    <p className="agent-welcome__eyebrow">{activeAgent.label} active</p>
+                    <h2>Start with a clinic question.</h2>
+                    <p>
+                      Ask in plain language. GreatTime will keep the answer grounded in the selected clinic,
+                      date range, and available source freshness.
+                    </p>
+                  </div>
                 </div>
                 <div className="agent-suggestion-grid" aria-label="Suggested questions">
                   {suggestions.map((suggestion) => (

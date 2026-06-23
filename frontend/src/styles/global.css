@@ -338,8 +338,7 @@ textarea:focus-visible,
 .topbar__ask svg,
 .menu-toggle svg,
 .sidebar-close svg,
-.agent-mode__icon svg,
-.agent-welcome__icon svg,
+.agent-avatar__badge svg,
 .nav-group__chevron {
   width: 100%;
   height: 100%;
@@ -348,6 +347,13 @@ textarea:focus-visible,
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2;
+}
+
+.topbar__ask svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
 }
 
 .nav-link__text {
@@ -468,6 +474,9 @@ textarea:focus-visible,
 
 .topbar__ask {
   display: inline-flex;
+  width: auto;
+  max-width: max-content;
+  flex: 0 0 auto;
   min-height: 38px;
   align-items: center;
   gap: 8px;
@@ -714,8 +723,8 @@ textarea:focus-visible,
 
 .agent-mode {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 11px;
   width: 100%;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
@@ -735,20 +744,6 @@ textarea:focus-visible,
   background: var(--gt-green-soft);
 }
 
-.agent-mode__icon,
-.agent-welcome__icon {
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  background: var(--surface);
-  color: var(--gt-green);
-}
-
-.agent-mode__icon {
-  width: 36px;
-  height: 36px;
-}
-
 .agent-mode__copy {
   display: grid;
   gap: 2px;
@@ -764,6 +759,58 @@ textarea:focus-visible,
   color: var(--text-muted);
   font-size: 0.78rem;
   line-height: 1.35;
+}
+
+.agent-avatar {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
+.agent-avatar img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 1px solid rgba(11, 93, 73, 0.14);
+  border-radius: 14px;
+  background: var(--surface-soft);
+  box-shadow: 0 1px 2px rgba(19, 38, 32, 0.08);
+  object-fit: cover;
+  object-position: center;
+}
+
+.agent-avatar--small {
+  width: 46px;
+  height: 46px;
+}
+
+.agent-avatar--large {
+  width: 76px;
+  height: 76px;
+}
+
+.agent-avatar--large img {
+  border-radius: 18px;
+}
+
+.agent-avatar__badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 2px solid var(--surface);
+  border-radius: 999px;
+  background: var(--gt-green);
+  color: #fff;
+}
+
+.agent-avatar__badge svg {
+  width: 13px;
+  height: 13px;
 }
 
 .agent-conversation {
@@ -783,15 +830,17 @@ textarea:focus-visible,
 .agent-welcome {
   display: grid;
   gap: 16px;
-  max-width: 760px;
+  max-width: 840px;
   margin: 0 auto;
-  padding: 24px 0;
+  padding: 18px 0 28px;
 }
 
-.agent-welcome__icon {
-  width: 48px;
-  height: 48px;
-  border: 1px solid var(--border-subtle);
+.agent-welcome__intro {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  padding: 4px 0 2px;
 }
 
 .agent-welcome__eyebrow {
