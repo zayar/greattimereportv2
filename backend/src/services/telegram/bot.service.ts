@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { env } from "../../config/env.js";
 import { HttpError } from "../../utils/http-error.js";
 import { hasFeatureAccess } from "../feature-access.service.js";
@@ -35,6 +36,15 @@ type TelegramChatMemberUpdate = {
   new_chat_member?: TelegramChatMember;
 };
 
+type TelegramCallbackQuery = {
+  id: string;
+  data?: string;
+  message?: TelegramMessage;
+  from?: {
+    id?: number;
+  };
+};
+
 export type TelegramUpdate = {
   update_id: number;
   message?: TelegramMessage;
@@ -42,6 +52,7 @@ export type TelegramUpdate = {
   channel_post?: TelegramMessage;
   edited_channel_post?: TelegramMessage;
   my_chat_member?: TelegramChatMemberUpdate;
+  callback_query?: TelegramCallbackQuery;
 };
 
 type TelegramApiResponse<T> = {
@@ -59,6 +70,8 @@ export type TelegramWebhookInfo = {
 
 let cachedBotUsername: string | null | undefined;
 let pollingStarted = false;
+const suggestedQuestionCallbacks = new Map<string, { question: string; createdAt: number }>();
+const SUGGESTED_QUESTION_TTL_MS = 60 * 60_000;
 
 function getTelegramApiUrl(method: string) {
   if (!env.TELEGRAM_BOT_TOKEN) {
@@ -194,6 +207,13 @@ export function canTelegramUserChatWithAgent(params: {
 
 function formatMetricValue(value: string | number, unit: string | undefined) {
   const formatted = typeof value === "number" ? value.toLocaleString("en-US") : value;
+  if (unit === "amount") {
+    return `${formatted} ကျပ်`;
+  }
+  if (unit === "%") {
+    return `${formatted}%`;
+  }
+
   return unit ? `${formatted} ${unit}` : formatted;
 }
 
@@ -201,6 +221,21 @@ function formatAgentLabel(agentId: GreatTimeAgentId) {
   switch (agentId) {
     case "finance":
       return "Finance Agent";
+    case "customer_relationship":
+      return "Customer Relationship Agent";
+    case "business":
+      return "Business Agent";
+    case "appointment":
+      return "Appointment Agent";
+    default:
+      return "GT Agent";
+  }
+}
+
+function formatAgentLabelMyanmar(agentId: GreatTimeAgentId) {
+  switch (agentId) {
+    case "finance":
+      return "ငွေကြေး Agent";
     case "customer_relationship":
       return "Customer Relationship Agent";
     case "business":
@@ -226,41 +261,309 @@ function formatShortDate(dateKey: string) {
   });
 }
 
+function formatShortDateMyanmar(dateKey: string) {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) {
+    return dateKey;
+  }
+
+  return date.toLocaleDateString("my-MM", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function translatePeriodLabel(label: string) {
+  const normalized = label.toLowerCase();
+  if (normalized === "today") {
+    return "ဒီနေ့";
+  }
+  if (normalized === "yesterday") {
+    return "မနေ့";
+  }
+  if (normalized === "this month") {
+    return "ဒီလ";
+  }
+  if (normalized === "this week") {
+    return "ဒီအပတ်";
+  }
+  if (normalized === "last 30 days") {
+    return "ပြီးခဲ့တဲ့ ၃၀ ရက်";
+  }
+  if (normalized === "last 90 days") {
+    return "ပြီးခဲ့တဲ့ ၉၀ ရက်";
+  }
+  if (normalized === "year to date") {
+    return "ဒီနှစ်အစမှ ယနေ့အထိ";
+  }
+
+  return label;
+}
+
 function formatResponsePeriod(response: GreatTimeAgentChatResponse) {
   const { period } = response;
   if (period.fromDate === period.toDate) {
-    return `${period.label} (${formatShortDate(period.toDate)})`;
+    return `${translatePeriodLabel(period.label)} (${formatShortDateMyanmar(period.toDate)})`;
   }
 
-  return `${period.label} (${formatShortDate(period.fromDate)} - ${formatShortDate(period.toDate)})`;
+  return `${translatePeriodLabel(period.label)} (${formatShortDateMyanmar(period.fromDate)} - ${formatShortDateMyanmar(period.toDate)})`;
 }
 
 function buildTelegramReplyHeader(response: GreatTimeAgentChatResponse) {
-  const agentLabel = formatAgentLabel(response.resolvedAgent);
-  const answeredBy = response.autoMode ? `GT Brain -> ${agentLabel}` : agentLabel;
+  const agentLabel = formatAgentLabelMyanmar(response.resolvedAgent);
+  const answeredBy = response.autoMode ? `GT Brain → ${agentLabel}` : agentLabel;
 
-  return ["GT Brain", `Answered by: ${answeredBy}`, `Period: ${formatResponsePeriod(response)}`];
+  return ["GT Brain", `ဖြေဆိုသူ: ${answeredBy}`, `ကာလ: ${formatResponsePeriod(response)}`];
 }
 
-function formatTablePreview(response: GreatTimeAgentChatResponse) {
+function stringValue(row: Record<string, unknown>, key: string, fallback = "-") {
+  const value = row[key];
+  return value == null || value === "" ? fallback : String(value);
+}
+
+function numberValue(row: Record<string, unknown>, key: string) {
+  const value = row[key];
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatDateTimeForOwner(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) {
+    return "-";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: env.DEFAULT_TIMEZONE,
+  });
+}
+
+function translateStatus(value: string) {
+  const normalized = value.trim().toUpperCase();
+  if (["CHECKOUT", "CHECKED_OUT"].includes(normalized)) {
+    return "ပြီးဆုံး";
+  }
+  if (["CHECKIN", "CHECK_IN"].includes(normalized)) {
+    return "ရောက်ရှိ";
+  }
+  if (["BOOKED", "BOOKING", "REQUEST", "REQUESTED"].includes(normalized)) {
+    return "ချိန်းထား";
+  }
+  if (normalized.includes("CANCEL")) {
+    return "ဖျက်ထား";
+  }
+  if (normalized === "NO_SHOW") {
+    return "မလာ";
+  }
+
+  return value || "-";
+}
+
+function translateMetricLabel(label: string) {
+  const normalized = label.toLowerCase();
+  const map: Record<string, string> = {
+    appointments: "Appointment စုစုပေါင်း",
+    services: "Service အမျိုးအစား",
+    "open / upcoming": "ဖွင့်/လာရန်ရှိ",
+    "checked out": "ပြီးဆုံး",
+    cancelled: "ဖျက်ထား",
+    "no-show": "မလာ",
+    revenue: "ဝင်ငွေ",
+    bookings: "Booking",
+    customers: "Customer",
+    treatments: "Treatment",
+    practitioners: "Practitioner",
+    "active practitioners": "Active practitioner",
+    "customers served": "Service ပေးထားသော customer",
+    "average utilization": "ပျမ်းမျှ utilization",
+    "total bookings": "Booking စုစုပေါင်း",
+    "distinct services": "Service အမျိုးအစား",
+    "avg bookings/service": "Service တစ်ခုလျှင် ပျမ်းမျှ booking",
+    collected: "စုဆောင်းငွေ",
+  };
+
+  return map[normalized] ?? label;
+}
+
+function formatAppointmentConversation(response: GreatTimeAgentChatResponse) {
+  const serviceTable = response.tables?.find((table) => table.title === "Appointment services");
+  const appointmentTable =
+    response.tables?.find((table) => table.title === "Appointments") ??
+    response.tables?.find((table) => /appointment/i.test(table.title) && table.title !== "Appointment services");
+  const totalAppointments =
+    response.metrics?.find((metric) => metric.label.toLowerCase() === "appointments")?.value ??
+    appointmentTable?.rows.length ??
+    0;
+  const serviceCount =
+    response.metrics?.find((metric) => metric.label.toLowerCase() === "services")?.value ??
+    serviceTable?.rows.length ??
+    0;
+  const lines = [
+    `ဒီနေ့ appointment စာရင်းကို APICORE ကနေ စစ်ထားပါတယ်။ Appointment ${formatMetricValue(totalAppointments, undefined)} ခုရှိပြီး service အမျိုးအစား ${formatMetricValue(serviceCount, undefined)} ခု ပါပါတယ်။`,
+  ];
+
+  if (serviceTable?.rows.length) {
+    lines.push("", "ဒီနေ့ appointment ထဲက service များ:");
+    serviceTable.rows.slice(0, 25).forEach((row, index) => {
+      const serviceName = stringValue(row, "serviceName", "Unknown service");
+      const appointments = numberValue(row, "appointmentCount") ?? 0;
+      const customers = numberValue(row, "customerCount") ?? 0;
+      lines.push(`${index + 1}. ${serviceName} — appointment ${appointments.toLocaleString("en-US")} ခု၊ customer ${customers.toLocaleString("en-US")} ယောက်`);
+    });
+
+    if (serviceTable.rows.length > 25) {
+      lines.push(`နောက်ထပ် service ${serviceTable.rows.length - 25} ခုရှိပါသေးတယ်။`);
+    }
+  }
+
+  if (appointmentTable?.rows.length) {
+    lines.push("", "Customer + service appointment စာရင်း:");
+    appointmentTable.rows.slice(0, 15).forEach((row, index) => {
+      const time = formatDateTimeForOwner(row.scheduledFrom);
+      const customer = stringValue(row, "customerName", "Unknown customer");
+      const service = stringValue(row, "serviceName", "Unknown service");
+      const practitioner = stringValue(row, "practitionerName", "");
+      const status = translateStatus(stringValue(row, "rawStatus", ""));
+      const practitionerText = practitioner ? `၊ practitioner ${practitioner}` : "";
+      lines.push(`${index + 1}. ${time} — ${customer}: ${service}${practitionerText}။ Status: ${status}`);
+    });
+
+    if (appointmentTable.rows.length > 15) {
+      lines.push(`နောက်ထပ် appointment ${appointmentTable.rows.length - 15} ခုကို GreatTime report ထဲမှာ ဆက်ကြည့်နိုင်ပါတယ်။`);
+    }
+  }
+
+  return lines;
+}
+
+function formatPractitionerPerformanceConversation(response: GreatTimeAgentChatResponse) {
+  const table = response.tables?.find((item) => item.title === "Practitioner performance");
+  if (!table?.rows.length) {
+    return [];
+  }
+
+  const lines = ["Practitioner performance ကို ဖတ်ရလွယ်အောင် ပြန်ရေးထားပါတယ်:"];
+  table.rows.slice(0, 8).forEach((row, index) => {
+    const name = stringValue(row, "therapistName", "Practitioner");
+    const treatments = numberValue(row, "treatmentsCompleted") ?? 0;
+    const customers = numberValue(row, "customersServed") ?? 0;
+    const topService = stringValue(row, "topService", "");
+    const topServiceText = topService && topService !== "-" ? ` အများဆုံးလုပ်ထားတဲ့ service က ${topService} ပါ။` : "";
+    lines.push(
+      `${index + 1}. ${name} က treatment ${treatments.toLocaleString("en-US")} ကြိမ်လုပ်ထားပြီး customer ${customers.toLocaleString("en-US")} ယောက်ကို service ပေးထားပါတယ်။${topServiceText}`,
+    );
+  });
+
+  return lines;
+}
+
+function formatServicePerformanceConversation(response: GreatTimeAgentChatResponse) {
+  const table = response.tables?.find((item) => /top services|service performance/i.test(item.title));
+  if (!table?.rows.length) {
+    return [];
+  }
+
+  const lines = ["Service အလိုက် owner အတွက် ဖတ်ရလွယ်တဲ့ summary:"];
+  table.rows.slice(0, 10).forEach((row, index) => {
+    const service = stringValue(row, "serviceName", "Service");
+    const bookings = numberValue(row, "bookingCount") ?? numberValue(row, "bookings");
+    const customers = numberValue(row, "customerCount") ?? numberValue(row, "totalCustomers");
+    const revenue = numberValue(row, "totalRevenue") ?? numberValue(row, "revenue");
+    const parts = [`${index + 1}. ${service}`];
+    if (bookings != null) {
+      parts.push(`booking ${bookings.toLocaleString("en-US")} ခု`);
+    }
+    if (customers != null) {
+      parts.push(`customer ${customers.toLocaleString("en-US")} ယောက်`);
+    }
+    if (revenue != null) {
+      parts.push(`ဝင်ငွေ ${revenue.toLocaleString("en-US")} ကျပ်`);
+    }
+    lines.push(`${parts.join(" — ")}။`);
+  });
+
+  return lines;
+}
+
+function formatCustomerMatchesConversation(response: GreatTimeAgentChatResponse) {
+  const table = response.tables?.find((item) => /customer relationship matches/i.test(item.title));
+  if (!table?.rows.length) {
+    return [];
+  }
+
+  const lines = ["Customer list ကို owner ဖတ်ရလွယ်အောင် ပြထားပါတယ်:"];
+  table.rows.slice(0, 8).forEach((row, index) => {
+    const name = stringValue(row, "customerName", "Customer");
+    const phone = stringValue(row, "maskedPhone", stringValue(row, "customerPhoneMasked", ""));
+    const lastVisit = stringValue(row, "lastVisitDate", "");
+    const remaining = numberValue(row, "remainingPackageSessions");
+    const parts = [`${index + 1}. ${name}`];
+    if (phone && phone !== "-") {
+      parts.push(`phone ${phone}`);
+    }
+    if (lastVisit && lastVisit !== "-") {
+      parts.push(`နောက်ဆုံးလာခဲ့တာ ${lastVisit}`);
+    }
+    if (remaining != null) {
+      parts.push(`package/session လက်ကျန် ${remaining.toLocaleString("en-US")}`);
+    }
+    lines.push(`${parts.join(" — ")}။`);
+  });
+
+  return lines;
+}
+
+function formatGenericTableConversation(response: GreatTimeAgentChatResponse) {
   const table = response.tables?.find((item) => item.rows.length > 0);
   if (!table) {
     return [];
   }
 
   const columns = table.columns.slice(0, 4);
-  const rows = table.rows.slice(0, 5).map((row, index) => {
+  const lines = [`${table.title} ကို ဖတ်ရလွယ်အောင် ပြထားပါတယ်:`];
+  table.rows.slice(0, 6).forEach((row, index) => {
     const values = columns
-      .map((column) => {
-        const value = row[column.key];
-        return value == null || value === "" ? "-" : String(value).slice(0, 48);
-      })
-      .join(" | ");
-
-    return `${index + 1}. ${values}`;
+      .map((column) => `${column.title}: ${stringValue(row, column.key)}`)
+      .join("၊ ");
+    lines.push(`${index + 1}. ${values}။`);
   });
 
-  return [`${table.title}:`, ...rows];
+  return lines;
+}
+
+function formatConversationTablePreview(response: GreatTimeAgentChatResponse) {
+  if (response.resolvedAgent === "appointment" || response.tables?.some((table) => table.title === "Appointment services")) {
+    return formatAppointmentConversation(response);
+  }
+
+  const practitioner = formatPractitionerPerformanceConversation(response);
+  if (practitioner.length) {
+    return practitioner;
+  }
+
+  const service = formatServicePerformanceConversation(response);
+  if (service.length) {
+    return service;
+  }
+
+  const customers = formatCustomerMatchesConversation(response);
+  if (customers.length) {
+    return customers;
+  }
+
+  return formatGenericTableConversation(response);
 }
 
 function formatCustomer360PackageLine(row: Customer360FactPack["packages"]["holdings"][number]) {
@@ -289,7 +592,6 @@ function formatCustomer360TelegramReply(response: GreatTimeAgentChatResponse) {
   const packageRows = factPack.packages.holdings.filter((row) => (row.remainingSessions ?? 0) > 0).slice(0, 6);
   const recentTreatments = (factPack.appointments.recentCompleted ?? []).slice(0, 3);
   const topServices = factPack.usage.topServices.slice(0, 3);
-  const followUps = (response.followUpQuestions ?? []).slice(0, 2);
   const lines = [...buildTelegramReplyHeader(response), "", response.summary || response.assistantMessage];
 
   if (packageRows.length > 0) {
@@ -322,13 +624,6 @@ function formatCustomer360TelegramReply(response: GreatTimeAgentChatResponse) {
     });
   }
 
-  if (followUps.length > 0) {
-    lines.push("", "ဆက်မေးနိုင်တာ:");
-    followUps.forEach((question) => {
-      lines.push(`- /ask ${question}`);
-    });
-  }
-
   const message = lines.join("\n").trim();
   return message.length <= 3900 ? message : `${message.slice(0, 3890).trim()}\n...`;
 }
@@ -338,39 +633,96 @@ export function formatAgentHubTelegramReply(response: GreatTimeAgentChatResponse
     return formatCustomer360TelegramReply(response);
   }
 
-  const lines = [...buildTelegramReplyHeader(response), "", response.summary || response.assistantMessage];
+  const tablePreview = formatConversationTablePreview(response);
+  const lines = [...buildTelegramReplyHeader(response)];
   const metrics = (response.metrics ?? []).slice(0, 5);
-  const tablePreview = formatTablePreview(response);
   const warnings = (response.warnings ?? []).slice(0, 2);
-  const followUps = (response.followUpQuestions ?? []).slice(0, 3);
-
-  if (metrics.length > 0) {
-    lines.push("", "Metrics:");
-    metrics.forEach((metric) => {
-      lines.push(`- ${metric.label}: ${formatMetricValue(metric.value, metric.unit)}`);
-    });
-  }
 
   if (tablePreview.length > 0) {
     lines.push("", ...tablePreview);
+  } else {
+    lines.push("", response.summary || response.assistantMessage);
+  }
+
+  if (metrics.length > 0 && response.resolvedAgent !== "appointment") {
+    lines.push("", "အဓိကကိန်းဂဏန်းများ:");
+    metrics.forEach((metric) => {
+      lines.push(`- ${translateMetricLabel(metric.label)}: ${formatMetricValue(metric.value, metric.unit)}`);
+    });
   }
 
   if (warnings.length > 0) {
-    lines.push("", "Notes:");
+    lines.push("", "သတိပြုရန်:");
     warnings.forEach((warning) => {
       lines.push(`- ${warning.title}: ${warning.message}`);
     });
   }
 
-  if (followUps.length > 0) {
-    lines.push("", "Try next:");
-    followUps.forEach((question) => {
-      lines.push(`- /ask ${question}`);
-    });
-  }
-
   const message = lines.join("\n").trim();
   return message.length <= 3900 ? message : `${message.slice(0, 3890).trim()}\n...`;
+}
+
+function cleanupSuggestedQuestionCallbacks() {
+  const cutoff = Date.now() - SUGGESTED_QUESTION_TTL_MS;
+  suggestedQuestionCallbacks.forEach((value, key) => {
+    if (value.createdAt < cutoff) {
+      suggestedQuestionCallbacks.delete(key);
+    }
+  });
+}
+
+function suggestionLabel(question: string, index: number) {
+  const normalized = question.toLowerCase();
+  if (/appointment/i.test(question) && /today/i.test(question)) {
+    return "ဒီနေ့ appointment ကြည့်မယ်";
+  }
+  if (/payment method/i.test(normalized)) {
+    return "Payment method အလိုက်ကြည့်မယ်";
+  }
+  if (/service.*declining|declining.*service/i.test(normalized)) {
+    return "ကျနေတဲ့ service ကြည့်မယ်";
+  }
+  if (/practitioner|therapist/i.test(normalized)) {
+    return "Practitioner performance ကြည့်မယ်";
+  }
+  if (/top services/i.test(normalized)) {
+    return "Top services ကြည့်မယ်";
+  }
+  if (/customer/i.test(normalized)) {
+    return "Customer detail ကြည့်မယ်";
+  }
+
+  return `ဆက်မေးခွန်း ${index + 1}`;
+}
+
+function registerSuggestedQuestion(question: string) {
+  cleanupSuggestedQuestionCallbacks();
+  const key = createHash("sha256")
+    .update(`${Date.now()}|${Math.random()}|${question}`)
+    .digest("hex")
+    .slice(0, 16);
+  suggestedQuestionCallbacks.set(key, {
+    question,
+    createdAt: Date.now(),
+  });
+
+  return key;
+}
+
+export function buildAgentHubTelegramReplyMarkup(response: GreatTimeAgentChatResponse) {
+  const questions = (response.followUpQuestions ?? []).filter(Boolean).slice(0, 3);
+  if (questions.length === 0) {
+    return undefined;
+  }
+
+  return {
+    inline_keyboard: questions.map((question, index) => [
+      {
+        text: suggestionLabel(question, index),
+        callback_data: `gtask:${registerSuggestedQuestion(question)}`,
+      },
+    ]),
+  };
 }
 
 function sanitizeSessionPart(value: string) {
@@ -422,6 +774,7 @@ async function buildAgentHubReply(params: {
 
 async function handleAgentQuestion(params: {
   chatId: string;
+  chatType: TelegramChat["type"];
   question: string;
   telegramUserId: string | null;
 }) {
@@ -455,7 +808,9 @@ async function handleAgentQuestion(params: {
     question: params.question.trim(),
     telegramUserId: params.telegramUserId,
   });
-  await sendTelegramMessage(params.chatId, formatAgentHubTelegramReply(response));
+  await sendTelegramMessage(params.chatId, formatAgentHubTelegramReply(response), {
+    replyMarkup: buildAgentHubTelegramReplyMarkup(response),
+  });
 }
 
 export function isTelegramBotConfigured() {
@@ -501,15 +856,59 @@ export async function getTelegramBotLinkMetadata(linkCode?: string | null) {
   };
 }
 
-export async function sendTelegramMessage(chatId: string, text: string) {
+export async function sendTelegramMessage(
+  chatId: string,
+  text: string,
+  options?: {
+    replyMarkup?: Record<string, unknown>;
+  },
+) {
   return callTelegramApi("sendMessage", {
     chat_id: chatId,
     text,
     disable_web_page_preview: true,
+    ...(options?.replyMarkup ? { reply_markup: options.replyMarkup } : {}),
+  });
+}
+
+async function answerTelegramCallback(callbackQueryId: string, text?: string) {
+  await callTelegramApi("answerCallbackQuery", {
+    callback_query_id: callbackQueryId,
+    ...(text ? { text } : {}),
+  });
+}
+
+async function handleSuggestedQuestionCallback(callback: TelegramCallbackQuery) {
+  const key = callback.data?.match(/^gtask:([A-Za-z0-9]+)$/)?.[1];
+  const chat = callback.message?.chat;
+
+  if (!key || !chat) {
+    await answerTelegramCallback(callback.id, "မေးခွန်းကို ပြန်မတွေ့ပါ။");
+    return;
+  }
+
+  cleanupSuggestedQuestionCallbacks();
+  const suggestion = suggestedQuestionCallbacks.get(key);
+  if (!suggestion) {
+    await answerTelegramCallback(callback.id, "ဒီ button သက်တမ်းကုန်သွားပါပြီ။ နောက်ဆုံး message က button ကို ပြန်နှိပ်ပါ။");
+    return;
+  }
+
+  await answerTelegramCallback(callback.id, "GT Brain ကို မေးနေပါတယ်...");
+  await handleAgentQuestion({
+    chatId: String(chat.id),
+    chatType: chat.type,
+    question: suggestion.question,
+    telegramUserId: callback.from?.id == null ? null : String(callback.from.id),
   });
 }
 
 export async function handleTelegramUpdate(update: TelegramUpdate) {
+  if (update.callback_query?.data?.startsWith("gtask:")) {
+    await handleSuggestedQuestionCallback(update.callback_query);
+    return;
+  }
+
   if (update.my_chat_member && didBotJoinChat(update.my_chat_member)) {
     try {
       await sendUsageMessage(String(update.my_chat_member.chat.id));
@@ -570,6 +969,7 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
   if (agentQuestion !== null) {
     await handleAgentQuestion({
       chatId,
+      chatType: message.chat.type,
       question: agentQuestion,
       telegramUserId: message.from?.id == null ? null : String(message.from.id),
     });
@@ -604,7 +1004,7 @@ export async function ensureTelegramWebhook() {
   await callTelegramApi("setWebhook", {
     url: webhookUrl,
     secret_token: env.TELEGRAM_WEBHOOK_SECRET,
-    allowed_updates: ["message", "edited_message", "channel_post", "edited_channel_post", "my_chat_member"],
+    allowed_updates: ["message", "edited_message", "channel_post", "edited_channel_post", "my_chat_member", "callback_query"],
   });
   console.log(`[telegram] webhook configured for ${webhookUrl}`);
 }

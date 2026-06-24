@@ -28,6 +28,7 @@ const { buildSessionSummaryFromTurn, isSessionSummaryFresh } = await import("../
 const { buildLearningBucket, isScheduleDueForJob } = await import("../src/services/agent-hub/learning-worker.ts")
 const { isAgentLearningSchedulerSecretValid } = await import("../src/routes/agent-learning.routes.ts")
 const {
+  buildAgentHubTelegramReplyMarkup,
   canTelegramUserChatWithAgent,
   extractTelegramAgentQuestion,
   formatAgentHubTelegramReply,
@@ -44,6 +45,18 @@ test("supervisor routes four agent domains and respects explicit override", () =
   assert.equal(resolveAgent({ requestedAgent: "finance", message: "appointments today" }).resolvedAgent, "finance")
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "Soe Moe Thu ( C )" }).resolvedAgent, "customer_relationship")
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "Tell me about Whitening Laser" }).resolvedAgent, "business")
+})
+
+test("supervisor routes appointment questions with customer or service words to Appointment Agent", () => {
+  assert.equal(
+    resolveAgent({ requestedAgent: "auto", message: "Who are the customers today's appointment?" }).resolvedAgent,
+    "appointment",
+  )
+  assert.equal(
+    resolveAgent({ requestedAgent: "auto", message: "What service are appointments today?" }).resolvedAgent,
+    "appointment",
+  )
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "appointment sales" }).resolvedAgent, "finance")
 })
 
 test("supervisor handles Myanmar keywords and deterministic tie-breaking", () => {
@@ -338,6 +351,18 @@ test("planner maps general appointment questions to the APICORE appointment ledg
   })
   assert.equal(listPlan.intent, "appointment_list")
   assert.deepEqual(listPlan.toolNames, ["get_appointment_ledger"])
+
+  const servicesTodayPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "What service are appointments today?",
+    },
+  })
+  assert.equal(servicesTodayPlan.resolvedAgent, "appointment")
+  assert.equal(servicesTodayPlan.intent, "appointment_list")
+  assert.deepEqual(servicesTodayPlan.toolNames, ["get_appointment_ledger"])
 })
 
 test("planner maps treatment-start appointment questions to the APICORE status proxy", () => {
@@ -394,8 +419,8 @@ test("Telegram Agent chat helpers require explicit group commands and target per
   )
 })
 
-test("Telegram Agent reply formatter keeps summaries, metrics, previews, and owner-facing follow-ups", () => {
-  const message = formatAgentHubTelegramReply({
+test("Telegram Agent reply formatter uses Myanmar conversational text and button follow-ups", () => {
+  const response = {
     sessionId: "session-1",
     requestId: "request-1",
     responseId: "response-1",
@@ -433,16 +458,21 @@ test("Telegram Agent reply formatter keeps summaries, metrics, previews, and own
     ],
     dataStatus: "ok",
     actions: [{ type: "read_only_agent_response" }],
-  })
+  } as const
+  const message = formatAgentHubTelegramReply(response)
+  const markup = buildAgentHubTelegramReplyMarkup(response)
 
   assert.match(message, /GT Brain/)
-  assert.match(message, /Answered by: GT Brain -> Finance Agent/)
-  assert.match(message, /Period: this month/)
-  assert.match(message, /Collected: 10,000 amount/)
-  assert.match(message, /Payment methods/)
+  assert.match(message, /ဖြေဆိုသူ: GT Brain → ငွေကြေး Agent/)
+  assert.match(message, /ကာလ: ဒီလ/)
+  assert.match(message, /စုဆောင်းငွေ: 10,000 ကျပ်/)
+  assert.match(message, /Payment methods ကို ဖတ်ရလွယ်အောင်/)
   assert.doesNotMatch(message, /BigQuery payment report: ok/)
   assert.doesNotMatch(message, /Sources:/)
-  assert.match(message, /\/ask Show payment methods by amount/)
+  assert.doesNotMatch(message, /\/ask Show payment methods by amount/)
+  assert.equal(markup?.inline_keyboard.length, 1)
+  assert.match(markup?.inline_keyboard[0]?.[0]?.text ?? "", /Payment method/)
+  assert.match(markup?.inline_keyboard[0]?.[0]?.callback_data ?? "", /^gtask:/)
 })
 
 test("Telegram Customer 360 formatter uses owner-friendly Myanmar package context", () => {
@@ -515,11 +545,113 @@ test("Telegram Customer 360 formatter uses owner-friendly Myanmar package contex
   })
 
   assert.match(message, /GT Brain/)
-  assert.match(message, /Answered by: GT Brain -> Customer Relationship Agent/)
+  assert.match(message, /ဖြေဆိုသူ: GT Brain → Customer Relationship Agent/)
   assert.match(message, /Package \/ service လက်ကျန်/)
   assert.match(message, /ExoMicro: ကျန် 14\/59/)
   assert.match(message, /အကြံပြုချက်/)
   assert.doesNotMatch(message, /Sources:/)
+  assert.doesNotMatch(message, /\/ask Show recent completed treatments/)
+})
+
+test("Telegram formatter explains appointment services and practitioner rows without pipe tables", () => {
+  const appointmentMessage = formatAgentHubTelegramReply({
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "appointment",
+    autoMode: true,
+    intent: "appointment_list",
+    period: {
+      fromDate: "2026-06-24",
+      toDate: "2026-06-24",
+      label: "today",
+    },
+    assistantMessage: "Appointment ledger has 2 appointments for 2026-06-24.",
+    summary: "Appointment ledger has 2 appointments for 2026-06-24.",
+    metrics: [
+      { label: "Appointments", value: 2 },
+      { label: "Services", value: 2 },
+    ],
+    tables: [
+      {
+        title: "Appointment services",
+        columns: [
+          { key: "serviceName", title: "Service" },
+          { key: "appointmentCount", title: "Appointments" },
+          { key: "customerCount", title: "Customers" },
+        ],
+        rows: [
+          { serviceName: "Whitening Laser", appointmentCount: 1, customerCount: 1 },
+          { serviceName: "Hair Removal Underarm", appointmentCount: 1, customerCount: 1 },
+        ],
+      },
+      {
+        title: "Appointments",
+        columns: [
+          { key: "scheduledFrom", title: "Time" },
+          { key: "customerName", title: "Customer" },
+          { key: "serviceName", title: "Service" },
+          { key: "practitionerName", title: "Practitioner" },
+          { key: "rawStatus", title: "Status" },
+        ],
+        rows: [
+          {
+            scheduledFrom: "2026-06-24T09:00:00.000Z",
+            customerName: "Ma Aye",
+            serviceName: "Whitening Laser",
+            practitionerName: "Wai Phoo",
+            rawStatus: "BOOKED",
+          },
+        ],
+      },
+    ],
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  })
+
+  assert.match(appointmentMessage, /ဒီနေ့ appointment စာရင်း/)
+  assert.match(appointmentMessage, /Whitening Laser — appointment 1 ခု/)
+  assert.match(appointmentMessage, /Ma Aye: Whitening Laser/)
+  assert.doesNotMatch(appointmentMessage, /Whitening Laser \|/)
+
+  const practitionerMessage = formatAgentHubTelegramReply({
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "business",
+    autoMode: true,
+    intent: "practitioner_performance",
+    period: {
+      fromDate: "2026-06-01",
+      toDate: "2026-06-24",
+      label: "this month",
+    },
+    assistantMessage: "Wai Phoo leads volume with 5 treatments.",
+    summary: "Wai Phoo leads volume with 5 treatments.",
+    metrics: [],
+    tables: [
+      {
+        title: "Practitioner performance",
+        columns: [
+          { key: "therapistName", title: "Practitioner" },
+          { key: "treatmentsCompleted", title: "Treatments" },
+          { key: "customersServed", title: "Customers" },
+          { key: "topService", title: "Top service" },
+        ],
+        rows: [{ therapistName: "Wai Phoo", treatmentsCompleted: 5, customersServed: 3, topService: "Whitening Laser" }],
+      },
+    ],
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  })
+
+  assert.match(practitionerMessage, /Wai Phoo က treatment 5 ကြိမ်လုပ်ထားပြီး customer 3 ယောက်/)
+  assert.match(practitionerMessage, /အများဆုံးလုပ်ထားတဲ့ service က Whitening Laser ပါ/)
+  assert.doesNotMatch(practitionerMessage, /Wai Phoo \| 5 \| 3 \| Whitening Laser/)
 })
 
 test("appointment helpers count active checked-ins and exclude merchant cancellations from totals", () => {

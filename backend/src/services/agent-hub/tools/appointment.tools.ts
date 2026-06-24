@@ -104,6 +104,51 @@ function ledgerTable(title: string, rows: ApicoreBookingDetailsRow[]) {
   };
 }
 
+function appointmentServiceRows(rows: ApicoreBookingDetailsRow[]) {
+  const grouped = new Map<string, { serviceName: string; appointmentCount: number; customerNames: Set<string> }>();
+
+  rows.forEach((row) => {
+    const serviceName = normalizeText(row.ServiceName, "Unknown service");
+    const current =
+      grouped.get(serviceName) ??
+      {
+        serviceName,
+        appointmentCount: 0,
+        customerNames: new Set<string>(),
+      };
+
+    current.appointmentCount += 1;
+    current.customerNames.add(normalizeText(row.MemberName, "Unknown customer"));
+    grouped.set(serviceName, current);
+  });
+
+  return [...grouped.values()]
+    .map((row) => ({
+      serviceName: row.serviceName,
+      appointmentCount: row.appointmentCount,
+      customerCount: row.customerNames.size,
+    }))
+    .sort((left, right) => {
+      if (right.appointmentCount !== left.appointmentCount) {
+        return right.appointmentCount - left.appointmentCount;
+      }
+
+      return left.serviceName.localeCompare(right.serviceName);
+    });
+}
+
+function appointmentServiceTable(rows: ApicoreBookingDetailsRow[]) {
+  return {
+    title: "Appointment services",
+    columns: [
+      { key: "serviceName", title: "Service" },
+      { key: "appointmentCount", title: "Appointments" },
+      { key: "customerCount", title: "Customers" },
+    ],
+    rows: appointmentServiceRows(rows),
+  };
+}
+
 function appointmentLedgerEntityRef(row: ApicoreBookingDetailsRow, rank: number) {
   return {
     entityType: "appointment" as const,
@@ -196,6 +241,7 @@ async function fetchAppointmentLedger(input: AgentToolInput) {
 }
 
 function ledgerStatusMetrics(rows: ApicoreBookingDetailsRow[], totalCount: number) {
+  const distinctServices = appointmentServiceRows(rows).length;
   const counts = rows.reduce(
     (summary, row) => {
       const status = normalizeStatus(row.status);
@@ -218,6 +264,7 @@ function ledgerStatusMetrics(rows: ApicoreBookingDetailsRow[], totalCount: numbe
 
   return [
     { label: "Appointments", value: totalCount, helperText: "APICORE booking ledger total." },
+    { label: "Services", value: distinctServices, helperText: "Distinct services in the loaded appointment rows." },
     { label: "Open / upcoming", value: counts.open, helperText },
     { label: "Checked out", value: counts.checkedOut, helperText },
     { label: "Cancelled", value: counts.cancelled, helperText },
@@ -266,7 +313,7 @@ async function getAppointmentLedger(input: AgentToolInput): Promise<AgentToolRes
     live: true,
     summary: `Appointment ledger has ${data.totalCount.toLocaleString("en-US")} appointment${data.totalCount === 1 ? "" : "s"} for ${label}.`,
     metrics: ledgerStatusMetrics(data.rows, data.totalCount),
-    tables: [ledgerTable("Appointments", data.rows)],
+    tables: [appointmentServiceTable(data.rows), ledgerTable("Appointments", data.rows)],
     warnings: data.warnings,
     entityRefs: data.rows.map((row, index) => appointmentLedgerEntityRef(row, index + 1)),
   };

@@ -224,8 +224,17 @@ function detectAppointmentIntent(message: string) {
   if (/live|right now|currently|now|ယခု|အခု/i.test(message) && asksAppointmentLedger) {
     return "live_appointment_counts";
   }
-  if (/who|list|show|view|display|all|scheduled|today|count|total|how many|ဘယ်သူ/i.test(message) && asksAppointmentLedger) {
-    return /who|list|show|view|display|all|ဘယ်သူ/i.test(message) ? "appointment_list" : "appointment_summary";
+  if (
+    /who|what|which|list|show|view|display|all|scheduled|today|count|total|how many|customer|customers|member|members|service|services|practitioner|therapist|ဘယ်သူ|ဝန်ဆောင်မှု|ဖောက်သည်/i.test(
+      message,
+    ) &&
+    asksAppointmentLedger
+  ) {
+    return /who|what|which|list|show|view|display|all|customer|customers|member|members|service|services|practitioner|therapist|ဘယ်သူ|ဝန်ဆောင်မှု|ဖောက်သည်/i.test(
+      message,
+    )
+      ? "appointment_list"
+      : "appointment_summary";
   }
   return "appointment_summary";
 }
