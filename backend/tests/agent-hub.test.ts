@@ -13,7 +13,11 @@ const { resolveAgent } = await import("../src/services/agent-hub/supervisor.ts")
 const { assertToolAllowed } = await import("../src/services/agent-hub/tool-executor.ts")
 const { createAgentToolRegistry, getAgentToolAllowlist } = await import("../src/services/agent-hub/tool-registry.ts")
 const { extractInvoiceSearch } = await import("../src/services/agent-hub/tools/finance.tools.ts")
-const { buildLockedAgentHubResponse } = await import("../src/services/agent-hub/agent-hub.service.ts")
+const {
+  buildLockedAgentHubResponse,
+  extractExplicitCustomerSearchText,
+  shouldIgnoreExplicitEntityContext,
+} = await import("../src/services/agent-hub/agent-hub.service.ts")
 const { evaluateMemoryCandidate, buildMemoryRecord } = await import("../src/services/agent-hub/memory/memory-policy.ts")
 const { rankMemoriesForRequest } = await import("../src/services/agent-hub/memory/memory-retriever.ts")
 const { buildMemoryRecordsFromFeedbackEvents } = await import("../src/services/agent-hub/memory/memory-writer.ts")
@@ -111,6 +115,44 @@ test("invoice detail search ignores generic time and display words", () => {
   assert.equal(extractInvoiceSearch("Show today invoice detail."), "")
   assert.equal(extractInvoiceSearch("Show invoice ABC-12345 detail"), "ABC-12345")
   assert.equal(extractInvoiceSearch("Show invoice detail for Aung Aung"), "Aung Aung")
+})
+
+test("customer follow-up ignores stale entity context when a different explicit name is requested", () => {
+  const shweContext = {
+    entityType: "customer" as const,
+    entityId: "customer:shwe",
+    customerKey: "customer:shwe",
+    displayName: "Shwe Myat Thu",
+    customerName: "Shwe Myat Thu",
+    rank: 1,
+  }
+
+  assert.equal(extractExplicitCustomerSearchText("can you find Sumar Tun"), "Sumar Tun")
+  assert.equal(extractExplicitCustomerSearchText("what about May Thu Q"), "May Thu Q")
+  assert.equal(
+    shouldIgnoreExplicitEntityContext({
+      request: {
+        clinicId: "clinic-1",
+        clinicCode: "ABC",
+        agent: "customer_relationship",
+        message: "can you find Sumar Tun",
+        entityContext: shweContext,
+      },
+    }),
+    true,
+  )
+  assert.equal(
+    shouldIgnoreExplicitEntityContext({
+      request: {
+        clinicId: "clinic-1",
+        clinicCode: "ABC",
+        agent: "customer_relationship",
+        message: "Show me details about Shwe Myat Thu",
+        entityContext: shweContext,
+      },
+    }),
+    false,
+  )
 })
 
 test("planner maps checked-in appointment questions to active check-in rows", () => {

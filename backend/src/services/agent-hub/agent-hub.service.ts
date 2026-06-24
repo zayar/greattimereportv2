@@ -47,9 +47,16 @@ function inferAgentFromEntity(ref: GreatTimeAgentEntityContext | null): GreatTim
 function withFollowUpAgentInference(
   request: GreatTimeAgentChatRequest,
   resolvedRef: GreatTimeAgentEntityContext | null,
-) {
+): GreatTimeAgentChatRequest {
   if (request.agent && request.agent !== "auto") {
     return request;
+  }
+
+  if (request.entityContext?.entityType === "customer" && hasExplicitCustomerSearchIntent(request.message)) {
+    return {
+      ...request,
+      agent: "customer_relationship",
+    };
   }
 
   const inferredAgent = inferAgentFromEntity(resolvedRef);
@@ -65,6 +72,50 @@ function withFollowUpAgentInference(
   }
 
   return request;
+}
+
+export function hasExplicitCustomerSearchIntent(message: string) {
+  return Boolean(extractExplicitCustomerSearchText(message));
+}
+
+export function extractExplicitCustomerSearchText(message: string) {
+  const normalized = message.trim();
+  const match = normalized.match(
+    /^(?:can\s+you\s+)?(?:find|search|look\s+up|show(?:\s+me)?(?:\s+details?\s+(?:about|for))?|tell\s+me\s+about|details?\s+(?:about|for)|what\s+about)\s+(.+)$/i,
+  );
+  const searchText = match?.[1]?.trim().replace(/[?.!]+$/g, "").trim() ?? "";
+
+  if (!searchText || /\b(first|second|third|fourth|fifth|they|them|that customer|her|him|သူ|အဲ့ဒီ)\b/i.test(searchText)) {
+    return "";
+  }
+
+  return searchText;
+}
+
+function normalizeNameForComparison(value: string | null | undefined) {
+  return (value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function searchTextMatchesEntity(searchText: string, entityContext: GreatTimeAgentEntityContext | undefined) {
+  const search = normalizeNameForComparison(searchText);
+  const name = normalizeNameForComparison(entityContext?.customerName ?? entityContext?.displayName);
+
+  return Boolean(search && name && (search === name || name.includes(search) || search.includes(name)));
+}
+
+export function shouldIgnoreExplicitEntityContext(params: {
+  request: GreatTimeAgentChatRequest;
+}) {
+  const searchText = extractExplicitCustomerSearchText(params.request.message);
+  return Boolean(
+    params.request.entityContext?.entityType === "customer" &&
+      searchText &&
+      !searchTextMatchesEntity(searchText, params.request.entityContext),
+  );
 }
 
 function forceFollowUpPlan(params: {
@@ -114,9 +165,12 @@ export async function askAgentHub(params: {
     explicit: params.request.entityContext,
     sessionRefs,
   });
+  const shouldIgnoreContext = shouldIgnoreExplicitEntityContext({
+    request: params.request,
+  });
   const request = {
     ...withFollowUpAgentInference(params.request, resolvedRef),
-    entityContext: params.request.entityContext ?? resolvedRef ?? undefined,
+    entityContext: shouldIgnoreContext ? undefined : (params.request.entityContext ?? resolvedRef ?? undefined),
   };
   const initialPlan = planAgentRequest({ request });
   const plan = forceFollowUpPlan({

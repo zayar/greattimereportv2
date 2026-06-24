@@ -34,8 +34,14 @@ function profilePlan(intent: string, message: string) {
     return { riskLevel: "high" as const, sortBy: "priorityScore" as const };
   }
 
-  const search = message
-    .replace(/tell me about|customer|member|who is|find|search|first|second|third/gi, "")
+  const explicitSearch = message
+    .trim()
+    .match(
+      /^(?:can\s+you\s+)?(?:find|search|look\s+up|show(?:\s+me)?(?:\s+details?\s+(?:about|for))?|tell\s+me\s+about|details?\s+(?:about|for)|what\s+about|who\s+is)\s+(.+)$/i,
+    )?.[1];
+  const search = (explicitSearch ?? message)
+    .replace(/customer|member|first|second|third/gi, "")
+    .replace(/[?.!]+$/g, "")
     .trim();
 
   return { search, sortBy: "priorityScore" as const };
