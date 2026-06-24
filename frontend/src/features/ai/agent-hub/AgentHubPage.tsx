@@ -17,7 +17,6 @@ import type {
   GreatTimeAgentChatResponse,
   GreatTimeAgentEntityContext,
   GreatTimeAgentId,
-  GreatTimeAgentSource,
   GreatTimeAgentTable,
   GreatTimeRequestedAgentId,
 } from "../../../types/domain";
@@ -135,37 +134,6 @@ function formatCell(value: unknown) {
   }
 
   return String(value);
-}
-
-function formatCheckedAt(value: string) {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return date.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatFreshness(source: GreatTimeAgentSource) {
-  if (source.freshnessSeconds == null) {
-    return source.checkedAt ? `Checked ${formatCheckedAt(source.checkedAt)}` : "Freshness not reported";
-  }
-
-  if (source.freshnessSeconds < 60) {
-    return "Checked just now";
-  }
-
-  if (source.freshnessSeconds < 3600) {
-    return `${Math.round(source.freshnessSeconds / 60)} min fresh`;
-  }
-
-  return `${Math.round(source.freshnessSeconds / 3600)} hr fresh`;
 }
 
 function formatOptionalNumber(value: number | undefined, suffix = "") {
@@ -339,6 +307,7 @@ function AgentCustomer360Card({ factPack }: { factPack: Customer360FactPack }) {
   const hasLiveAppointmentSection =
     appointmentRows.length > 0 || factPack.sources.some((source) => source.tool === "get_customer_live_appointments");
   const visitMetricLabel = factPack.usage.selectedYear ? `${factPack.usage.selectedYear} visits` : "Visits";
+  const visibleQuality = factPack.dataQuality.filter((item) => item.severity !== "info");
 
   return (
     <section className="agent-customer360">
@@ -416,6 +385,8 @@ function AgentCustomer360Card({ factPack }: { factPack: Customer360FactPack }) {
                 {packageRows.map((row) => (
                   <li key={`${row.packageId ?? row.serviceName}-${row.serviceName}`}>
                     {row.serviceName}: {formatOptionalNumber(row.remainingSessions)} remaining
+                    {row.totalSessions != null ? ` / ${formatOptionalNumber(row.totalSessions)} total` : ""}
+                    {row.latestTherapist ? ` · ${row.latestTherapist}` : ""}
                   </li>
                 ))}
               </ul>
@@ -479,29 +450,21 @@ function AgentCustomer360Card({ factPack }: { factPack: Customer360FactPack }) {
         <div>
           <h4>Recommended action</h4>
           <p>{factPack.recommendation?.title ?? "Review source sections."}</p>
-          {factPack.recommendation?.reasonCodes.length ? (
-            <small>{factPack.recommendation.reasonCodes.join(", ")}</small>
+          {factPack.recommendation?.evidence.length ? (
+            <small>{factPack.recommendation.evidence.slice(0, 2).join(" ")}</small>
           ) : null}
         </div>
       </div>
 
-      {factPack.dataQuality.length ? (
+      {visibleQuality.length ? (
         <div className="agent-customer360__quality">
-          {factPack.dataQuality.map((item) => (
+          {visibleQuality.map((item) => (
             <span key={item.code} className={item.severity === "info" ? "agent-hub-chip" : "agent-hub-chip agent-hub-chip--warn"}>
               {item.severity}: {item.message}
             </span>
           ))}
         </div>
       ) : null}
-
-      <div className="agent-customer360__sources">
-        {factPack.sources.map((source) => (
-          <span key={`${source.tool}-${source.checkedAt}`} className={agentHubStatusClass(source.dataStatus)}>
-            {source.scope ?? (source.live ? "live" : "historical")} · {source.sourceName} · {formatFreshness(source)}
-          </span>
-        ))}
-      </div>
     </section>
   );
 }
@@ -748,7 +711,7 @@ export function AgentHubPage() {
 
                     {turn.response.customer360 ? <AgentCustomer360Card factPack={turn.response.customer360} /> : null}
 
-                    {turn.response.metrics?.length ? (
+                    {!turn.response.customer360 && turn.response.metrics?.length ? (
                       <div className="agent-metrics">
                         {turn.response.metrics.map((metric) => (
                           <div key={`${metric.label}-${metric.value}`} className="agent-metric">
@@ -763,15 +726,17 @@ export function AgentHubPage() {
                       </div>
                     ) : null}
 
-                    {turn.response.tables?.map((table) => (
-                      <AgentTable
-                        key={`${turn.response?.responseId}-${table.title}`}
-                        table={table}
-                        onPickContext={(context) => setActiveContext(context)}
-                      />
-                    ))}
+                    {!turn.response.customer360
+                      ? turn.response.tables?.map((table) => (
+                          <AgentTable
+                            key={`${turn.response?.responseId}-${table.title}`}
+                            table={table}
+                            onPickContext={(context) => setActiveContext(context)}
+                          />
+                        ))
+                      : null}
 
-                    {turn.response.recommendations?.length ? (
+                    {!turn.response.customer360 && turn.response.recommendations?.length ? (
                       <section className="agent-answer-section">
                         <h3>Recommendations</h3>
                         <div className="agent-recommendations">
@@ -779,26 +744,11 @@ export function AgentHubPage() {
                             <div key={`${recommendation.title ?? "recommendation"}-${index}`}>
                               {recommendation.title ? <strong>{recommendation.title}</strong> : null}
                               <p>{recommendation.message}</p>
-                              {recommendation.sourceTools.length ? (
-                                <small>Sources: {recommendation.sourceTools.join(", ")}</small>
-                              ) : null}
                             </div>
                           ))}
                         </div>
                       </section>
                     ) : null}
-
-                    <section className="agent-sources" aria-label="Sources and freshness">
-                      {turn.response.sources.map((source) => (
-                        <span
-                          key={`${turn.response?.responseId}-${source.tool}-${source.checkedAt}`}
-                          className={agentHubStatusClass(source.dataStatus)}
-                        >
-                          {source.live ? "Live" : "Historical"} · {source.sourceName} · {source.dataStatus} ·{" "}
-                          {formatFreshness(source)}
-                        </span>
-                      ))}
-                    </section>
                   </div>
                 ) : null}
               </article>
@@ -867,24 +817,6 @@ export function AgentHubPage() {
               <p className="agent-context-panel__muted">Click an eligible table row to use it as follow-up context.</p>
             )}
           </section>
-
-          {latestResponse?.sources.length ? (
-            <section className="agent-context-section">
-              <h2>Freshness</h2>
-              <div className="agent-source-list">
-                {latestResponse.sources.map((source) => (
-                  <div key={`${source.tool}-${source.checkedAt}-${source.sourceName}`}>
-                    <strong>{source.sourceName}</strong>
-                    <span>
-                      {source.live ? "Live" : "Historical"} · {source.dataStatus}
-                    </span>
-                    <small>{formatFreshness(source)}</small>
-                    {source.period ? <small>{source.period}</small> : null}
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : null}
 
           {latestResponse?.followUpQuestions?.length ? (
             <section className="agent-context-section">

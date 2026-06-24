@@ -2,7 +2,7 @@ import { env } from "../../config/env.js";
 import { HttpError } from "../../utils/http-error.js";
 import { hasFeatureAccess } from "../feature-access.service.js";
 import { askAgentHub, buildLockedAgentHubResponse } from "../agent-hub/agent-hub.service.js";
-import type { GreatTimeAgentChatResponse } from "../agent-hub/types.js";
+import type { Customer360FactPack, GreatTimeAgentChatResponse } from "../agent-hub/types.js";
 import { buildTelegramSalesAssistantReply } from "../gt-growth-ai/sales-assistant.service.js";
 import { GT_GROWTH_AI_FEATURE_GATE } from "../../types/report-ai.js";
 import { getTelegramTargetByChatId, redeemTelegramLinkCode } from "./storage.service.js";
@@ -218,12 +218,85 @@ function formatTablePreview(response: GreatTimeAgentChatResponse) {
   return [`${table.title}:`, ...rows];
 }
 
+function formatCustomer360PackageLine(row: Customer360FactPack["packages"]["holdings"][number]) {
+  const remaining = row.remainingSessions ?? 0;
+  const total = row.totalSessions ?? 0;
+  const latest = row.latestUsageDate ? ` | နောက်ဆုံး ${row.latestUsageDate}` : "";
+  const therapist = row.latestTherapist ? ` | ${row.latestTherapist}` : "";
+
+  return `- ${row.serviceName}: ကျန် ${remaining.toLocaleString("en-US")}/${total.toLocaleString("en-US")}${latest}${therapist}`;
+}
+
+function formatCustomer360TreatmentLine(row: Record<string, unknown>) {
+  const date = typeof row.checkInTime === "string" ? row.checkInTime.slice(0, 10) : "-";
+  const service = typeof row.serviceName === "string" ? row.serviceName : "Service";
+  const therapist = typeof row.therapistName === "string" ? ` | ${row.therapistName}` : "";
+
+  return `- ${date}: ${service}${therapist}`;
+}
+
+function formatCustomer360TelegramReply(response: GreatTimeAgentChatResponse) {
+  const factPack = response.customer360;
+  if (!factPack) {
+    return "";
+  }
+
+  const packageRows = factPack.packages.holdings.filter((row) => (row.remainingSessions ?? 0) > 0).slice(0, 6);
+  const recentTreatments = (factPack.appointments.recentCompleted ?? []).slice(0, 3);
+  const topServices = factPack.usage.topServices.slice(0, 3);
+  const followUps = (response.followUpQuestions ?? []).slice(0, 2);
+  const lines = ["GreatTime AI", "", response.summary || response.assistantMessage];
+
+  if (packageRows.length > 0) {
+    lines.push("", "Package / service လက်ကျန်:");
+    packageRows.forEach((row) => {
+      lines.push(formatCustomer360PackageLine(row));
+    });
+  }
+
+  if (recentTreatments.length > 0) {
+    lines.push("", "နောက်ဆုံး treatment များ:");
+    recentTreatments.forEach((row) => {
+      lines.push(formatCustomer360TreatmentLine(row));
+    });
+  }
+
+  if (topServices.length > 0) {
+    lines.push("", "အသုံးများတဲ့ service:");
+    topServices.forEach((row) => {
+      const service = typeof row.serviceName === "string" ? row.serviceName : "Service";
+      const usage = typeof row.totalUsage === "number" ? row.totalUsage.toLocaleString("en-US") : String(row.totalUsage ?? "-");
+      lines.push(`- ${service}: ${usage} ကြိမ်`);
+    });
+  }
+
+  if (factPack.recommendation) {
+    lines.push("", `အကြံပြုချက်: ${factPack.recommendation.title}`);
+    factPack.recommendation.evidence.slice(0, 2).forEach((item) => {
+      lines.push(`- ${item}`);
+    });
+  }
+
+  if (followUps.length > 0) {
+    lines.push("", "ဆက်မေးနိုင်တာ:");
+    followUps.forEach((question) => {
+      lines.push(`- /ask ${question}`);
+    });
+  }
+
+  const message = lines.join("\n").trim();
+  return message.length <= 3900 ? message : `${message.slice(0, 3890).trim()}\n...`;
+}
+
 export function formatAgentHubTelegramReply(response: GreatTimeAgentChatResponse) {
+  if (response.customer360) {
+    return formatCustomer360TelegramReply(response);
+  }
+
   const lines = ["GT Agent", "", response.summary || response.assistantMessage];
   const metrics = (response.metrics ?? []).slice(0, 5);
   const tablePreview = formatTablePreview(response);
   const warnings = (response.warnings ?? []).slice(0, 2);
-  const sources = response.sources.slice(0, 3);
   const followUps = (response.followUpQuestions ?? []).slice(0, 3);
 
   if (metrics.length > 0) {
@@ -241,13 +314,6 @@ export function formatAgentHubTelegramReply(response: GreatTimeAgentChatResponse
     lines.push("", "Notes:");
     warnings.forEach((warning) => {
       lines.push(`- ${warning.title}: ${warning.message}`);
-    });
-  }
-
-  if (sources.length > 0) {
-    lines.push("", "Sources:");
-    sources.forEach((source) => {
-      lines.push(`- ${source.sourceName}: ${source.dataStatus}${source.live ? " live" : ""}`);
     });
   }
 

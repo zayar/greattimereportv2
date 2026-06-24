@@ -992,6 +992,7 @@ textarea:focus-visible,
 .agent-answer-summary {
   color: var(--text-primary);
   font-size: 1rem;
+  white-space: pre-line;
 }
 
 .agent-answer-detail {

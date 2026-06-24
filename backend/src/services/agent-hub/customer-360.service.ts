@@ -14,9 +14,12 @@ import type {
   AgentToolInput,
   AgentToolResult,
   Customer360FactPack,
+  Customer360PackageStatus,
   GreatTimeAgentSource,
   GreatTimeAgentWarning,
 } from "./types.js";
+
+type Customer360Language = AgentToolInput["request"]["aiLanguage"];
 
 type ResolvedCustomerIdentity = {
   customerKey: string;
@@ -62,6 +65,46 @@ function normalizeText(value: string | null | undefined) {
 
 function normalizeDigits(value: string | null | undefined) {
   return (value ?? "").replace(/\D/g, "");
+}
+
+function parseNumber(value: unknown) {
+  if (typeof value === "number") {
+    return value;
+  }
+
+  if (typeof value === "bigint") {
+    return Number(value);
+  }
+
+  if (value && typeof value === "object" && "value" in value) {
+    return Number((value as { value: unknown }).value);
+  }
+
+  return Number(value ?? 0);
+}
+
+function parseText(value: unknown, fallback = "") {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value == null) {
+    return fallback;
+  }
+
+  if (typeof value === "number" || typeof value === "bigint" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  if (value && typeof value === "object" && "value" in value) {
+    return parseText((value as { value: unknown }).value, fallback);
+  }
+
+  return fallback;
+}
+
+function isMyanmarLanguage(language: Customer360Language) {
+  return language === "my-MM" || language === "my";
 }
 
 function source(params: {
@@ -336,49 +379,141 @@ function formatDate(value: string | null | undefined) {
   });
 }
 
-function buildRecommendation(factPack: Customer360FactPack): Customer360FactPack["recommendation"] {
+function buildRecommendation(factPack: Customer360FactPack, language?: Customer360Language): Customer360FactPack["recommendation"] {
+  const myanmar = isMyanmarLanguage(language);
   const remaining = factPack.packages.totalRemainingSessions ?? 0;
   const hasUpcoming = (factPack.appointments.upcoming?.length ?? 0) > 0 || (factPack.appointments.current?.length ?? 0) > 0;
 
   if (factPack.packages.dataStatus !== "not_ready" && remaining > 0 && !hasUpcoming) {
     return {
-      title: "Rebook unused package care",
+      title: myanmar ? "Package လက်ကျန်အတွက် follow-up လုပ်ပါ" : "Follow up on package balance",
       reasonCodes: ["unused_package_balance", "no_live_upcoming_booking"],
       evidence: [
-        `${remaining.toLocaleString("en-US")} remaining package session${remaining === 1 ? "" : "s"}`,
-        "No current or upcoming APICORE booking was found in the next 30 days.",
+        myanmar
+          ? `Package session ${remaining.toLocaleString("en-US")} ခု ကျန်နေပါတယ်။`
+          : `${remaining.toLocaleString("en-US")} remaining package session${remaining === 1 ? "" : "s"}`,
+        myanmar
+          ? "လက်ကျန်များတဲ့ service ကိုအခြေခံပြီး ပြန်လာမည့်ရက်ချိန်းအတွက် စကားစနိုင်ပါတယ်။"
+          : "Use the highest-balance service as a natural rebooking conversation.",
       ],
     };
   }
 
   if (factPack.visitPattern.momentum === "declining") {
     return {
-      title: "Retention check-in",
+      title: myanmar ? "ပြန်လာဖို့ check-in လုပ်ပါ" : "Retention check-in",
       reasonCodes: ["declining_visit_frequency"],
       evidence: [
-        `${factPack.visitPattern.recentWindowVisits ?? 0} recent-window visits versus ${
-          factPack.visitPattern.previousWindowVisits ?? 0
-        } in the previous comparison window.`,
+        myanmar
+          ? `နောက်ဆုံး window တွင် visit ${factPack.visitPattern.recentWindowVisits ?? 0} ကြိမ်၊ ယခင် window တွင် ${
+              factPack.visitPattern.previousWindowVisits ?? 0
+            } ကြိမ်ရှိပါတယ်။`
+          : `${factPack.visitPattern.recentWindowVisits ?? 0} recent-window visits versus ${
+              factPack.visitPattern.previousWindowVisits ?? 0
+            } in the previous comparison window.`,
       ],
     };
   }
 
   if ((factPack.latestActivity.daysSinceLastVisit ?? 0) > 45) {
     return {
-      title: "Return-visit check-in",
+      title: myanmar ? "Return visit အတွက် ဆက်သွယ်ပါ" : "Return-visit check-in",
       reasonCodes: ["inactive_visit_cadence"],
-      evidence: [`Last completed visit was ${factPack.latestActivity.daysSinceLastVisit} days ago.`],
+      evidence: [
+        myanmar
+          ? `နောက်ဆုံး visit ပြီးတာ ${factPack.latestActivity.daysSinceLastVisit} ရက်ရှိပါပြီ။`
+          : `Last completed visit was ${factPack.latestActivity.daysSinceLastVisit} days ago.`,
+      ],
     };
   }
 
   return {
-    title: "Keep in regular care cadence",
+    title: myanmar ? "ပုံမှန် care cadence ထိန်းထားပါ" : "Keep in regular care cadence",
     reasonCodes: ["steady_relationship"],
-    evidence: ["No high-priority visit-frequency trigger is visible in the lean Customer 360 snapshot."],
+    evidence: [
+      myanmar
+        ? "အခုမြင်ရတဲ့ visit pattern အရ အရေးပေါ် risk ကြီးမားတာ မတွေ့ရသေးပါ။"
+        : "No high-priority visit-frequency trigger is visible in the Customer 360 snapshot.",
+    ],
   };
 }
 
-export function composeCustomer360Summary(factPack: Customer360FactPack) {
+function packageHoldingSummary(row: Customer360FactPack["packages"]["holdings"][number], language?: Customer360Language) {
+  const remaining = row.remainingSessions ?? 0;
+  const total = row.totalSessions ?? 0;
+  const latest = formatDate(row.latestUsageDate);
+  const therapist = row.latestTherapist ? `, ${row.latestTherapist}` : "";
+
+  if (isMyanmarLanguage(language)) {
+    return `${row.serviceName} - ကျန် ${remaining.toLocaleString("en-US")}/${total.toLocaleString("en-US")}${
+      latest ? `, နောက်ဆုံး ${latest}${therapist}` : therapist
+    }`;
+  }
+
+  return `${row.serviceName} (${remaining.toLocaleString("en-US")} of ${total.toLocaleString("en-US")} remaining${
+    latest ? `, last used ${latest}${therapist}` : therapist
+  })`;
+}
+
+function composeCustomer360MyanmarSummary(factPack: Customer360FactPack) {
+  const name = factPack.identity.displayName;
+  const year = factPack.usage.selectedYear;
+  const visits = factPack.value.totalVisits;
+  const lastVisit = formatDate(factPack.latestActivity.lastVisitAt);
+  const packages = factPack.packages.holdings.filter((row) => (row.remainingSessions ?? 0) > 0).slice(0, 4);
+  const remaining = factPack.packages.totalRemainingSessions ?? 0;
+  const service = factPack.preferences.preferredService ?? factPack.latestActivity.lastService;
+  const therapist = factPack.preferences.preferredTherapist ?? factPack.latestActivity.lastTherapist;
+  const lines: string[] = [];
+
+  lines.push(`${name} အကျဉ်းချုပ်`);
+
+  if (visits != null) {
+    lines.push(`- ${year ?? "ဒီနှစ်"} visit ${visits.toLocaleString("en-US")} ကြိမ်ရှိပါတယ်။`);
+  }
+
+  if (lastVisit) {
+    lines.push(
+      `- နောက်ဆုံးလာခဲ့တာ ${lastVisit}${factPack.latestActivity.lastService ? ` (${factPack.latestActivity.lastService})` : ""}${
+        factPack.latestActivity.lastTherapist ? ` - ${factPack.latestActivity.lastTherapist}` : ""
+      } ဖြစ်ပါတယ်။`,
+    );
+  }
+
+  if (service || therapist) {
+    lines.push(
+      `- အဓိကစိတ်ဝင်စားတဲ့ service က ${service ?? "-"}${therapist ? `၊ therapist ဆက်ဆံရေးက ${therapist}` : ""} ဖြစ်ပါတယ်။`,
+    );
+  }
+
+  if (packages.length > 0) {
+    lines.push(`- Package/service လက်ကျန် ${packages.length} ခု၊ session စုစုပေါင်း ${remaining.toLocaleString("en-US")} ခု ကျန်နေပါတယ်။`);
+    lines.push(`  ${packages.map((row) => packageHoldingSummary(row, "my-MM")).join(" | ")}`);
+  } else if (factPack.packages.dataStatus === "no_activity") {
+    lines.push("- Active package လက်ကျန် မတွေ့ပါ။");
+  }
+
+  if (factPack.visitPattern.momentum && factPack.visitPattern.momentum !== "unknown") {
+    const trend = factPack.visitPattern.momentum === "declining" ? "လျော့နေ" : factPack.visitPattern.momentum === "increasing" ? "တက်နေ" : "တည်ငြိမ်";
+    lines.push(
+      `- Visit frequency က ${trend}ပါတယ် (${factPack.visitPattern.recentWindowVisits ?? 0} ကြိမ် vs ယခင် ${
+        factPack.visitPattern.previousWindowVisits ?? 0
+      } ကြိမ်)။`,
+    );
+  }
+
+  if (factPack.recommendation) {
+    lines.push(`အကြံပြုချက်: ${factPack.recommendation.title}။ ${factPack.recommendation.evidence[0] ?? ""}`.trim());
+  }
+
+  return lines.join("\n");
+}
+
+export function composeCustomer360Summary(factPack: Customer360FactPack, language?: Customer360Language) {
+  if (isMyanmarLanguage(language)) {
+    return composeCustomer360MyanmarSummary(factPack);
+  }
+
   const name = factPack.identity.displayName;
   const sentences: string[] = [];
   const joined = formatDate(factPack.identity.joinedDate);
@@ -425,11 +560,15 @@ export function composeCustomer360Summary(factPack: Customer360FactPack) {
     );
   }
 
-  if (packageRemaining != null) {
+  if (factPack.packages.holdings.length > 0) {
+    const activeHoldings = factPack.packages.holdings.filter((row) => (row.remainingSessions ?? 0) > 0);
+    const topHoldings = activeHoldings.slice(0, 3).map((row) => packageHoldingSummary(row)).join("; ");
     sentences.push(
-      `APICORE package holdings show ${factPack.packages.activeHoldingCount ?? 0} active holding${
-        factPack.packages.activeHoldingCount === 1 ? "" : "s"
-      } with ${packageRemaining.toLocaleString("en-US")} remaining session${packageRemaining === 1 ? "" : "s"}.`,
+      `Purchased package services show ${activeHoldings.length.toLocaleString("en-US")} active holding${
+        activeHoldings.length === 1 ? "" : "s"
+      } with ${(packageRemaining ?? 0).toLocaleString("en-US")} remaining session${
+        packageRemaining === 1 ? "" : "s"
+      }${topHoldings ? `: ${topHoldings}.` : "."}`,
     );
   } else if (factPack.packages.dataStatus === "unavailable" || factPack.packages.dataStatus === "partial") {
     sentences.push("Package balances are not presented as an exact combined total because the package source is partial or unavailable.");
@@ -593,9 +732,9 @@ export async function buildCustomer360ToolResult(input: AgentToolInput): Promise
 
   dataQuality.push(
     {
-      code: "apicore_skipped_for_performance",
+      code: "live_appointments_skipped_for_performance",
       severity: "info",
-      message: "APICORE package and live appointment checks are skipped in this lean Customer 360 path.",
+      message: "Live appointment checks are skipped in this lean Customer 360 path.",
     },
     {
       code: "lifetime_spend_skipped_for_performance",
@@ -606,6 +745,24 @@ export async function buildCustomer360ToolResult(input: AgentToolInput): Promise
 
   const snapshotCustomer = snapshot?.customer;
   const recentCompleted = snapshot?.recentCompleted ?? [];
+  const packageHoldings = (snapshot?.packageHoldings ?? []).map((row, index) => {
+    const remainingSessions = parseNumber(row.remainingCount);
+    const totalSessions = parseNumber(row.packageTotal);
+
+    return {
+      packageId: `${parseText(row.serviceName, "package")}-${index}`,
+      packageName: null,
+      serviceName: parseText(row.serviceName, "Package service"),
+      totalSessions,
+      usedSessions: parseNumber(row.usedCount),
+      remainingSessions,
+      latestUsageDate: parseText(row.latestUsageDate) || null,
+      latestTherapist: parseText(row.latestTherapist) || null,
+      status: parseText(row.status, remainingSessions > 0 ? "active" : "completed") as Customer360PackageStatus,
+    };
+  });
+  const activePackageHoldings = packageHoldings.filter((row) => (row.remainingSessions ?? 0) > 0);
+  const totalRemainingSessions = packageHoldings.reduce((sum, row) => sum + Math.max(0, row.remainingSessions ?? 0), 0);
   const preferredTherapist = snapshotCustomer?.preferredTherapist ?? null;
   const phoneNumber = snapshotCustomer?.phoneNumber || identity.customerPhone;
   const customerName = snapshotCustomer?.customerName || identity.customerName;
@@ -645,8 +802,11 @@ export async function buildCustomer360ToolResult(input: AgentToolInput): Promise
       momentum: momentum(snapshotCustomer?.recent3MonthVisits, snapshotCustomer?.previous3MonthVisits),
     },
     packages: {
-      dataStatus: "not_ready",
-      holdings: [],
+      purchaseCount: packageHoldings.length,
+      activeHoldingCount: activePackageHoldings.length,
+      totalRemainingSessions,
+      dataStatus: snapshot ? (packageHoldings.length ? "ok" : "no_activity") : "unavailable",
+      holdings: packageHoldings,
     },
     appointments: {
       current: [],
@@ -665,7 +825,7 @@ export async function buildCustomer360ToolResult(input: AgentToolInput): Promise
     dataQuality,
     sources,
   };
-  factPack.recommendation = buildRecommendation(factPack);
+  factPack.recommendation = buildRecommendation(factPack, input.request.aiLanguage);
 
   for (const note of dataQuality.filter((item) => item.severity !== "info")) {
     warnings.push({
@@ -675,7 +835,7 @@ export async function buildCustomer360ToolResult(input: AgentToolInput): Promise
     });
   }
 
-  const summary = composeCustomer360Summary(factPack);
+  const summary = composeCustomer360Summary(factPack, input.request.aiLanguage);
   const statuses = sources.map((item) => item.dataStatus);
   const dataStatus = buildOverallStatus(statuses);
 
@@ -691,10 +851,27 @@ export async function buildCustomer360ToolResult(input: AgentToolInput): Promise
     customer360: factPack,
     metrics: [
       { label: `${usageYear} visits`, value: factPack.value.totalVisits ?? 0 },
+      { label: "Package remaining", value: factPack.packages.totalRemainingSessions ?? 0 },
       { label: "Recent treatments", value: factPack.appointments.recentCompleted?.length ?? 0 },
       { label: "Top services", value: factPack.usage.topServices.length },
     ],
     tables: [
+      ...(factPack.packages.holdings.length
+        ? [
+            {
+              title: "Customer 360 package holdings",
+              columns: [
+                { key: "serviceName", title: "Service" },
+                { key: "totalSessions", title: "Package total" },
+                { key: "usedSessions", title: "Used" },
+                { key: "remainingSessions", title: "Remaining" },
+                { key: "latestUsageDate", title: "Latest usage" },
+                { key: "latestTherapist", title: "Therapist" },
+              ],
+              rows: factPack.packages.holdings,
+            },
+          ]
+        : []),
       ...(factPack.appointments.recentCompleted?.length
         ? [
             {

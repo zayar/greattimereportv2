@@ -303,7 +303,7 @@ test("Telegram Agent chat helpers require explicit group commands and target per
   )
 })
 
-test("Telegram Agent reply formatter keeps summaries, metrics, previews, and sources", () => {
+test("Telegram Agent reply formatter keeps summaries, metrics, previews, and owner-facing follow-ups", () => {
   const message = formatAgentHubTelegramReply({
     sessionId: "session-1",
     requestId: "request-1",
@@ -342,8 +342,80 @@ test("Telegram Agent reply formatter keeps summaries, metrics, previews, and sou
   assert.match(message, /GT Agent/)
   assert.match(message, /Collected: 10,000 amount/)
   assert.match(message, /Payment methods/)
-  assert.match(message, /BigQuery payment report: ok/)
+  assert.doesNotMatch(message, /BigQuery payment report: ok/)
+  assert.doesNotMatch(message, /Sources:/)
   assert.match(message, /\/ask Show payment methods by amount/)
+})
+
+test("Telegram Customer 360 formatter uses owner-friendly Myanmar package context", () => {
+  const message = formatAgentHubTelegramReply({
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "customer_relationship",
+    autoMode: true,
+    intent: "customer_360",
+    assistantMessage: "Soe Moe Thu အကျဉ်းချုပ်\n- 2026 visit 89 ကြိမ်ရှိပါတယ်။",
+    summary: "Soe Moe Thu အကျဉ်းချုပ်\n- 2026 visit 89 ကြိမ်ရှိပါတယ်။",
+    customer360: {
+      identity: {
+        customerKey: "cust-1",
+        displayName: "Soe Moe Thu",
+      },
+      value: {
+        totalVisits: 89,
+      },
+      latestActivity: {},
+      preferences: {},
+      visitPattern: {},
+      packages: {
+        dataStatus: "ok",
+        activeHoldingCount: 1,
+        totalRemainingSessions: 14,
+        holdings: [
+          {
+            packageId: "pkg-1",
+            serviceName: "ExoMicro",
+            totalSessions: 59,
+            usedSessions: 45,
+            remainingSessions: 14,
+            latestUsageDate: "2026-05-29",
+            latestTherapist: "Wai Phoo",
+            status: "active",
+          },
+        ],
+      },
+      appointments: {
+        recentCompleted: [{ checkInTime: "2026-06-22", serviceName: "Body Contouring", therapistName: "Htet Htet" }],
+      },
+      payments: {
+        recentInvoices: [],
+      },
+      usage: {
+        selectedYear: 2026,
+        topServices: [{ serviceName: "Body Contouring", totalUsage: 20 }],
+        monthlyServiceUsage: [],
+      },
+      recommendation: {
+        title: "Package လက်ကျန်အတွက် follow-up လုပ်ပါ",
+        reasonCodes: ["unused_package_balance"],
+        evidence: ["Package session 14 ခု ကျန်နေပါတယ်။"],
+      },
+      dataQuality: [],
+      sources: [],
+    },
+    followUpQuestions: ["Show recent completed treatments."],
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  })
+
+  assert.match(message, /GreatTime AI/)
+  assert.match(message, /Package \/ service လက်ကျန်/)
+  assert.match(message, /ExoMicro: ကျန် 14\/59/)
+  assert.match(message, /အကြံပြုချက်/)
+  assert.doesNotMatch(message, /Sources:/)
 })
 
 test("appointment helpers count active checked-ins and exclude merchant cancellations from totals", () => {

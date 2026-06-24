@@ -511,6 +511,7 @@ export async function getCustomerPortalAgentVisitSnapshot(params: DetailBasePara
     avgVisitIntervalDays: number | null;
     recentCompletedJson: string;
     topServicesJson: string;
+    packageHoldingsJson: string;
   }>(
     `
       WITH
@@ -564,6 +565,32 @@ export async function getCustomerPortalAgentVisitSnapshot(params: DetailBasePara
           GROUP BY serviceName, serviceCategory
           ORDER BY totalUsage DESC, serviceName ASC
           LIMIT 8
+        ),
+        PackageHoldings AS (
+          SELECT
+            COALESCE(ServiceName, '') AS serviceName,
+            ${buildServiceCategoryExpression("ServiceName", "CAST(NULL AS STRING)")} AS serviceCategory,
+            MAX(CAST(COALESCE(PackageCount, 0) AS INT64)) AS packageTotal,
+            GREATEST(
+              MAX(CAST(COALESCE(PackageCount, 0) AS INT64)) - MAX(CAST(COALESCE(RemainingPackageCount, 0) AS INT64)),
+              0
+            ) AS usedCount,
+            GREATEST(MAX(CAST(COALESCE(RemainingPackageCount, 0) AS INT64)), 0) AS remainingCount,
+            FORMAT_DATE('%Y-%m-%d', MAX(DATE(CheckInTime))) AS latestUsageDate,
+            ARRAY_AGG(COALESCE(PractitionerName, 'Unknown') ORDER BY CheckInTime DESC LIMIT 1)[SAFE_OFFSET(0)] AS latestTherapist
+          FROM ${analyticsTables.mainDataView}
+          WHERE LOWER(ClinicCode) = LOWER(@clinicCode)
+            AND CustomerName IS NOT NULL
+            AND CustomerPhoneNumber IS NOT NULL
+            AND CheckInTime IS NOT NULL
+            AND ${buildCustomerIdentityCondition("CustomerPhoneNumber", "CustomerName", "CustomerID")}
+            AND (
+              CAST(COALESCE(PackageCount, 0) AS INT64) > 0
+              OR CAST(COALESCE(RemainingPackageCount, 0) AS INT64) > 0
+            )
+          GROUP BY serviceName, serviceCategory
+          ORDER BY remainingCount DESC, latestUsageDate DESC, serviceName ASC
+          LIMIT 8
         )
       SELECT
         COALESCE((SELECT ANY_VALUE(customerName) FROM YearVisits), @customerName) AS customerName,
@@ -600,7 +627,25 @@ export async function getCustomerPortalAgentVisitSnapshot(params: DetailBasePara
           SELECT AS STRUCT serviceName, serviceCategory, totalUsage
           FROM TopServices
           ORDER BY totalUsage DESC, serviceName ASC
-        )) AS topServicesJson
+        )) AS topServicesJson,
+        TO_JSON_STRING(ARRAY(
+          SELECT AS STRUCT
+            serviceName,
+            serviceCategory,
+            packageTotal,
+            usedCount,
+            remainingCount,
+            latestUsageDate,
+            latestTherapist,
+            CASE
+              WHEN remainingCount > 3 THEN 'active'
+              WHEN remainingCount > 0 THEN 'low_remaining'
+              WHEN remainingCount = 0 THEN 'completed'
+              ELSE 'unknown'
+            END AS status
+          FROM PackageHoldings
+          ORDER BY remainingCount DESC, latestUsageDate DESC, serviceName ASC
+        )) AS packageHoldingsJson
     `,
     queryParams,
   );
@@ -627,6 +672,7 @@ export async function getCustomerPortalAgentVisitSnapshot(params: DetailBasePara
     },
     recentCompleted: parseJsonArray(row?.recentCompletedJson),
     topServices: parseJsonArray(row?.topServicesJson),
+    packageHoldings: parseJsonArray(row?.packageHoldingsJson),
     year: params.year,
   };
 }
