@@ -4,6 +4,7 @@ import type {
   GtAgentMemoryPolicyDecision,
   GtAgentMemoryRecord,
   GtAgentMemoryWriteInput,
+  GtAgentPreferenceValue,
 } from "./memory-types.js";
 
 const TRANSIENT_METRIC_PATTERN =
@@ -21,14 +22,54 @@ function stableHash(value: string) {
   return createHash("sha256").update(value).digest("hex").slice(0, 24);
 }
 
-export function buildMemoryId(input: Pick<GtAgentMemoryWriteInput, "clinicId" | "userId" | "memoryType" | "content" | "entityType" | "entityId">) {
+function stablePreferenceValue(value: GtAgentPreferenceValue | null | undefined) {
+  if (Array.isArray(value)) {
+    return JSON.stringify([...value].sort());
+  }
+
+  return value == null ? "" : JSON.stringify(value);
+}
+
+function addDaysIso(now: string, days: number) {
+  const date = new Date(now);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString();
+}
+
+function distinctSessionCount(input: Pick<GtAgentMemoryWriteInput, "sourceSessionIds">) {
+  return new Set((input.sourceSessionIds ?? []).filter(Boolean)).size;
+}
+
+export function buildMemoryId(
+  input: Pick<
+    GtAgentMemoryWriteInput,
+    | "clinicId"
+    | "userId"
+    | "memoryType"
+    | "content"
+    | "entityType"
+    | "entityId"
+    | "agentId"
+    | "intent"
+    | "preferenceKey"
+    | "preferenceValue"
+  >,
+) {
+  const stableContent = input.preferenceKey
+    ? `${input.preferenceKey}:${stablePreferenceValue(input.preferenceValue)}`
+    : input.content.trim().toLowerCase();
+
   return `mem_${stableHash([
     input.clinicId,
     input.userId ?? "clinic",
+    input.agentId ?? "agent:any",
+    input.intent ?? "intent:any",
     input.memoryType,
+    input.preferenceKey ?? "",
+    stablePreferenceValue(input.preferenceValue),
     input.entityType ?? "",
     input.entityId ?? "",
-    input.content.trim().toLowerCase(),
+    stableContent,
   ].join("|"))}`;
 }
 
@@ -72,7 +113,24 @@ export function evaluateMemoryCandidate(input: GtAgentMemoryWriteInput): GtAgent
     };
   }
 
-  if (evidenceCount >= 2) {
+  if (input.source === "feedback") {
+    const hasEnoughSessions = distinctSessionCount(input) >= 2;
+    if (evidenceCount >= 3 && hasEnoughSessions) {
+      return {
+        accepted: true,
+        status: "active",
+        confidence: clampConfidence(input.confidence ?? 0.74),
+      };
+    }
+
+    return {
+      accepted: true,
+      status: "candidate",
+      confidence: clampConfidence(input.confidence ?? 0.48),
+    };
+  }
+
+  if (evidenceCount >= 3) {
     return {
       accepted: true,
       status: "active",
@@ -103,16 +161,19 @@ export function buildMemoryRecord(input: GtAgentMemoryWriteInput, now = nowIso()
     intent: input.intent ?? null,
     memoryType: input.memoryType,
     content: input.content.trim(),
+    preferenceKey: input.preferenceKey ?? null,
+    preferenceValue: input.preferenceValue ?? null,
     source: input.source,
     status: decision.status,
     confidence: decision.confidence,
     evidenceCount: input.evidenceCount ?? 1,
     sourceEventIds: input.sourceEventIds ?? [],
+    sourceSessionIds: input.sourceSessionIds ?? [],
     createdAt: now,
     updatedAt: now,
     lastObservedAt: input.observedAt ?? now,
     validFrom: now,
-    validUntil: null,
+    validUntil: input.source === "explicit_user" ? null : addDaysIso(now, 180),
     supersededByMemoryId: null,
   };
 }

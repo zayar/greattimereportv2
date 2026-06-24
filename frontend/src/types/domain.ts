@@ -769,6 +769,7 @@ export interface GreatTimeAgentWarning {
 export interface GreatTimeAgentRecommendation {
   recommendationId?: string;
   recommendationType?: string;
+  opportunityKey?: string;
   targetCustomerKey?: string;
   title?: string;
   message: string;
@@ -943,12 +944,20 @@ export interface GreatTimeAgentChatResponse {
   resolvedAgent: GreatTimeAgentId;
   autoMode: boolean;
   intent: string;
+  period: {
+    fromDate: string;
+    toDate: string;
+    label: string;
+    previousFromDate?: string;
+    previousToDate?: string;
+  };
   assistantMessage: string;
   summary?: string;
   metrics?: GreatTimeAgentMetric[];
   tables?: GreatTimeAgentTable[];
   recommendations?: GreatTimeAgentRecommendation[];
   followUpQuestions?: string[];
+  usedMemoryIds?: string[];
   customer360?: Customer360FactPack;
   service360?: Service360FactPack;
   sources: GreatTimeAgentSource[];

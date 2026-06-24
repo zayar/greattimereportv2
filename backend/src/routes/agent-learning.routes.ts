@@ -35,6 +35,7 @@ router.post(
       clinicCodesById: params.clinicCodesById,
       jobTypes: params.jobTypes,
       dateKey: params.date,
+      now: params.runAt ? new Date(params.runAt) : undefined,
       timezone: params.timezone,
       dryRun: params.dryRun,
       operationalIntervalMinutes: params.operationalIntervalMinutes,

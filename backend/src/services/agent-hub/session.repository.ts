@@ -62,6 +62,12 @@ export async function saveAgentSessionTurn(params: {
   ]);
 
   if (env.AGENT_MEMORY_V2_ENABLED) {
+    const previousSummary = await getSessionSummaryV2({
+      clinicId: params.clinicId,
+      userId: params.userId,
+      sessionId: params.sessionId,
+    }).catch(() => null);
+
     await saveSessionSummaryV2(
       buildSessionSummaryFromTurn({
         clinicId: params.clinicId,
@@ -71,6 +77,7 @@ export async function saveAgentSessionTurn(params: {
         response: params.response,
         entityRefs: refs,
         usedMemories: params.usedMemories ?? [],
+        previousSummary,
         now: createdAt,
       }),
     ).catch(() => undefined);
@@ -131,6 +138,7 @@ export function buildSessionSummaryFromTurn(params: {
   response: GreatTimeAgentChatResponse;
   entityRefs: GreatTimeAgentEntityContext[];
   usedMemories: GtAgentRelevantMemory[];
+  previousSummary?: GtAgentSessionSummaryV2 | null;
   now?: string;
 }): GtAgentSessionSummaryV2 {
   const updatedAt = params.now ?? nowIso();
@@ -139,6 +147,20 @@ export function buildSessionSummaryFromTurn(params: {
     params.usedMemories.find((memory) => memory.memoryType === "response_style")?.content ?? null;
   const preferredResponseLanguage =
     params.usedMemories.find((memory) => memory.memoryType === "language_preference")?.content ?? null;
+  const activeEntityRefs = mergeSummaryEntityRefs(
+    params.entityRefs.map((ref) => ({
+      entityType: ref.entityType,
+      entityId: ref.entityId,
+      displayName: ref.displayName,
+      rank: ref.rank,
+    })),
+    params.previousSummary?.activeEntityRefs ?? [],
+  );
+  const currentTurnSummary = params.response.summary ?? params.response.assistantMessage;
+  const recentTurnSummary = [
+    ...(params.previousSummary?.recentTurnSummary ?? []),
+    currentTurnSummary,
+  ].filter(Boolean).slice(-6);
 
   return {
     id: buildSessionSummaryId({
@@ -153,25 +175,41 @@ export function buildSessionSummaryFromTurn(params: {
     lastResolvedAgent: params.response.resolvedAgent,
     lastIntent: params.response.intent,
     selectedDateRange: {
-      fromDate: params.request?.fromDate,
-      toDate: params.request?.toDate,
-      timezone: params.request?.timezone,
+      fromDate: params.response.period.fromDate,
+      toDate: params.response.period.toDate,
+      label: params.response.period.label,
+      timezone: params.request?.timezone ?? params.previousSummary?.selectedDateRange.timezone,
     },
-    activeEntityRefs: params.entityRefs.slice(0, 12).map((ref) => ({
-      entityType: ref.entityType,
-      entityId: ref.entityId,
-      displayName: ref.displayName,
-      rank: ref.rank,
-    })),
-    unresolvedClarification: null,
-    preferredResponseLanguage,
-    preferredResponseStyle,
+    activeEntityRefs,
+    unresolvedClarification: params.previousSummary?.unresolvedClarification ?? null,
+    preferredResponseLanguage: preferredResponseLanguage ?? params.previousSummary?.preferredResponseLanguage ?? null,
+    preferredResponseStyle: preferredResponseStyle ?? params.previousSummary?.preferredResponseStyle ?? null,
     lastRecommendationIds: (params.response.recommendations ?? [])
       .map((recommendation) => recommendation.recommendationId)
       .filter((id): id is string => Boolean(id)),
-    recentTurnSummary: [params.response.summary ?? params.response.assistantMessage].filter(Boolean).slice(0, 4),
+    recentTurnSummary,
     usedMemoryIds: params.usedMemories.map((memory) => memory.id),
     updatedAt,
     expiresAt,
   };
+}
+
+function mergeSummaryEntityRefs(
+  current: GtAgentSessionSummaryV2["activeEntityRefs"],
+  previous: GtAgentSessionSummaryV2["activeEntityRefs"],
+) {
+  const seen = new Set<string>();
+  const merged: GtAgentSessionSummaryV2["activeEntityRefs"] = [];
+
+  [...current, ...previous].forEach((ref) => {
+    const key = `${ref.entityType}:${ref.entityId}`;
+    if (seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    merged.push(ref);
+  });
+
+  return merged.slice(0, 12);
 }

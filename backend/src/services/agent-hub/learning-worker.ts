@@ -49,11 +49,28 @@ const DAILY_JOBS = new Set<AgentLearningJobType>([
   "finance_daily_snapshot",
   "service_profiles",
   "practitioner_profiles",
+  "service_practitioner_profiles",
   "appointment_daily_profile",
   "owner_insight_cards",
-  "memory_maintenance",
 ]);
 const HOURLY_JOBS = new Set<AgentLearningJobType>(["feedback_learning", "recommendation_outcome_observer"]);
+const WEEKLY_JOBS = new Set<AgentLearningJobType>(["weekly_business_review", "memory_maintenance"]);
+const SCHEDULER_TICK_WINDOW_MINUTES = 15;
+
+const DEFAULT_DAILY_RUN_TIMES: Partial<Record<AgentLearningJobType, string>> = {
+  appointment_daily_profile: "01:00",
+  finance_daily_snapshot: "01:15",
+  customer_profiles: "02:00",
+  service_profiles: "02:15",
+  practitioner_profiles: "02:30",
+  service_practitioner_profiles: "02:45",
+  owner_insight_cards: "08:00",
+};
+
+const DEFAULT_WEEKLY_RUNS: Partial<Record<AgentLearningJobType, { day: number; time: string }>> = {
+  weekly_business_review: { day: 1, time: "08:00" },
+  memory_maintenance: { day: 0, time: "03:00" },
+};
 
 function emptyCounts(overrides?: Partial<AgentLearningRunCounts>): AgentLearningRunCounts {
   return {
@@ -88,11 +105,13 @@ export function buildLearningBucket(params: {
   now?: Date;
   timezone?: string;
   operationalIntervalMinutes?: 15 | 30 | 60;
+  dateKey?: string;
+  timeKey?: string;
 }) {
   const now = params.now ?? new Date();
   const timezone = normalizeTimeZone(params.timezone || env.DEFAULT_TIMEZONE);
-  const dateKey = formatDateKeyInTimeZone(now, timezone);
-  const timeKey = formatTimeKeyInTimeZone(now, timezone);
+  const dateKey = params.dateKey ?? formatDateKeyInTimeZone(now, timezone);
+  const timeKey = params.timeKey ?? formatTimeKeyInTimeZone(now, timezone);
   const [hour, minute] = timeKey.split(":").map(Number);
 
   if (params.jobType === "appointment_operational_snapshot") {
@@ -112,19 +131,127 @@ export function buildLearningBucket(params: {
     return `${date.toISOString().slice(0, 10)}+${timezone}`;
   }
 
-  return DAILY_JOBS.has(params.jobType) ? `${dateKey}+${timezone}` : `${dateKey}+${timezone}`;
+  return `${dateKey}+${timezone}`;
+}
+
+function localScheduleParts(now: Date, timezone: string) {
+  const normalized = normalizeTimeZone(timezone);
+  const dateKey = formatDateKeyInTimeZone(now, normalized);
+  const timeKey = formatTimeKeyInTimeZone(now, normalized);
+  const [hour, minute] = timeKey.split(":").map(Number);
+  const day = new Date(`${dateKey}T00:00:00.000Z`).getUTCDay();
+
+  return { dateKey, timeKey, hour, minute, day };
+}
+
+function minutesSinceMidnight(timeKey: string) {
+  const [hour, minute] = timeKey.split(":").map(Number);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
+    return null;
+  }
+
+  return hour * 60 + minute;
+}
+
+function isWithinCadenceWindow(timeKey: string, targetTimeKey: string, windowMinutes = SCHEDULER_TICK_WINDOW_MINUTES) {
+  const current = minutesSinceMidnight(timeKey);
+  const target = minutesSinceMidnight(targetTimeKey);
+
+  if (current == null || target == null) {
+    return false;
+  }
+
+  return current >= target && current < target + windowMinutes;
+}
+
+function parseCadenceOverride(value: string | undefined) {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  if (["off", "disabled", "manual"].includes(normalized)) {
+    return { kind: "off" as const };
+  }
+
+  const hourlyMatch = normalized.match(/^hourly(?:@(?<minute>\d{1,2}))?$/);
+  if (hourlyMatch) {
+    const minute = Math.min(59, Math.max(0, Number(hourlyMatch.groups?.minute ?? 0)));
+    return { kind: "hourly" as const, minute };
+  }
+
+  const dailyMatch = normalized.match(/^(?:daily|nightly)(?:@(?<time>\d{2}:\d{2}))?$/);
+  if (dailyMatch) {
+    return { kind: "daily" as const, time: dailyMatch.groups?.time ?? "02:00" };
+  }
+
+  const weeklyMatch = normalized.match(/^weekly(?:@(?:(?<day>[0-6]|sun|mon|tue|wed|thu|fri|sat):)?(?<time>\d{2}:\d{2}))?$/);
+  if (weeklyMatch) {
+    const dayMap: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+    const rawDay = weeklyMatch.groups?.day;
+    const day = rawDay == null ? 1 : dayMap[rawDay] ?? Number(rawDay);
+    return { kind: "weekly" as const, day, time: weeklyMatch.groups?.time ?? "08:00" };
+  }
+
+  return null;
 }
 
 function isWithinOperatingHours(schedule: AgentLearningScheduleRecord, now: Date) {
   const timezone = normalizeTimeZone(schedule.timezone);
-  const dateKey = formatDateKeyInTimeZone(now, timezone);
-  const timeKey = formatTimeKeyInTimeZone(now, timezone);
-  const day = new Date(`${dateKey}T00:00:00.000Z`).getUTCDay();
+  const { timeKey, day } = localScheduleParts(now, timezone);
   const operatingDays = schedule.operatingDays?.length ? schedule.operatingDays : [0, 1, 2, 3, 4, 5, 6];
   const opening = schedule.localOpeningTime ?? "00:00";
   const closing = schedule.localClosingTime ?? "23:59";
 
   return operatingDays.includes(day) && timeKey >= opening && timeKey <= closing;
+}
+
+function isOperationalCadenceDue(schedule: AgentLearningScheduleRecord, now: Date) {
+  const interval = schedule.operationalSnapshotIntervalMinutes ?? 15;
+  const { minute } = localScheduleParts(now, schedule.timezone);
+  const schedulerBucketMinute = Math.floor(minute / SCHEDULER_TICK_WINDOW_MINUTES) * SCHEDULER_TICK_WINDOW_MINUTES;
+
+  return schedulerBucketMinute % interval === 0;
+}
+
+function isDefaultCadenceDue(params: {
+  schedule: AgentLearningScheduleRecord;
+  jobType: AgentLearningJobType;
+  now: Date;
+}) {
+  const parts = localScheduleParts(params.now, params.schedule.timezone);
+  const override = parseCadenceOverride(params.schedule.cadenceOverrides?.[params.jobType]);
+
+  if (override?.kind === "off") {
+    return false;
+  }
+
+  if (override?.kind === "hourly") {
+    return parts.minute >= override.minute && parts.minute < override.minute + SCHEDULER_TICK_WINDOW_MINUTES;
+  }
+
+  if (override?.kind === "daily") {
+    return isWithinCadenceWindow(parts.timeKey, override.time);
+  }
+
+  if (override?.kind === "weekly") {
+    return parts.day === override.day && isWithinCadenceWindow(parts.timeKey, override.time);
+  }
+
+  if (HOURLY_JOBS.has(params.jobType)) {
+    return parts.minute < SCHEDULER_TICK_WINDOW_MINUTES;
+  }
+
+  if (DAILY_JOBS.has(params.jobType)) {
+    return isWithinCadenceWindow(parts.timeKey, DEFAULT_DAILY_RUN_TIMES[params.jobType] ?? "02:00");
+  }
+
+  if (WEEKLY_JOBS.has(params.jobType)) {
+    const cadence = DEFAULT_WEEKLY_RUNS[params.jobType] ?? { day: 1, time: "08:00" };
+    return parts.day === cadence.day && isWithinCadenceWindow(parts.timeKey, cadence.time);
+  }
+
+  return false;
 }
 
 export function isScheduleDueForJob(params: {
@@ -137,10 +264,16 @@ export function isScheduleDueForJob(params: {
   }
 
   if (params.jobType === "appointment_operational_snapshot") {
-    return isWithinOperatingHours(params.schedule, params.now ?? new Date()) || Boolean(params.schedule.offHoursOperationalSnapshotEnabled);
+    const now = params.now ?? new Date();
+    const allowedHours = isWithinOperatingHours(params.schedule, now) || Boolean(params.schedule.offHoursOperationalSnapshotEnabled);
+    return allowedHours && isOperationalCadenceDue(params.schedule, now);
   }
 
-  return true;
+  return isDefaultCadenceDue({
+    schedule: params.schedule,
+    jobType: params.jobType,
+    now: params.now ?? new Date(),
+  });
 }
 
 async function saveSnapshot(params: {
@@ -484,6 +617,7 @@ async function runClinicJobs(params: {
   dateKey: string;
   dryRun: boolean;
   operationalIntervalMinutes?: 15 | 30 | 60;
+  now?: Date;
 }) {
   const results: Array<{
     clinicId: string;
@@ -495,8 +629,10 @@ async function runClinicJobs(params: {
   for (const jobType of params.jobTypes) {
     const bucket = buildLearningBucket({
       jobType,
+      now: params.now,
       timezone: params.timezone,
       operationalIntervalMinutes: params.operationalIntervalMinutes,
+      dateKey: params.dateKey,
     });
 
     if (!params.clinicCode) {
@@ -537,7 +673,7 @@ async function runClinicJobs(params: {
         clinicId: params.clinicId,
         jobType,
       });
-      if (previousWatermark === bucket && jobType !== "feedback_learning") {
+      if (previousWatermark.completedBucket === bucket) {
         await saveAgentLearningRun({
           clinicId: params.clinicId,
           clinicCode: params.clinicCode,
@@ -546,7 +682,7 @@ async function runClinicJobs(params: {
           status: "skipped",
           rowCount: 0,
           counts: emptyCounts({ skipped: 1 }),
-          sourceWatermark: previousWatermark,
+          sourceWatermark: previousWatermark.sourceWatermark,
         });
         results.push({ clinicId: params.clinicId, jobType, status: "skipped", rowCount: 0 });
         continue;
@@ -624,6 +760,7 @@ export async function runAgentLearningTick(params: {
   clinicCodesById?: Record<string, string>;
   jobTypes?: AgentLearningJobType[];
   dateKey?: string;
+  now?: Date;
   timezone?: string;
   dryRun?: boolean;
   operationalIntervalMinutes?: 15 | 30 | 60;
@@ -636,7 +773,8 @@ export async function runAgentLearningTick(params: {
   }
 
   const timezone = normalizeTimeZone(params.timezone || env.DEFAULT_TIMEZONE);
-  const dateKey = params.dateKey ?? formatDateKeyInTimeZone(new Date(), timezone);
+  const now = params.now ?? new Date();
+  const dateKey = params.dateKey ?? formatDateKeyInTimeZone(now, timezone);
   const jobTypes = params.jobTypes?.length ? params.jobTypes : DEFAULT_JOB_TYPES;
   const clinicIds = params.clinicIds ?? Object.keys(params.clinicCodesById ?? {});
   const perClinicResults = await mapWithConcurrency(
@@ -651,6 +789,7 @@ export async function runAgentLearningTick(params: {
         dateKey,
         dryRun: Boolean(params.dryRun),
         operationalIntervalMinutes: params.operationalIntervalMinutes,
+        now,
       }),
   );
 
@@ -695,6 +834,7 @@ export async function runAgentLearningForSchedules(params?: {
       dateKey,
       dryRun: Boolean(params?.dryRun),
       operationalIntervalMinutes: schedule.operationalSnapshotIntervalMinutes ?? 15,
+      now,
     });
   });
 

@@ -62,6 +62,7 @@ export type GreatTimeAgentTable = {
 export type GreatTimeAgentRecommendation = {
   recommendationId?: string;
   recommendationType?: string;
+  opportunityKey?: string;
   targetCustomerKey?: string;
   title?: string;
   message: string;
@@ -241,6 +242,7 @@ export type GreatTimeAgentChatResponse = {
   resolvedAgent: GreatTimeAgentId;
   autoMode: boolean;
   intent: string;
+  period: AgentPeriod;
   assistantMessage: string;
   summary?: string;
   metrics?: GreatTimeAgentMetric[];
@@ -350,6 +352,9 @@ export type AgentFeedbackInput = {
   responseId: string;
   requestId?: string | null;
   recommendationId?: string | null;
+  recommendationType?: string | null;
+  opportunityKey?: string | null;
+  targetCustomerKey?: string | null;
   feedbackType?:
     | "helpful"
     | "not_helpful"
@@ -378,4 +383,5 @@ export type AgentFeedbackInput = {
   resolvedAgent?: GreatTimeAgentId | null;
   intent?: string | null;
   sourceTools?: string[];
+  usedMemoryIds?: string[];
 };

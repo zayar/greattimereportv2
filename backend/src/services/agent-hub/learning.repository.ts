@@ -47,6 +47,11 @@ export type AgentLearningScheduleRecord = {
   updatedBy?: string | null;
 };
 
+export type AgentLearningWatermarkRecord = {
+  sourceWatermark: string | null;
+  completedBucket: string | null;
+};
+
 function lockId(params: { clinicId: string; jobType: AgentLearningJobType; bucket: string }) {
   return `${encodeURIComponent(params.clinicId)}__${params.jobType}__${params.bucket}`;
 }
@@ -60,7 +65,7 @@ export async function acquireAgentLearningLock(params: {
   const db = firestoreDb();
   const ref = db.collection(LOCKS_COLLECTION).doc(lockId(params));
   const now = Date.now();
-  const expiresAt = new Date(now + (params.leaseMs ?? 10 * 60_000)).toISOString();
+  const expiresAt = new Date(now + (params.leaseMs ?? 60 * 60_000)).toISOString();
 
   return db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(ref);
@@ -125,14 +130,22 @@ function watermarkId(params: { clinicId: string; jobType: AgentLearningJobType }
 export async function getAgentLearningWatermark(params: {
   clinicId: string;
   jobType: AgentLearningJobType;
-}) {
+}): Promise<AgentLearningWatermarkRecord> {
   const snapshot = await firestoreDb()
     .collection(GT_AGENT_LEARNING_WATERMARKS_COLLECTION)
     .doc(watermarkId(params))
     .get();
   const data = snapshot.data();
 
-  return typeof data?.sourceWatermark === "string" ? data.sourceWatermark : null;
+  return {
+    sourceWatermark: typeof data?.sourceWatermark === "string" ? data.sourceWatermark : null,
+    completedBucket:
+      typeof data?.completedBucket === "string"
+        ? data.completedBucket
+        : typeof data?.bucket === "string"
+          ? data.bucket
+          : null,
+  };
 }
 
 export async function saveAgentLearningWatermark(params: {
@@ -146,6 +159,7 @@ export async function saveAgentLearningWatermark(params: {
       clinicId: params.clinicId,
       jobType: params.jobType,
       sourceWatermark: params.sourceWatermark,
+      completedBucket: params.bucket,
       bucket: params.bucket,
       updatedAt: nowIso(),
     },

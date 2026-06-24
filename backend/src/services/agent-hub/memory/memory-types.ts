@@ -11,6 +11,12 @@ export const GT_AGENT_LEARNING_SCHEDULES_COLLECTION = "gtAgentLearningSchedulesV
 
 export type GtAgentMemoryStatus = "candidate" | "active" | "superseded" | "archived";
 export type GtAgentMemorySource = "explicit_user" | "feedback" | "system_observed" | "verified_outcome";
+export type GtAgentPreferenceKey =
+  | "response.language"
+  | "response.detail_level"
+  | "response.format"
+  | "recommendation.priority";
+export type GtAgentPreferenceValue = string | number | boolean | string[];
 export type GtAgentMemoryType =
   | "response_style"
   | "language_preference"
@@ -32,11 +38,14 @@ export type GtAgentMemoryRecord = {
   intent?: string | null;
   memoryType: GtAgentMemoryType;
   content: string;
+  preferenceKey?: GtAgentPreferenceKey | null;
+  preferenceValue?: GtAgentPreferenceValue | null;
   source: GtAgentMemorySource;
   status: GtAgentMemoryStatus;
   confidence: number;
   evidenceCount: number;
   sourceEventIds: string[];
+  sourceSessionIds?: string[];
   createdAt: string;
   updatedAt: string;
   lastObservedAt?: string | null;
@@ -54,10 +63,13 @@ export type GtAgentMemoryWriteInput = {
   intent?: string | null;
   memoryType: GtAgentMemoryType;
   content: string;
+  preferenceKey?: GtAgentPreferenceKey | null;
+  preferenceValue?: GtAgentPreferenceValue | null;
   source: GtAgentMemorySource;
   confidence?: number;
   evidenceCount?: number;
   sourceEventIds?: string[];
+  sourceSessionIds?: string[];
   observedAt?: string;
 };
 
@@ -124,6 +136,7 @@ export type GtAgentRecommendationOutcome = {
   resolvedAgent?: GreatTimeAgentId | null;
   intent?: string | null;
   recommendationType?: string | null;
+  opportunityKey?: string | null;
   targetCustomerKey?: string | null;
   state: GtAgentRecommendationState;
   sourceTools: string[];

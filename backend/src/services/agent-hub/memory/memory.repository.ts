@@ -1,4 +1,5 @@
 import { firestoreDb } from "../../../config/firebase.js";
+import { evaluateMemoryCandidate } from "./memory-policy.js";
 import {
   GT_AGENT_CLINIC_MEMORIES_COLLECTION,
   GT_AGENT_FACT_SNAPSHOTS_COLLECTION,
@@ -47,7 +48,145 @@ function sessionSummaryId(params: { clinicId: string; userId: string; sessionId:
 
 export async function saveMemoryRecord(memory: GtAgentMemoryRecord) {
   const collection = memory.userId ? userPreferenceCollection() : clinicMemoryCollection();
-  await collection.doc(memory.id).set(memory, { merge: true });
+  const db = firestoreDb();
+  const ref = collection.doc(memory.id);
+
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    const snapshotData = snapshot.data();
+    const existing = isMemoryRecord(snapshotData) ? snapshotData : null;
+    const merged = mergeMemoryRecords(existing, memory);
+    const decision = evaluateMemoryCandidate({
+      clinicId: merged.clinicId,
+      userId: merged.userId,
+      entityType: merged.entityType,
+      entityId: merged.entityId,
+      agentId: merged.agentId,
+      intent: merged.intent,
+      memoryType: merged.memoryType,
+      content: merged.content,
+      preferenceKey: merged.preferenceKey,
+      preferenceValue: merged.preferenceValue,
+      source: merged.source,
+      confidence: merged.confidence,
+      evidenceCount: merged.evidenceCount,
+      sourceEventIds: merged.sourceEventIds,
+      sourceSessionIds: merged.sourceSessionIds,
+      observedAt: merged.lastObservedAt ?? undefined,
+    });
+
+    if (decision.accepted) {
+      merged.status = decision.status;
+      merged.confidence = Math.max(merged.confidence, decision.confidence);
+    }
+
+    if (memory.source === "explicit_user" && memory.preferenceKey) {
+      const conflictQuery = collection
+        .where("clinicId", "==", memory.clinicId)
+        .where("preferenceKey", "==", memory.preferenceKey)
+        .where("status", "==", "active")
+        .limit(50);
+      const conflicts = await transaction.get(conflictQuery);
+
+      conflicts.docs
+        .map((doc) => ({ ref: doc.ref, data: doc.data() }))
+        .filter((doc) => doc.ref.id !== memory.id)
+        .filter((doc) => isMemoryRecord(doc.data))
+        .filter((doc) => sameMemoryScope(doc.data as GtAgentMemoryRecord, memory))
+        .filter((doc) => stableValue(doc.data.preferenceValue) !== stableValue(memory.preferenceValue))
+        .forEach((doc) => {
+          transaction.set(
+            doc.ref,
+            {
+              status: "superseded",
+              supersededByMemoryId: memory.id,
+              updatedAt: memory.updatedAt,
+            },
+            { merge: true },
+          );
+        });
+    }
+
+    transaction.set(ref, merged);
+    return merged;
+  });
+}
+
+function stableValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return JSON.stringify([...value].sort());
+  }
+
+  return value == null ? "" : JSON.stringify(value);
+}
+
+function uniqueBounded(values: Array<string | null | undefined>, max: number) {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))].slice(-max);
+}
+
+function latestIso(left: string | null | undefined, right: string | null | undefined) {
+  if (!left) {
+    return right ?? null;
+  }
+  if (!right) {
+    return left;
+  }
+
+  return new Date(right).getTime() > new Date(left).getTime() ? right : left;
+}
+
+function sameMemoryScope(left: GtAgentMemoryRecord, right: GtAgentMemoryRecord) {
+  return (
+    (left.userId ?? null) === (right.userId ?? null) &&
+    (left.agentId ?? null) === (right.agentId ?? null) &&
+    (left.intent ?? null) === (right.intent ?? null) &&
+    (left.entityType ?? null) === (right.entityType ?? null) &&
+    (left.entityId ?? null) === (right.entityId ?? null)
+  );
+}
+
+function mergeMemoryRecords(existing: GtAgentMemoryRecord | null, incoming: GtAgentMemoryRecord): GtAgentMemoryRecord {
+  if (!existing) {
+    return {
+      ...incoming,
+      sourceEventIds: uniqueBounded(incoming.sourceEventIds, 50),
+      sourceSessionIds: uniqueBounded(incoming.sourceSessionIds ?? [], 50),
+    };
+  }
+
+  const existingEventIds = new Set(existing.sourceEventIds ?? []);
+  const incomingEventIds = incoming.sourceEventIds ?? [];
+  const newEventCount = incomingEventIds.length
+    ? incomingEventIds.filter((eventId) => !existingEventIds.has(eventId)).length
+    : incoming.evidenceCount;
+  const sourceEventIds = uniqueBounded([...(existing.sourceEventIds ?? []), ...incomingEventIds], 50);
+  const sourceSessionIds = uniqueBounded([...(existing.sourceSessionIds ?? []), ...(incoming.sourceSessionIds ?? [])], 50);
+  const evidenceCount = Math.max(existing.evidenceCount + newEventCount, sourceEventIds.length, incoming.evidenceCount);
+  const source =
+    existing.source === "explicit_user" || incoming.source === "explicit_user"
+      ? "explicit_user"
+      : incoming.source === "verified_outcome"
+        ? "verified_outcome"
+        : existing.source;
+
+  return {
+    ...existing,
+    content: incoming.content || existing.content,
+    preferenceKey: incoming.preferenceKey ?? existing.preferenceKey ?? null,
+    preferenceValue: incoming.preferenceValue ?? existing.preferenceValue ?? null,
+    source,
+    status: incoming.source === "explicit_user" ? incoming.status : existing.status,
+    confidence: Math.max(existing.confidence, incoming.confidence),
+    evidenceCount,
+    sourceEventIds,
+    sourceSessionIds,
+    createdAt: existing.createdAt,
+    updatedAt: incoming.updatedAt,
+    lastObservedAt: latestIso(existing.lastObservedAt ?? existing.updatedAt, incoming.lastObservedAt ?? incoming.updatedAt),
+    validFrom: existing.validFrom ?? incoming.validFrom,
+    validUntil: incoming.source === "explicit_user" ? null : latestIso(existing.validUntil, incoming.validUntil),
+    supersededByMemoryId: existing.supersededByMemoryId ?? null,
+  };
 }
 
 export async function listCandidateMemories(params: {
@@ -95,7 +234,36 @@ export function buildSessionSummaryId(params: { clinicId: string; userId: string
 }
 
 export async function saveRecommendationOutcome(outcome: GtAgentRecommendationOutcome) {
-  await recommendationOutcomeCollection().doc(outcome.id).set(outcome, { merge: true });
+  const db = firestoreDb();
+  const ref = recommendationOutcomeCollection().doc(outcome.id);
+
+  return db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(ref);
+    const existing = snapshot.data() as GtAgentRecommendationOutcome | undefined;
+    const sourceTools = uniqueBounded([...(existing?.sourceTools ?? []), ...(outcome.sourceTools ?? [])], 50);
+    const sourceEvidenceRefs = uniqueBounded(
+      [...(existing?.sourceEvidenceRefs ?? []), ...(outcome.sourceEvidenceRefs ?? [])],
+      50,
+    );
+    const merged: GtAgentRecommendationOutcome = {
+      ...outcome,
+      recommendationType: outcome.recommendationType ?? existing?.recommendationType ?? null,
+      opportunityKey: outcome.opportunityKey ?? existing?.opportunityKey ?? null,
+      targetCustomerKey: outcome.targetCustomerKey ?? existing?.targetCustomerKey ?? null,
+      sourceTools,
+      sourceEvidenceRefs,
+      shownAt: existing?.shownAt ?? outcome.shownAt ?? (outcome.state === "shown" ? outcome.updatedAt : null),
+      acceptedAt: existing?.acceptedAt ?? outcome.acceptedAt ?? (outcome.state === "accepted" ? outcome.updatedAt : null),
+      contactedAt: existing?.contactedAt ?? outcome.contactedAt ?? (outcome.state === "contacted" ? outcome.updatedAt : null),
+      observedAt: existing?.observedAt ?? outcome.observedAt ?? null,
+      verificationWindowDays: outcome.verificationWindowDays ?? existing?.verificationWindowDays ?? 30,
+      createdAt: existing?.createdAt ?? outcome.createdAt,
+      updatedAt: outcome.updatedAt,
+    };
+
+    transaction.set(ref, merged);
+    return merged;
+  });
 }
 
 export async function saveInsightCard(card: GtAgentInsightCard) {

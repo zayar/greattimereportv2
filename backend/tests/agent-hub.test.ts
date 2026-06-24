@@ -54,6 +54,17 @@ test("supervisor handles Myanmar keywords and deterministic tie-breaking", () =>
 
 test("planner extracts relative periods and blocks write requests", () => {
   const now = new Date("2026-06-18T06:00:00.000Z")
+  const defaultPeriod = extractAgentPeriod({
+    message: "Which service is declining?",
+    timezone: "UTC",
+    now,
+  })
+  assert.equal(defaultPeriod.label, "this month")
+  assert.equal(defaultPeriod.fromDate, "2026-06-01")
+  assert.equal(defaultPeriod.toDate, "2026-06-18")
+  assert.equal(defaultPeriod.previousFromDate, "2026-05-01")
+  assert.equal(defaultPeriod.previousToDate, "2026-05-18")
+
   const period = extractAgentPeriod({
     message: "Compare this week sales with last week",
     timezone: "UTC",
@@ -194,7 +205,7 @@ test("planner keeps generic show questions out of Customer 360 and includes usag
   assert.deepEqual(callPlan.toolNames, ["search_customer_profiles"])
 })
 
-test("planner routes named service questions to one-shot Service 360 with YTD default", () => {
+test("planner routes named service questions to one-shot Service 360 with month-to-date default", () => {
   const now = new Date("2026-06-18T06:00:00.000Z")
   const plan = planAgentRequest({
     request: {
@@ -214,7 +225,8 @@ test("planner routes named service questions to one-shot Service 360 with YTD de
   assert.equal(plan.resolvedAgent, "business")
   assert.equal(plan.intent, "service_360")
   assert.deepEqual(plan.toolNames, ["get_service_360"])
-  assert.equal(plan.period.fromDate, "2026-01-01")
+  assert.equal(plan.period.label, "this month")
+  assert.equal(plan.period.fromDate, "2026-06-01")
   assert.equal(plan.period.toDate, "2026-06-18")
 
   const genericPlan = planAgentRequest({
@@ -391,6 +403,11 @@ test("Telegram Agent reply formatter keeps summaries, metrics, previews, and own
     resolvedAgent: "finance",
     autoMode: true,
     intent: "payment_summary",
+    period: {
+      fromDate: "2026-06-01",
+      toDate: "2026-06-23",
+      label: "this month",
+    },
     assistantMessage: "Collections for today: 10,000 across 2 invoices.",
     summary: "Collections for today: 10,000 across 2 invoices.",
     metrics: [{ label: "Collected", value: 10000, unit: "amount" }],
@@ -418,7 +435,9 @@ test("Telegram Agent reply formatter keeps summaries, metrics, previews, and own
     actions: [{ type: "read_only_agent_response" }],
   })
 
-  assert.match(message, /GT Agent/)
+  assert.match(message, /GT Brain/)
+  assert.match(message, /Answered by: GT Brain -> Finance Agent/)
+  assert.match(message, /Period: this month/)
   assert.match(message, /Collected: 10,000 amount/)
   assert.match(message, /Payment methods/)
   assert.doesNotMatch(message, /BigQuery payment report: ok/)
@@ -435,6 +454,11 @@ test("Telegram Customer 360 formatter uses owner-friendly Myanmar package contex
     resolvedAgent: "customer_relationship",
     autoMode: true,
     intent: "customer_360",
+    period: {
+      fromDate: "2026-06-01",
+      toDate: "2026-06-23",
+      label: "this month",
+    },
     assistantMessage: "Soe Moe Thu အကျဉ်းချုပ်\n- 2026 visit 89 ကြိမ်ရှိပါတယ်။",
     summary: "Soe Moe Thu အကျဉ်းချုပ်\n- 2026 visit 89 ကြိမ်ရှိပါတယ်။",
     customer360: {
@@ -490,7 +514,8 @@ test("Telegram Customer 360 formatter uses owner-friendly Myanmar package contex
     actions: [{ type: "read_only_agent_response" }],
   })
 
-  assert.match(message, /GreatTime AI/)
+  assert.match(message, /GT Brain/)
+  assert.match(message, /Answered by: GT Brain -> Customer Relationship Agent/)
   assert.match(message, /Package \/ service လက်ကျန်/)
   assert.match(message, /ExoMicro: ကျန် 14\/59/)
   assert.match(message, /အကြံပြုချက်/)
@@ -736,7 +761,7 @@ test("response builder exposes Customer 360 fact packs with scoped sources and d
 
   assert.equal(response.customer360?.identity.displayName, "Soe Moe Thu")
   assert.equal(response.sources[0]?.scope, "historical")
-  assert.ok(response.followUpQuestions?.includes("Show her unused package services."))
+  assert.ok(response.followUpQuestions?.includes("Show unused package services."))
   assert.ok(response.followUpQuestions?.includes("Show purchase and payment details."))
   assert.ok(response.assistantMessage.includes("805 visits"))
 })
@@ -997,8 +1022,20 @@ test("memory policy activates explicit preferences and promotes repeated evidenc
     content: "Owner often marks responses too long; prefer concise answers for this area.",
     source: "feedback",
     evidenceCount: 2,
+    sourceSessionIds: ["session-1"],
   })
-  assert.equal(repeated?.status, "active")
+  assert.equal(repeated?.status, "candidate")
+
+  const repeatedReady = buildMemoryRecord({
+    clinicId: "clinic-1",
+    userId: "user-1",
+    memoryType: "response_style",
+    content: "Owner often marks responses too long; prefer concise answers for this area.",
+    source: "feedback",
+    evidenceCount: 3,
+    sourceSessionIds: ["session-1", "session-2"],
+  })
+  assert.equal(repeatedReady?.status, "active")
 })
 
 test("feedback learning extracts explicit and repeated preference memories", () => {
@@ -1032,7 +1069,7 @@ test("feedback learning extracts explicit and repeated preference memories", () 
       id: "fb-3",
       clinicId: "clinic-1",
       userId: "user-1",
-      sessionId: "session-1",
+      sessionId: "session-2",
       responseId: "resp-3",
       rating: "not_helpful",
       feedbackType: "too_long",
@@ -1040,11 +1077,31 @@ test("feedback learning extracts explicit and repeated preference memories", () 
       resolvedAgent: "finance",
       intent: "sales_summary",
     },
+    {
+      id: "fb-4",
+      clinicId: "clinic-1",
+      userId: "user-1",
+      sessionId: "session-2",
+      responseId: "resp-4",
+      rating: "not_helpful",
+      feedbackType: "too_long",
+      createdAt: "2026-06-18T03:00:00.000Z",
+      resolvedAgent: "finance",
+      intent: "sales_summary",
+    },
   ])
 
-  assert.ok(records.some((record) => record.memoryType === "response_style" && record.status === "active"))
-  assert.ok(records.some((record) => record.memoryType === "priority_preference" && record.status === "active"))
-  assert.ok(records.some((record) => record.source === "feedback" && record.evidenceCount === 2 && record.status === "active"))
+  assert.ok(
+    records.some(
+      (record) =>
+        record.memoryType === "response_style" &&
+        record.preferenceKey === "response.detail_level" &&
+        record.preferenceValue === "concise" &&
+        record.status === "active",
+    ),
+  )
+  assert.ok(records.some((record) => record.memoryType === "priority_preference" && record.preferenceKey === "recommendation.priority" && record.status === "active"))
+  assert.ok(records.some((record) => record.source === "feedback" && record.evidenceCount === 3 && record.status === "active"))
 })
 
 test("memory retrieval ranks exact scoped active memories and isolates clinics", () => {
@@ -1108,6 +1165,11 @@ test("session summary has bounded fields and expires after TTL", () => {
       resolvedAgent: "customer_relationship",
       autoMode: false,
       intent: "unused_package_balance",
+      period: {
+        fromDate: "2026-06-18",
+        toDate: "2026-06-18",
+        label: "today",
+      },
       assistantMessage: "Summary",
       summary: "Summary",
       recommendations: [{ recommendationId: "rec-1", message: "Follow up.", sourceTools: [] }],
@@ -1155,6 +1217,15 @@ test("learning bucket calculation respects Asia/Yangon local time and operationa
     }),
     "2026-06-23+Asia/Yangon",
   )
+  assert.equal(
+    buildLearningBucket({
+      jobType: "feedback_learning",
+      now: new Date("2026-06-24T04:30:00.000Z"),
+      dateKey: "2026-06-10",
+      timezone: "Asia/Yangon",
+    }),
+    "2026-06-10T11:00+Asia/Yangon",
+  )
 })
 
 test("schedule due helper skips closed clinics unless off-hours monitoring is enabled", () => {
@@ -1180,6 +1251,50 @@ test("schedule due helper skips closed clinics unless off-hours monitoring is en
       jobType: "appointment_operational_snapshot",
       now: afterHours,
     }),
+    true,
+  )
+})
+
+test("schedule due helper applies hourly, daily, weekly, and override cadence windows", () => {
+  const schedule = {
+    id: "schedule-1",
+    clinicId: "clinic-1",
+    clinicCode: "ABC",
+    timezone: "Asia/Yangon",
+    enabled: true,
+    enabledJobTypes: [
+      "feedback_learning" as const,
+      "finance_daily_snapshot" as const,
+      "weekly_business_review" as const,
+      "owner_insight_cards" as const,
+    ],
+    cadenceOverrides: {
+      owner_insight_cards: "daily@09:30",
+    },
+  }
+
+  assert.equal(
+    isScheduleDueForJob({ schedule, jobType: "feedback_learning", now: new Date("2026-06-22T18:30:00.000Z") }),
+    true,
+  )
+  assert.equal(
+    isScheduleDueForJob({ schedule, jobType: "feedback_learning", now: new Date("2026-06-22T18:45:00.000Z") }),
+    false,
+  )
+  assert.equal(
+    isScheduleDueForJob({ schedule, jobType: "finance_daily_snapshot", now: new Date("2026-06-22T18:45:00.000Z") }),
+    true,
+  )
+  assert.equal(
+    isScheduleDueForJob({ schedule, jobType: "weekly_business_review", now: new Date("2026-06-22T01:30:00.000Z") }),
+    true,
+  )
+  assert.equal(
+    isScheduleDueForJob({ schedule, jobType: "weekly_business_review", now: new Date("2026-06-23T01:30:00.000Z") }),
+    false,
+  )
+  assert.equal(
+    isScheduleDueForJob({ schedule, jobType: "owner_insight_cards", now: new Date("2026-06-23T03:00:00.000Z") }),
     true,
   )
 })

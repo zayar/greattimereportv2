@@ -33,7 +33,7 @@ function followUpsForCustomer360(factPack: Customer360FactPack) {
   const questions: string[] = [];
 
   if (factPack.packages.holdings.length > 0 || factPack.packages.dataStatus === "partial") {
-    questions.push("Show her unused package services.");
+    questions.push("Show unused package services.");
   }
 
   if (factPack.payments.invoiceCount || factPack.payments.recentInvoices.length > 0) {
@@ -55,7 +55,9 @@ function followUpsForCustomer360(factPack: Customer360FactPack) {
     questions.push("Show service usage and visit frequency over time.");
   }
 
-  return questions.length ? questions.slice(0, 4) : ["Open the customer detail report.", "Show recent treatments.", "Show service usage."];
+  return questions.length
+    ? questions.slice(0, 4)
+    : ["Show recent treatments.", "Show service usage this month.", "Show purchase and package details."];
 }
 
 function hasActionableCustomerRows(results: AgentToolResult[]) {
@@ -70,9 +72,9 @@ function hasActionableCustomerRows(results: AgentToolResult[]) {
 
 function followUpsForService360(factPack: Service360FactPack) {
   const questions = [
-    `Which customers used ${factPack.identity.displayName} most?`,
+    `Which customers used ${factPack.identity.displayName} most this month?`,
+    `Which practitioners handled ${factPack.identity.displayName} most this month?`,
     `Which services are bought together with ${factPack.identity.displayName}?`,
-    `Which practitioners handle ${factPack.identity.displayName} most?`,
   ];
 
   return questions.slice(0, 3);
@@ -94,9 +96,9 @@ function followUpsForAgent(
 
   if (plan.resolvedAgent === "finance") {
     return [
-      "Compare this period with the previous period.",
-      "Show payment methods by amount.",
-      "Which invoices should we review next?",
+      "Compare this month sales with the same days last month.",
+      "Show this month collection by payment method.",
+      "Which payment method needs reconciliation this month?",
     ];
   }
 
@@ -107,16 +109,16 @@ function followUpsForAgent(
 
     return [
       "Tell me about the first customer.",
-      "Show the first customer's last treatment and recent purchases.",
-      "Which customers should we follow up today?",
+      "Show the first customer's last treatment and package balance.",
+      "Which top customers should we thank this month?",
     ];
   }
 
   if (plan.resolvedAgent === "business") {
     return [
-      "Which service is declining?",
-      "Which practitioners handle that service most?",
-      "Show daily treatment volume.",
+      "Which service is declining this month?",
+      "Which practitioners handled the most treatments this month?",
+      "Show top services this month.",
     ];
   }
 
@@ -218,6 +220,7 @@ export function buildAgentResponse(params: {
     resolvedAgent: params.plan.resolvedAgent,
     autoMode: params.plan.autoMode,
     intent: params.plan.intent,
+    period: params.plan.period,
     assistantMessage: summary,
     summary,
     metrics: metrics.length ? metrics : undefined,

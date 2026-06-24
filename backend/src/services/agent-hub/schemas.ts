@@ -39,6 +39,9 @@ export const agentFeedbackSchema = z.object({
   responseId: z.string().min(1),
   requestId: z.string().min(1).nullable().optional(),
   recommendationId: z.string().min(1).nullable().optional(),
+  recommendationType: z.string().min(1).max(120).nullable().optional(),
+  opportunityKey: z.string().min(1).max(200).nullable().optional(),
+  targetCustomerKey: z.string().min(1).max(200).nullable().optional(),
   feedbackType: z
     .enum(["helpful", "not_helpful", "wrong_data", "too_long", "too_short", "remember_this", "correction"])
     .optional(),
@@ -65,6 +68,7 @@ export const agentFeedbackSchema = z.object({
   resolvedAgent: z.enum(greatTimeAgentIds).nullable().optional(),
   intent: z.string().min(1).max(120).nullable().optional(),
   sourceTools: z.array(z.string().min(1).max(120)).max(20).optional(),
+  usedMemoryIds: z.array(z.string().min(1).max(160)).max(20).optional(),
 });
 
 export const agentSessionParamsSchema = z.object({
@@ -91,6 +95,7 @@ export const agentLearningTickSchema = z.object({
   clinicCodesById: z.record(z.string()).optional(),
   jobTypes: z.array(z.enum(agentLearningJobTypes)).max(12).optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  runAt: z.string().datetime().optional(),
   timezone: z.string().min(1).max(80).optional(),
   dryRun: z.boolean().optional(),
   operationalIntervalMinutes: z.union([z.literal(15), z.literal(30), z.literal(60)]).optional(),

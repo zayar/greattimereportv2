@@ -2,7 +2,7 @@ import { env } from "../../config/env.js";
 import { HttpError } from "../../utils/http-error.js";
 import { hasFeatureAccess } from "../feature-access.service.js";
 import { askAgentHub, buildLockedAgentHubResponse } from "../agent-hub/agent-hub.service.js";
-import type { Customer360FactPack, GreatTimeAgentChatResponse } from "../agent-hub/types.js";
+import type { Customer360FactPack, GreatTimeAgentChatResponse, GreatTimeAgentId } from "../agent-hub/types.js";
 import { buildTelegramSalesAssistantReply } from "../gt-growth-ai/sales-assistant.service.js";
 import { GT_GROWTH_AI_FEATURE_GATE } from "../../types/report-ai.js";
 import { getTelegramTargetByChatId, redeemTelegramLinkCode } from "./storage.service.js";
@@ -197,6 +197,51 @@ function formatMetricValue(value: string | number, unit: string | undefined) {
   return unit ? `${formatted} ${unit}` : formatted;
 }
 
+function formatAgentLabel(agentId: GreatTimeAgentId) {
+  switch (agentId) {
+    case "finance":
+      return "Finance Agent";
+    case "customer_relationship":
+      return "Customer Relationship Agent";
+    case "business":
+      return "Business Agent";
+    case "appointment":
+      return "Appointment Agent";
+    default:
+      return "GT Agent";
+  }
+}
+
+function formatShortDate(dateKey: string) {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) {
+    return dateKey;
+  }
+
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function formatResponsePeriod(response: GreatTimeAgentChatResponse) {
+  const { period } = response;
+  if (period.fromDate === period.toDate) {
+    return `${period.label} (${formatShortDate(period.toDate)})`;
+  }
+
+  return `${period.label} (${formatShortDate(period.fromDate)} - ${formatShortDate(period.toDate)})`;
+}
+
+function buildTelegramReplyHeader(response: GreatTimeAgentChatResponse) {
+  const agentLabel = formatAgentLabel(response.resolvedAgent);
+  const answeredBy = response.autoMode ? `GT Brain -> ${agentLabel}` : agentLabel;
+
+  return ["GT Brain", `Answered by: ${answeredBy}`, `Period: ${formatResponsePeriod(response)}`];
+}
+
 function formatTablePreview(response: GreatTimeAgentChatResponse) {
   const table = response.tables?.find((item) => item.rows.length > 0);
   if (!table) {
@@ -245,7 +290,7 @@ function formatCustomer360TelegramReply(response: GreatTimeAgentChatResponse) {
   const recentTreatments = (factPack.appointments.recentCompleted ?? []).slice(0, 3);
   const topServices = factPack.usage.topServices.slice(0, 3);
   const followUps = (response.followUpQuestions ?? []).slice(0, 2);
-  const lines = ["GreatTime AI", "", response.summary || response.assistantMessage];
+  const lines = [...buildTelegramReplyHeader(response), "", response.summary || response.assistantMessage];
 
   if (packageRows.length > 0) {
     lines.push("", "Package / service လက်ကျန်:");
@@ -293,7 +338,7 @@ export function formatAgentHubTelegramReply(response: GreatTimeAgentChatResponse
     return formatCustomer360TelegramReply(response);
   }
 
-  const lines = ["GT Agent", "", response.summary || response.assistantMessage];
+  const lines = [...buildTelegramReplyHeader(response), "", response.summary || response.assistantMessage];
   const metrics = (response.metrics ?? []).slice(0, 5);
   const tablePreview = formatTablePreview(response);
   const warnings = (response.warnings ?? []).slice(0, 2);
@@ -394,7 +439,7 @@ async function handleAgentQuestion(params: {
     await sendTelegramMessage(
       params.chatId,
       target.isAgentChatEnabled
-        ? "You are not allowed to chat with GT Agent from this Telegram target. Scheduled reports can still be delivered here."
+        ? "You are not allowed to chat with GT Brain from this Telegram target. Scheduled reports can still be delivered here."
         : "This Telegram target is report-only. Enable Agent chat for this target in GreatTime Settings > Telegram.",
     );
     return;

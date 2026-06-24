@@ -36,6 +36,14 @@ function startOfWeek(dateKey: string) {
   return dateFromUtc(date);
 }
 
+function startOfMonth(dateKey: string) {
+  return `${dateKey.slice(0, 8)}01`;
+}
+
+function daysInUtcMonth(year: number, monthIndex: number) {
+  return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+}
+
 function buildPeriod(fromDate: string, toDate: string, label: string): AgentPeriod {
   const previous = shiftRange(fromDate, toDate);
   return {
@@ -43,6 +51,23 @@ function buildPeriod(fromDate: string, toDate: string, label: string): AgentPeri
     toDate,
     label,
     ...previous,
+  };
+}
+
+function buildThisMonthPeriod(today: string): AgentPeriod {
+  const current = new Date(`${today}T00:00:00.000Z`);
+  const currentYear = current.getUTCFullYear();
+  const currentMonth = current.getUTCMonth();
+  const previousMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+  const previousYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+  const previousDay = Math.min(current.getUTCDate(), daysInUtcMonth(previousYear, previousMonth));
+
+  return {
+    fromDate: startOfMonth(today),
+    toDate: today,
+    label: "this month",
+    previousFromDate: dateFromUtc(new Date(Date.UTC(previousYear, previousMonth, 1))),
+    previousToDate: dateFromUtc(new Date(Date.UTC(previousYear, previousMonth, previousDay))),
   };
 }
 
@@ -85,6 +110,10 @@ export function extractAgentPeriod(params: {
     return buildPeriod(today, today, "today");
   }
 
+  if (/this\s+month|current\s+month|month\s+to\s+date|mtd|ဒီ\s*လ/i.test(params.message)) {
+    return buildThisMonthPeriod(today);
+  }
+
   if (/this\s+year|current\s+year|year\s+to\s+date|ytd|ဒီ\s*နှစ်/i.test(params.message)) {
     return buildPeriod(`${today.slice(0, 4)}-01-01`, today, "year to date");
   }
@@ -93,16 +122,7 @@ export function extractAgentPeriod(params: {
     return buildPeriod(params.fromDate, params.toDate, `${params.fromDate} to ${params.toDate}`);
   }
 
-  return buildPeriod(today, today, "today");
-}
-
-function hasExplicitPeriodCue(request: GreatTimeAgentChatRequest) {
-  return Boolean(
-    (request.fromDate && request.toDate) ||
-      /last\s+\d+\s+days|last\s+90\s+days|90\s+days|last\s+30\s+days|30\s+days|this\s+week|current\s+week|last\s+week|previous\s+week|yesterday|today|now|right now|this\s+year|current\s+year|year\s+to\s+date|ytd|ဒီနေ့|ဒီ\s*နှစ်|မနေ့/i.test(
-        request.message,
-      ),
-  );
+  return buildThisMonthPeriod(today);
 }
 
 function detectFinanceIntent(message: string) {
@@ -336,17 +356,12 @@ export function planAgentRequest(params: {
           ? detectBusinessIntent(params.request.message)
           : detectAppointmentIntent(params.request.message);
 
-  const plannedPeriod =
-    intent === "service_360" && !hasExplicitPeriodCue(params.request)
-      ? buildPeriod(`${period.toDate.slice(0, 4)}-01-01`, period.toDate, "year to date")
-      : period;
-
   return {
     requestedAgent,
     resolvedAgent,
     autoMode,
     intent,
     toolNames: toolsForIntent(resolvedAgent, intent),
-    period: plannedPeriod,
+    period,
   };
 }

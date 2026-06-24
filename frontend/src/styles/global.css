@@ -954,6 +954,8 @@ textarea:focus-visible,
 }
 
 .agent-feedback button,
+.agent-feedback select,
+.agent-feedback input,
 .agent-context-section__header button {
   border: 1px solid var(--border-subtle);
   border-radius: 999px;
@@ -963,6 +965,17 @@ textarea:focus-visible,
   font-weight: 750;
   padding: 5px 9px;
   cursor: pointer;
+}
+
+.agent-feedback input {
+  min-width: 160px;
+  max-width: 220px;
+  cursor: text;
+}
+
+.agent-feedback select {
+  appearance: none;
+  padding-right: 24px;
 }
 
 .agent-feedback button:hover,
@@ -1228,6 +1241,29 @@ textarea:focus-visible,
 
 .agent-recommendations strong {
   color: var(--text-primary);
+}
+
+.agent-recommendation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.agent-recommendation-actions button {
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-weight: 750;
+  padding: 5px 8px;
+  cursor: pointer;
+}
+
+.agent-recommendation-actions button:hover {
+  border-color: var(--gt-green);
+  color: var(--gt-green-dark);
 }
 
 .agent-recommendations small {

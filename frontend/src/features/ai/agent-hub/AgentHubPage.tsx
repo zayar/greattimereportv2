@@ -6,7 +6,7 @@ import { DateRangeControls } from "../../../components/DateRangeControls";
 import { ErrorState, EmptyState } from "../../../components/StatusViews";
 import { useAccess } from "../../access/AccessProvider";
 import { AI_LANGUAGE_OPTIONS, useAiPreferences } from "../AiPreferencesProvider";
-import { daysAgo, today } from "../../../utils/date";
+import { startOfCurrentMonth, today } from "../../../utils/date";
 import autoAgentAvatar from "../../../../CFO_agent.jpg";
 import financeAgentAvatar from "../../../../Finance_agent.jpg";
 import appointmentAgentAvatar from "../../../../Inventory_agent.jpg";
@@ -17,6 +17,7 @@ import type {
   GreatTimeAgentChatResponse,
   GreatTimeAgentEntityContext,
   GreatTimeAgentId,
+  GreatTimeAgentRecommendation,
   GreatTimeAgentTable,
   GreatTimeRequestedAgentId,
 } from "../../../types/domain";
@@ -40,14 +41,49 @@ type AgentOption = {
   avatarAlt: string;
 };
 
+type AgentFeedbackType =
+  | "helpful"
+  | "not_helpful"
+  | "wrong_data"
+  | "too_long"
+  | "too_short"
+  | "remember_this"
+  | "correction";
+
+type FeedbackDraft = {
+  feedbackType: AgentFeedbackType;
+  note: string;
+};
+
+const FEEDBACK_REASONS: Array<{ value: AgentFeedbackType; label: string; rating: "helpful" | "not_helpful" }> = [
+  { value: "helpful", label: "Helpful", rating: "helpful" },
+  { value: "not_helpful", label: "Not helpful", rating: "not_helpful" },
+  { value: "wrong_data", label: "Wrong data", rating: "not_helpful" },
+  { value: "too_long", label: "Too long", rating: "not_helpful" },
+  { value: "too_short", label: "Too short", rating: "not_helpful" },
+  { value: "remember_this", label: "Remember this", rating: "helpful" },
+  { value: "correction", label: "Correction", rating: "not_helpful" },
+];
+
+const RECOMMENDATION_OUTCOMES: Array<{
+  value: "accepted" | "dismissed" | "contacted" | "no_reply" | "not_interested" | "remind_later";
+  label: string;
+  rating: "helpful" | "not_helpful";
+}> = [
+  { value: "accepted", label: "Accept", rating: "helpful" },
+  { value: "contacted", label: "Contacted", rating: "helpful" },
+  { value: "dismissed", label: "Dismiss", rating: "not_helpful" },
+  { value: "remind_later", label: "Later", rating: "not_helpful" },
+];
+
 const AGENT_OPTIONS: AgentOption[] = [
   {
     value: "auto",
-    label: "Auto",
-    description: "Selects the right specialization for each question.",
+    label: "GT Brain",
+    description: "Routes each question to the right specialist.",
     icon: "auto",
     avatar: autoAgentAvatar,
-    avatarAlt: "Auto specialization portrait",
+    avatarAlt: "GT Brain specialization portrait",
   },
   {
     value: "finance",
@@ -85,28 +121,28 @@ const AGENT_OPTIONS: AgentOption[] = [
 
 const SUGGESTIONS: Record<GreatTimeRequestedAgentId, string[]> = {
   auto: [
-    "What needs attention in the clinic today?",
-    "How much did we collect today by payment method?",
-    "Which customers should we follow up first?",
+    "What should we focus on this month?",
+    "Which service is declining this month?",
+    "Who are the top customers this month?",
     "How many appointments are scheduled today?",
   ],
   finance: [
-    "How much did we collect today by payment method?",
-    "Compare this week sales with last week.",
-    "Show today invoice detail.",
-    "Which payment method needs reconciliation?",
+    "Show this month collection by payment method.",
+    "Compare this month sales with the same days last month.",
+    "Show today's invoice detail.",
+    "Which payment method needs reconciliation this month?",
   ],
   customer_relationship: [
+    "Who are the top customers this month?",
     "Which customers have unused package balance and have not visited recently?",
-    "Which customers are at risk of churn?",
-    "Who should we follow up today?",
-    "Draft owner-safe follow-up priorities for this week.",
+    "Which customers are at risk of churn this month?",
+    "Draft owner-safe follow-up priorities for this month.",
   ],
   business: [
-    "Which service is declining in the last 90 days?",
-    "Which practitioners handled the most treatments?",
-    "Show business health this week.",
-    "Where are the strongest revenue opportunities?",
+    "Which service is declining this month?",
+    "Which practitioners handled the most treatments this month?",
+    "Show top services this month.",
+    "Where are the strongest revenue opportunities this month?",
   ],
   appointment: [
     "Show all appointments today.",
@@ -118,6 +154,26 @@ const SUGGESTIONS: Record<GreatTimeRequestedAgentId, string[]> = {
 
 function agentLabel(agent: GreatTimeAgentId | GreatTimeRequestedAgentId) {
   return AGENT_OPTIONS.find((option) => option.value === agent)?.label ?? agent;
+}
+
+function specialistAgentLabel(agent: GreatTimeAgentId) {
+  switch (agent) {
+    case "finance":
+      return "Finance Agent";
+    case "customer_relationship":
+      return "Customer Relationship Agent";
+    case "business":
+      return "Business Agent";
+    case "appointment":
+      return "Appointment Agent";
+    default:
+      return "GreatTime Agent";
+  }
+}
+
+function agentAnswerLabel(response: GreatTimeAgentChatResponse) {
+  const specialist = specialistAgentLabel(response.resolvedAgent);
+  return response.autoMode ? `GT Brain -> ${specialist}` : specialist;
 }
 
 function formatCell(value: unknown) {
@@ -168,6 +224,27 @@ function formatDateValue(value: string | null | undefined) {
     year: "numeric",
     timeZone: "UTC",
   });
+}
+
+function formatResponsePeriod(response: GreatTimeAgentChatResponse) {
+  const { period } = response;
+  if (period.fromDate === period.toDate) {
+    return `${period.label} (${formatDateValue(period.toDate)})`;
+  }
+
+  return `${period.label} (${formatDateValue(period.fromDate)} - ${formatDateValue(period.toDate)})`;
+}
+
+function feedbackRatingForType(feedbackType: AgentFeedbackType) {
+  return FEEDBACK_REASONS.find((reason) => reason.value === feedbackType)?.rating ?? "not_helpful";
+}
+
+function responseSourceTools(response: GreatTimeAgentChatResponse) {
+  return [...new Set(response.sources.map((source) => source.tool).filter(Boolean))];
+}
+
+function defaultFeedbackDraft(): FeedbackDraft {
+  return { feedbackType: "helpful", note: "" };
 }
 
 function getAgentHubErrorMessage(error: unknown) {
@@ -473,13 +550,16 @@ export function AgentHubPage() {
   const { currentClinic, loading: accessLoading, error: accessError } = useAccess();
   const { aiLanguage, setAiLanguage } = useAiPreferences();
   const [agent, setAgent] = useState<GreatTimeRequestedAgentId>("auto");
-  const [range, setRange] = useState({ fromDate: daysAgo(29), toDate: today() });
+  const [range, setRange] = useState({ fromDate: startOfCurrentMonth(), toDate: today() });
+  const [rangeTouched, setRangeTouched] = useState(false);
   const [message, setMessage] = useState("");
   const [sessionId, setSessionId] = useState<string | undefined>();
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [loading, setLoading] = useState(false);
   const [activeContext, setActiveContext] = useState<GreatTimeAgentEntityContext | undefined>();
   const [feedbackSent, setFeedbackSent] = useState<Record<string, string>>({});
+  const [feedbackDrafts, setFeedbackDrafts] = useState<Record<string, FeedbackDraft>>({});
+  const [recommendationFeedbackSent, setRecommendationFeedbackSent] = useState<Record<string, string>>({});
   const scrollAnchorRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -487,6 +567,9 @@ export function AgentHubPage() {
     setTurns([]);
     setActiveContext(undefined);
     setFeedbackSent({});
+    setFeedbackDrafts({});
+    setRecommendationFeedbackSent({});
+    setRangeTouched(false);
   }, [currentClinic?.id]);
 
   useEffect(() => {
@@ -516,8 +599,8 @@ export function AgentHubPage() {
         agent,
         message: trimmed,
         aiLanguage,
-        fromDate: range.fromDate,
-        toDate: range.toDate,
+        fromDate: rangeTouched ? range.fromDate : undefined,
+        toDate: rangeTouched ? range.toDate : undefined,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         entityContext: activeContext,
       });
@@ -543,7 +626,7 @@ export function AgentHubPage() {
     }
   };
 
-  const sendFeedback = async (response: GreatTimeAgentChatResponse, rating: "helpful" | "not_helpful") => {
+  const sendFeedback = async (response: GreatTimeAgentChatResponse, draft: FeedbackDraft) => {
     if (!currentClinic || feedbackSent[response.responseId]) {
       return;
     }
@@ -552,9 +635,48 @@ export function AgentHubPage() {
       clinicId: currentClinic.id,
       sessionId: response.sessionId,
       responseId: response.responseId,
-      rating,
+      requestId: response.requestId,
+      feedbackType: draft.feedbackType,
+      rating: feedbackRatingForType(draft.feedbackType),
+      note: draft.note.trim() || null,
+      resolvedAgent: response.resolvedAgent,
+      intent: response.intent,
+      sourceTools: responseSourceTools(response),
+      usedMemoryIds: response.usedMemoryIds ?? [],
     });
-    setFeedbackSent((current) => ({ ...current, [response.responseId]: rating }));
+    setFeedbackSent((current) => ({ ...current, [response.responseId]: draft.feedbackType }));
+  };
+
+  const sendRecommendationOutcome = async (
+    response: GreatTimeAgentChatResponse,
+    recommendation: GreatTimeAgentRecommendation,
+    outcome: (typeof RECOMMENDATION_OUTCOMES)[number],
+  ) => {
+    if (!currentClinic || !recommendation.recommendationId || recommendationFeedbackSent[recommendation.recommendationId]) {
+      return;
+    }
+
+    await recordGreatTimeAgentFeedback({
+      clinicId: currentClinic.id,
+      sessionId: response.sessionId,
+      responseId: response.responseId,
+      requestId: response.requestId,
+      recommendationId: recommendation.recommendationId,
+      recommendationType: recommendation.recommendationType ?? response.intent,
+      opportunityKey: recommendation.opportunityKey ?? null,
+      targetCustomerKey: recommendation.targetCustomerKey ?? null,
+      feedbackType: outcome.rating === "helpful" ? "helpful" : "not_helpful",
+      rating: outcome.rating,
+      outcome: outcome.value,
+      resolvedAgent: response.resolvedAgent,
+      intent: response.intent,
+      sourceTools: recommendation.sourceTools.length ? recommendation.sourceTools : responseSourceTools(response),
+      usedMemoryIds: response.usedMemoryIds ?? [],
+    });
+    setRecommendationFeedbackSent((current) => ({
+      ...current,
+      [recommendation.recommendationId!]: outcome.value,
+    }));
   };
 
   const startNewConversation = () => {
@@ -563,6 +685,8 @@ export function AgentHubPage() {
     setMessage("");
     setActiveContext(undefined);
     setFeedbackSent({});
+    setFeedbackDrafts({});
+    setRecommendationFeedbackSent({});
   };
 
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -676,18 +800,52 @@ export function AgentHubPage() {
                     <div className="agent-answer-header">
                       <div className="agent-answer-header__status">
                         <span className={agentHubStatusClass(turn.response.dataStatus)}>{turn.response.dataStatus}</span>
-                        <span className="agent-chip">{agentLabel(turn.response.resolvedAgent)}</span>
+                        <span className="agent-chip">Answered by {agentAnswerLabel(turn.response)}</span>
+                        <span className="agent-chip">Period: {formatResponsePeriod(turn.response)}</span>
                       </div>
                       <div className="agent-feedback">
                         {feedbackSent[turn.response.responseId] ? (
                           <span>Feedback saved</span>
                         ) : (
                           <>
-                            <button type="button" onClick={() => void sendFeedback(turn.response!, "helpful")}>
-                              Helpful
-                            </button>
-                            <button type="button" onClick={() => void sendFeedback(turn.response!, "not_helpful")}>
-                              Not helpful
+                            <select
+                              value={feedbackDrafts[turn.response.responseId]?.feedbackType ?? "helpful"}
+                              onChange={(event) =>
+                                setFeedbackDrafts((current) => ({
+                                  ...current,
+                                  [turn.response!.responseId]: {
+                                    ...(current[turn.response!.responseId] ?? defaultFeedbackDraft()),
+                                    feedbackType: event.target.value as AgentFeedbackType,
+                                  },
+                                }))
+                              }
+                              aria-label="Feedback reason"
+                            >
+                              {FEEDBACK_REASONS.map((reason) => (
+                                <option key={reason.value} value={reason.value}>
+                                  {reason.label}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              type="text"
+                              value={feedbackDrafts[turn.response.responseId]?.note ?? ""}
+                              placeholder="Optional note"
+                              onChange={(event) =>
+                                setFeedbackDrafts((current) => ({
+                                  ...current,
+                                  [turn.response!.responseId]: {
+                                    ...(current[turn.response!.responseId] ?? defaultFeedbackDraft()),
+                                    note: event.target.value,
+                                  },
+                                }))
+                              }
+                            />
+                            <button
+                              type="button"
+                              onClick={() => void sendFeedback(turn.response!, feedbackDrafts[turn.response!.responseId] ?? defaultFeedbackDraft())}
+                            >
+                              Save
                             </button>
                           </>
                         )}
@@ -741,9 +899,26 @@ export function AgentHubPage() {
                         <h3>Recommendations</h3>
                         <div className="agent-recommendations">
                           {turn.response.recommendations.map((recommendation, index) => (
-                            <div key={`${recommendation.title ?? "recommendation"}-${index}`}>
+                            <div key={`${recommendation.recommendationId ?? recommendation.title ?? "recommendation"}-${index}`}>
                               {recommendation.title ? <strong>{recommendation.title}</strong> : null}
                               <p>{recommendation.message}</p>
+                              {recommendation.recommendationId ? (
+                                <div className="agent-recommendation-actions">
+                                  {recommendationFeedbackSent[recommendation.recommendationId] ? (
+                                    <small>Outcome saved: {recommendationFeedbackSent[recommendation.recommendationId]}</small>
+                                  ) : (
+                                    RECOMMENDATION_OUTCOMES.map((outcome) => (
+                                      <button
+                                        key={outcome.value}
+                                        type="button"
+                                        onClick={() => void sendRecommendationOutcome(turn.response!, recommendation, outcome)}
+                                      >
+                                        {outcome.label}
+                                      </button>
+                                    ))
+                                  )}
+                                </div>
+                              ) : null}
                             </div>
                           ))}
                         </div>
@@ -796,7 +971,14 @@ export function AgentHubPage() {
                 ))}
               </select>
             </label>
-            <DateRangeControls fromDate={range.fromDate} toDate={range.toDate} onChange={setRange} />
+            <DateRangeControls
+              fromDate={range.fromDate}
+              toDate={range.toDate}
+              onChange={(nextRange) => {
+                setRange(nextRange);
+                setRangeTouched(true);
+              }}
+            />
           </section>
 
           <section className="agent-context-section">

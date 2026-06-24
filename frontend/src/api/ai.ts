@@ -16,6 +16,7 @@ import type {
   CustomerRelationshipSegment,
   GreatTimeAgentChatRequest,
   GreatTimeAgentChatResponse,
+  GreatTimeAgentId,
 } from "../types/domain";
 
 type BaseAiRequest = {
@@ -180,9 +181,33 @@ export async function recordGreatTimeAgentFeedback(params: {
   clinicId: string;
   sessionId: string;
   responseId: string;
+  requestId?: string | null;
+  recommendationId?: string | null;
+  recommendationType?: string | null;
+  opportunityKey?: string | null;
+  targetCustomerKey?: string | null;
+  feedbackType?: "helpful" | "not_helpful" | "wrong_data" | "too_long" | "too_short" | "remember_this" | "correction";
   rating: "helpful" | "not_helpful";
   note?: string | null;
-  outcome?: "messaged" | "replied" | "booked" | "no_reply" | "not_interested" | null;
+  outcome?:
+    | "shown"
+    | "accepted"
+    | "dismissed"
+    | "contacted"
+    | "messaged"
+    | "replied"
+    | "booked"
+    | "paid"
+    | "visited"
+    | "no_reply"
+    | "not_interested"
+    | "remind_later"
+    | "failed"
+    | null;
+  resolvedAgent?: GreatTimeAgentId | null;
+  intent?: string | null;
+  sourceTools?: string[];
+  usedMemoryIds?: string[];
 }) {
   const response = await apiClient.post<{ success: true; data: { createdAt: string } }>(
     "/ai/agent/feedback",

@@ -13,9 +13,9 @@ import { buildAgentResponse } from "./response-builder.js";
 import { newId, nowIso, sanitizeError } from "./safety.js";
 import { applyMemoryPreferencesToResponse } from "./memory/memory-writer.js";
 import { retrieveMemoryContext } from "./memory/memory-retriever.js";
+import { saveRecommendationOutcome } from "./memory/memory.repository.js";
 import {
   getAgentSession,
-  getAgentSessionEntityRefs,
   saveAgentSessionTurn,
 } from "./session.repository.js";
 import { saveAgentRunTrace } from "./trace.repository.js";
@@ -117,6 +117,72 @@ function serviceTextMatchesEntity(searchText: string, entityContext: GreatTimeAg
   return Boolean(search && name && (search === name || name.includes(search) || search.includes(name)));
 }
 
+function hasExplicitPeriodCue(message: string) {
+  return /last\s+\d+\s+days|last\s+90\s+days|90\s+days|last\s+30\s+days|30\s+days|this\s+week|current\s+week|last\s+week|previous\s+week|yesterday|today|now|right now|this\s+month|current\s+month|month\s+to\s+date|mtd|this\s+year|current\s+year|year\s+to\s+date|ytd|ဒီနေ့|ဒီ\s*လ|ဒီ\s*နှစ်|မနေ့/i.test(
+    message,
+  );
+}
+
+function recommendationOpportunityKey(params: {
+  recommendation: NonNullable<GreatTimeAgentChatResponse["recommendations"]>[number];
+  intent: string;
+}) {
+  if (params.recommendation.opportunityKey) {
+    return params.recommendation.opportunityKey;
+  }
+
+  const target = params.recommendation.targetCustomerKey ?? params.recommendation.title ?? params.recommendation.message;
+  return `${params.recommendation.recommendationType ?? params.intent}:${target}`.slice(0, 200);
+}
+
+async function registerShownRecommendations(params: {
+  clinicId: string;
+  userId: string;
+  sessionId: string;
+  response: GreatTimeAgentChatResponse;
+  fallbackSourceTools: string[];
+}) {
+  const recommendations = params.response.recommendations ?? [];
+  if (recommendations.length === 0) {
+    return;
+  }
+
+  const shownAt = nowIso();
+  await Promise.all(
+    recommendations
+      .filter((recommendation) => recommendation.recommendationId)
+      .map((recommendation) =>
+        saveRecommendationOutcome({
+          id: recommendation.recommendationId!,
+          recommendationId: recommendation.recommendationId!,
+          clinicId: params.clinicId,
+          userId: params.userId,
+          sessionId: params.sessionId,
+          requestId: params.response.requestId,
+          responseId: params.response.responseId,
+          resolvedAgent: params.response.resolvedAgent,
+          intent: params.response.intent,
+          recommendationType: recommendation.recommendationType ?? params.response.intent,
+          opportunityKey: recommendationOpportunityKey({
+            recommendation,
+            intent: params.response.intent,
+          }),
+          targetCustomerKey: recommendation.targetCustomerKey ?? null,
+          state: "shown",
+          sourceTools: recommendation.sourceTools.length ? recommendation.sourceTools : params.fallbackSourceTools,
+          sourceEvidenceRefs: params.response.sources.map((source) => `${source.tool}:${source.checkedAt}`),
+          shownAt,
+          acceptedAt: null,
+          contactedAt: null,
+          observedAt: null,
+          verificationWindowDays: 30,
+          createdAt: shownAt,
+          updatedAt: shownAt,
+        }),
+      ),
+  );
+}
+
 export function shouldIgnoreExplicitEntityContext(params: {
   request: GreatTimeAgentChatRequest;
 }) {
@@ -154,25 +220,10 @@ function forceFollowUpPlan(params: {
     params.entityContext.entityType === "service" &&
     (isService360Question(params.request.message) || /tell\s+me|details?|what\s+do\s+we\s+know|how\s+is|service\s*360/i.test(params.request.message))
   ) {
-    const hasExplicitPeriod = Boolean(
-      (params.request.fromDate && params.request.toDate) ||
-        /last\s+\d+\s+days|last\s+90\s+days|90\s+days|last\s+30\s+days|30\s+days|this\s+week|current\s+week|last\s+week|previous\s+week|yesterday|today|now|right now|this\s+year|current\s+year|year\s+to\s+date|ytd|ဒီနေ့|ဒီ\s*နှစ်|မနေ့/i.test(
-          params.request.message,
-        ),
-    );
-    const period = hasExplicitPeriod
-      ? params.plan.period
-      : {
-          ...params.plan.period,
-          fromDate: `${params.plan.period.toDate.slice(0, 4)}-01-01`,
-          label: "year to date",
-        };
-
     return {
       ...params.plan,
       intent: "service_360",
       toolNames: ["get_service_360"],
-      period,
     };
   }
 
@@ -195,13 +246,21 @@ export async function askAgentHub(params: {
   const sessionId = params.request.sessionId ?? newId("session");
   const requestId = params.request.requestId ?? newId("req");
   const registry = createAgentToolRegistry();
-  const sessionRefs = params.request.sessionId
-    ? await getAgentSessionEntityRefs({
+  const session = params.request.sessionId
+    ? await getAgentSession({
         clinicId: params.clinic.clinicId,
         userId: params.requestContext.userId,
         sessionId,
-      }).catch(() => [])
-    : [];
+      }).catch(() => null)
+    : null;
+  const summaryRefs =
+    session?.summaryV2?.activeEntityRefs.map((ref) => ({
+      entityType: ref.entityType as GreatTimeAgentEntityContext["entityType"],
+      entityId: ref.entityId,
+      displayName: ref.displayName,
+      rank: ref.rank,
+    })) ?? [];
+  const sessionRefs = [...(session?.entityRefs ?? []), ...summaryRefs];
   const resolvedRef = resolveEntityReference({
     message: params.request.message,
     explicit: params.request.entityContext,
@@ -210,8 +269,19 @@ export async function askAgentHub(params: {
   const shouldIgnoreContext = shouldIgnoreExplicitEntityContext({
     request: params.request,
   });
+  const summaryRange = session?.summaryV2?.selectedDateRange;
+  const shouldUseSummaryRange = Boolean(
+    !params.request.fromDate &&
+      !params.request.toDate &&
+      summaryRange?.fromDate &&
+      summaryRange?.toDate &&
+      !hasExplicitPeriodCue(params.request.message),
+  );
   const request = {
     ...withFollowUpAgentInference(params.request, resolvedRef),
+    fromDate: shouldUseSummaryRange ? summaryRange?.fromDate : params.request.fromDate,
+    toDate: shouldUseSummaryRange ? summaryRange?.toDate : params.request.toDate,
+    timezone: params.request.timezone ?? summaryRange?.timezone,
     entityContext: shouldIgnoreContext ? undefined : (params.request.entityContext ?? resolvedRef ?? undefined),
   };
   const initialPlan = planAgentRequest({ request });
@@ -305,6 +375,13 @@ export async function askAgentHub(params: {
         sanitizedError: sanitizeError(error),
       }),
     ),
+    registerShownRecommendations({
+      clinicId: params.clinic.clinicId,
+      userId: params.requestContext.userId,
+      sessionId,
+      response,
+      fallbackSourceTools: plan.toolNames,
+    }),
   ]);
 
   return response;
@@ -332,6 +409,7 @@ export function buildLockedAgentHubResponse(params: {
     resolvedAgent: plan.resolvedAgent,
     autoMode: plan.autoMode,
     intent: "feature_locked",
+    period: plan.period,
     assistantMessage: message,
     summary: message,
     recommendations: [
