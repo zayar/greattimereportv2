@@ -1,0 +1,59 @@
+const ORDINAL_OR_PRONOUN =
+  /\b(first|second|third|fourth|fifth|they|them|that customer|that|her|him|သူ|အဲ့ဒီ)\b/i;
+
+const GENERIC_NON_CUSTOMER_TERMS =
+  /\b(all|today|yesterday|week|month|appointments?|bookings?|sales?|revenue|payments?|invoices?|services?|practitioners?|therapists?|packages?|customers?|members?|report|summary|list|count|total|trend|method|cash|bank|kbz|kpay)\b/i;
+
+function cleanupSearchText(value: string | undefined) {
+  return (value ?? "")
+    .trim()
+    .replace(/^[#:\-\s]+/g, "")
+    .replace(/[?.!]+$/g, "")
+    .trim();
+}
+
+function looksLikeNamedCustomer(value: string) {
+  const cleaned = cleanupSearchText(value);
+
+  if (!cleaned || ORDINAL_OR_PRONOUN.test(cleaned) || GENERIC_NON_CUSTOMER_TERMS.test(cleaned)) {
+    return false;
+  }
+
+  const words = cleaned.split(/\s+/).filter(Boolean);
+  const hasLetters = /[A-Za-z\u1000-\u109F]/.test(cleaned);
+
+  return hasLetters && words.length <= 6 && cleaned.length <= 80;
+}
+
+export function extractExplicitCustomerSearchText(message: string) {
+  const normalized = message.trim();
+  const directMatch = normalized.match(
+    /^(?:can\s+you\s+)?(?:find|search|look\s+up|show(?:\s+me)?(?:\s+details?\s+(?:about|for))?|tell\s+me\s+about|details?\s+(?:about|for)|what\s+about|who\s+is|what\s+do\s+we\s+know\s+about)\s+(.+)$/i,
+  );
+  const directSearch = cleanupSearchText(directMatch?.[1]);
+
+  if (directSearch && !ORDINAL_OR_PRONOUN.test(directSearch)) {
+    return directSearch;
+  }
+
+  const showMatch = normalized.match(/^(?:show|view|display)\s+(.+)$/i);
+  const showSearch = cleanupSearchText(showMatch?.[1]);
+
+  return looksLikeNamedCustomer(showSearch) ? showSearch : "";
+}
+
+export function hasExplicitCustomerSearchIntent(message: string) {
+  return Boolean(extractExplicitCustomerSearchText(message));
+}
+
+export function isCustomer360Question(message: string) {
+  const searchText = extractExplicitCustomerSearchText(message);
+
+  if (!searchText || !looksLikeNamedCustomer(searchText)) {
+    return false;
+  }
+
+  return /tell\s+me\s+about|show|details?\s+(?:about|for)|what\s+about|who\s+is|what\s+do\s+we\s+know\s+about/i.test(
+    message,
+  );
+}

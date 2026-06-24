@@ -1,5 +1,6 @@
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import { isAxiosError } from "axios";
+import { Link } from "react-router-dom";
 import { askGreatTimeAgentHub, recordGreatTimeAgentFeedback } from "../../../api/ai";
 import { DateRangeControls } from "../../../components/DateRangeControls";
 import { ErrorState, EmptyState } from "../../../components/StatusViews";
@@ -12,6 +13,7 @@ import appointmentAgentAvatar from "../../../../Inventory_agent.jpg";
 import relationshipAgentAvatar from "../../../../relationship_agent.jpg";
 import businessAgentAvatar from "../../../../Sales_agent.jpg";
 import type {
+  Customer360FactPack,
   GreatTimeAgentChatResponse,
   GreatTimeAgentEntityContext,
   GreatTimeAgentId,
@@ -166,6 +168,40 @@ function formatFreshness(source: GreatTimeAgentSource) {
   return `${Math.round(source.freshnessSeconds / 3600)} hr fresh`;
 }
 
+function formatOptionalNumber(value: number | undefined, suffix = "") {
+  if (value == null) {
+    return "-";
+  }
+
+  return `${value.toLocaleString("en-US")}${suffix}`;
+}
+
+function formatOptionalMoney(value: number | undefined) {
+  if (value == null) {
+    return "-";
+  }
+
+  return `${value.toLocaleString("en-US")} MMK`;
+}
+
+function formatDateValue(value: string | null | undefined) {
+  if (!value) {
+    return "-";
+  }
+
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
 function getAgentHubErrorMessage(error: unknown) {
   if (isAxiosError(error)) {
     const data = error.response?.data as { error?: unknown; details?: unknown } | undefined;
@@ -286,6 +322,153 @@ function AgentTable({
             })}
           </tbody>
         </table>
+      </div>
+    </section>
+  );
+}
+
+function AgentCustomer360Card({ factPack }: { factPack: Customer360FactPack }) {
+  const topServices = factPack.usage.topServices.slice(0, 3);
+  const packageRows = factPack.packages.holdings.slice(0, 4);
+  const appointmentRows = [...(factPack.appointments.current ?? []), ...(factPack.appointments.upcoming ?? [])].slice(0, 3);
+
+  return (
+    <section className="agent-customer360">
+      <div className="agent-customer360__header">
+        <div>
+          <span className="agent-customer360__eyebrow">Customer 360</span>
+          <h3>{factPack.identity.displayName}</h3>
+          <div className="agent-customer360__badges">
+            {factPack.identity.memberId ? <span>Member {factPack.identity.memberId}</span> : null}
+            {factPack.identity.maskedPhone ? <span>{factPack.identity.maskedPhone}</span> : null}
+          </div>
+        </div>
+        {factPack.identity.detailPath ? (
+          <Link className="button button--secondary agent-customer360__link" to={factPack.identity.detailPath}>
+            Open detail
+          </Link>
+        ) : null}
+      </div>
+
+      <div className="agent-customer360__metrics">
+        <div>
+          <span>Joined</span>
+          <strong>{formatDateValue(factPack.identity.joinedDate)}</strong>
+        </div>
+        <div>
+          <span>Lifetime visits</span>
+          <strong>{formatOptionalNumber(factPack.value.totalVisits)}</strong>
+        </div>
+        <div>
+          <span>Lifetime spend</span>
+          <strong>{formatOptionalMoney(factPack.value.lifetimeSpend)}</strong>
+        </div>
+        <div>
+          <span>Last visit</span>
+          <strong>{formatDateValue(factPack.latestActivity.lastVisitAt)}</strong>
+          {factPack.latestActivity.lastService ? <small>{factPack.latestActivity.lastService}</small> : null}
+        </div>
+        <div>
+          <span>Package balance</span>
+          <strong>{formatOptionalNumber(factPack.packages.totalRemainingSessions)}</strong>
+          <small>{factPack.packages.dataStatus}</small>
+        </div>
+        <div>
+          <span>Upcoming</span>
+          <strong>{formatOptionalNumber(factPack.appointments.upcoming?.length ?? 0)}</strong>
+          <small>APICORE</small>
+        </div>
+      </div>
+
+      <div className="agent-customer360__grid">
+        <div>
+          <h4>Relationship</h4>
+          <p>
+            {factPack.preferences.preferredService || "-"}
+            {factPack.preferences.preferredTherapist ? ` with ${factPack.preferences.preferredTherapist}` : ""}
+          </p>
+          <small>
+            Momentum {factPack.visitPattern.momentum ?? "unknown"}
+            {factPack.visitPattern.averageVisitIntervalDays != null
+              ? ` · ${factPack.visitPattern.averageVisitIntervalDays} days average interval`
+              : ""}
+          </small>
+        </div>
+        <div>
+          <h4>Packages</h4>
+          {packageRows.length ? (
+            <ul>
+              {packageRows.map((row) => (
+                <li key={`${row.packageId ?? row.serviceName}-${row.serviceName}`}>
+                  {row.serviceName}: {formatOptionalNumber(row.remainingSessions)} remaining
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>No package holdings returned.</p>
+          )}
+        </div>
+        <div>
+          <h4>Appointments</h4>
+          {appointmentRows.length ? (
+            <ul>
+              {appointmentRows.map((row, index) => (
+                <li key={`${String(row.appointmentId ?? index)}-${index}`}>
+                  {formatDateValue(String(row.scheduledFrom ?? ""))} · {String(row.serviceName ?? "Service")}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>No current or upcoming APICORE booking.</p>
+          )}
+        </div>
+        <div>
+          <h4>Payments</h4>
+          <p>
+            {formatOptionalNumber(factPack.payments.invoiceCount)} invoice
+            {factPack.payments.invoiceCount === 1 ? "" : "s"} · {formatOptionalMoney(factPack.payments.selectedPeriodTotal)}
+          </p>
+          {factPack.payments.preferredMethod ? <small>{factPack.payments.preferredMethod}</small> : null}
+        </div>
+        <div>
+          <h4>Usage</h4>
+          {topServices.length ? (
+            <ul>
+              {topServices.map((row) => (
+                <li key={String(row.serviceName)}>
+                  {String(row.serviceName)} · {formatCell(row.totalUsage)}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>No usage rows returned.</p>
+          )}
+        </div>
+        <div>
+          <h4>Recommended action</h4>
+          <p>{factPack.recommendation?.title ?? "Review source sections."}</p>
+          {factPack.recommendation?.reasonCodes.length ? (
+            <small>{factPack.recommendation.reasonCodes.join(", ")}</small>
+          ) : null}
+        </div>
+      </div>
+
+      {factPack.dataQuality.length ? (
+        <div className="agent-customer360__quality">
+          {factPack.dataQuality.map((item) => (
+            <span key={item.code} className={item.severity === "info" ? "agent-hub-chip" : "agent-hub-chip agent-hub-chip--warn"}>
+              {item.severity}: {item.message}
+            </span>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="agent-customer360__sources">
+        {factPack.sources.map((source) => (
+          <span key={`${source.tool}-${source.checkedAt}`} className={agentHubStatusClass(source.dataStatus)}>
+            {source.scope ?? (source.live ? "live" : "historical")} · {source.sourceName} · {formatFreshness(source)}
+          </span>
+        ))}
       </div>
     </section>
   );
@@ -530,6 +713,8 @@ export function AgentHubPage() {
                         ))}
                       </div>
                     ) : null}
+
+                    {turn.response.customer360 ? <AgentCustomer360Card factPack={turn.response.customer360} /> : null}
 
                     {turn.response.metrics?.length ? (
                       <div className="agent-metrics">

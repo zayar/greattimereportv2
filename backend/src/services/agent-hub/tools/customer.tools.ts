@@ -11,6 +11,8 @@ import {
   getLatestCustomerRelationshipLearningRun,
   searchCustomerRelationshipProfilesBounded,
 } from "../../reports/customer-relationship-profile.repository.js";
+import { buildCustomer360ToolResult } from "../customer-360.service.js";
+import { extractExplicitCustomerSearchText } from "../customer-query.js";
 import { limitRows, nowIso } from "../safety.js";
 import type { AgentToolDefinition, AgentToolInput, AgentToolResult } from "../types.js";
 
@@ -34,12 +36,8 @@ function profilePlan(intent: string, message: string) {
     return { riskLevel: "high" as const, sortBy: "priorityScore" as const };
   }
 
-  const explicitSearch = message
-    .trim()
-    .match(
-      /^(?:can\s+you\s+)?(?:find|search|look\s+up|show(?:\s+me)?(?:\s+details?\s+(?:about|for))?|tell\s+me\s+about|details?\s+(?:about|for)|what\s+about|who\s+is)\s+(.+)$/i,
-    )?.[1];
-  const search = (explicitSearch ?? message)
+  const explicitSearch = extractExplicitCustomerSearchText(message);
+  const search = (explicitSearch || message)
     .replace(/customer|member|first|second|third/gi, "")
     .replace(/[?.!]+$/g, "")
     .trim();
@@ -127,6 +125,7 @@ function customerIdentity(input: AgentToolInput) {
   return {
     customerName: input.entityContext?.customerName ?? input.entityContext?.displayName ?? "",
     customerPhone: input.entityContext?.customerPhone ?? "",
+    memberId: input.entityContext?.memberId ?? "",
   };
 }
 
@@ -150,7 +149,7 @@ function notReadyCustomerTool(toolName: string, input: AgentToolInput): AgentToo
 
 async function getCustomerOverview(input: AgentToolInput): Promise<AgentToolResult> {
   const identity = customerIdentity(input);
-  if (!identity.customerName && !identity.customerPhone) {
+  if (!identity.customerName && !identity.customerPhone && !identity.memberId) {
     return notReadyCustomerTool("get_customer_overview", input);
   }
 
@@ -199,7 +198,7 @@ async function getCustomerOverview(input: AgentToolInput): Promise<AgentToolResu
 
 async function getCustomerPackages(input: AgentToolInput): Promise<AgentToolResult> {
   const identity = customerIdentity(input);
-  if (!identity.customerName && !identity.customerPhone) {
+  if (!identity.customerName && !identity.customerPhone && !identity.memberId) {
     return notReadyCustomerTool("get_customer_packages", input);
   }
 
@@ -247,7 +246,7 @@ async function getCustomerPackages(input: AgentToolInput): Promise<AgentToolResu
 
 async function getCustomerBookings(input: AgentToolInput): Promise<AgentToolResult> {
   const identity = customerIdentity(input);
-  if (!identity.customerName && !identity.customerPhone) {
+  if (!identity.customerName && !identity.customerPhone && !identity.memberId) {
     return notReadyCustomerTool("get_customer_bookings", input);
   }
 
@@ -285,7 +284,7 @@ async function getCustomerBookings(input: AgentToolInput): Promise<AgentToolResu
 
 async function getCustomerPayments(input: AgentToolInput): Promise<AgentToolResult> {
   const identity = customerIdentity(input);
-  if (!identity.customerName && !identity.customerPhone) {
+  if (!identity.customerName && !identity.customerPhone && !identity.memberId) {
     return notReadyCustomerTool("get_customer_payments", input);
   }
 
@@ -324,7 +323,7 @@ async function getCustomerPayments(input: AgentToolInput): Promise<AgentToolResu
 
 async function getCustomerUsage(input: AgentToolInput): Promise<AgentToolResult> {
   const identity = customerIdentity(input);
-  if (!identity.customerName && !identity.customerPhone) {
+  if (!identity.customerName && !identity.customerPhone && !identity.memberId) {
     return notReadyCustomerTool("get_customer_usage", input);
   }
 
@@ -360,6 +359,17 @@ async function getCustomerUsage(input: AgentToolInput): Promise<AgentToolResult>
 
 export function createCustomerTools(): AgentToolDefinition[] {
   return [
+    {
+      name: "get_customer_360",
+      agentId: "customer_relationship",
+      description: "Build a source-grounded Customer 360 fact pack from identity, historical, live, package, payment, and usage sources.",
+      inputSchema: toolInputSchema,
+      sourceName: "Customer 360 fact pack",
+      live: true,
+      maxRows: 50,
+      timeoutMs: 30_000,
+      execute: buildCustomer360ToolResult,
+    },
     {
       name: "search_customer_profiles",
       agentId: "customer_relationship",

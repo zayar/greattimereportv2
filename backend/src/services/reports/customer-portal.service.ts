@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { analyticsTables } from "../../config/bigquery.js";
 import { runAnalyticsQuery } from "../bigquery.service.js";
 import { calculateCustomerRiskSignals } from "../ai/customer-risk.service.js";
@@ -5,6 +6,7 @@ import { calculateCustomerRiskSignals } from "../ai/customer-risk.service.js";
 type CustomerIdentity = {
   customerName: string;
   customerPhone: string;
+  memberId?: string;
 };
 
 type CustomerListParams = {
@@ -82,6 +84,23 @@ function normalizePhoneDigits(value: string) {
   return value.replace(/\D/g, "");
 }
 
+function hashCustomerKey(params: { clinicCode: string; phoneNumber: string; customerName: string }) {
+  const digits = normalizePhoneDigits(params.phoneNumber);
+  const identity = digits || params.customerName.trim().toLowerCase().replace(/\s+/g, " ");
+
+  return createHash("sha256").update(`${params.clinicCode.toLowerCase()}:${identity}`).digest("hex").slice(0, 32);
+}
+
+function maskPhone(value: string | null | undefined) {
+  const digits = normalizePhoneDigits(value ?? "");
+
+  if (digits.length < 5) {
+    return digits ? "***" : "";
+  }
+
+  return `${digits.slice(0, 2)}***${digits.slice(-3)}`;
+}
+
 function buildServiceCategoryExpression(serviceField: string, packageField: string) {
   return `
     CASE
@@ -114,9 +133,20 @@ function buildServiceCategoryExpression(serviceField: string, packageField: stri
   `;
 }
 
-function buildCustomerIdentityCondition(phoneField: string, nameField: string) {
+function buildCustomerIdentityCondition(phoneField: string, nameField: string, memberField?: string) {
+  const memberCondition = memberField
+    ? `
+      (
+        @memberId != ''
+        AND LOWER(COALESCE(${memberField}, '')) = LOWER(@memberId)
+      )
+      OR
+    `
+    : "";
+
   return `
     (
+      ${memberCondition}
       (
         @customerPhoneDigits != ''
         AND REGEXP_REPLACE(COALESCE(${phoneField}, ''), r'[^0-9]', '') = @customerPhoneDigits
@@ -408,10 +438,11 @@ function buildCustomerScopedCtes(identity: CustomerIdentity) {
   const identityParams = {
     customerName: identity.customerName.trim(),
     customerPhoneDigits: normalizePhoneDigits(identity.customerPhone),
+    memberId: identity.memberId?.trim() ?? "",
   };
 
-  const invoiceScope = buildCustomerIdentityCondition("CustomerPhoneNumber", "CustomerName");
-  const visitScope = buildCustomerIdentityCondition("CustomerPhoneNumber", "CustomerName");
+  const invoiceScope = buildCustomerIdentityCondition("CustomerPhoneNumber", "CustomerName", "MemberID");
+  const visitScope = buildCustomerIdentityCondition("CustomerPhoneNumber", "CustomerName", "CustomerID");
 
   return {
     queryParams: identityParams,
@@ -422,6 +453,123 @@ function buildCustomerScopedCtes(identity: CustomerIdentity) {
         ${buildDistinctVisitsCte(visitScope)}
     `,
   };
+}
+
+export async function resolveCustomerPortalCandidates(params: {
+  clinicCode: string;
+  search: string;
+  limit?: number;
+}) {
+  const search = params.search.trim();
+  const searchDigits = normalizePhoneDigits(search);
+  const limit = Math.min(Math.max(params.limit ?? 10, 1), 25);
+
+  if (!search) {
+    return [];
+  }
+
+  const rows = await runAnalyticsQuery<{
+    customerName: string;
+    phoneNumber: string;
+    memberId: string;
+    joinedDate: string | null;
+    lastVisitDate: string | null;
+    totalVisits: number;
+    lifetimeSpend: number;
+  }>(
+    `
+      WITH
+        CandidateVisits AS (
+          SELECT
+            CustomerName AS customerName,
+            CustomerPhoneNumber AS phoneNumber,
+            MAX(COALESCE(CustomerID, '')) AS memberId,
+            MIN(DATE(CheckInTime)) AS joinedDate,
+            MAX(DATE(COALESCE(CheckOutTime, CheckInTime))) AS lastVisitDate,
+            COUNT(DISTINCT COALESCE(CAST(BookingID AS STRING), FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%S', CheckInTime))) AS totalVisits,
+            0 AS lifetimeSpend
+          FROM ${analyticsTables.mainDataView}
+          WHERE LOWER(ClinicCode) = LOWER(@clinicCode)
+            AND CustomerName IS NOT NULL
+            AND CustomerPhoneNumber IS NOT NULL
+            AND CheckInTime IS NOT NULL
+            AND (
+              LOWER(CustomerName) = LOWER(@search)
+              OR LOWER(CustomerName) LIKE LOWER(CONCAT('%', @search, '%'))
+              OR LOWER(COALESCE(CustomerID, '')) = LOWER(@search)
+              OR (@searchDigits != '' AND REGEXP_REPLACE(COALESCE(CustomerPhoneNumber, ''), r'[^0-9]', '') = @searchDigits)
+            )
+          GROUP BY customerName, phoneNumber
+        ),
+        CandidatePayments AS (
+          SELECT
+            CustomerName AS customerName,
+            CustomerPhoneNumber AS phoneNumber,
+            MAX(COALESCE(MemberID, '')) AS memberId,
+            MIN(DATE(OrderCreatedDate)) AS joinedDate,
+            CAST(NULL AS DATE) AS lastVisitDate,
+            0 AS totalVisits,
+            SUM(CAST(COALESCE(NetTotal, 0) AS FLOAT64)) AS lifetimeSpend
+          FROM ${analyticsTables.mainPaymentView}
+          WHERE LOWER(ClinicCode) = LOWER(@clinicCode)
+            AND CustomerName IS NOT NULL
+            AND CustomerPhoneNumber IS NOT NULL
+            AND PaymentStatus = 'PAID'
+            AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
+            AND COALESCE(PaymentMethod, '') != 'PASS'
+            AND (
+              LOWER(CustomerName) = LOWER(@search)
+              OR LOWER(CustomerName) LIKE LOWER(CONCAT('%', @search, '%'))
+              OR LOWER(COALESCE(MemberID, '')) = LOWER(@search)
+              OR (@searchDigits != '' AND REGEXP_REPLACE(COALESCE(CustomerPhoneNumber, ''), r'[^0-9]', '') = @searchDigits)
+            )
+          GROUP BY customerName, phoneNumber
+        ),
+        Combined AS (
+          SELECT * FROM CandidateVisits
+          UNION ALL
+          SELECT * FROM CandidatePayments
+        )
+      SELECT
+        customerName,
+        phoneNumber,
+        ARRAY_AGG(memberId IGNORE NULLS ORDER BY memberId DESC LIMIT 1)[SAFE_OFFSET(0)] AS memberId,
+        FORMAT_DATE('%Y-%m-%d', MIN(joinedDate)) AS joinedDate,
+        FORMAT_DATE('%Y-%m-%d', MAX(lastVisitDate)) AS lastVisitDate,
+        SUM(totalVisits) AS totalVisits,
+        SUM(lifetimeSpend) AS lifetimeSpend
+      FROM Combined
+      GROUP BY customerName, phoneNumber
+      ORDER BY
+        CASE WHEN LOWER(customerName) = LOWER(@search) THEN 0 ELSE 1 END,
+        lastVisitDate DESC,
+        lifetimeSpend DESC,
+        customerName ASC
+      LIMIT @limit
+    `,
+    {
+      clinicCode: params.clinicCode,
+      search,
+      searchDigits,
+      limit,
+    },
+  );
+
+  return rows.map((row) => ({
+    customerKey: hashCustomerKey({
+      clinicCode: params.clinicCode,
+      phoneNumber: row.phoneNumber,
+      customerName: row.customerName,
+    }),
+    customerName: row.customerName,
+    phoneNumber: row.phoneNumber,
+    phoneMasked: maskPhone(row.phoneNumber),
+    memberId: row.memberId || null,
+    joinedDate: row.joinedDate,
+    lastVisitDate: row.lastVisitDate,
+    totalVisits: parseNumber(row.totalVisits),
+    lifetimeSpend: parseNumber(row.lifetimeSpend),
+  }));
 }
 
 function buildInsightSet(input: {

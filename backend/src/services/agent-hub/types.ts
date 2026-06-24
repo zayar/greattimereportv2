@@ -12,6 +12,8 @@ export type AgentDataStatus =
   | "not_ready"
   | "stale";
 
+export type AgentSourceScope = "live" | "historical" | "learned";
+
 export type GreatTimeAgentEntityType = "customer" | "appointment" | "service" | "practitioner" | "invoice";
 
 export type GreatTimeAgentEntityContext = {
@@ -74,12 +76,96 @@ export type GreatTimeAgentSource = {
   dataStatus: AgentDataStatus;
   freshnessSeconds?: number;
   live?: boolean;
+  scope?: AgentSourceScope;
 };
 
 export type GreatTimeAgentWarning = {
   type: string;
   title: string;
   message: string;
+};
+
+export type Customer360PackageStatus = "active" | "low_remaining" | "completed" | "unknown";
+
+export type Customer360FactPack = {
+  identity: {
+    customerKey: string;
+    memberId?: string;
+    displayName: string;
+    joinedDate?: string | null;
+    maskedPhone?: string;
+    detailPath?: string;
+  };
+  value: {
+    lifetimeSpend?: number;
+    totalVisits?: number;
+    averageVisitSpend?: number;
+  };
+  latestActivity: {
+    lastVisitAt?: string | null;
+    lastService?: string | null;
+    lastTherapist?: string | null;
+    daysSinceLastVisit?: number | null;
+  };
+  preferences: {
+    preferredService?: string | null;
+    preferredServiceCategory?: string | null;
+    preferredTherapist?: string | null;
+    preferredTherapistVisits?: number;
+  };
+  visitPattern: {
+    averageVisitIntervalDays?: number | null;
+    recentWindowVisits?: number;
+    previousWindowVisits?: number;
+    momentum?: "increasing" | "stable" | "declining" | "unknown";
+  };
+  packages: {
+    purchaseCount?: number;
+    activeHoldingCount?: number;
+    totalRemainingSessions?: number;
+    dataStatus: AgentDataStatus;
+    holdings: Array<{
+      packageId?: string;
+      packageName?: string | null;
+      serviceName: string;
+      totalSessions?: number;
+      usedSessions?: number;
+      remainingSessions?: number;
+      latestUsageDate?: string | null;
+      latestTherapist?: string | null;
+      status: Customer360PackageStatus;
+    }>;
+  };
+  appointments: {
+    current?: Array<Record<string, unknown>>;
+    upcoming?: Array<Record<string, unknown>>;
+    recentCompleted?: Array<Record<string, unknown>>;
+  };
+  payments: {
+    selectedPeriodTotal?: number;
+    invoiceCount?: number;
+    averageInvoice?: number;
+    outstanding?: number;
+    preferredMethod?: string | null;
+    recentInvoices: Array<Record<string, unknown>>;
+  };
+  usage: {
+    selectedYear?: number;
+    distinctServices?: number;
+    topServices: Array<Record<string, unknown>>;
+    monthlyServiceUsage: Array<Record<string, unknown>>;
+  };
+  recommendation?: {
+    title: string;
+    reasonCodes: string[];
+    evidence: string[];
+  };
+  dataQuality: Array<{
+    code: string;
+    severity: "info" | "warning" | "blocking";
+    message: string;
+  }>;
+  sources: GreatTimeAgentSource[];
 };
 
 export type GreatTimeAgentChatResponse = {
@@ -97,6 +183,7 @@ export type GreatTimeAgentChatResponse = {
   recommendations?: GreatTimeAgentRecommendation[];
   followUpQuestions?: string[];
   usedMemoryIds?: string[];
+  customer360?: Customer360FactPack;
   sources: GreatTimeAgentSource[];
   dataStatus: AgentDataStatus;
   warnings?: GreatTimeAgentWarning[];
@@ -156,6 +243,8 @@ export type AgentToolResult = {
   warnings?: GreatTimeAgentWarning[];
   summary?: string;
   entityRefs?: GreatTimeAgentEntityContext[];
+  sources?: GreatTimeAgentSource[];
+  customer360?: Customer360FactPack;
 };
 
 export type AgentToolDefinition = {

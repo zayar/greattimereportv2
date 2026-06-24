@@ -28,6 +28,25 @@ function buildNarrativePrompt(response: GreatTimeAgentChatResponse, memories: Gt
     intent: response.intent,
     dataStatus: response.dataStatus,
     deterministicSummary: response.summary ?? response.assistantMessage,
+    customer360: response.customer360
+      ? {
+          ...response.customer360,
+          appointments: {
+            current: (response.customer360.appointments.current ?? []).slice(0, 5),
+            upcoming: (response.customer360.appointments.upcoming ?? []).slice(0, 5),
+            recentCompleted: (response.customer360.appointments.recentCompleted ?? []).slice(0, 5),
+          },
+          payments: {
+            ...response.customer360.payments,
+            recentInvoices: response.customer360.payments.recentInvoices.slice(0, 5),
+          },
+          usage: {
+            ...response.customer360.usage,
+            topServices: response.customer360.usage.topServices.slice(0, 8),
+            monthlyServiceUsage: response.customer360.usage.monthlyServiceUsage.slice(0, 12),
+          },
+        }
+      : undefined,
     metrics: (response.metrics ?? []).slice(0, 8),
     tableTitles: (response.tables ?? []).map((table) => ({
       title: table.title,
@@ -49,7 +68,7 @@ export async function enhanceAgentResponseNarrative(
 ) {
   const provider = createAiProvider();
   if (!provider) {
-    return response;
+    return { response, fallbackUsed: true };
   }
 
   try {
@@ -57,15 +76,18 @@ export async function enhanceAgentResponseNarrative(
     const parsed = narrativeSchema.safeParse(JSON.parse(stripJsonFences(raw)));
 
     if (!parsed.success) {
-      return response;
+      return { response, fallbackUsed: true };
     }
 
     return {
-      ...response,
-      assistantMessage: parsed.data.assistantMessage,
-      summary: parsed.data.assistantMessage,
+      response: {
+        ...response,
+        assistantMessage: parsed.data.assistantMessage,
+        summary: parsed.data.assistantMessage,
+      },
+      fallbackUsed: false,
     };
   } catch {
-    return response;
+    return { response, fallbackUsed: true };
   }
 }

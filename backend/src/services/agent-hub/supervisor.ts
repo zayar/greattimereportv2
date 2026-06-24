@@ -1,4 +1,5 @@
 import type { GreatTimeAgentId, GreatTimeRequestedAgentId } from "./types.js";
+import { hasExplicitCustomerSearchIntent } from "./customer-query.js";
 
 const AGENT_ORDER: GreatTimeAgentId[] = ["finance", "customer_relationship", "business", "appointment"];
 
@@ -45,6 +46,15 @@ export function resolveAgent(params: {
   const scores = Object.fromEntries(
     AGENT_ORDER.map((agentId) => [agentId, scoreAgent(params.message, agentId)]),
   ) as Record<GreatTimeAgentId, number>;
+
+  if (
+    hasExplicitCustomerSearchIntent(params.message) &&
+    scores.finance === 0 &&
+    scores.appointment === 0 &&
+    scores.business === 0
+  ) {
+    scores.customer_relationship += 1;
+  }
 
   const resolvedAgent = AGENT_ORDER.reduce<GreatTimeAgentId>((best, candidate) => {
     if (scores[candidate] > scores[best]) {

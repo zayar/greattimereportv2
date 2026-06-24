@@ -718,6 +718,8 @@ export type AgentDataStatus =
   | "not_ready"
   | "stale";
 
+export type AgentSourceScope = "live" | "historical" | "learned";
+
 export interface GreatTimeAgentEntityContext {
   entityType: "customer" | "appointment" | "service" | "practitioner" | "invoice";
   entityId: string;
@@ -755,6 +757,7 @@ export interface GreatTimeAgentSource {
   dataStatus: AgentDataStatus;
   freshnessSeconds?: number;
   live?: boolean;
+  scope?: AgentSourceScope;
 }
 
 export interface GreatTimeAgentWarning {
@@ -764,9 +767,93 @@ export interface GreatTimeAgentWarning {
 }
 
 export interface GreatTimeAgentRecommendation {
+  recommendationId?: string;
+  recommendationType?: string;
+  targetCustomerKey?: string;
   title?: string;
   message: string;
   sourceTools: string[];
+}
+
+export interface Customer360FactPack {
+  identity: {
+    customerKey: string;
+    memberId?: string;
+    displayName: string;
+    joinedDate?: string | null;
+    maskedPhone?: string;
+    detailPath?: string;
+  };
+  value: {
+    lifetimeSpend?: number;
+    totalVisits?: number;
+    averageVisitSpend?: number;
+  };
+  latestActivity: {
+    lastVisitAt?: string | null;
+    lastService?: string | null;
+    lastTherapist?: string | null;
+    daysSinceLastVisit?: number | null;
+  };
+  preferences: {
+    preferredService?: string | null;
+    preferredServiceCategory?: string | null;
+    preferredTherapist?: string | null;
+    preferredTherapistVisits?: number;
+  };
+  visitPattern: {
+    averageVisitIntervalDays?: number | null;
+    recentWindowVisits?: number;
+    previousWindowVisits?: number;
+    momentum?: "increasing" | "stable" | "declining" | "unknown";
+  };
+  packages: {
+    purchaseCount?: number;
+    activeHoldingCount?: number;
+    totalRemainingSessions?: number;
+    dataStatus: AgentDataStatus;
+    holdings: Array<{
+      packageId?: string;
+      packageName?: string | null;
+      serviceName: string;
+      totalSessions?: number;
+      usedSessions?: number;
+      remainingSessions?: number;
+      latestUsageDate?: string | null;
+      latestTherapist?: string | null;
+      status: "active" | "low_remaining" | "completed" | "unknown";
+    }>;
+  };
+  appointments: {
+    current?: Array<Record<string, unknown>>;
+    upcoming?: Array<Record<string, unknown>>;
+    recentCompleted?: Array<Record<string, unknown>>;
+  };
+  payments: {
+    selectedPeriodTotal?: number;
+    invoiceCount?: number;
+    averageInvoice?: number;
+    outstanding?: number;
+    preferredMethod?: string | null;
+    recentInvoices: Array<Record<string, unknown>>;
+  };
+  usage: {
+    selectedYear?: number;
+    distinctServices?: number;
+    topServices: Array<Record<string, unknown>>;
+    monthlyServiceUsage: Array<Record<string, unknown>>;
+  };
+  recommendation?: {
+    title: string;
+    reasonCodes: string[];
+    evidence: string[];
+  };
+  dataQuality: Array<{
+    code: string;
+    severity: "info" | "warning" | "blocking";
+    message: string;
+  }>;
+  sources: GreatTimeAgentSource[];
 }
 
 export interface GreatTimeAgentChatRequest {
@@ -797,6 +884,7 @@ export interface GreatTimeAgentChatResponse {
   tables?: GreatTimeAgentTable[];
   recommendations?: GreatTimeAgentRecommendation[];
   followUpQuestions?: string[];
+  customer360?: Customer360FactPack;
   sources: GreatTimeAgentSource[];
   dataStatus: AgentDataStatus;
   warnings?: GreatTimeAgentWarning[];

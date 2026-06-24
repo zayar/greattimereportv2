@@ -6,6 +6,7 @@ process.env.AGENT_LEARNING_SCHEDULER_SECRET ??= "scheduler-secret"
 
 const { normalizeAppointmentLifecycle } = await import("../src/services/agent-hub/appointment-lifecycle.ts")
 const { isActiveCheckedInAppointment, isCountableTodayAppointment } = await import("../src/services/agent-hub/appointment-live.service.ts")
+const { composeCustomer360Summary } = await import("../src/services/agent-hub/customer-360.service.ts")
 const { resolveEntityReference } = await import("../src/services/agent-hub/entity-context.ts")
 const { extractAgentPeriod, planAgentRequest } = await import("../src/services/agent-hub/intent-planner.ts")
 const { buildAgentResponse } = await import("../src/services/agent-hub/response-builder.ts")
@@ -109,6 +110,60 @@ test("planner does not block read-only questions that mention collected or cance
   })
   assert.equal(appointmentPlan.intent, "cancelled_no_show")
   assert.deepEqual(appointmentPlan.toolNames, ["get_cancelled_no_show_customers"])
+})
+
+test("planner routes exact named customer briefings to one-shot Customer 360", () => {
+  const plan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "Tell me about Soe Moe Thu",
+    },
+    now: new Date("2026-06-18T06:00:00.000Z"),
+  })
+
+  assert.equal(plan.resolvedAgent, "customer_relationship")
+  assert.equal(plan.intent, "customer_360")
+  assert.deepEqual(plan.toolNames, ["get_customer_360"])
+
+  const showPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "Show Soe Moe Thu",
+    },
+    now: new Date("2026-06-18T06:00:00.000Z"),
+  })
+
+  assert.equal(showPlan.resolvedAgent, "customer_relationship")
+  assert.equal(showPlan.intent, "customer_360")
+  assert.deepEqual(showPlan.toolNames, ["get_customer_360"])
+})
+
+test("planner keeps generic show questions out of Customer 360 and includes usage in overview", () => {
+  const appointmentPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "Show all appointments today",
+    },
+  })
+  assert.equal(appointmentPlan.resolvedAgent, "appointment")
+
+  const overviewPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "customer_relationship",
+      message: "Show customer history, package, purchase, and payment detail",
+    },
+  })
+
+  assert.equal(overviewPlan.intent, "customer_overview")
+  assert.ok(overviewPlan.toolNames.includes("get_customer_usage"))
 })
 
 test("invoice detail search ignores generic time and display words", () => {
@@ -393,6 +448,194 @@ test("response builder keeps tool metrics and source metadata grounded", () => {
   assert.equal(response.sources[0]?.tool, "get_sales_summary")
   assert.equal(response.dataStatus, "ok")
   assert.equal(response.actions[0]?.type, "read_only_agent_response")
+})
+
+test("response builder exposes Customer 360 fact packs with scoped sources and dynamic follow-ups", () => {
+  const customer360 = {
+    identity: {
+      customerKey: "cust-1",
+      displayName: "Soe Moe Thu",
+      joinedDate: "2021-07-03",
+      maskedPhone: "09***123",
+    },
+    value: {
+      lifetimeSpend: 360500000,
+      totalVisits: 805,
+      averageVisitSpend: 447826.09,
+    },
+    latestActivity: {
+      lastVisitAt: "2026-06-22",
+      lastService: "Body Contouring",
+      lastTherapist: "Htet Htet",
+      daysSinceLastVisit: 2,
+    },
+    preferences: {
+      preferredService: "Body Contouring",
+      preferredServiceCategory: "Body",
+      preferredTherapist: "Htet Htet",
+      preferredTherapistVisits: 200,
+    },
+    visitPattern: {
+      averageVisitIntervalDays: 2.3,
+      recentWindowVisits: 40,
+      previousWindowVisits: 49,
+      momentum: "declining" as const,
+    },
+    packages: {
+      purchaseCount: 2,
+      activeHoldingCount: 1,
+      totalRemainingSessions: 5,
+      dataStatus: "ok" as const,
+      holdings: [
+        {
+          packageId: "pkg-1",
+          packageName: "Body Package",
+          serviceName: "Body Contouring",
+          totalSessions: 10,
+          usedSessions: 5,
+          remainingSessions: 5,
+          latestUsageDate: "2026-06-22",
+          latestTherapist: "Htet Htet",
+          status: "active" as const,
+        },
+      ],
+    },
+    appointments: {
+      current: [],
+      upcoming: [],
+      recentCompleted: [{ checkInTime: "2026-06-22", serviceName: "Body Contouring" }],
+    },
+    payments: {
+      selectedPeriodTotal: 200000000,
+      invoiceCount: 3,
+      averageInvoice: 66666666.67,
+      outstanding: 0,
+      preferredMethod: "KBZ",
+      recentInvoices: [{ invoiceNumber: "INV-1", netAmount: 200000000 }],
+    },
+    usage: {
+      selectedYear: 2026,
+      distinctServices: 1,
+      topServices: [{ serviceName: "Body Contouring", totalUsage: 40 }],
+      monthlyServiceUsage: [{ serviceName: "Body Contouring", month: "Jun", usageCount: 10 }],
+    },
+    recommendation: {
+      title: "Rebook unused package care",
+      reasonCodes: ["unused_package_balance", "no_live_upcoming_booking"],
+      evidence: ["5 remaining package sessions", "No upcoming booking found."],
+    },
+    dataQuality: [],
+    sources: [
+      {
+        tool: "get_customer_overview",
+        sourceName: "BigQuery customer portal",
+        checkedAt: "2026-06-24T00:00:00.000Z",
+        dataStatus: "ok" as const,
+        live: false,
+        scope: "historical" as const,
+      },
+      {
+        tool: "get_customer_live_appointments",
+        sourceName: "APICORE booking ledger",
+        checkedAt: "2026-06-24T00:00:00.000Z",
+        dataStatus: "no_activity" as const,
+        live: true,
+        scope: "live" as const,
+      },
+    ],
+  }
+  const response = buildAgentResponse({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "customer_relationship",
+      message: "Tell me about Soe Moe Thu",
+    },
+    sessionId: "session-1",
+    requestId: "request-1",
+    plan: {
+      requestedAgent: "customer_relationship",
+      resolvedAgent: "customer_relationship",
+      autoMode: false,
+      intent: "customer_360",
+      toolNames: ["get_customer_360"],
+      period: { fromDate: "2026-06-01", toDate: "2026-06-24", label: "selected period" },
+    },
+    toolResults: [
+      {
+        toolName: "get_customer_360",
+        sourceName: "Customer 360 fact pack",
+        checkedAt: "2026-06-24T00:00:00.000Z",
+        dataStatus: "ok",
+        live: true,
+        summary: composeCustomer360Summary(customer360),
+        customer360,
+        sources: customer360.sources,
+      },
+    ],
+  })
+
+  assert.equal(response.customer360?.identity.displayName, "Soe Moe Thu")
+  assert.equal(response.sources[0]?.scope, "historical")
+  assert.ok(response.followUpQuestions?.includes("Show her unused package services."))
+  assert.ok(response.followUpQuestions?.includes("Show purchase and payment details."))
+  assert.ok(response.assistantMessage.includes("805 visits"))
+})
+
+test("Customer 360 deterministic summary avoids exact package totals when the package section is partial", () => {
+  const summary = composeCustomer360Summary({
+    identity: {
+      customerKey: "cust-1",
+      displayName: "Soe Moe Thu",
+      joinedDate: "2021-07-03",
+    },
+    value: {
+      lifetimeSpend: 360500000,
+      totalVisits: 805,
+    },
+    latestActivity: {
+      lastVisitAt: "2026-06-22",
+      lastService: "Body Contouring",
+      lastTherapist: "Htet Htet",
+      daysSinceLastVisit: 2,
+    },
+    preferences: {
+      preferredService: "Body Contouring",
+      preferredTherapist: "Htet Htet",
+    },
+    visitPattern: {
+      recentWindowVisits: 40,
+      previousWindowVisits: 49,
+      momentum: "declining",
+    },
+    packages: {
+      dataStatus: "partial",
+      holdings: [],
+    },
+    appointments: {
+      current: [],
+      upcoming: [],
+      recentCompleted: [],
+    },
+    payments: {
+      recentInvoices: [],
+    },
+    usage: {
+      topServices: [],
+      monthlyServiceUsage: [],
+    },
+    dataQuality: [
+      {
+        code: "package_contract_missing",
+        severity: "warning",
+        message: "Package holding identity is unavailable.",
+      },
+    ],
+    sources: [],
+  })
+
+  assert.match(summary, /not presented as an exact combined total/)
+  assert.doesNotMatch(summary, /undefined remaining/)
 })
 
 test("response builder assigns stable recommendation IDs", () => {

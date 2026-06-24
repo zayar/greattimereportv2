@@ -1,6 +1,10 @@
 import { createAgentToolRegistry } from "./tool-registry.js";
 import { executeToolPlan } from "./tool-executor.js";
 import { resolveEntityReference } from "./entity-context.js";
+import {
+  extractExplicitCustomerSearchText as extractCustomerSearchText,
+  hasExplicitCustomerSearchIntent as hasCustomerSearchIntent,
+} from "./customer-query.js";
 import { planAgentRequest } from "./intent-planner.js";
 import { enhanceAgentResponseNarrative } from "./narrative.service.js";
 import { buildAgentResponse } from "./response-builder.js";
@@ -75,21 +79,11 @@ function withFollowUpAgentInference(
 }
 
 export function hasExplicitCustomerSearchIntent(message: string) {
-  return Boolean(extractExplicitCustomerSearchText(message));
+  return hasCustomerSearchIntent(message);
 }
 
 export function extractExplicitCustomerSearchText(message: string) {
-  const normalized = message.trim();
-  const match = normalized.match(
-    /^(?:can\s+you\s+)?(?:find|search|look\s+up|show(?:\s+me)?(?:\s+details?\s+(?:about|for))?|tell\s+me\s+about|details?\s+(?:about|for)|what\s+about)\s+(.+)$/i,
-  );
-  const searchText = match?.[1]?.trim().replace(/[?.!]+$/g, "").trim() ?? "";
-
-  if (!searchText || /\b(first|second|third|fourth|fifth|they|them|that customer|her|him|သူ|အဲ့ဒီ)\b/i.test(searchText)) {
-    return "";
-  }
-
-  return searchText;
+  return extractCustomerSearchText(message);
 }
 
 function normalizeNameForComparison(value: string | null | undefined) {
@@ -129,8 +123,8 @@ function forceFollowUpPlan(params: {
   if (params.plan.resolvedAgent === "customer_relationship" && params.entityContext.entityType === "customer") {
     return {
       ...params.plan,
-      intent: "customer_overview",
-      toolNames: ["get_customer_overview", "get_customer_packages", "get_customer_bookings", "get_customer_payments"],
+      intent: "customer_360",
+      toolNames: ["get_customer_360"],
     };
   }
 
@@ -208,9 +202,10 @@ export async function askAgentHub(params: {
     toolResults,
     unsupportedReason: plan.unsupportedReason,
   });
-  const narrativeResponse = await enhanceAgentResponseNarrative(deterministicResponse, {
+  const narrativeResult = await enhanceAgentResponseNarrative(deterministicResponse, {
     memories: memoryContext.memories,
   });
+  const narrativeResponse = narrativeResult.response;
   const response = applyMemoryPreferencesToResponse(narrativeResponse, memoryContext.memories);
   const entityRefs = toolResults.flatMap((result) => result.entityRefs ?? []).map((ref) => ({
     ...ref,
@@ -239,7 +234,7 @@ export async function askAgentHub(params: {
       toolNames: plan.toolNames,
       sourceStatuses: response.sources.map((source) => source.dataStatus),
       dataStatus: response.dataStatus,
-      fallbackUsed: true,
+      fallbackUsed: narrativeResult.fallbackUsed,
       usedMemoryIds: memoryContext.usedMemoryIds,
       createdAt: nowIso(),
     }).catch((error) =>
@@ -255,7 +250,7 @@ export async function askAgentHub(params: {
         toolNames: plan.toolNames,
         sourceStatuses: response.sources.map((source) => source.dataStatus),
         dataStatus: response.dataStatus,
-        fallbackUsed: true,
+        fallbackUsed: narrativeResult.fallbackUsed,
         usedMemoryIds: memoryContext.usedMemoryIds,
         createdAt: nowIso(),
         sanitizedError: sanitizeError(error),

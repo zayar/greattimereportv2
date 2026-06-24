@@ -1052,6 +1052,127 @@ textarea:focus-visible,
   font-size: 0.96rem;
 }
 
+.agent-customer360 {
+  display: grid;
+  gap: 14px;
+  border: 1px solid rgba(11, 93, 73, 0.16);
+  border-radius: var(--radius-md);
+  background: #fbfdfc;
+  padding: 14px;
+}
+
+.agent-customer360__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-customer360__header h3 {
+  margin: 3px 0 0;
+  color: var(--text-primary);
+  font-size: 1.05rem;
+}
+
+.agent-customer360__eyebrow {
+  color: var(--gt-green);
+  font-size: 0.74rem;
+  font-weight: 850;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.agent-customer360__badges,
+.agent-customer360__quality,
+.agent-customer360__sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.agent-customer360__badges {
+  margin-top: 7px;
+}
+
+.agent-customer360__badges span {
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  padding: 3px 8px;
+}
+
+.agent-customer360__link {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.agent-customer360__metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.agent-customer360__metrics > div,
+.agent-customer360__grid > div {
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 10px;
+}
+
+.agent-customer360__metrics span,
+.agent-customer360__metrics small,
+.agent-customer360__grid small {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.agent-customer360__metrics strong {
+  display: block;
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: var(--text-primary);
+  font-size: 0.98rem;
+  line-height: 1.2;
+}
+
+.agent-customer360__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.agent-customer360__grid h4 {
+  margin: 0 0 6px;
+  color: var(--text-primary);
+  font-size: 0.86rem;
+}
+
+.agent-customer360__grid p,
+.agent-customer360__grid ul {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.agent-customer360__grid ul {
+  display: grid;
+  gap: 4px;
+  padding-left: 18px;
+}
+
+.agent-customer360__quality span,
+.agent-customer360__sources span {
+  white-space: normal;
+}
+
 .agent-table-wrap {
   overflow-x: auto;
   border: 1px solid var(--border-subtle);
@@ -1635,6 +1756,15 @@ textarea:focus-visible,
   }
 
   .agent-suggestion-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .agent-customer360__header {
+    display: grid;
+  }
+
+  .agent-customer360__metrics,
+  .agent-customer360__grid {
     grid-template-columns: minmax(0, 1fr);
   }
 

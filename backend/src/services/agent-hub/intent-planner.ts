@@ -1,6 +1,7 @@
 import { env } from "../../config/env.js";
 import { shiftRange, toIsoDate } from "../../utils/date-range.js";
 import { formatDateKeyInTimeZone, normalizeTimeZone } from "../telegram/time.js";
+import { isCustomer360Question } from "./customer-query.js";
 import { resolveAgent } from "./supervisor.js";
 import type {
   AgentPeriod,
@@ -110,6 +111,9 @@ function detectFinanceIntent(message: string) {
 }
 
 function detectCustomerIntent(message: string) {
+  if (isCustomer360Question(message)) {
+    return "customer_360";
+  }
   if (/package.*never|never came|never visit|မလာသေး/i.test(message)) {
     return "package_bought_never_used";
   }
@@ -208,7 +212,15 @@ function toolsForIntent(agentId: GreatTimeAgentId, intent: string) {
   if (agentId === "customer_relationship") {
     switch (intent) {
       case "customer_overview":
-        return ["get_customer_overview", "get_customer_packages", "get_customer_bookings", "get_customer_payments"];
+        return [
+          "get_customer_overview",
+          "get_customer_packages",
+          "get_customer_bookings",
+          "get_customer_payments",
+          "get_customer_usage",
+        ];
+      case "customer_360":
+        return ["get_customer_360"];
       case "unused_package_balance":
       case "package_bought_never_used":
       case "treatment_due":

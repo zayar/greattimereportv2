@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { combineStatuses, newId, nowIso } from "./safety.js";
 import type {
   AgentToolResult,
+  Customer360FactPack,
   GreatTimeAgentChatRequest,
   GreatTimeAgentChatResponse,
   GreatTimeAgentIntentPlan,
@@ -27,7 +28,37 @@ function defaultSummary(plan: GreatTimeAgentIntentPlan, results: AgentToolResult
   return `I checked ${sourceCount} source tool${sourceCount === 1 ? "" : "s"} and ${okSources} returned current data.`;
 }
 
-function followUpsForAgent(plan: GreatTimeAgentIntentPlan) {
+function followUpsForCustomer360(factPack: Customer360FactPack) {
+  const questions: string[] = [];
+
+  if (factPack.packages.holdings.length > 0 || factPack.packages.dataStatus === "partial") {
+    questions.push("Show her unused package services.");
+  }
+
+  if (factPack.payments.invoiceCount || factPack.payments.recentInvoices.length > 0) {
+    questions.push("Show purchase and payment details.");
+  }
+
+  if (
+    (factPack.appointments.current?.length ?? 0) > 0 ||
+    (factPack.appointments.upcoming?.length ?? 0) > 0 ||
+    (factPack.appointments.recentCompleted?.length ?? 0) > 0
+  ) {
+    questions.push("Show upcoming and past appointments.");
+  }
+
+  if (factPack.usage.topServices.length > 0 || factPack.visitPattern.momentum !== "unknown") {
+    questions.push("Show service usage and visit frequency over time.");
+  }
+
+  return questions.length ? questions.slice(0, 4) : ["Open the customer detail report.", "Show payment history.", "Show appointment history."];
+}
+
+function followUpsForAgent(plan: GreatTimeAgentIntentPlan, customer360?: Customer360FactPack) {
+  if (customer360) {
+    return followUpsForCustomer360(customer360);
+  }
+
   if (plan.resolvedAgent === "finance") {
     return [
       "Compare this period with the previous period.",
@@ -123,8 +154,23 @@ export function buildAgentResponse(params: {
     ...(params.plan.warnings ?? []),
     ...params.toolResults.flatMap((result) => result.warnings ?? []),
   ];
+  const customer360 = params.toolResults.find((result) => result.customer360)?.customer360;
   const entityContext = params.toolResults.flatMap((result) => result.entityRefs ?? [])[0] ?? params.request.entityContext;
   const summary = params.unsupportedReason ?? defaultSummary(params.plan, params.toolResults);
+  const sources = params.toolResults.flatMap((result) =>
+    result.sources?.length
+      ? result.sources
+      : [
+          {
+            tool: result.toolName,
+            sourceName: result.sourceName,
+            checkedAt: result.checkedAt || nowIso(),
+            period: result.period,
+            dataStatus: result.dataStatus,
+            live: result.live,
+          },
+        ],
+  );
 
   return {
     sessionId: params.sessionId,
@@ -139,15 +185,9 @@ export function buildAgentResponse(params: {
     metrics: metrics.length ? metrics : undefined,
     tables: tables.length ? tables : undefined,
     recommendations: recommendations.length ? recommendations : undefined,
-    followUpQuestions: followUpsForAgent(params.plan),
-    sources: params.toolResults.map((result) => ({
-      tool: result.toolName,
-      sourceName: result.sourceName,
-      checkedAt: result.checkedAt || nowIso(),
-      period: result.period,
-      dataStatus: result.dataStatus,
-      live: result.live,
-    })),
+    followUpQuestions: followUpsForAgent(params.plan, customer360),
+    customer360,
+    sources,
     dataStatus,
     warnings: warnings.length ? warnings : undefined,
     entityContext,

@@ -1073,6 +1073,7 @@ function buildCustomerRows(rows: PackageCustomerRecord[]) {
       memberId: row.memberId,
       packageName: row.packageName,
       category: row.category,
+      serviceNames: row.serviceNames,
       purchaseDate: row.purchaseDate,
       purchaseCount: row.purchaseCount,
       purchasedUnits: row.purchasedUnits,
@@ -1138,6 +1139,52 @@ export async function getPackagePortalDetail(
         }
       : null,
     customers: buildCustomerRows(packageRows),
+    assumptions: buildAssumptions(),
+  };
+}
+
+function normalizeDigits(value: string | null | undefined) {
+  return (value ?? "").replace(/\D/g, "");
+}
+
+function namesMatch(left: string | null | undefined, right: string | null | undefined) {
+  return parseText(left).trim().replace(/\s+/g, " ").toLowerCase() === parseText(right).trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+export async function getPackagePortalCustomerHoldings(params: {
+  clinicId: string;
+  customerName: string;
+  customerPhone?: string;
+  memberId?: string;
+  throughDate: string;
+  authorizationHeader?: string;
+}) {
+  const records = await buildPackageCustomerSeed({
+    clinicId: params.clinicId,
+    fromDate: "2000-01-01",
+    toDate: params.throughDate,
+    packageId: "",
+    category: "",
+    salesperson: "",
+    onlyRemaining: false,
+    authorizationHeader: params.authorizationHeader,
+  });
+  const phoneDigits = normalizeDigits(params.customerPhone);
+  const memberId = parseText(params.memberId).toLowerCase();
+  const matched = records.filter((row) => {
+    if (memberId && row.memberId.toLowerCase() === memberId) {
+      return true;
+    }
+
+    if (phoneDigits && normalizeDigits(row.customerPhone) === phoneDigits) {
+      return true;
+    }
+
+    return namesMatch(row.customerName, params.customerName);
+  });
+
+  return {
+    holdings: buildCustomerRows(matched),
     assumptions: buildAssumptions(),
   };
 }
