@@ -126,7 +126,11 @@ function detectCustomerIntent(message: string) {
   if (/due|overdue|ပြန်လာ|ကုသမှု/i.test(message)) {
     return "treatment_due";
   }
-  if (/follow[- ]?up|ဆက်သွယ်/i.test(message)) {
+  if (
+    /follow[- ]?up|priority|priorities|need attention|owner[- ]?safe|call|contact|message|rebook|return visit|ဆက်သွယ်|ပြန်ချိန်း/i.test(
+      message,
+    )
+  ) {
     return "follow_up_today";
   }
   if (/top customers?|best customers?|vip customers?|highest.*customers?|most valuable|valuable customers?|top spend|top visit|အကောင်းဆုံး|အများဆုံး/i.test(message)) {

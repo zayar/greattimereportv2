@@ -1,5 +1,5 @@
 import type { GreatTimeAgentId, GreatTimeRequestedAgentId } from "./types.js";
-import { hasExplicitCustomerSearchIntent } from "./customer-query.js";
+import { extractLikelyCustomerSearchText, hasExplicitCustomerSearchIntent } from "./customer-query.js";
 
 const AGENT_ORDER: GreatTimeAgentId[] = ["finance", "customer_relationship", "business", "appointment"];
 
@@ -48,7 +48,7 @@ export function resolveAgent(params: {
   ) as Record<GreatTimeAgentId, number>;
 
   if (
-    hasExplicitCustomerSearchIntent(params.message) &&
+    (hasExplicitCustomerSearchIntent(params.message) || extractLikelyCustomerSearchText(params.message)) &&
     scores.finance === 0 &&
     scores.appointment === 0 &&
     scores.business === 0

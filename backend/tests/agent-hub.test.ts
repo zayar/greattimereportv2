@@ -14,6 +14,7 @@ const { resolveAgent } = await import("../src/services/agent-hub/supervisor.ts")
 const { assertToolAllowed } = await import("../src/services/agent-hub/tool-executor.ts")
 const { createAgentToolRegistry, getAgentToolAllowlist } = await import("../src/services/agent-hub/tool-registry.ts")
 const { extractInvoiceSearch } = await import("../src/services/agent-hub/tools/finance.tools.ts")
+const { extractLikelyCustomerSearchText } = await import("../src/services/agent-hub/customer-query.ts")
 const {
   buildLockedAgentHubResponse,
   extractExplicitCustomerSearchText,
@@ -40,6 +41,7 @@ test("supervisor routes four agent domains and respects explicit override", () =
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "service trend and practitioner performance" }).resolvedAgent, "business")
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "How many appointments are checked in now?" }).resolvedAgent, "appointment")
   assert.equal(resolveAgent({ requestedAgent: "finance", message: "appointments today" }).resolvedAgent, "finance")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "Soe Moe Thu ( C )" }).resolvedAgent, "customer_relationship")
 })
 
 test("supervisor handles Myanmar keywords and deterministic tie-breaking", () => {
@@ -176,6 +178,18 @@ test("planner keeps generic show questions out of Customer 360 and includes usag
 
   assert.equal(topCustomerPlan.intent, "top_customers")
   assert.deepEqual(topCustomerPlan.toolNames, ["search_customer_profiles"])
+
+  const callPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "customer_relationship",
+      message: "who should we call today",
+    },
+  })
+
+  assert.equal(callPlan.intent, "follow_up_today")
+  assert.deepEqual(callPlan.toolNames, ["search_customer_profiles"])
 })
 
 test("invoice detail search ignores generic time and display words", () => {
@@ -196,6 +210,8 @@ test("customer follow-up ignores stale entity context when a different explicit 
 
   assert.equal(extractExplicitCustomerSearchText("can you find Sumar Tun"), "Sumar Tun")
   assert.equal(extractExplicitCustomerSearchText("what about May Thu Q"), "May Thu Q")
+  assert.equal(extractLikelyCustomerSearchText("Soe Moe Thu ( C )"), "Soe Moe Thu ( C )")
+  assert.equal(extractLikelyCustomerSearchText("Which customers should we follow up today?"), "")
   assert.equal(
     shouldIgnoreExplicitEntityContext({
       request: {

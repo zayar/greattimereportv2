@@ -3,6 +3,7 @@ import { executeToolPlan } from "./tool-executor.js";
 import { resolveEntityReference } from "./entity-context.js";
 import {
   extractExplicitCustomerSearchText as extractCustomerSearchText,
+  hasCustomerEntityReference,
   hasExplicitCustomerSearchIntent as hasCustomerSearchIntent,
 } from "./customer-query.js";
 import { planAgentRequest } from "./intent-planner.js";
@@ -68,7 +69,7 @@ function withFollowUpAgentInference(
     return request;
   }
 
-  if (/\b(first|second|third|they|them|that|her|him|သူ|အဲ့ဒီ)\b/i.test(request.message)) {
+  if (hasCustomerEntityReference(request.message)) {
     return {
       ...request,
       agent: inferredAgent,

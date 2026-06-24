@@ -13,7 +13,7 @@ import {
   searchCustomerRelationshipProfilesBounded,
 } from "../../reports/customer-relationship-profile.repository.js";
 import { buildCustomer360ToolResult } from "../customer-360.service.js";
-import { extractExplicitCustomerSearchText } from "../customer-query.js";
+import { extractExplicitCustomerSearchText, extractLikelyCustomerSearchText } from "../customer-query.js";
 import { limitRows, nowIso } from "../safety.js";
 import type { AgentToolDefinition, AgentToolInput, AgentToolResult } from "../types.js";
 
@@ -43,8 +43,12 @@ function profilePlan(intent: string, message: string) {
     return { riskLevel: "high" as const, sortBy: "priorityScore" as const };
   }
 
-  const explicitSearch = extractExplicitCustomerSearchText(message);
-  const search = (explicitSearch || message)
+  const explicitSearch = extractLikelyCustomerSearchText(message);
+  if (!explicitSearch) {
+    return { sortBy: "priorityScore" as const };
+  }
+
+  const search = explicitSearch
     .replace(/customer|member|first|second|third/gi, "")
     .replace(/[?.!]+$/g, "")
     .trim();

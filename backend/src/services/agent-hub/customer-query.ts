@@ -42,6 +42,21 @@ export function extractExplicitCustomerSearchText(message: string) {
   return looksLikeNamedCustomer(showSearch) ? showSearch : "";
 }
 
+export function extractLikelyCustomerSearchText(message: string) {
+  const explicit = extractExplicitCustomerSearchText(message);
+
+  if (explicit) {
+    return explicit;
+  }
+
+  const cleaned = cleanupSearchText(message);
+  return looksLikeNamedCustomer(cleaned) ? cleaned : "";
+}
+
+export function hasCustomerEntityReference(message: string) {
+  return ORDINAL_OR_PRONOUN.test(message);
+}
+
 export function hasExplicitCustomerSearchIntent(message: string) {
   return Boolean(extractExplicitCustomerSearchText(message));
 }

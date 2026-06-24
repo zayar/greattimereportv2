@@ -87,7 +87,7 @@ function followUpsForAgent(plan: GreatTimeAgentIntentPlan, results: AgentToolRes
 
     return [
       "Tell me about the first customer.",
-      "Show their last treatment and recent purchases.",
+      "Show the first customer's last treatment and recent purchases.",
       "Which customers should we follow up today?",
     ];
   }
