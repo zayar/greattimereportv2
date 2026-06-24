@@ -1,8 +1,12 @@
 import { env } from "../../config/env.js";
 import { HttpError } from "../../utils/http-error.js";
+import { hasFeatureAccess } from "../feature-access.service.js";
+import { askAgentHub, buildLockedAgentHubResponse } from "../agent-hub/agent-hub.service.js";
+import type { GreatTimeAgentChatResponse } from "../agent-hub/types.js";
 import { buildTelegramSalesAssistantReply } from "../gt-growth-ai/sales-assistant.service.js";
-import { redeemTelegramLinkCode } from "./storage.service.js";
-import type { TelegramChatTarget } from "./types.js";
+import { GT_GROWTH_AI_FEATURE_GATE } from "../../types/report-ai.js";
+import { getTelegramTargetByChatId, redeemTelegramLinkCode } from "./storage.service.js";
+import type { TelegramChatTarget, TelegramTargetStatus } from "./types.js";
 
 type TelegramChat = {
   id: number;
@@ -141,6 +145,9 @@ async function sendUsageMessage(chatId: string) {
       "",
       "GT Growth AI commands for paid clinics:",
       "/tasks, /today, C1, B1, P1, S1, M1",
+      "",
+      "Agent chat when enabled:",
+      "/ask How much did we collect today?",
     ].join("\n"),
   );
 }
@@ -153,6 +160,191 @@ function isSalesAssistantCommand(text: string) {
     /^([CBPSM])\s*(\d{1,2})$/i.test(trimmed) ||
     /^\/(contacted|booked|purchased|skipped|message)(?:@\w+)?\s+\d{1,2}$/i.test(trimmed)
   );
+}
+
+export function extractTelegramAgentQuestion(text: string, chatType: TelegramChat["type"]) {
+  const trimmed = text.trim();
+  const commandMatch = trimmed.match(/^\/(?:ask|gt|agent)(?:@\w+)?(?:\s+([\s\S]+))?$/i);
+
+  if (commandMatch) {
+    return commandMatch[1]?.trim() || "";
+  }
+
+  if (chatType === "private" && !trimmed.startsWith("/")) {
+    return trimmed;
+  }
+
+  return null;
+}
+
+export function canTelegramUserChatWithAgent(params: {
+  target: Pick<TelegramTargetStatus, "isAgentChatEnabled" | "agentChatAccessMode" | "agentChatAllowedUserIds">;
+  telegramUserId: string | null;
+}) {
+  if (!params.target.isAgentChatEnabled) {
+    return false;
+  }
+
+  if (params.target.agentChatAccessMode === "all_members") {
+    return true;
+  }
+
+  return Boolean(params.telegramUserId && params.target.agentChatAllowedUserIds.includes(params.telegramUserId));
+}
+
+function formatMetricValue(value: string | number, unit: string | undefined) {
+  const formatted = typeof value === "number" ? value.toLocaleString("en-US") : value;
+  return unit ? `${formatted} ${unit}` : formatted;
+}
+
+function formatTablePreview(response: GreatTimeAgentChatResponse) {
+  const table = response.tables?.find((item) => item.rows.length > 0);
+  if (!table) {
+    return [];
+  }
+
+  const columns = table.columns.slice(0, 4);
+  const rows = table.rows.slice(0, 5).map((row, index) => {
+    const values = columns
+      .map((column) => {
+        const value = row[column.key];
+        return value == null || value === "" ? "-" : String(value).slice(0, 48);
+      })
+      .join(" | ");
+
+    return `${index + 1}. ${values}`;
+  });
+
+  return [`${table.title}:`, ...rows];
+}
+
+export function formatAgentHubTelegramReply(response: GreatTimeAgentChatResponse) {
+  const lines = ["GT Agent", "", response.summary || response.assistantMessage];
+  const metrics = (response.metrics ?? []).slice(0, 5);
+  const tablePreview = formatTablePreview(response);
+  const warnings = (response.warnings ?? []).slice(0, 2);
+  const sources = response.sources.slice(0, 3);
+  const followUps = (response.followUpQuestions ?? []).slice(0, 3);
+
+  if (metrics.length > 0) {
+    lines.push("", "Metrics:");
+    metrics.forEach((metric) => {
+      lines.push(`- ${metric.label}: ${formatMetricValue(metric.value, metric.unit)}`);
+    });
+  }
+
+  if (tablePreview.length > 0) {
+    lines.push("", ...tablePreview);
+  }
+
+  if (warnings.length > 0) {
+    lines.push("", "Notes:");
+    warnings.forEach((warning) => {
+      lines.push(`- ${warning.title}: ${warning.message}`);
+    });
+  }
+
+  if (sources.length > 0) {
+    lines.push("", "Sources:");
+    sources.forEach((source) => {
+      lines.push(`- ${source.sourceName}: ${source.dataStatus}${source.live ? " live" : ""}`);
+    });
+  }
+
+  if (followUps.length > 0) {
+    lines.push("", "Try next:");
+    followUps.forEach((question) => {
+      lines.push(`- /ask ${question}`);
+    });
+  }
+
+  const message = lines.join("\n").trim();
+  return message.length <= 3900 ? message : `${message.slice(0, 3890).trim()}\n...`;
+}
+
+function sanitizeSessionPart(value: string) {
+  return value.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 80) || "unknown";
+}
+
+async function buildAgentHubReply(params: {
+  target: TelegramTargetStatus;
+  question: string;
+  telegramUserId: string | null;
+}) {
+  const premium = await hasFeatureAccess({
+    clinicId: params.target.clinicId,
+    feature: GT_GROWTH_AI_FEATURE_GATE,
+  });
+  const sessionActor = params.telegramUserId ?? params.target.telegramChatId ?? "chat";
+  const sessionId = [
+    "telegram",
+    sanitizeSessionPart(params.target.clinicId),
+    sanitizeSessionPart(params.target.telegramChatId ?? "chat"),
+    sanitizeSessionPart(sessionActor),
+  ].join("_");
+  const request = {
+    clinicId: params.target.clinicId,
+    clinicCode: params.target.clinicCode,
+    sessionId,
+    agent: "auto" as const,
+    message: params.question,
+    aiLanguage: params.target.ownerAiLanguage,
+    timezone: params.target.timezone,
+  };
+
+  if (!premium.enabled) {
+    return buildLockedAgentHubResponse({ request, premium });
+  }
+
+  return askAgentHub({
+    request,
+    clinic: {
+      clinicId: params.target.clinicId,
+      clinicCode: params.target.clinicCode,
+    },
+    requestContext: {
+      userId: `telegram:${sessionActor}`,
+      userEmail: undefined,
+    },
+  });
+}
+
+async function handleAgentQuestion(params: {
+  chatId: string;
+  question: string;
+  telegramUserId: string | null;
+}) {
+  const target = await getTelegramTargetByChatId(params.chatId);
+
+  if (!target) {
+    await sendTelegramMessage(
+      params.chatId,
+      "This Telegram chat is not linked to a GreatTime clinic yet. Link it from GreatTime Settings > Telegram first.",
+    );
+    return;
+  }
+
+  if (!canTelegramUserChatWithAgent({ target, telegramUserId: params.telegramUserId })) {
+    await sendTelegramMessage(
+      params.chatId,
+      target.isAgentChatEnabled
+        ? "You are not allowed to chat with GT Agent from this Telegram target. Scheduled reports can still be delivered here."
+        : "This Telegram target is report-only. Enable Agent chat for this target in GreatTime Settings > Telegram.",
+    );
+    return;
+  }
+
+  if (!params.question.trim()) {
+    await sendTelegramMessage(params.chatId, "Send /ask followed by a clinic question, for example: /ask How much did we collect today?");
+    return;
+  }
+
+  const response = await buildAgentHubReply({
+    target,
+    question: params.question.trim(),
+    telegramUserId: params.telegramUserId,
+  });
+  await sendTelegramMessage(params.chatId, formatAgentHubTelegramReply(response));
 }
 
 export function isTelegramBotConfigured() {
@@ -248,20 +440,28 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
   }
 
   const code = extractLinkCode(text);
-  if (!code) {
+  if (code) {
+    try {
+      const result = await redeemTelegramLinkCode({ code, chat });
+      await sendTelegramMessage(
+        chatId,
+        `Telegram connected to ${result.clinicName || "your clinic"}.\n\nReports and Agent chat access can now be controlled from GT Settings.`,
+      );
+    } catch (error) {
+      const messageText =
+        error instanceof Error ? error.message : "Link code could not be used. Please generate a new code in GT.";
+      await sendTelegramMessage(chatId, `GT Telegram link failed.\n\n${messageText}`);
+    }
     return;
   }
 
-  try {
-    const result = await redeemTelegramLinkCode({ code, chat });
-    await sendTelegramMessage(
+  const agentQuestion = extractTelegramAgentQuestion(text, message.chat.type);
+  if (agentQuestion !== null) {
+    await handleAgentQuestion({
       chatId,
-      `Telegram connected to ${result.clinicName || "your clinic"}.\n\nToday Appointment Report can now be enabled from GT Settings.`,
-    );
-  } catch (error) {
-    const messageText =
-      error instanceof Error ? error.message : "Link code could not be used. Please generate a new code in GT.";
-    await sendTelegramMessage(chatId, `GT Telegram link failed.\n\n${messageText}`);
+      question: agentQuestion,
+      telegramUserId: message.from?.id == null ? null : String(message.from.id),
+    });
   }
 }
 

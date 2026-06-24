@@ -24,6 +24,7 @@ import type {
   OwnerAiReportTone,
   TelegramChatTarget,
   TelegramConnectionStatus,
+  TelegramAgentChatAccessMode,
   TelegramDeliveryLogEntry,
   TelegramDeliveryLogRecord,
   TelegramDeliveryTrigger,
@@ -146,6 +147,25 @@ function normalizeTargetPurpose(
     : fallback;
 }
 
+function normalizeAgentChatAccessMode(
+  value: unknown,
+  fallback: TelegramAgentChatAccessMode = "all_members",
+) {
+  return value === "all_members" || value === "allowed_users" ? value : fallback;
+}
+
+function normalizeTelegramUserIds(value: unknown, fallback: string[] = []) {
+  if (!Array.isArray(value)) {
+    return [...fallback];
+  }
+
+  const normalized = value
+    .map((item) => (typeof item === "string" || typeof item === "number" ? String(item).trim() : ""))
+    .filter((item) => /^\d{3,20}$/.test(item));
+
+  return [...new Set(normalized)].slice(0, 50);
+}
+
 function parseReportSettings(
   data: Record<string, unknown> | undefined,
   defaults: TelegramReportSettingsRecord,
@@ -162,6 +182,10 @@ function parseReportSettings(
     telegramChatTitle: typeof data?.telegramChatTitle === "string" ? data.telegramChatTitle : defaults.telegramChatTitle,
     telegramLinkedAt: typeof data?.telegramLinkedAt === "string" ? data.telegramLinkedAt : defaults.telegramLinkedAt,
     targetPurpose: normalizeTargetPurpose(data?.targetPurpose, defaults.targetPurpose),
+    isAgentChatEnabled:
+      typeof data?.isAgentChatEnabled === "boolean" ? data.isAgentChatEnabled : defaults.isAgentChatEnabled,
+    agentChatAccessMode: normalizeAgentChatAccessMode(data?.agentChatAccessMode, defaults.agentChatAccessMode),
+    agentChatAllowedUserIds: normalizeTelegramUserIds(data?.agentChatAllowedUserIds, defaults.agentChatAllowedUserIds),
     isGtGrowthAiSalesAssistantEnabled:
       typeof data?.isGtGrowthAiSalesAssistantEnabled === "boolean"
         ? data.isGtGrowthAiSalesAssistantEnabled
@@ -306,6 +330,9 @@ function buildDefaultReportSettings(input?: {
     telegramChatTitle: input?.telegramChatTitle ?? null,
     telegramLinkedAt: input?.telegramLinkedAt ?? null,
     targetPurpose: "general_reports",
+    isAgentChatEnabled: false,
+    agentChatAccessMode: "all_members",
+    agentChatAllowedUserIds: [],
     isGtGrowthAiSalesAssistantEnabled: false,
     gtGrowthAiSalesAssistantTime: env.TELEGRAM_REPORT_DEFAULT_TIME,
     isGtGrowthAiOwnerProgressSummaryEnabled: false,
@@ -565,6 +592,9 @@ function buildStatus(
         telegramChatTitle: primaryTarget.telegramChatTitle,
         telegramLinkedAt: primaryTarget.telegramLinkedAt,
         targetPurpose: primaryTarget.targetPurpose,
+        isAgentChatEnabled: primaryTarget.isAgentChatEnabled,
+        agentChatAccessMode: primaryTarget.agentChatAccessMode,
+        agentChatAllowedUserIds: primaryTarget.agentChatAllowedUserIds,
         isGtGrowthAiSalesAssistantEnabled: primaryTarget.isGtGrowthAiSalesAssistantEnabled,
         gtGrowthAiSalesAssistantTime: primaryTarget.gtGrowthAiSalesAssistantTime,
         isGtGrowthAiOwnerProgressSummaryEnabled: primaryTarget.isGtGrowthAiOwnerProgressSummaryEnabled,
@@ -689,6 +719,9 @@ async function ensureLegacyTargetMigrated(record: TelegramIntegrationRecord) {
       telegramChatTitle: record.telegramChatTitle,
       telegramLinkedAt: record.telegramLinkedAt,
       targetPurpose: record.targetPurpose,
+      isAgentChatEnabled: record.isAgentChatEnabled,
+      agentChatAccessMode: record.agentChatAccessMode,
+      agentChatAllowedUserIds: record.agentChatAllowedUserIds,
       isGtGrowthAiSalesAssistantEnabled: record.isGtGrowthAiSalesAssistantEnabled,
       gtGrowthAiSalesAssistantTime: record.gtGrowthAiSalesAssistantTime,
       isGtGrowthAiOwnerProgressSummaryEnabled: record.isGtGrowthAiOwnerProgressSummaryEnabled,
@@ -826,6 +859,9 @@ export async function updateTelegramReportSettings(input: {
   weeklySummaryDayOfWeek?: WeeklySummaryDayOfWeek;
   weeklySummarySections?: WeeklySummarySection[];
   targetPurpose?: GtGrowthAiTelegramTargetPurpose;
+  isAgentChatEnabled?: boolean;
+  agentChatAccessMode?: TelegramAgentChatAccessMode;
+  agentChatAllowedUserIds?: string[];
   isGtGrowthAiSalesAssistantEnabled?: boolean;
   gtGrowthAiSalesAssistantTime?: string;
   isGtGrowthAiOwnerProgressSummaryEnabled?: boolean;
@@ -849,6 +885,15 @@ export async function updateTelegramReportSettings(input: {
     clinicCode: input.clinicCode ?? existingTarget.clinicCode,
     clinicName: input.clinicName ?? existingTarget.clinicName,
     targetPurpose: normalizeTargetPurpose(input.targetPurpose, existingTarget.targetPurpose),
+    isAgentChatEnabled: input.isAgentChatEnabled ?? existingTarget.isAgentChatEnabled,
+    agentChatAccessMode: normalizeAgentChatAccessMode(
+      input.agentChatAccessMode,
+      existingTarget.agentChatAccessMode,
+    ),
+    agentChatAllowedUserIds: normalizeTelegramUserIds(
+      input.agentChatAllowedUserIds,
+      existingTarget.agentChatAllowedUserIds,
+    ),
     isGtGrowthAiSalesAssistantEnabled:
       input.isGtGrowthAiSalesAssistantEnabled ?? existingTarget.isGtGrowthAiSalesAssistantEnabled,
     gtGrowthAiSalesAssistantTime: normalizeReportTime(

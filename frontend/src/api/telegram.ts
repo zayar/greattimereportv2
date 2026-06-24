@@ -1,6 +1,7 @@
 import { apiClient } from "./http";
 import type {
   AiLanguage,
+  TelegramAgentChatAccessMode,
   GtGrowthAiTelegramTargetPurpose,
   TelegramIntegrationStatus,
   TelegramOwnerAiFocusArea,
@@ -36,6 +37,9 @@ export async function generateTelegramLinkCode(payload: ClinicScopedInput) {
 
 export async function saveTelegramSettings(payload: ClinicScopedInput & {
   chatId: string;
+  isAgentChatEnabled?: boolean;
+  agentChatAccessMode?: TelegramAgentChatAccessMode;
+  agentChatAllowedUserIds?: string[];
   isTodayAppointmentReportEnabled: boolean;
   reportTime: string;
   isTodayPaymentReportEnabled: boolean;

@@ -6,6 +6,7 @@ export type TelegramChatType = "private" | "group" | "supergroup" | "channel";
 
 export type TelegramConnectionStatus = "not_linked" | "pending" | "linked";
 export type TelegramReportType = "appointment" | "payment" | "owner_ai" | "weekly_summary";
+export type TelegramAgentChatAccessMode = "all_members" | "allowed_users";
 export type TelegramScheduleLockType =
   | TelegramReportType
   | "gt_growth_ai_sales_assistant"
@@ -52,6 +53,9 @@ export interface TelegramReportSettingsRecord {
   telegramChatTitle: string | null;
   telegramLinkedAt: string | null;
   targetPurpose: GtGrowthAiTelegramTargetPurpose;
+  isAgentChatEnabled: boolean;
+  agentChatAccessMode: TelegramAgentChatAccessMode;
+  agentChatAllowedUserIds: string[];
   isGtGrowthAiSalesAssistantEnabled: boolean;
   gtGrowthAiSalesAssistantTime: string;
   isGtGrowthAiOwnerProgressSummaryEnabled: boolean;

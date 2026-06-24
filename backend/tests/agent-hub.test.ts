@@ -20,6 +20,11 @@ const { buildMemoryRecordsFromFeedbackEvents } = await import("../src/services/a
 const { buildSessionSummaryFromTurn, isSessionSummaryFresh } = await import("../src/services/agent-hub/session.repository.ts")
 const { buildLearningBucket, isScheduleDueForJob } = await import("../src/services/agent-hub/learning-worker.ts")
 const { isAgentLearningSchedulerSecretValid } = await import("../src/routes/agent-learning.routes.ts")
+const {
+  canTelegramUserChatWithAgent,
+  extractTelegramAgentQuestion,
+  formatAgentHubTelegramReply,
+} = await import("../src/services/telegram/bot.service.ts")
 
 test("supervisor routes four agent domains and respects explicit override", () => {
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "sales revenue by payment method" }).resolvedAgent, "finance")
@@ -159,6 +164,89 @@ test("planner maps treatment-start appointment questions to the APICORE status p
 
   assert.equal(plan.intent, "waiting_customers")
   assert.deepEqual(plan.toolNames, ["get_treatment_start_proxy"])
+})
+
+test("Telegram Agent chat helpers require explicit group commands and target permission", () => {
+  assert.equal(extractTelegramAgentQuestion("/ask How much did we collect today?", "group"), "How much did we collect today?")
+  assert.equal(extractTelegramAgentQuestion("How much did we collect today?", "group"), null)
+  assert.equal(extractTelegramAgentQuestion("How much did we collect today?", "private"), "How much did we collect today?")
+
+  assert.equal(
+    canTelegramUserChatWithAgent({
+      target: {
+        isAgentChatEnabled: false,
+        agentChatAccessMode: "all_members",
+        agentChatAllowedUserIds: [],
+      },
+      telegramUserId: "12345",
+    }),
+    false,
+  )
+  assert.equal(
+    canTelegramUserChatWithAgent({
+      target: {
+        isAgentChatEnabled: true,
+        agentChatAccessMode: "allowed_users",
+        agentChatAllowedUserIds: ["12345"],
+      },
+      telegramUserId: "12345",
+    }),
+    true,
+  )
+  assert.equal(
+    canTelegramUserChatWithAgent({
+      target: {
+        isAgentChatEnabled: true,
+        agentChatAccessMode: "allowed_users",
+        agentChatAllowedUserIds: ["12345"],
+      },
+      telegramUserId: "99999",
+    }),
+    false,
+  )
+})
+
+test("Telegram Agent reply formatter keeps summaries, metrics, previews, and sources", () => {
+  const message = formatAgentHubTelegramReply({
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "finance",
+    autoMode: true,
+    intent: "payment_summary",
+    assistantMessage: "Collections for today: 10,000 across 2 invoices.",
+    summary: "Collections for today: 10,000 across 2 invoices.",
+    metrics: [{ label: "Collected", value: 10000, unit: "amount" }],
+    tables: [
+      {
+        title: "Payment methods",
+        columns: [
+          { key: "method", title: "Method" },
+          { key: "amount", title: "Amount" },
+        ],
+        rows: [{ method: "CASH", amount: 10000 }],
+      },
+    ],
+    followUpQuestions: ["Show payment methods by amount."],
+    sources: [
+      {
+        tool: "get_payment_summary",
+        sourceName: "BigQuery payment report",
+        checkedAt: "2026-06-23T00:00:00.000Z",
+        dataStatus: "ok",
+        live: false,
+      },
+    ],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  })
+
+  assert.match(message, /GT Agent/)
+  assert.match(message, /Collected: 10,000 amount/)
+  assert.match(message, /Payment methods/)
+  assert.match(message, /BigQuery payment report: ok/)
+  assert.match(message, /\/ask Show payment methods by amount/)
 })
 
 test("appointment helpers count active checked-ins and exclude merchant cancellations from totals", () => {

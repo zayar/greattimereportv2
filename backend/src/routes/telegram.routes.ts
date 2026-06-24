@@ -74,13 +74,19 @@ const gtGrowthAiSalesAssistantSettingsSchema = z.object({
   gtGrowthAiOwnerProgressSummaryTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
 });
 
+const agentChatSettingsSchema = z.object({
+  isAgentChatEnabled: z.boolean().optional(),
+  agentChatAccessMode: z.enum(["all_members", "allowed_users"]).optional(),
+  agentChatAllowedUserIds: z.array(z.string().regex(/^\d{3,20}$/)).max(50).optional(),
+});
+
 const settingsSchema = clinicTargetSchema.extend({
   isTodayAppointmentReportEnabled: z.boolean(),
   reportTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   isTodayPaymentReportEnabled: z.boolean(),
   paymentReportTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
   timezone: z.string().min(1),
-}).merge(ownerAiSettingsSchema).merge(weeklySummarySettingsSchema).merge(gtGrowthAiSalesAssistantSettingsSchema);
+}).merge(ownerAiSettingsSchema).merge(weeklySummarySettingsSchema).merge(gtGrowthAiSalesAssistantSettingsSchema).merge(agentChatSettingsSchema);
 
 const sendTestSchema = clinicTargetSchema.extend({
   reportType: telegramReportTypeSchema.default("appointment"),

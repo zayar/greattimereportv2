@@ -18,6 +18,7 @@ import type {
   AiLanguage,
   ClinicFeatureAccessStatus,
   GtGrowthAiTelegramTargetPurpose,
+  TelegramAgentChatAccessMode,
   TelegramDeliveryLogEntry,
   TelegramIntegrationStatus,
   TelegramOwnerAiFocusArea,
@@ -33,6 +34,9 @@ type BusyAction = "load" | "link" | "save" | "unlink" | "test" | "resend" | "sal
 
 type TargetDraft = {
   targetPurpose: GtGrowthAiTelegramTargetPurpose;
+  agentChatEnabled: boolean;
+  agentChatAccessMode: TelegramAgentChatAccessMode;
+  agentChatAllowedUserIdsText: string;
   salesAssistantEnabled: boolean;
   salesAssistantTime: string;
   ownerProgressEnabled: boolean;
@@ -113,6 +117,7 @@ const TELEGRAM_TARGET_PURPOSE_OPTIONS: Array<{ value: GtGrowthAiTelegramTargetPu
 ];
 
 const REPORT_ROUTING_COLUMNS = [
+  { key: "agent_chat", label: "Agent chat" },
   { key: "appointment", label: "Appointment" },
   { key: "payment", label: "Payment" },
   { key: "weekly", label: "Weekly" },
@@ -195,6 +200,27 @@ function normalizeWeeklySummarySections(value: TelegramWeeklySummarySection[] | 
   return value?.length ? value : DEFAULT_WEEKLY_SUMMARY_SECTIONS;
 }
 
+function normalizeTelegramUserIdList(value: string) {
+  return [
+    ...new Set(
+      value
+        .split(/[\s,]+/)
+        .map((item) => item.trim())
+        .filter((item) => /^\d{3,20}$/.test(item)),
+    ),
+  ].slice(0, 50);
+}
+
+function formatTelegramUserIdList(value: string[]) {
+  return value.join(", ");
+}
+
+function sameTelegramUserIds(left: string, right: string[]) {
+  const leftSorted = normalizeTelegramUserIdList(left).sort();
+  const rightSorted = [...right].sort();
+  return leftSorted.length === rightSorted.length && leftSorted.every((value, index) => value === rightSorted[index]);
+}
+
 function sameFocusAreas(left: TelegramOwnerAiFocusArea[], right: TelegramOwnerAiFocusArea[]) {
   const leftSorted = [...left].sort();
   const rightSorted = [...right].sort();
@@ -213,6 +239,9 @@ function sameWeeklySummarySections(
 function buildTargetDraft(target: TelegramTargetStatus): TargetDraft {
   return {
     targetPurpose: target.targetPurpose,
+    agentChatEnabled: target.isAgentChatEnabled,
+    agentChatAccessMode: target.agentChatAccessMode,
+    agentChatAllowedUserIdsText: formatTelegramUserIdList(target.agentChatAllowedUserIds),
     salesAssistantEnabled: target.isGtGrowthAiSalesAssistantEnabled,
     salesAssistantTime: target.gtGrowthAiSalesAssistantTime,
     ownerProgressEnabled: target.isGtGrowthAiOwnerProgressSummaryEnabled,
@@ -298,6 +327,14 @@ function getRoutingCell(target: TelegramTargetStatus, key: (typeof REPORT_ROUTIN
   switch (key) {
     case "appointment":
       return { enabled: target.isTodayAppointmentReportEnabled, time: target.reportTime };
+    case "agent_chat":
+      return {
+        enabled: target.isAgentChatEnabled,
+        time:
+          target.agentChatAccessMode === "allowed_users"
+            ? `${target.agentChatAllowedUserIds.length} users`
+            : "All",
+      };
     case "payment":
       return { enabled: target.isTodayPaymentReportEnabled, time: target.paymentReportTime };
     case "weekly":
@@ -457,6 +494,9 @@ export function TelegramSettingsPage() {
     selectedTarget &&
       selectedDraft &&
       (selectedDraft.targetPurpose !== selectedTarget.targetPurpose ||
+        selectedDraft.agentChatEnabled !== selectedTarget.isAgentChatEnabled ||
+        selectedDraft.agentChatAccessMode !== selectedTarget.agentChatAccessMode ||
+        !sameTelegramUserIds(selectedDraft.agentChatAllowedUserIdsText, selectedTarget.agentChatAllowedUserIds) ||
         selectedDraft.salesAssistantEnabled !== selectedTarget.isGtGrowthAiSalesAssistantEnabled ||
         selectedDraft.salesAssistantTime !== selectedTarget.gtGrowthAiSalesAssistantTime ||
         selectedDraft.ownerProgressEnabled !== selectedTarget.isGtGrowthAiOwnerProgressSummaryEnabled ||
@@ -662,6 +702,9 @@ export function TelegramSettingsPage() {
         clinicName: activeClinic.name,
         chatId: selectedTarget.telegramChatId,
         targetPurpose: selectedDraft.targetPurpose,
+        isAgentChatEnabled: selectedDraft.agentChatEnabled,
+        agentChatAccessMode: selectedDraft.agentChatAccessMode,
+        agentChatAllowedUserIds: normalizeTelegramUserIdList(selectedDraft.agentChatAllowedUserIdsText),
         isGtGrowthAiSalesAssistantEnabled: selectedDraft.salesAssistantEnabled,
         gtGrowthAiSalesAssistantTime: selectedDraft.salesAssistantTime,
         isGtGrowthAiOwnerProgressSummaryEnabled: selectedDraft.ownerProgressEnabled,
@@ -1021,6 +1064,7 @@ export function TelegramSettingsPage() {
                 <strong>
                   {selectedDraft?.appointmentEnabled ? "Appointment on" : "Appointment off"} ·{" "}
                   {selectedDraft?.paymentEnabled ? "Payment on" : "Payment off"} ·{" "}
+                  {selectedDraft?.agentChatEnabled ? "Agent chat on" : "Agent chat off"} ·{" "}
                   {selectedDraft?.ownerAiEnabled ? "AI Owner on" : "AI Owner off"} ·{" "}
                   {selectedDraft?.weeklySummaryEnabled ? "Weekly on" : "Weekly off"}
                 </strong>
@@ -1152,6 +1196,92 @@ export function TelegramSettingsPage() {
             TODO(gt_growth_ai): connect this status to the production billing/admin entitlement source. Normal merchant users
             cannot self-enable paid access from this settings page.
           </p>
+        </Panel>
+
+        <Panel
+          className="telegram-settings__card telegram-settings__card--wide"
+          title="Agent chat access"
+          subtitle={
+            selectedTarget
+              ? `Control whether ${selectedTarget.targetLabel} can ask questions in Telegram.`
+              : "Link a Telegram target first, then choose who can chat with GT Agent."
+          }
+        >
+          {!selectedTarget || !selectedDraft ? (
+            <div className="inline-note">Link and select a Telegram target before enabling Agent chat.</div>
+          ) : (
+            <>
+              <label className="telegram-settings__toggle">
+                <input
+                  type="checkbox"
+                  checked={selectedDraft.agentChatEnabled}
+                  onChange={(event) => updateSelectedDraft({ agentChatEnabled: event.target.checked })}
+                />
+                <span className={`telegram-settings__switch ${selectedDraft.agentChatEnabled ? "telegram-settings__switch--on" : ""}`} aria-hidden="true">
+                  <span className="telegram-settings__switch-handle" />
+                </span>
+                <div className="telegram-settings__toggle-copy">
+                  <strong>Enable Agent chat for this target</strong>
+                  <span>
+                    When off, this target is report-only. Scheduled reports still arrive, but Telegram questions are rejected.
+                  </span>
+                </div>
+              </label>
+
+              <div className="telegram-settings__two-up">
+                <label className="field">
+                  <span>Who can ask from this target</span>
+                  <select
+                    value={selectedDraft.agentChatAccessMode}
+                    onChange={(event) =>
+                      updateSelectedDraft({ agentChatAccessMode: event.target.value as TelegramAgentChatAccessMode })
+                    }
+                    disabled={!selectedDraft.agentChatEnabled}
+                  >
+                    <option value="all_members">Anyone in this Telegram target</option>
+                    <option value="allowed_users">Only listed Telegram user IDs</option>
+                  </select>
+                </label>
+
+                <article className="telegram-settings__meta-card telegram-settings__meta-card--inline">
+                  <span>Telegram command</span>
+                  <strong>/ask your question</strong>
+                  <small>Private linked chats can also send plain questions when chat is enabled.</small>
+                </article>
+              </div>
+
+              <label className="field">
+                <span>Allowed Telegram user IDs</span>
+                <textarea
+                  className="telegram-settings__textarea"
+                  value={selectedDraft.agentChatAllowedUserIdsText}
+                  onChange={(event) => updateSelectedDraft({ agentChatAllowedUserIdsText: event.target.value })}
+                  rows={3}
+                  disabled={!selectedDraft.agentChatEnabled || selectedDraft.agentChatAccessMode !== "allowed_users"}
+                  placeholder="123456789, 987654321"
+                />
+              </label>
+
+              <div className="telegram-settings__callout">
+                <strong>{selectedDraft.agentChatEnabled ? "Agent chat is allowed after saving" : "Report-only target"}</strong>
+                <span>
+                  {selectedDraft.agentChatEnabled
+                    ? "GT Agent answers are read-only and use the linked clinic context for this target."
+                    : "Use this mode for groups or recipients that should only receive scheduled appointment, payment, weekly, or owner reports."}
+                </span>
+              </div>
+
+              <div className="telegram-settings__button-row">
+                <button
+                  className="button telegram-settings__button telegram-settings__button--primary"
+                  onClick={() => void handleSaveSettings()}
+                  disabled={busyAction !== null || !hasChanges}
+                >
+                  {busyAction === "save" ? "Saving..." : "Save Agent chat access"}
+                </button>
+              </div>
+            </>
+          )}
         </Panel>
 
         <Panel

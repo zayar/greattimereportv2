@@ -39,6 +39,7 @@ export type AiLanguage = "my-MM" | "en-US";
 
 export type TelegramConnectionStatus = "not_linked" | "pending" | "linked";
 export type TelegramReportType = "appointment" | "payment" | "owner_ai" | "weekly_summary";
+export type TelegramAgentChatAccessMode = "all_members" | "allowed_users";
 export type TelegramDeliveryTrigger = "manual_test" | "scheduled" | "resend";
 export type TelegramDeliveryOutcome = "sent" | "failed";
 export type TelegramOwnerAiTone = "simple" | "professional" | "friendly";
@@ -95,6 +96,9 @@ export interface TelegramTargetStatus {
   telegramChatTitle: string | null;
   telegramLinkedAt: string | null;
   targetPurpose: GtGrowthAiTelegramTargetPurpose;
+  isAgentChatEnabled: boolean;
+  agentChatAccessMode: TelegramAgentChatAccessMode;
+  agentChatAllowedUserIds: string[];
   isGtGrowthAiSalesAssistantEnabled: boolean;
   gtGrowthAiSalesAssistantTime: string;
   isGtGrowthAiOwnerProgressSummaryEnabled: boolean;
