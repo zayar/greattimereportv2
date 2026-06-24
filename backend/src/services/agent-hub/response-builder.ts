@@ -80,6 +80,70 @@ function followUpsForService360(factPack: Service360FactPack) {
   return questions.slice(0, 3);
 }
 
+function hasAppointmentRows(results: AgentToolResult[]) {
+  return results.some((result) =>
+    (result.tables ?? []).some((table) => /appointment|checked|cancel|no-show/i.test(table.title) && table.rows.length > 0),
+  );
+}
+
+function followUpsForAppointment(plan: GreatTimeAgentIntentPlan, results: AgentToolResult[]) {
+  const hasRows = hasAppointmentRows(results);
+
+  switch (plan.intent) {
+    case "checked_in_customers":
+      return [
+        "Show checked-out customers today.",
+        "Show cancelled and no-show appointments today.",
+        "Show all appointments today.",
+      ];
+    case "checked_out_customers":
+      return [
+        "Show checked-in customers now.",
+        "Show cancelled and no-show appointments today.",
+        "Show all appointments today.",
+      ];
+    case "cancelled_no_show":
+      return [
+        "Show all appointments today.",
+        "Show checked-in customers now.",
+        "Show checked-out customers today.",
+      ];
+    case "waiting_customers":
+    case "treatment_in_progress":
+      return [
+        "Show checked-in customers now.",
+        "Show checked-out customers today.",
+        "Show all appointments today.",
+      ];
+    case "appointment_trend":
+      return [
+        "Show all appointments today.",
+        "Show cancelled and no-show appointments today.",
+        "Show checked-out customers today.",
+      ];
+    case "appointment_detail":
+      return [
+        "Show all appointments today.",
+        "Show checked-in customers now.",
+        "Show checked-out customers today.",
+      ];
+    case "appointment_summary":
+    case "appointment_list":
+    default:
+      return hasRows
+        ? [
+            "Show checked-in customers now.",
+            "Show checked-out customers today.",
+            "Show cancelled and no-show appointments today.",
+          ]
+        : [
+            "Show tomorrow appointments.",
+            "Show appointment trend this week.",
+            "Show cancelled and no-show appointments today.",
+          ];
+  }
+}
+
 function followUpsForAgent(
   plan: GreatTimeAgentIntentPlan,
   results: AgentToolResult[],
@@ -122,12 +186,7 @@ function followUpsForAgent(
     ];
   }
 
-  return [
-    "Show all appointments today.",
-    "How many appointments are scheduled today?",
-    "Show checked-out customers today.",
-    "Which customers may not have started treatment?",
-  ];
+  return followUpsForAppointment(plan, results);
 }
 
 function stableRecommendationId(params: {

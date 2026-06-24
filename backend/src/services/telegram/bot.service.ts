@@ -397,6 +397,20 @@ function translateMetricLabel(label: string) {
   return map[normalized] ?? label;
 }
 
+function sanitizeOwnerFacingText(text: string) {
+  return text
+    .replace(
+      /APICORE does not expose a treatment_started_at event here, so this uses booking status as a proxy and does not confirm exact treatment-start time\./gi,
+      "Treatment စတင်ချိန်ကို စနစ်ထဲမှာ တိတိကျကျ မတွေ့ရလို့ booking status ကို အခြေခံပြီး ခန့်မှန်းထားပါတယ်။",
+    )
+    .replace(/APICORE booking ledger/gi, "appointment စာရင်း")
+    .replace(/APICORE appointment ledger/gi, "appointment စာရင်း")
+    .replace(/\bAPICORE\b/gi, "appointment စာရင်း")
+    .replace(/BigQuery payment report/gi, "payment report")
+    .replace(/BigQuery customer portal/gi, "customer report")
+    .replace(/\bBigQuery\b/gi, "report data");
+}
+
 function formatAppointmentConversation(response: GreatTimeAgentChatResponse) {
   const serviceTable = response.tables?.find((table) => table.title === "Appointment services");
   const appointmentTable =
@@ -411,7 +425,7 @@ function formatAppointmentConversation(response: GreatTimeAgentChatResponse) {
     serviceTable?.rows.length ??
     0;
   const lines = [
-    `ဒီနေ့ appointment စာရင်းကို APICORE ကနေ စစ်ထားပါတယ်။ Appointment ${formatMetricValue(totalAppointments, undefined)} ခုရှိပြီး service အမျိုးအစား ${formatMetricValue(serviceCount, undefined)} ခု ပါပါတယ်။`,
+    `ဒီနေ့ appointment စာရင်းကို စစ်ပြီးပါပြီ။ Appointment ${formatMetricValue(totalAppointments, undefined)} ခုရှိပြီး service အမျိုးအစား ${formatMetricValue(serviceCount, undefined)} ခု ပါပါတယ်။`,
   ];
 
   if (serviceTable?.rows.length) {
@@ -436,8 +450,8 @@ function formatAppointmentConversation(response: GreatTimeAgentChatResponse) {
       const service = stringValue(row, "serviceName", "Unknown service");
       const practitioner = stringValue(row, "practitionerName", "");
       const status = translateStatus(stringValue(row, "rawStatus", ""));
-      const practitionerText = practitioner ? `၊ practitioner ${practitioner}` : "";
-      lines.push(`${index + 1}. ${time} — ${customer}: ${service}${practitionerText}။ Status: ${status}`);
+      const practitionerText = practitioner && practitioner !== "-" ? ` ${practitioner} က တာဝန်ယူထားပါတယ်။` : "";
+      lines.push(`${index + 1}. ${time} — ${customer} အတွက် ${service} appointment ပါ။${practitionerText} အခြေအနေ: ${status}`);
     });
 
     if (appointmentTable.rows.length > 15) {
@@ -592,7 +606,7 @@ function formatCustomer360TelegramReply(response: GreatTimeAgentChatResponse) {
   const packageRows = factPack.packages.holdings.filter((row) => (row.remainingSessions ?? 0) > 0).slice(0, 6);
   const recentTreatments = (factPack.appointments.recentCompleted ?? []).slice(0, 3);
   const topServices = factPack.usage.topServices.slice(0, 3);
-  const lines = [...buildTelegramReplyHeader(response), "", response.summary || response.assistantMessage];
+  const lines = [...buildTelegramReplyHeader(response), "", sanitizeOwnerFacingText(response.summary || response.assistantMessage)];
 
   if (packageRows.length > 0) {
     lines.push("", "Package / service လက်ကျန်:");
@@ -618,9 +632,9 @@ function formatCustomer360TelegramReply(response: GreatTimeAgentChatResponse) {
   }
 
   if (factPack.recommendation) {
-    lines.push("", `အကြံပြုချက်: ${factPack.recommendation.title}`);
+    lines.push("", `အကြံပြုချက်: ${sanitizeOwnerFacingText(factPack.recommendation.title)}`);
     factPack.recommendation.evidence.slice(0, 2).forEach((item) => {
-      lines.push(`- ${item}`);
+      lines.push(`- ${sanitizeOwnerFacingText(item)}`);
     });
   }
 
@@ -641,7 +655,7 @@ export function formatAgentHubTelegramReply(response: GreatTimeAgentChatResponse
   if (tablePreview.length > 0) {
     lines.push("", ...tablePreview);
   } else {
-    lines.push("", response.summary || response.assistantMessage);
+    lines.push("", sanitizeOwnerFacingText(response.summary || response.assistantMessage));
   }
 
   if (metrics.length > 0 && response.resolvedAgent !== "appointment") {
@@ -654,7 +668,7 @@ export function formatAgentHubTelegramReply(response: GreatTimeAgentChatResponse
   if (warnings.length > 0) {
     lines.push("", "သတိပြုရန်:");
     warnings.forEach((warning) => {
-      lines.push(`- ${warning.title}: ${warning.message}`);
+      lines.push(`- ${sanitizeOwnerFacingText(warning.title)}: ${sanitizeOwnerFacingText(warning.message)}`);
     });
   }
 
@@ -671,10 +685,94 @@ function cleanupSuggestedQuestionCallbacks() {
   });
 }
 
+function suggestionCategory(question: string) {
+  const normalized = question.toLowerCase();
+  if (/recent completed treatments?|completed treatments?/.test(normalized)) {
+    return "recent_treatments";
+  }
+  if (/cancel|no[- ]?show|မလာ|ဖျက်/.test(normalized)) {
+    return "appointment_cancelled_no_show";
+  }
+  if (/checked[- ]?in|check[- ]?in|arrived|ရောက်/.test(normalized)) {
+    return "appointment_checked_in";
+  }
+  if (/checked[- ]?out|check[- ]?out|ပြီးဆုံး/.test(normalized) || (/completed/.test(normalized) && /appointment|booking|customer/.test(normalized))) {
+    return "appointment_checked_out";
+  }
+  if (/tomorrow|မနက်ဖြန်/.test(normalized) && /appointment|booking|ချိန်း/.test(normalized)) {
+    return "appointment_tomorrow";
+  }
+  if (/trend|weekly|this week|ဒီအပတ်/.test(normalized) && /appointment|booking|ချိန်း/.test(normalized)) {
+    return "appointment_trend";
+  }
+  if (/appointment|appointments|booking|bookings|ချိန်း/.test(normalized) && /today|scheduled|all|list|how many|ဒီနေ့/.test(normalized)) {
+    return "appointment_today";
+  }
+  if (/payment method/i.test(question)) {
+    return "payment_method";
+  }
+  if (/service.*declining|declining.*service/i.test(question)) {
+    return "declining_service";
+  }
+  if (/top services/i.test(question)) {
+    return "top_services";
+  }
+  if (/practitioner|therapist/i.test(question)) {
+    return "practitioner";
+  }
+  if (/customer/i.test(question)) {
+    return "customer_detail";
+  }
+
+  return normalized.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 80) || "suggestion";
+}
+
+function isRedundantSuggestion(response: GreatTimeAgentChatResponse, category: string) {
+  if (response.resolvedAgent !== "appointment") {
+    return false;
+  }
+
+  if (["appointment_summary", "appointment_list"].includes(response.intent)) {
+    return category === "appointment_today";
+  }
+  if (response.intent === "checked_in_customers") {
+    return category === "appointment_checked_in";
+  }
+  if (response.intent === "checked_out_customers") {
+    return category === "appointment_checked_out";
+  }
+  if (response.intent === "cancelled_no_show") {
+    return category === "appointment_cancelled_no_show";
+  }
+  if (response.intent === "appointment_trend") {
+    return category === "appointment_trend";
+  }
+
+  return false;
+}
+
 function suggestionLabel(question: string, index: number) {
   const normalized = question.toLowerCase();
-  if (/appointment/i.test(question) && /today/i.test(question)) {
-    return "ဒီနေ့ appointment ကြည့်မယ်";
+  if (/recent completed treatments?|completed treatments?/.test(normalized)) {
+    return "နောက်ဆုံး treatment ကြည့်မယ်";
+  }
+  if (/cancel|no[- ]?show|မလာ|ဖျက်/.test(normalized)) {
+    return "ဖျက်/မလာ ကြည့်မယ်";
+  }
+  if (/checked[- ]?in|check[- ]?in|arrived|ရောက်/.test(normalized)) {
+    return "ရောက်ရှိပြီးသူ ကြည့်မယ်";
+  }
+  if (/checked[- ]?out|check[- ]?out|ပြီးဆုံး/.test(normalized) || (/completed/.test(normalized) && /appointment|booking|customer/.test(normalized))) {
+    return "ပြီးဆုံးသူ ကြည့်မယ်";
+  }
+  if (/tomorrow|မနက်ဖြန်/.test(normalized) && /appointment|booking|ချိန်း/.test(normalized)) {
+    return "မနက်ဖြန် appointment";
+  }
+  if (/trend|weekly|this week|ဒီအပတ်/.test(normalized) && /appointment|booking|ချိန်း/.test(normalized)) {
+    return "Appointment trend";
+  }
+  if (/appointment|booking|ချိန်း/.test(normalized) && /today|scheduled|all|list|how many|ဒီနေ့/.test(normalized)) {
+    return "ဒီနေ့စာရင်း ကြည့်မယ်";
   }
   if (/payment method/i.test(normalized)) {
     return "Payment method အလိုက်ကြည့်မယ်";
@@ -710,7 +808,25 @@ function registerSuggestedQuestion(question: string) {
 }
 
 export function buildAgentHubTelegramReplyMarkup(response: GreatTimeAgentChatResponse) {
-  const questions = (response.followUpQuestions ?? []).filter(Boolean).slice(0, 3);
+  const seenCategories = new Set<string>();
+  const seenLabels = new Set<string>();
+  const questions = (response.followUpQuestions ?? []).filter(Boolean).reduce<string[]>((selected, question) => {
+    if (selected.length >= 3) {
+      return selected;
+    }
+
+    const category = suggestionCategory(question);
+    const label = suggestionLabel(question, selected.length);
+    if (isRedundantSuggestion(response, category) || seenCategories.has(category) || seenLabels.has(label)) {
+      return selected;
+    }
+
+    seenCategories.add(category);
+    seenLabels.add(label);
+    selected.push(question);
+    return selected;
+  }, []);
+
   if (questions.length === 0) {
     return undefined;
   }

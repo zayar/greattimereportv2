@@ -554,7 +554,7 @@ test("Telegram Customer 360 formatter uses owner-friendly Myanmar package contex
 })
 
 test("Telegram formatter explains appointment services and practitioner rows without pipe tables", () => {
-  const appointmentMessage = formatAgentHubTelegramReply({
+  const appointmentResponse = {
     sessionId: "session-1",
     requestId: "request-1",
     responseId: "response-1",
@@ -567,8 +567,8 @@ test("Telegram formatter explains appointment services and practitioner rows wit
       toDate: "2026-06-24",
       label: "today",
     },
-    assistantMessage: "Appointment ledger has 2 appointments for 2026-06-24.",
-    summary: "Appointment ledger has 2 appointments for 2026-06-24.",
+    assistantMessage: "APICORE appointment ledger has 2 appointments for 2026-06-24.",
+    summary: "APICORE appointment ledger has 2 appointments for 2026-06-24.",
     metrics: [
       { label: "Appointments", value: 2 },
       { label: "Services", value: 2 },
@@ -606,15 +606,30 @@ test("Telegram formatter explains appointment services and practitioner rows wit
         ],
       },
     ],
+    warnings: [{ title: "APICORE note", message: "APICORE booking ledger returned partial rows." }],
+    followUpQuestions: [
+      "Show all appointments today.",
+      "How many appointments are scheduled today?",
+      "Show checked-out customers today.",
+      "Show cancelled and no-show appointments today.",
+    ],
     sources: [],
     dataStatus: "ok",
     actions: [{ type: "read_only_agent_response" }],
-  })
+  } as const
+  const appointmentMessage = formatAgentHubTelegramReply(appointmentResponse)
+  const appointmentMarkup = buildAgentHubTelegramReplyMarkup(appointmentResponse)
 
   assert.match(appointmentMessage, /ဒီနေ့ appointment စာရင်း/)
   assert.match(appointmentMessage, /Whitening Laser — appointment 1 ခု/)
-  assert.match(appointmentMessage, /Ma Aye: Whitening Laser/)
+  assert.match(appointmentMessage, /Ma Aye အတွက် Whitening Laser appointment ပါ/)
+  assert.match(appointmentMessage, /Wai Phoo က တာဝန်ယူထားပါတယ်/)
+  assert.doesNotMatch(appointmentMessage, /APICORE/)
   assert.doesNotMatch(appointmentMessage, /Whitening Laser \|/)
+  assert.deepEqual(
+    appointmentMarkup?.inline_keyboard.map((row) => row[0]?.text),
+    ["ပြီးဆုံးသူ ကြည့်မယ်", "ဖျက်/မလာ ကြည့်မယ်"],
+  )
 
   const practitionerMessage = formatAgentHubTelegramReply({
     sessionId: "session-1",
@@ -764,6 +779,49 @@ test("response builder keeps tool metrics and source metadata grounded", () => {
   assert.equal(response.sources[0]?.tool, "get_sales_summary")
   assert.equal(response.dataStatus, "ok")
   assert.equal(response.actions[0]?.type, "read_only_agent_response")
+})
+
+test("response builder suggests useful appointment next actions without repeating the same list", () => {
+  const response = buildAgentResponse({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "appointment",
+      message: "Who are the customers today's appointment?",
+    },
+    sessionId: "session-1",
+    requestId: "request-1",
+    plan: {
+      requestedAgent: "appointment",
+      resolvedAgent: "appointment",
+      autoMode: false,
+      intent: "appointment_list",
+      toolNames: ["get_appointment_ledger"],
+      period: { fromDate: "2026-06-24", toDate: "2026-06-24", label: "today" },
+    },
+    toolResults: [
+      {
+        toolName: "get_appointment_ledger",
+        sourceName: "appointment ledger",
+        checkedAt: "2026-06-24T00:00:00.000Z",
+        dataStatus: "ok",
+        live: true,
+        tables: [
+          {
+            title: "Appointments",
+            columns: [{ key: "customerName", title: "Customer" }],
+            rows: [{ customerName: "Ma Aye" }],
+          },
+        ],
+      },
+    ],
+  })
+
+  assert.deepEqual(response.followUpQuestions, [
+    "Show checked-in customers now.",
+    "Show checked-out customers today.",
+    "Show cancelled and no-show appointments today.",
+  ])
 })
 
 test("response builder exposes Customer 360 fact packs with scoped sources and dynamic follow-ups", () => {
