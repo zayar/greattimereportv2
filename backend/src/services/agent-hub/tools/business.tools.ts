@@ -4,6 +4,7 @@ import { getDailyTreatmentReport } from "../../reports/daily-treatment.service.j
 import { getServiceBehaviorReport } from "../../reports/service-behavior.service.js";
 import { getServicePortalList, getServicePortalOverview } from "../../reports/service-portal.service.js";
 import { getTherapistPortalReport } from "../../reports/therapist-portal.service.js";
+import { buildService360ToolResult } from "../service-360.service.js";
 import { limitRows, nowIso } from "../safety.js";
 import type { AgentToolDefinition, AgentToolInput, AgentToolResult } from "../types.js";
 
@@ -262,6 +263,17 @@ async function getDailyTreatments(input: AgentToolInput): Promise<AgentToolResul
 
 export function createBusinessTools(): AgentToolDefinition[] {
   return [
+    {
+      name: "get_service_360",
+      agentId: "business",
+      description: "Build a one-shot Service 360 fact pack for a named service.",
+      inputSchema: toolInputSchema,
+      sourceName: "Service 360 fact pack",
+      live: false,
+      maxRows: 25,
+      timeoutMs: 15_000,
+      execute: buildService360ToolResult,
+    },
     {
       name: "get_service_behavior",
       agentId: "business",

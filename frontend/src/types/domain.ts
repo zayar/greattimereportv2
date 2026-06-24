@@ -856,6 +856,71 @@ export interface Customer360FactPack {
   sources: GreatTimeAgentSource[];
 }
 
+export interface Service360FactPack {
+  identity: {
+    serviceKey: string;
+    displayName: string;
+    category: string;
+    detailPath?: string;
+    fromDate: string;
+    toDate: string;
+    selectedYear?: number;
+    lastCompletedAt?: string | null;
+  };
+  performance: {
+    revenue: number;
+    paidLineCount: number;
+    invoiceCount: number;
+    completedBookingCount: number;
+    customersServed: number;
+    payingCustomers: number;
+    customersTouched: number;
+    repeatCustomerCount: number;
+    repeatRatePct: number;
+    averageSellingPrice: number;
+    revenuePerCustomer: number;
+    revenueGrowthPct: number;
+    completedBookingGrowthPct: number;
+  };
+  demandPattern: {
+    trend: Array<Record<string, unknown>>;
+    peakWeekdays: Array<Record<string, unknown>>;
+    peakHours: Array<Record<string, unknown>>;
+  };
+  therapists: {
+    topAttributedTherapist?: string | null;
+    topAttributedTherapistSharePct: number;
+    unattributedBookingCount: number;
+    unattributedBookingSharePct: number;
+    performanceRows: Array<Record<string, unknown>>;
+  };
+  customers: {
+    topRows: Array<Record<string, unknown>>;
+  };
+  affinities: {
+    boughtTogether: Array<Record<string, unknown>>;
+    alsoUsedBySameCustomers: Array<Record<string, unknown>>;
+  };
+  commercial: {
+    packageMixPct: number;
+    oneOffMixPct: number;
+    averageDiscountRate: number;
+    paymentMethodMix: Array<Record<string, unknown>>;
+    packageBalanceStatus: "not_reported" | "partial" | "reliable";
+  };
+  recommendation?: {
+    title: string;
+    reasonCodes: string[];
+    evidence: string[];
+  };
+  dataQuality: Array<{
+    code: string;
+    severity: "info" | "warning" | "blocking";
+    message: string;
+  }>;
+  sources: GreatTimeAgentSource[];
+}
+
 export interface GreatTimeAgentChatRequest {
   sessionId?: string;
   clinicId: string;
@@ -885,6 +950,7 @@ export interface GreatTimeAgentChatResponse {
   recommendations?: GreatTimeAgentRecommendation[];
   followUpQuestions?: string[];
   customer360?: Customer360FactPack;
+  service360?: Service360FactPack;
   sources: GreatTimeAgentSource[];
   dataStatus: AgentDataStatus;
   warnings?: GreatTimeAgentWarning[];
@@ -1441,15 +1507,29 @@ export interface ServicePortalOverviewResponse {
     serviceName: string;
     serviceCategory: string;
     totalRevenue: number;
+    paidLineCount: number;
+    invoiceCount: number;
+    completedBookingCount: number;
     bookingCount: number;
+    customersServed: number;
+    payingCustomers: number;
+    customersTouched: number;
     customerCount: number;
+    repeatCustomerCount: number;
+    repeatRatePct: number;
     averageSellingPrice: number;
     repeatPurchaseRate: number;
     lastBookedDate: string | null;
+    topAttributedTherapist: string;
+    topAttributedTherapistSharePct: number;
     topTherapist: string;
     topTherapistShare: number;
+    unattributedBookingCount: number;
+    unattributedBookingSharePct: number;
     packageMixPct: number;
     oneOffMixPct: number;
+    revenueGrowthPct: number;
+    completedBookingGrowthPct: number;
     growthRate: number;
     averageDiscountRate: number;
     packageRemainingUsage: number;
@@ -1493,6 +1573,13 @@ export interface ServicePortalOverviewResponse {
     serviceCategory: string;
     sharedCustomerCount: number;
     pairCount: number;
+  }>;
+  boughtTogether: Array<{
+    serviceName: string;
+    serviceCategory: string;
+    coPurchaseInvoiceCount: number;
+    sharedCustomerCount: number;
+    invoiceSharePct: number;
   }>;
   peakPeriods: {
     weekdays: Array<{

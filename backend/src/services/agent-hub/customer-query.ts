@@ -1,5 +1,5 @@
 const ORDINAL_OR_PRONOUN =
-  /\b(first|second|third|fourth|fifth|they|them|that customer|that|her|him|သူ|အဲ့ဒီ)\b/i;
+  /\b(first|second|third|fourth|fifth|they|them|that customer|that service|that|her|him|it|သူ|အဲ့ဒီ)\b/i;
 
 const GENERIC_NON_CUSTOMER_TERMS =
   /\b(all|today|yesterday|week|month|appointments?|bookings?|sales?|revenue|payments?|invoices?|services?|practitioners?|therapists?|packages?|customers?|members?|report|summary|list|count|total|trend|method|cash|bank|kbz|kpay)\b/i;

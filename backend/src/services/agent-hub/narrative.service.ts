@@ -47,6 +47,30 @@ function buildNarrativePrompt(response: GreatTimeAgentChatResponse, memories: Gt
           },
         }
       : undefined,
+    service360: response.service360
+      ? {
+          ...response.service360,
+          demandPattern: {
+            ...response.service360.demandPattern,
+            trend: response.service360.demandPattern.trend.slice(0, 12),
+          },
+          therapists: {
+            ...response.service360.therapists,
+            performanceRows: response.service360.therapists.performanceRows.slice(0, 8),
+          },
+          customers: {
+            topRows: response.service360.customers.topRows.slice(0, 6),
+          },
+          affinities: {
+            boughtTogether: response.service360.affinities.boughtTogether.slice(0, 8),
+            alsoUsedBySameCustomers: response.service360.affinities.alsoUsedBySameCustomers.slice(0, 8),
+          },
+          commercial: {
+            ...response.service360.commercial,
+            paymentMethodMix: response.service360.commercial.paymentMethodMix.slice(0, 8),
+          },
+        }
+      : undefined,
     metrics: (response.metrics ?? []).slice(0, 8),
     tableTitles: (response.tables ?? []).map((table) => ({
       title: table.title,

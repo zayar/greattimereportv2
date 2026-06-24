@@ -2,6 +2,7 @@ import { env } from "../../config/env.js";
 import { shiftRange, toIsoDate } from "../../utils/date-range.js";
 import { formatDateKeyInTimeZone, normalizeTimeZone } from "../telegram/time.js";
 import { isCustomer360Question } from "./customer-query.js";
+import { isService360Question } from "./service-query.js";
 import { resolveAgent } from "./supervisor.js";
 import type {
   AgentPeriod,
@@ -84,11 +85,24 @@ export function extractAgentPeriod(params: {
     return buildPeriod(today, today, "today");
   }
 
+  if (/this\s+year|current\s+year|year\s+to\s+date|ytd|ဒီ\s*နှစ်/i.test(params.message)) {
+    return buildPeriod(`${today.slice(0, 4)}-01-01`, today, "year to date");
+  }
+
   if (params.fromDate && params.toDate) {
     return buildPeriod(params.fromDate, params.toDate, `${params.fromDate} to ${params.toDate}`);
   }
 
   return buildPeriod(today, today, "today");
+}
+
+function hasExplicitPeriodCue(request: GreatTimeAgentChatRequest) {
+  return Boolean(
+    (request.fromDate && request.toDate) ||
+      /last\s+\d+\s+days|last\s+90\s+days|90\s+days|last\s+30\s+days|30\s+days|this\s+week|current\s+week|last\s+week|previous\s+week|yesterday|today|now|right now|this\s+year|current\s+year|year\s+to\s+date|ytd|ဒီနေ့|ဒီ\s*နှစ်|မနေ့/i.test(
+        request.message,
+      ),
+  );
 }
 
 function detectFinanceIntent(message: string) {
@@ -143,6 +157,9 @@ function detectCustomerIntent(message: string) {
 }
 
 function detectBusinessIntent(message: string) {
+  if (isService360Question(message)) {
+    return "service_360";
+  }
   if (/practitioner|therapist|doctor|ဆရာဝန်/i.test(message)) {
     return "practitioner_performance";
   }
@@ -242,6 +259,8 @@ function toolsForIntent(agentId: GreatTimeAgentId, intent: string) {
 
   if (agentId === "business") {
     switch (intent) {
+      case "service_360":
+        return ["get_service_360"];
       case "service_performance":
       case "service_trend":
         return ["get_service_behavior", "get_service_overview"];
@@ -317,12 +336,17 @@ export function planAgentRequest(params: {
           ? detectBusinessIntent(params.request.message)
           : detectAppointmentIntent(params.request.message);
 
+  const plannedPeriod =
+    intent === "service_360" && !hasExplicitPeriodCue(params.request)
+      ? buildPeriod(`${period.toDate.slice(0, 4)}-01-01`, period.toDate, "year to date")
+      : period;
+
   return {
     requestedAgent,
     resolvedAgent,
     autoMode,
     intent,
     toolNames: toolsForIntent(resolvedAgent, intent),
-    period,
+    period: plannedPeriod,
   };
 }

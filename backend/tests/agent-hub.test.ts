@@ -15,6 +15,7 @@ const { assertToolAllowed } = await import("../src/services/agent-hub/tool-execu
 const { createAgentToolRegistry, getAgentToolAllowlist } = await import("../src/services/agent-hub/tool-registry.ts")
 const { extractInvoiceSearch } = await import("../src/services/agent-hub/tools/finance.tools.ts")
 const { extractLikelyCustomerSearchText } = await import("../src/services/agent-hub/customer-query.ts")
+const { extractExplicitServiceSearchText } = await import("../src/services/agent-hub/service-query.ts")
 const {
   buildLockedAgentHubResponse,
   extractExplicitCustomerSearchText,
@@ -42,6 +43,7 @@ test("supervisor routes four agent domains and respects explicit override", () =
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "How many appointments are checked in now?" }).resolvedAgent, "appointment")
   assert.equal(resolveAgent({ requestedAgent: "finance", message: "appointments today" }).resolvedAgent, "finance")
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "Soe Moe Thu ( C )" }).resolvedAgent, "customer_relationship")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "Tell me about Whitening Laser" }).resolvedAgent, "business")
 })
 
 test("supervisor handles Myanmar keywords and deterministic tie-breaking", () => {
@@ -190,6 +192,55 @@ test("planner keeps generic show questions out of Customer 360 and includes usag
 
   assert.equal(callPlan.intent, "follow_up_today")
   assert.deepEqual(callPlan.toolNames, ["search_customer_profiles"])
+})
+
+test("planner routes named service questions to one-shot Service 360 with YTD default", () => {
+  const now = new Date("2026-06-18T06:00:00.000Z")
+  const plan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "Tell me about Whitening Laser",
+      timezone: "UTC",
+    },
+    now,
+  })
+
+  assert.equal(extractExplicitServiceSearchText("Tell me about Whitening Laser"), "Whitening Laser")
+  assert.equal(extractExplicitServiceSearchText("Which customers used Whitening Laser most?"), "Whitening Laser")
+  assert.equal(extractExplicitServiceSearchText("Which services are bought together with Whitening Laser?"), "Whitening Laser")
+  assert.equal(extractExplicitServiceSearchText("Which service is declining?"), "")
+  assert.equal(plan.resolvedAgent, "business")
+  assert.equal(plan.intent, "service_360")
+  assert.deepEqual(plan.toolNames, ["get_service_360"])
+  assert.equal(plan.period.fromDate, "2026-01-01")
+  assert.equal(plan.period.toDate, "2026-06-18")
+
+  const genericPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "business",
+      message: "Which service is declining?",
+    },
+    now,
+  })
+  assert.equal(genericPlan.intent, "service_trend")
+
+  const explicitPeriodPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "business",
+      message: "How is Whitening Laser doing last 30 days?",
+      timezone: "UTC",
+    },
+    now,
+  })
+  assert.equal(explicitPeriodPlan.intent, "service_360")
+  assert.equal(explicitPeriodPlan.period.fromDate, "2026-05-20")
+  assert.equal(explicitPeriodPlan.period.toDate, "2026-06-18")
 })
 
 test("invoice detail search ignores generic time and display words", () => {
@@ -512,6 +563,14 @@ test("entity context resolves ordinal customer references", () => {
     ],
   })
   assert.equal(ref?.entityId, "c-2")
+
+  const serviceRef = resolveEntityReference({
+    message: "Tell me about the first service",
+    sessionRefs: [
+      { entityType: "service", entityId: "svc-1", displayName: "Whitening Laser", serviceName: "Whitening Laser", rank: 1 },
+    ],
+  })
+  assert.equal(serviceRef?.entityId, "svc-1")
 })
 
 test("response builder keeps tool metrics and source metadata grounded", () => {

@@ -168,6 +168,71 @@ export type Customer360FactPack = {
   sources: GreatTimeAgentSource[];
 };
 
+export type Service360FactPack = {
+  identity: {
+    serviceKey: string;
+    displayName: string;
+    category: string;
+    detailPath?: string;
+    fromDate: string;
+    toDate: string;
+    selectedYear?: number;
+    lastCompletedAt?: string | null;
+  };
+  performance: {
+    revenue: number;
+    paidLineCount: number;
+    invoiceCount: number;
+    completedBookingCount: number;
+    customersServed: number;
+    payingCustomers: number;
+    customersTouched: number;
+    repeatCustomerCount: number;
+    repeatRatePct: number;
+    averageSellingPrice: number;
+    revenuePerCustomer: number;
+    revenueGrowthPct: number;
+    completedBookingGrowthPct: number;
+  };
+  demandPattern: {
+    trend: Array<Record<string, unknown>>;
+    peakWeekdays: Array<Record<string, unknown>>;
+    peakHours: Array<Record<string, unknown>>;
+  };
+  therapists: {
+    topAttributedTherapist?: string | null;
+    topAttributedTherapistSharePct: number;
+    unattributedBookingCount: number;
+    unattributedBookingSharePct: number;
+    performanceRows: Array<Record<string, unknown>>;
+  };
+  customers: {
+    topRows: Array<Record<string, unknown>>;
+  };
+  affinities: {
+    boughtTogether: Array<Record<string, unknown>>;
+    alsoUsedBySameCustomers: Array<Record<string, unknown>>;
+  };
+  commercial: {
+    packageMixPct: number;
+    oneOffMixPct: number;
+    averageDiscountRate: number;
+    paymentMethodMix: Array<Record<string, unknown>>;
+    packageBalanceStatus: "not_reported" | "partial" | "reliable";
+  };
+  recommendation?: {
+    title: string;
+    reasonCodes: string[];
+    evidence: string[];
+  };
+  dataQuality: Array<{
+    code: string;
+    severity: "info" | "warning" | "blocking";
+    message: string;
+  }>;
+  sources: GreatTimeAgentSource[];
+};
+
 export type GreatTimeAgentChatResponse = {
   sessionId: string;
   requestId: string;
@@ -184,6 +249,7 @@ export type GreatTimeAgentChatResponse = {
   followUpQuestions?: string[];
   usedMemoryIds?: string[];
   customer360?: Customer360FactPack;
+  service360?: Service360FactPack;
   sources: GreatTimeAgentSource[];
   dataStatus: AgentDataStatus;
   warnings?: GreatTimeAgentWarning[];
@@ -245,6 +311,7 @@ export type AgentToolResult = {
   entityRefs?: GreatTimeAgentEntityContext[];
   sources?: GreatTimeAgentSource[];
   customer360?: Customer360FactPack;
+  service360?: Service360FactPack;
 };
 
 export type AgentToolDefinition = {

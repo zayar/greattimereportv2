@@ -8,6 +8,8 @@ const ORDINALS: Array<[RegExp, number]> = [
   [/\bfifth\b/i, 5],
 ];
 
+const ENTITY_REFERENCE = /\b(first|second|third|fourth|fifth|they|them|that customer|that service|that|her|him|it|သူ|အဲ့ဒီ)\b/i;
+
 export function entityRefKey(ref: GreatTimeAgentEntityContext) {
   return `${ref.entityType}:${ref.entityId}`;
 }
@@ -36,14 +38,16 @@ export function resolveEntityReference(params: {
     return params.explicit;
   }
 
-  const refs = (params.sessionRefs ?? []).filter((ref) => ref.entityType === "customer" || ref.entityType === "appointment");
+  const refs = (params.sessionRefs ?? []).filter((ref) =>
+    ["customer", "appointment", "service", "practitioner", "invoice"].includes(ref.entityType),
+  );
   const ordinal = ORDINALS.find(([pattern]) => pattern.test(params.message))?.[1];
 
   if (ordinal) {
     return refs.find((ref) => ref.rank === ordinal) ?? refs[ordinal - 1] ?? null;
   }
 
-  if (/\b(they|them|that customer|her|him|သူ|အဲ့ဒီ)\b/i.test(params.message) && refs.length === 1) {
+  if (ENTITY_REFERENCE.test(params.message) && refs.length === 1) {
     return refs[0];
   }
 

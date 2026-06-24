@@ -531,7 +531,7 @@ export async function getServicePortalList(params: ServiceListParams) {
           ANY_VALUE(visits.serviceCategory) AS serviceCategory,
           COUNT(*) AS bookingCount,
           COUNT(DISTINCT visits.phoneNumber) AS customerCount,
-          COUNTIF(customerCounts.visitCount > 1) AS repeatCustomers,
+          COUNT(DISTINCT IF(customerCounts.visitCount > 1, visits.phoneNumber, NULL)) AS repeatCustomers,
           FORMAT_DATE('%Y-%m-%d', MAX(DATE(visits.checkInTime))) AS lastBookedDate,
           COALESCE(previous.previousBookingCount, 0) AS previousBookingCount,
           COUNTIF(spend.visitCount >= 3) AS highValueCustomers
@@ -566,6 +566,7 @@ export async function getServicePortalList(params: ServiceListParams) {
             COUNT(*) AS bookingCount,
             MAX(checkInTime) AS latestVisitDate
           FROM DistinctServiceVisits
+          WHERE LOWER(TRIM(COALESCE(therapistName, ''))) NOT IN ('', 'unknown', 'null', 'n/a')
           GROUP BY serviceName, therapistName
         )
         SELECT
@@ -741,6 +742,101 @@ export async function getServicePortalList(params: ServiceListParams) {
   };
 }
 
+export async function resolveServicePortalCandidates(params: {
+  clinicCode: string;
+  search: string;
+  limit?: number;
+}) {
+  const search = params.search.trim();
+  const limit = Math.min(Math.max(params.limit ?? 10, 1), 25);
+
+  if (!search) {
+    return [];
+  }
+
+  const rows = await runAnalyticsQuery<{
+    serviceName: string;
+    serviceCategory: string;
+    completedBookingCount: number;
+    revenue: number;
+    paidLineCount: number;
+    lastActivityDate: string | null;
+  }>(
+    `
+      ${buildServicePaymentItemsCte("DATE(OrderCreatedDate) >= DATE_SUB(CURRENT_DATE(), INTERVAL 730 DAY)")}
+      ${buildDistinctServiceVisitsCte("DATE(CheckInTime) >= DATE_SUB(CURRENT_DATE(), INTERVAL 730 DAY)").replace("WITH DistinctServiceVisits AS", ", DistinctServiceVisits AS")}
+      ,
+      PaymentServices AS (
+        SELECT
+          serviceName,
+          ANY_VALUE(serviceCategory) AS serviceCategory,
+          SUM(itemTotal) AS revenue,
+          COUNT(*) AS paidLineCount,
+          MAX(DATE(orderCreatedDate)) AS lastPaymentDate
+        FROM ServicePaymentItems
+        GROUP BY serviceName
+      ),
+      VisitServices AS (
+        SELECT
+          serviceName,
+          ANY_VALUE(serviceCategory) AS serviceCategory,
+          COUNT(*) AS completedBookingCount,
+          MAX(DATE(checkInTime)) AS lastVisitDate
+        FROM DistinctServiceVisits
+        GROUP BY serviceName
+      ),
+      CombinedServices AS (
+        SELECT
+          COALESCE(pay.serviceName, visits.serviceName) AS serviceName,
+          COALESCE(pay.serviceCategory, visits.serviceCategory, 'Other') AS serviceCategory,
+          COALESCE(visits.completedBookingCount, 0) AS completedBookingCount,
+          COALESCE(pay.revenue, 0) AS revenue,
+          COALESCE(pay.paidLineCount, 0) AS paidLineCount,
+          GREATEST(
+            COALESCE(pay.lastPaymentDate, DATE '1900-01-01'),
+            COALESCE(visits.lastVisitDate, DATE '1900-01-01')
+          ) AS lastActivityDate
+        FROM PaymentServices AS pay
+        FULL OUTER JOIN VisitServices AS visits
+          USING (serviceName)
+      )
+      SELECT
+        serviceName,
+        serviceCategory,
+        completedBookingCount,
+        revenue,
+        paidLineCount,
+        IF(lastActivityDate = DATE '1900-01-01', NULL, FORMAT_DATE('%Y-%m-%d', lastActivityDate)) AS lastActivityDate
+      FROM CombinedServices
+      WHERE
+        LOWER(serviceName) = LOWER(@search)
+        OR LOWER(serviceName) LIKE LOWER(CONCAT('%', @search, '%'))
+        OR LOWER(serviceCategory) LIKE LOWER(CONCAT('%', @search, '%'))
+      ORDER BY
+        CASE WHEN LOWER(serviceName) = LOWER(@search) THEN 0 ELSE 1 END,
+        completedBookingCount DESC,
+        revenue DESC,
+        serviceName ASC
+      LIMIT @limit
+    `,
+    {
+      clinicCode: params.clinicCode,
+      search,
+      limit,
+    },
+  );
+
+  return rows.map((row) => ({
+    serviceKey: row.serviceName.toLowerCase(),
+    serviceName: row.serviceName,
+    serviceCategory: row.serviceCategory || "Other",
+    completedBookingCount: parseNumber(row.completedBookingCount),
+    revenue: parseNumber(row.revenue),
+    paidLineCount: parseNumber(row.paidLineCount),
+    lastActivityDate: row.lastActivityDate,
+  }));
+}
+
 export async function getServicePortalOverview(params: DetailBaseParams) {
   const { previousFromDate, previousToDate } = getPreviousWindow(params.fromDate, params.toDate);
   const queryParams = {
@@ -749,11 +845,24 @@ export async function getServicePortalOverview(params: DetailBaseParams) {
     previousToDate,
   };
 
-  const [paymentRows, visitRows, trendRows, therapistRows, paymentMixRows, customerRows, relatedRows, weekdayRows, hourRows] =
+  const [
+    paymentRows,
+    visitRows,
+    trendRows,
+    therapistRows,
+    paymentMixRows,
+    customerRows,
+    customerSummaryRows,
+    coPurchaseRows,
+    relatedRows,
+    weekdayRows,
+    hourRows,
+  ] =
     await Promise.all([
       runAnalyticsQuery<{
         totalRevenue: number;
-        saleCount: number;
+        paidLineCount: number;
+        invoiceCount: number;
         paymentCustomerCount: number;
         averageSellingPrice: number;
         packageMixPct: number;
@@ -765,7 +874,8 @@ export async function getServicePortalOverview(params: DetailBaseParams) {
           ${buildServicePaymentItemsCte("LOWER(COALESCE(ServiceName, '')) = LOWER(@serviceName) AND DATE(OrderCreatedDate) BETWEEN @previousFromDate AND @toDate")}
           SELECT
             SUM(CASE WHEN DATE(orderCreatedDate) BETWEEN @fromDate AND @toDate THEN itemTotal ELSE 0 END) AS totalRevenue,
-            COUNTIF(DATE(orderCreatedDate) BETWEEN @fromDate AND @toDate) AS saleCount,
+            COUNTIF(DATE(orderCreatedDate) BETWEEN @fromDate AND @toDate) AS paidLineCount,
+            COUNT(DISTINCT IF(DATE(orderCreatedDate) BETWEEN @fromDate AND @toDate, invoiceNumber, NULL)) AS invoiceCount,
             COUNT(DISTINCT CASE WHEN DATE(orderCreatedDate) BETWEEN @fromDate AND @toDate THEN phoneNumber ELSE NULL END) AS paymentCustomerCount,
             SAFE_DIVIDE(
               SUM(CASE WHEN DATE(orderCreatedDate) BETWEEN @fromDate AND @toDate THEN itemTotal ELSE 0 END),
@@ -781,6 +891,7 @@ export async function getServicePortalOverview(params: DetailBaseParams) {
             ) * 100 AS oneOffMixPct,
             AVG(
               CASE
+                WHEN DATE(orderCreatedDate) NOT BETWEEN @fromDate AND @toDate THEN NULL
                 WHEN invoiceNetTotal = 0 THEN 0
                 ELSE SAFE_DIVIDE(invoiceDiscount, invoiceNetTotal) * 100
               END
@@ -794,11 +905,12 @@ export async function getServicePortalOverview(params: DetailBaseParams) {
         serviceCategory: string;
         bookingCount: number;
         customerCount: number;
-        repeatCustomers: number;
+        repeatCustomerCount: number;
         lastBookedDate: string | null;
         packageRemainingUsage: number;
         topTherapist: string;
         topTherapistBookings: number;
+        unattributedBookingCount: number;
         previousBookingCount: number;
       }>(
         `
@@ -827,6 +939,7 @@ export async function getServicePortalOverview(params: DetailBaseParams) {
               COUNT(*) AS bookingCount,
               MAX(checkInTime) AS latestVisitDate
             FROM PeriodVisits
+            WHERE LOWER(TRIM(COALESCE(therapistName, ''))) NOT IN ('', 'unknown', 'null', 'n/a')
             GROUP BY therapistName
           ),
           TopTherapist AS (
@@ -845,11 +958,12 @@ export async function getServicePortalOverview(params: DetailBaseParams) {
             ANY_VALUE(serviceCategory) AS serviceCategory,
             COUNT(*) AS bookingCount,
             COUNT(DISTINCT phoneNumber) AS customerCount,
-            COUNTIF(customerCounts.visitCount > 1) AS repeatCustomers,
+            COUNT(DISTINCT IF(customerCounts.visitCount > 1, phoneNumber, NULL)) AS repeatCustomerCount,
             FORMAT_DATE('%Y-%m-%d', MAX(DATE(checkInTime))) AS lastBookedDate,
             SUM(GREATEST(remainingPackageCount, 0)) AS packageRemainingUsage,
             (SELECT topTherapist FROM TopTherapist) AS topTherapist,
             COALESCE((SELECT topTherapistBookings FROM TopTherapist), 0) AS topTherapistBookings,
+            COUNTIF(LOWER(TRIM(COALESCE(therapistName, ''))) IN ('', 'unknown', 'null', 'n/a')) AS unattributedBookingCount,
             (SELECT COUNT(*) FROM PreviousVisits) AS previousBookingCount
           FROM PeriodVisits
           LEFT JOIN CustomerVisitCounts AS customerCounts USING (phoneNumber)
@@ -924,6 +1038,7 @@ export async function getServicePortalOverview(params: DetailBaseParams) {
             SUM(price) AS serviceValue,
             FORMAT_DATE('%Y-%m-%d', MAX(DATE(checkInTime))) AS latestVisitDate
           FROM DistinctServiceVisits
+          WHERE LOWER(TRIM(COALESCE(therapistName, ''))) NOT IN ('', 'unknown', 'null', 'n/a')
           GROUP BY therapistName
           ORDER BY bookingCount DESC, serviceValue DESC, therapistName ASC
           LIMIT 8
@@ -993,6 +1108,78 @@ export async function getServicePortalOverview(params: DetailBaseParams) {
         queryParams,
       ),
       runAnalyticsQuery<{
+        customersTouched: number;
+      }>(
+        `
+          ${buildServicePaymentItemsCte("LOWER(COALESCE(ServiceName, '')) = LOWER(@serviceName) AND DATE(OrderCreatedDate) BETWEEN @fromDate AND @toDate")}
+          ${buildDistinctServiceVisitsCte("LOWER(COALESCE(ServiceName, '')) = LOWER(@serviceName) AND DATE(CheckInTime) BETWEEN @fromDate AND @toDate").replace("WITH DistinctServiceVisits AS", ", DistinctServiceVisits AS")}
+          ,
+          PaymentCustomerKeys AS (
+            SELECT DISTINCT
+              COALESCE(NULLIF(memberId, ''), NULLIF(REGEXP_REPLACE(phoneNumber, r'[^0-9]', ''), ''), LOWER(customerName)) AS customerKey
+            FROM ServicePaymentItems
+          ),
+          VisitCustomerKeys AS (
+            SELECT DISTINCT
+              COALESCE(NULLIF(memberId, ''), NULLIF(REGEXP_REPLACE(phoneNumber, r'[^0-9]', ''), ''), LOWER(customerName)) AS customerKey
+            FROM DistinctServiceVisits
+          ),
+          CombinedCustomerKeys AS (
+            SELECT customerKey FROM PaymentCustomerKeys
+            UNION DISTINCT
+            SELECT customerKey FROM VisitCustomerKeys
+          )
+          SELECT COUNT(DISTINCT customerKey) AS customersTouched
+          FROM CombinedCustomerKeys
+          WHERE COALESCE(customerKey, '') != ''
+        `,
+        queryParams,
+      ),
+      runAnalyticsQuery<{
+        serviceName: string;
+        serviceCategory: string;
+        coPurchaseInvoiceCount: number;
+        sharedCustomerCount: number;
+        invoiceSharePct: number;
+      }>(
+        `
+          ${buildServicePaymentItemsCte("DATE(OrderCreatedDate) BETWEEN @fromDate AND @toDate")}
+          ,
+          TargetInvoices AS (
+            SELECT DISTINCT invoiceNumber
+            FROM ServicePaymentItems
+            WHERE LOWER(serviceName) = LOWER(@serviceName)
+          ),
+          InvoiceServices AS (
+            SELECT DISTINCT
+              invoiceNumber,
+              serviceName,
+              phoneNumber,
+              serviceCategory
+            FROM ServicePaymentItems
+            WHERE COALESCE(invoiceNumber, '') != ''
+              AND COALESCE(serviceName, '') != ''
+          )
+          SELECT
+            invoiceServices.serviceName AS serviceName,
+            ANY_VALUE(invoiceServices.serviceCategory) AS serviceCategory,
+            COUNT(DISTINCT invoiceServices.invoiceNumber) AS coPurchaseInvoiceCount,
+            COUNT(DISTINCT invoiceServices.phoneNumber) AS sharedCustomerCount,
+            SAFE_DIVIDE(
+              COUNT(DISTINCT invoiceServices.invoiceNumber),
+              NULLIF((SELECT COUNT(*) FROM TargetInvoices), 0)
+            ) * 100 AS invoiceSharePct
+          FROM InvoiceServices AS invoiceServices
+          JOIN TargetInvoices
+            USING (invoiceNumber)
+          WHERE LOWER(invoiceServices.serviceName) != LOWER(@serviceName)
+          GROUP BY invoiceServices.serviceName
+          ORDER BY coPurchaseInvoiceCount DESC, sharedCustomerCount DESC, invoiceServices.serviceName ASC
+          LIMIT 8
+        `,
+        queryParams,
+      ),
+      runAnalyticsQuery<{
         serviceName: string;
         sharedCustomerCount: number;
         pairCount: number;
@@ -1057,21 +1244,38 @@ export async function getServicePortalOverview(params: DetailBaseParams) {
 
   const paymentSummary = paymentRows[0];
   const visitSummary = visitRows[0];
+  const customerSummary = customerSummaryRows[0];
   const totalRevenue = parseNumber(paymentSummary?.totalRevenue);
   const bookingCount = parseNumber(visitSummary?.bookingCount);
-  const customerCount = parseNumber(visitSummary?.customerCount || paymentSummary?.paymentCustomerCount);
-  const repeatCustomers = parseNumber(visitSummary?.repeatCustomers);
+  const paidLineCount = parseNumber(paymentSummary?.paidLineCount);
+  const invoiceCount = parseNumber(paymentSummary?.invoiceCount);
+  const customersServed = parseNumber(visitSummary?.customerCount);
+  const payingCustomers = parseNumber(paymentSummary?.paymentCustomerCount);
+  const customersTouched = parseNumber(customerSummary?.customersTouched || customersServed || payingCustomers);
+  const customerCount = customersServed || payingCustomers;
+  const repeatCustomers = parseNumber(visitSummary?.repeatCustomerCount);
   const repeatPurchaseRate =
-    customerCount > 0 ? Number(((repeatCustomers / customerCount) * 100).toFixed(1)) : 0;
+    customersServed > 0 ? Number(((repeatCustomers / customersServed) * 100).toFixed(1)) : 0;
   const previousRevenue = parseNumber(paymentSummary?.previousRevenue);
   const previousBookingCount = parseNumber(visitSummary?.previousBookingCount);
-  const growthBase = previousRevenue > 0 ? previousRevenue : previousBookingCount;
-  const growthNumerator = previousRevenue > 0 ? totalRevenue - previousRevenue : bookingCount - previousBookingCount;
-  const growthRate =
-    growthBase > 0 ? Number(((growthNumerator / growthBase) * 100).toFixed(1)) : totalRevenue > 0 || bookingCount > 0 ? 100 : 0;
+  const revenueGrowthPct =
+    previousRevenue > 0 ? Number((((totalRevenue - previousRevenue) / previousRevenue) * 100).toFixed(1)) : totalRevenue > 0 ? 100 : 0;
+  const completedBookingGrowthPct =
+    previousBookingCount > 0
+      ? Number((((bookingCount - previousBookingCount) / previousBookingCount) * 100).toFixed(1))
+      : bookingCount > 0
+        ? 100
+        : 0;
+  const growthRate = previousRevenue > 0 ? revenueGrowthPct : completedBookingGrowthPct;
   const topTherapistBookings = parseNumber(visitSummary?.topTherapistBookings);
+  const unattributedBookingCount = parseNumber(visitSummary?.unattributedBookingCount);
   const topTherapistShare =
     bookingCount > 0 ? Number(((topTherapistBookings / bookingCount) * 100).toFixed(1)) : 0;
+  const attributedBookingCount = Math.max(0, bookingCount - unattributedBookingCount);
+  const topAttributedTherapistSharePct =
+    attributedBookingCount > 0 ? Number(((topTherapistBookings / attributedBookingCount) * 100).toFixed(1)) : 0;
+  const unattributedBookingSharePct =
+    bookingCount > 0 ? Number(((unattributedBookingCount / bookingCount) * 100).toFixed(1)) : 0;
   const averageDiscountRate = Number(parseNumber(paymentSummary?.averageDiscountRate).toFixed(1));
 
   const insights = buildServiceInsights({
@@ -1093,15 +1297,29 @@ export async function getServicePortalOverview(params: DetailBaseParams) {
       serviceName: params.serviceName,
       serviceCategory: parseText(visitSummary?.serviceCategory, "Other"),
       totalRevenue,
+      paidLineCount,
+      invoiceCount,
+      completedBookingCount: bookingCount,
       bookingCount,
+      customersServed,
+      payingCustomers,
+      customersTouched,
       customerCount,
+      repeatCustomerCount: repeatCustomers,
+      repeatRatePct: repeatPurchaseRate,
       averageSellingPrice: Number(parseNumber(paymentSummary?.averageSellingPrice).toFixed(0)),
       repeatPurchaseRate,
       lastBookedDate: visitSummary?.lastBookedDate ?? null,
+      topAttributedTherapist: parseText(visitSummary?.topTherapist, "Unknown"),
+      topAttributedTherapistSharePct,
       topTherapist: parseText(visitSummary?.topTherapist, "Unknown"),
       topTherapistShare,
+      unattributedBookingCount,
+      unattributedBookingSharePct,
       packageMixPct: Number(parseNumber(paymentSummary?.packageMixPct).toFixed(1)),
       oneOffMixPct: Number(parseNumber(paymentSummary?.oneOffMixPct).toFixed(1)),
+      revenueGrowthPct,
+      completedBookingGrowthPct,
       growthRate,
       averageDiscountRate,
       packageRemainingUsage: parseNumber(visitSummary?.packageRemainingUsage),
@@ -1160,6 +1378,13 @@ export async function getServicePortalOverview(params: DetailBaseParams) {
       serviceCategory: row.serviceCategory,
       sharedCustomerCount: parseNumber(row.sharedCustomerCount),
       pairCount: parseNumber(row.pairCount),
+    })),
+    boughtTogether: coPurchaseRows.map((row) => ({
+      serviceName: row.serviceName,
+      serviceCategory: row.serviceCategory,
+      coPurchaseInvoiceCount: parseNumber(row.coPurchaseInvoiceCount),
+      sharedCustomerCount: parseNumber(row.sharedCustomerCount),
+      invoiceSharePct: Number(parseNumber(row.invoiceSharePct).toFixed(1)),
     })),
     peakPeriods: {
       weekdays: weekdayRows.map((row) => ({

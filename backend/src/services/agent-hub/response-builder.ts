@@ -6,6 +6,7 @@ import type {
   GreatTimeAgentChatRequest,
   GreatTimeAgentChatResponse,
   GreatTimeAgentIntentPlan,
+  Service360FactPack,
 } from "./types.js";
 
 function defaultSummary(plan: GreatTimeAgentIntentPlan, results: AgentToolResult[]) {
@@ -67,9 +68,28 @@ function hasActionableCustomerRows(results: AgentToolResult[]) {
   });
 }
 
-function followUpsForAgent(plan: GreatTimeAgentIntentPlan, results: AgentToolResult[], customer360?: Customer360FactPack) {
+function followUpsForService360(factPack: Service360FactPack) {
+  const questions = [
+    `Which customers used ${factPack.identity.displayName} most?`,
+    `Which services are bought together with ${factPack.identity.displayName}?`,
+    `Which practitioners handle ${factPack.identity.displayName} most?`,
+  ];
+
+  return questions.slice(0, 3);
+}
+
+function followUpsForAgent(
+  plan: GreatTimeAgentIntentPlan,
+  results: AgentToolResult[],
+  customer360?: Customer360FactPack,
+  service360?: Service360FactPack,
+) {
   if (customer360) {
     return followUpsForCustomer360(customer360);
+  }
+
+  if (service360) {
+    return followUpsForService360(service360);
   }
 
   if (plan.resolvedAgent === "finance") {
@@ -172,6 +192,7 @@ export function buildAgentResponse(params: {
     ...params.toolResults.flatMap((result) => result.warnings ?? []),
   ];
   const customer360 = params.toolResults.find((result) => result.customer360)?.customer360;
+  const service360 = params.toolResults.find((result) => result.service360)?.service360;
   const entityContext = params.toolResults.flatMap((result) => result.entityRefs ?? [])[0] ?? params.request.entityContext;
   const summary = params.unsupportedReason ?? defaultSummary(params.plan, params.toolResults);
   const sources = params.toolResults.flatMap((result) =>
@@ -202,8 +223,9 @@ export function buildAgentResponse(params: {
     metrics: metrics.length ? metrics : undefined,
     tables: tables.length ? tables : undefined,
     recommendations: recommendations.length ? recommendations : undefined,
-    followUpQuestions: followUpsForAgent(params.plan, params.toolResults, customer360),
+    followUpQuestions: followUpsForAgent(params.plan, params.toolResults, customer360, service360),
     customer360,
+    service360,
     sources,
     dataStatus,
     warnings: warnings.length ? warnings : undefined,

@@ -6,6 +6,7 @@ import {
   hasCustomerEntityReference,
   hasExplicitCustomerSearchIntent as hasCustomerSearchIntent,
 } from "./customer-query.js";
+import { extractExplicitServiceSearchText, hasExplicitServiceSearchIntent, isService360Question } from "./service-query.js";
 import { planAgentRequest } from "./intent-planner.js";
 import { enhanceAgentResponseNarrative } from "./narrative.service.js";
 import { buildAgentResponse } from "./response-builder.js";
@@ -64,6 +65,13 @@ function withFollowUpAgentInference(
     };
   }
 
+  if (request.entityContext?.entityType === "service" && hasExplicitServiceSearchIntent(request.message)) {
+    return {
+      ...request,
+      agent: "business",
+    };
+  }
+
   const inferredAgent = inferAgentFromEntity(resolvedRef);
   if (!inferredAgent) {
     return request;
@@ -102,20 +110,32 @@ function searchTextMatchesEntity(searchText: string, entityContext: GreatTimeAge
   return Boolean(search && name && (search === name || name.includes(search) || search.includes(name)));
 }
 
+function serviceTextMatchesEntity(searchText: string, entityContext: GreatTimeAgentEntityContext | undefined) {
+  const search = normalizeNameForComparison(searchText);
+  const name = normalizeNameForComparison(entityContext?.serviceName ?? entityContext?.displayName);
+
+  return Boolean(search && name && (search === name || name.includes(search) || search.includes(name)));
+}
+
 export function shouldIgnoreExplicitEntityContext(params: {
   request: GreatTimeAgentChatRequest;
 }) {
   const searchText = extractExplicitCustomerSearchText(params.request.message);
+  const serviceSearchText = extractExplicitServiceSearchText(params.request.message);
   return Boolean(
-    params.request.entityContext?.entityType === "customer" &&
+    (params.request.entityContext?.entityType === "customer" &&
       searchText &&
-      !searchTextMatchesEntity(searchText, params.request.entityContext),
+      !searchTextMatchesEntity(searchText, params.request.entityContext)) ||
+      (params.request.entityContext?.entityType === "service" &&
+        serviceSearchText &&
+        !serviceTextMatchesEntity(serviceSearchText, params.request.entityContext)),
   );
 }
 
 function forceFollowUpPlan(params: {
   plan: ReturnType<typeof planAgentRequest>;
   entityContext: GreatTimeAgentEntityContext | undefined;
+  request: GreatTimeAgentChatRequest;
 }) {
   if (!params.entityContext) {
     return params.plan;
@@ -126,6 +146,33 @@ function forceFollowUpPlan(params: {
       ...params.plan,
       intent: "customer_360",
       toolNames: ["get_customer_360"],
+    };
+  }
+
+  if (
+    params.plan.resolvedAgent === "business" &&
+    params.entityContext.entityType === "service" &&
+    (isService360Question(params.request.message) || /tell\s+me|details?|what\s+do\s+we\s+know|how\s+is|service\s*360/i.test(params.request.message))
+  ) {
+    const hasExplicitPeriod = Boolean(
+      (params.request.fromDate && params.request.toDate) ||
+        /last\s+\d+\s+days|last\s+90\s+days|90\s+days|last\s+30\s+days|30\s+days|this\s+week|current\s+week|last\s+week|previous\s+week|yesterday|today|now|right now|this\s+year|current\s+year|year\s+to\s+date|ytd|ဒီနေ့|ဒီ\s*နှစ်|မနေ့/i.test(
+          params.request.message,
+        ),
+    );
+    const period = hasExplicitPeriod
+      ? params.plan.period
+      : {
+          ...params.plan.period,
+          fromDate: `${params.plan.period.toDate.slice(0, 4)}-01-01`,
+          label: "year to date",
+        };
+
+    return {
+      ...params.plan,
+      intent: "service_360",
+      toolNames: ["get_service_360"],
+      period,
     };
   }
 
@@ -171,6 +218,7 @@ export async function askAgentHub(params: {
   const plan = forceFollowUpPlan({
     plan: initialPlan,
     entityContext: request.entityContext,
+    request,
   });
   const memoryContext = await retrieveMemoryContext({
     clinicId: params.clinic.clinicId,
