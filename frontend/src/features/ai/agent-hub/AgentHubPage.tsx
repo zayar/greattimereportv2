@@ -331,6 +331,14 @@ function AgentCustomer360Card({ factPack }: { factPack: Customer360FactPack }) {
   const topServices = factPack.usage.topServices.slice(0, 3);
   const packageRows = factPack.packages.holdings.slice(0, 4);
   const appointmentRows = [...(factPack.appointments.current ?? []), ...(factPack.appointments.upcoming ?? [])].slice(0, 3);
+  const recentTreatmentRows = (factPack.appointments.recentCompleted ?? []).slice(0, 4);
+  const hasLifetimeSpend = factPack.value.lifetimeSpend != null;
+  const hasPackageSection =
+    packageRows.length > 0 || factPack.packages.totalRemainingSessions != null || factPack.packages.dataStatus !== "not_ready";
+  const hasPaymentSection = factPack.payments.invoiceCount != null || factPack.payments.recentInvoices.length > 0;
+  const hasLiveAppointmentSection =
+    appointmentRows.length > 0 || factPack.sources.some((source) => source.tool === "get_customer_live_appointments");
+  const visitMetricLabel = factPack.usage.selectedYear ? `${factPack.usage.selectedYear} visits` : "Visits";
 
   return (
     <section className="agent-customer360">
@@ -356,28 +364,34 @@ function AgentCustomer360Card({ factPack }: { factPack: Customer360FactPack }) {
           <strong>{formatDateValue(factPack.identity.joinedDate)}</strong>
         </div>
         <div>
-          <span>Lifetime visits</span>
+          <span>{visitMetricLabel}</span>
           <strong>{formatOptionalNumber(factPack.value.totalVisits)}</strong>
         </div>
-        <div>
-          <span>Lifetime spend</span>
-          <strong>{formatOptionalMoney(factPack.value.lifetimeSpend)}</strong>
-        </div>
+        {hasLifetimeSpend ? (
+          <div>
+            <span>Lifetime spend</span>
+            <strong>{formatOptionalMoney(factPack.value.lifetimeSpend)}</strong>
+          </div>
+        ) : null}
         <div>
           <span>Last visit</span>
           <strong>{formatDateValue(factPack.latestActivity.lastVisitAt)}</strong>
           {factPack.latestActivity.lastService ? <small>{factPack.latestActivity.lastService}</small> : null}
         </div>
-        <div>
-          <span>Package balance</span>
-          <strong>{formatOptionalNumber(factPack.packages.totalRemainingSessions)}</strong>
-          <small>{factPack.packages.dataStatus}</small>
-        </div>
-        <div>
-          <span>Upcoming</span>
-          <strong>{formatOptionalNumber(factPack.appointments.upcoming?.length ?? 0)}</strong>
-          <small>APICORE</small>
-        </div>
+        {hasPackageSection ? (
+          <div>
+            <span>Package balance</span>
+            <strong>{formatOptionalNumber(factPack.packages.totalRemainingSessions)}</strong>
+            <small>{factPack.packages.dataStatus}</small>
+          </div>
+        ) : null}
+        {hasLiveAppointmentSection ? (
+          <div>
+            <span>Upcoming</span>
+            <strong>{formatOptionalNumber(factPack.appointments.upcoming?.length ?? 0)}</strong>
+            <small>APICORE</small>
+          </div>
+        ) : null}
       </div>
 
       <div className="agent-customer360__grid">
@@ -394,42 +408,60 @@ function AgentCustomer360Card({ factPack }: { factPack: Customer360FactPack }) {
               : ""}
           </small>
         </div>
-        <div>
-          <h4>Packages</h4>
-          {packageRows.length ? (
+        {hasPackageSection ? (
+          <div>
+            <h4>Packages</h4>
+            {packageRows.length ? (
+              <ul>
+                {packageRows.map((row) => (
+                  <li key={`${row.packageId ?? row.serviceName}-${row.serviceName}`}>
+                    {row.serviceName}: {formatOptionalNumber(row.remainingSessions)} remaining
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>No package holdings returned.</p>
+            )}
+          </div>
+        ) : null}
+        {recentTreatmentRows.length ? (
+          <div>
+            <h4>Recent treatments</h4>
             <ul>
-              {packageRows.map((row) => (
-                <li key={`${row.packageId ?? row.serviceName}-${row.serviceName}`}>
-                  {row.serviceName}: {formatOptionalNumber(row.remainingSessions)} remaining
+              {recentTreatmentRows.map((row, index) => (
+                <li key={`${String(row.checkInTime ?? index)}-${index}`}>
+                  {formatDateValue(String(row.checkInTime ?? ""))} · {String(row.serviceName ?? "Service")}
                 </li>
               ))}
             </ul>
-          ) : (
-            <p>No package holdings returned.</p>
-          )}
-        </div>
-        <div>
-          <h4>Appointments</h4>
-          {appointmentRows.length ? (
-            <ul>
-              {appointmentRows.map((row, index) => (
-                <li key={`${String(row.appointmentId ?? index)}-${index}`}>
-                  {formatDateValue(String(row.scheduledFrom ?? ""))} · {String(row.serviceName ?? "Service")}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p>No current or upcoming APICORE booking.</p>
-          )}
-        </div>
-        <div>
-          <h4>Payments</h4>
-          <p>
-            {formatOptionalNumber(factPack.payments.invoiceCount)} invoice
-            {factPack.payments.invoiceCount === 1 ? "" : "s"} · {formatOptionalMoney(factPack.payments.selectedPeriodTotal)}
-          </p>
-          {factPack.payments.preferredMethod ? <small>{factPack.payments.preferredMethod}</small> : null}
-        </div>
+          </div>
+        ) : null}
+        {hasLiveAppointmentSection ? (
+          <div>
+            <h4>Appointments</h4>
+            {appointmentRows.length ? (
+              <ul>
+                {appointmentRows.map((row, index) => (
+                  <li key={`${String(row.appointmentId ?? index)}-${index}`}>
+                    {formatDateValue(String(row.scheduledFrom ?? ""))} · {String(row.serviceName ?? "Service")}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>No current or upcoming APICORE booking.</p>
+            )}
+          </div>
+        ) : null}
+        {hasPaymentSection ? (
+          <div>
+            <h4>Payments</h4>
+            <p>
+              {formatOptionalNumber(factPack.payments.invoiceCount)} invoice
+              {factPack.payments.invoiceCount === 1 ? "" : "s"} · {formatOptionalMoney(factPack.payments.selectedPeriodTotal)}
+            </p>
+            {factPack.payments.preferredMethod ? <small>{factPack.payments.preferredMethod}</small> : null}
+          </div>
+        ) : null}
         <div>
           <h4>Usage</h4>
           {topServices.length ? (

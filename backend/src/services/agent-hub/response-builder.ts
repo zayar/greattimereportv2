@@ -39,19 +39,22 @@ function followUpsForCustomer360(factPack: Customer360FactPack) {
     questions.push("Show purchase and payment details.");
   }
 
-  if (
-    (factPack.appointments.current?.length ?? 0) > 0 ||
-    (factPack.appointments.upcoming?.length ?? 0) > 0 ||
-    (factPack.appointments.recentCompleted?.length ?? 0) > 0
-  ) {
+  const hasLiveAppointments = (factPack.appointments.current?.length ?? 0) > 0 || (factPack.appointments.upcoming?.length ?? 0) > 0;
+  const hasRecentCompleted = (factPack.appointments.recentCompleted?.length ?? 0) > 0;
+
+  if (hasLiveAppointments && hasRecentCompleted) {
     questions.push("Show upcoming and past appointments.");
+  } else if (hasLiveAppointments) {
+    questions.push("Show upcoming appointments.");
+  } else if (hasRecentCompleted) {
+    questions.push("Show recent completed treatments.");
   }
 
   if (factPack.usage.topServices.length > 0 || factPack.visitPattern.momentum !== "unknown") {
     questions.push("Show service usage and visit frequency over time.");
   }
 
-  return questions.length ? questions.slice(0, 4) : ["Open the customer detail report.", "Show payment history.", "Show appointment history."];
+  return questions.length ? questions.slice(0, 4) : ["Open the customer detail report.", "Show recent treatments.", "Show service usage."];
 }
 
 function followUpsForAgent(plan: GreatTimeAgentIntentPlan, customer360?: Customer360FactPack) {

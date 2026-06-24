@@ -638,6 +638,72 @@ test("Customer 360 deterministic summary avoids exact package totals when the pa
   assert.doesNotMatch(summary, /undefined remaining/)
 })
 
+test("Customer 360 deterministic summary supports the lean yearly visit snapshot", () => {
+  const summary = composeCustomer360Summary({
+    identity: {
+      customerKey: "cust-1",
+      displayName: "Soe Moe Thu",
+      joinedDate: "2021-07-03",
+    },
+    value: {
+      totalVisits: 44,
+    },
+    latestActivity: {
+      lastVisitAt: "2026-06-22",
+      lastService: "Body Contouring",
+      lastTherapist: "Htet Htet",
+      daysSinceLastVisit: 2,
+    },
+    preferences: {
+      preferredService: "Body Contouring",
+      preferredTherapist: "Htet Htet",
+    },
+    visitPattern: {
+      recentWindowVisits: 20,
+      previousWindowVisits: 18,
+      momentum: "stable",
+    },
+    packages: {
+      dataStatus: "not_ready",
+      holdings: [],
+    },
+    appointments: {
+      current: [],
+      upcoming: [],
+      recentCompleted: [{ checkInTime: "2026-06-22", serviceName: "Body Contouring" }],
+    },
+    payments: {
+      recentInvoices: [],
+    },
+    usage: {
+      selectedYear: 2026,
+      topServices: [{ serviceName: "Body Contouring", totalUsage: 20 }],
+      monthlyServiceUsage: [],
+    },
+    dataQuality: [
+      {
+        code: "lifetime_spend_skipped_for_performance",
+        severity: "info",
+        message: "Lifetime spend was skipped.",
+      },
+    ],
+    sources: [
+      {
+        tool: "get_customer_visit_snapshot",
+        sourceName: "BigQuery customer visits",
+        checkedAt: "2026-06-24T00:00:00.000Z",
+        dataStatus: "ok",
+        live: false,
+        scope: "historical",
+      },
+    ],
+  })
+
+  assert.match(summary, /44 visits in 2026/)
+  assert.doesNotMatch(summary, /unknown.*lifetime spend/i)
+  assert.doesNotMatch(summary, /APICORE shows/i)
+})
+
 test("response builder assigns stable recommendation IDs", () => {
   const baseParams = {
     request: {

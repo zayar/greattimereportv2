@@ -455,6 +455,182 @@ function buildCustomerScopedCtes(identity: CustomerIdentity) {
   };
 }
 
+function parseJsonArray(value: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+  }
+
+  if (typeof value !== "string" || !value.trim()) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function getCustomerPortalAgentVisitSnapshot(params: DetailBaseParams & {
+  year: number;
+}) {
+  const visitScope = `
+    ${buildCustomerIdentityCondition("CustomerPhoneNumber", "CustomerName", "CustomerID")}
+    AND DATE(CheckInTime) BETWEEN DATE(@yearStart) AND DATE(@toDate)
+  `;
+  const yearStart = `${params.year}-01-01`;
+  const queryParams = {
+    clinicCode: params.clinicCode,
+    fromDate: yearStart,
+    toDate: params.toDate,
+    yearStart,
+    customerPhone: params.customerPhone,
+    customerName: params.customerName.trim(),
+    customerPhoneDigits: normalizePhoneDigits(params.customerPhone),
+    memberId: params.memberId?.trim() ?? "",
+  };
+  const rows = await runAnalyticsQuery<{
+    customerName: string;
+    phoneNumber: string;
+    memberId: string;
+    firstVisitThisYear: string | null;
+    lastVisitDate: string | null;
+    lastService: string | null;
+    lastTherapist: string | null;
+    daysSinceLastVisit: number | null;
+    visitsThisYear: number;
+    preferredService: string | null;
+    preferredServiceCategory: string | null;
+    preferredTherapist: string | null;
+    preferredTherapistVisits: number;
+    recent3MonthVisits: number;
+    previous3MonthVisits: number;
+    avgVisitIntervalDays: number | null;
+    recentCompletedJson: string;
+    topServicesJson: string;
+  }>(
+    `
+      WITH
+        ${buildDistinctVisitsCte(visitScope)}
+        ,
+        YearVisits AS (
+          SELECT *
+          FROM DistinctVisits
+        ),
+        VisitIntervals AS (
+          SELECT
+            DATE_DIFF(DATE(checkInTime), DATE(previousCheckInTime), DAY) AS gapDays
+          FROM (
+            SELECT
+              checkInTime,
+              LAG(checkInTime) OVER (ORDER BY checkInTime) AS previousCheckInTime
+            FROM YearVisits
+          )
+          WHERE previousCheckInTime IS NOT NULL
+        ),
+        PreferredTherapist AS (
+          SELECT
+            practitionerName,
+            COUNT(*) AS visitCount,
+            MAX(checkInTime) AS latestVisitDate
+          FROM YearVisits
+          WHERE COALESCE(practitionerName, '') != ''
+          GROUP BY practitionerName
+          ORDER BY visitCount DESC, latestVisitDate DESC, practitionerName ASC
+          LIMIT 1
+        ),
+        PreferredService AS (
+          SELECT
+            serviceName,
+            serviceCategory,
+            COUNT(*) AS visitCount,
+            MAX(checkInTime) AS latestVisitDate
+          FROM YearVisits
+          WHERE COALESCE(serviceName, '') != ''
+          GROUP BY serviceName, serviceCategory
+          ORDER BY visitCount DESC, latestVisitDate DESC, serviceName ASC
+          LIMIT 1
+        ),
+        TopServices AS (
+          SELECT
+            serviceName,
+            serviceCategory,
+            COUNT(*) AS totalUsage
+          FROM YearVisits
+          WHERE COALESCE(serviceName, '') != ''
+          GROUP BY serviceName, serviceCategory
+          ORDER BY totalUsage DESC, serviceName ASC
+          LIMIT 8
+        )
+      SELECT
+        COALESCE((SELECT ANY_VALUE(customerName) FROM YearVisits), @customerName) AS customerName,
+        COALESCE((SELECT ANY_VALUE(phoneNumber) FROM YearVisits), @customerPhone) AS phoneNumber,
+        COALESCE((SELECT MAX(memberId) FROM YearVisits), @memberId) AS memberId,
+        FORMAT_DATE('%Y-%m-%d', (SELECT MIN(DATE(checkInTime)) FROM YearVisits)) AS firstVisitThisYear,
+        FORMAT_DATE('%Y-%m-%d', (SELECT MAX(DATE(COALESCE(checkOutTime, checkInTime))) FROM YearVisits)) AS lastVisitDate,
+        (SELECT serviceName FROM YearVisits ORDER BY COALESCE(checkOutTime, checkInTime) DESC LIMIT 1) AS lastService,
+        (SELECT practitionerName FROM YearVisits ORDER BY COALESCE(checkOutTime, checkInTime) DESC LIMIT 1) AS lastTherapist,
+        CASE
+          WHEN (SELECT MAX(DATE(COALESCE(checkOutTime, checkInTime))) FROM YearVisits) IS NULL THEN NULL
+          ELSE DATE_DIFF(DATE(@toDate), (SELECT MAX(DATE(COALESCE(checkOutTime, checkInTime))) FROM YearVisits), DAY)
+        END AS daysSinceLastVisit,
+        (SELECT COUNT(*) FROM YearVisits) AS visitsThisYear,
+        (SELECT serviceName FROM PreferredService) AS preferredService,
+        (SELECT serviceCategory FROM PreferredService) AS preferredServiceCategory,
+        (SELECT practitionerName FROM PreferredTherapist) AS preferredTherapist,
+        COALESCE((SELECT visitCount FROM PreferredTherapist), 0) AS preferredTherapistVisits,
+        (SELECT COUNT(*) FROM YearVisits WHERE DATE(checkInTime) BETWEEN DATE_SUB(DATE(@toDate), INTERVAL 90 DAY) AND DATE(@toDate)) AS recent3MonthVisits,
+        (SELECT COUNT(*) FROM YearVisits WHERE DATE(checkInTime) BETWEEN DATE_SUB(DATE(@toDate), INTERVAL 180 DAY) AND DATE_SUB(DATE(@toDate), INTERVAL 91 DAY)) AS previous3MonthVisits,
+        ROUND(COALESCE((SELECT AVG(gapDays) FROM VisitIntervals), 0), 1) AS avgVisitIntervalDays,
+        TO_JSON_STRING(ARRAY(
+          SELECT AS STRUCT
+            FORMAT_TIMESTAMP('%Y-%m-%d %I:%M %p', checkInTime) AS checkInTime,
+            serviceName,
+            practitionerName AS therapistName,
+            serviceCategory,
+            'Completed' AS status
+          FROM YearVisits
+          ORDER BY checkInTime DESC
+          LIMIT 8
+        )) AS recentCompletedJson,
+        TO_JSON_STRING(ARRAY(
+          SELECT AS STRUCT serviceName, serviceCategory, totalUsage
+          FROM TopServices
+          ORDER BY totalUsage DESC, serviceName ASC
+        )) AS topServicesJson
+    `,
+    queryParams,
+  );
+  const row = rows[0];
+
+  return {
+    customer: {
+      customerName: row?.customerName ?? params.customerName,
+      phoneNumber: row?.phoneNumber || params.customerPhone,
+      memberId: row?.memberId || params.memberId || "",
+      firstVisitThisYear: row?.firstVisitThisYear ?? null,
+      lastVisitDate: row?.lastVisitDate ?? null,
+      lastService: row?.lastService ?? null,
+      lastTherapist: row?.lastTherapist ?? null,
+      daysSinceLastVisit: row?.daysSinceLastVisit == null ? null : parseNumber(row.daysSinceLastVisit),
+      visitsThisYear: parseNumber(row?.visitsThisYear),
+      preferredService: row?.preferredService ?? null,
+      preferredServiceCategory: row?.preferredServiceCategory ?? null,
+      preferredTherapist: row?.preferredTherapist ?? null,
+      preferredTherapistVisits: parseNumber(row?.preferredTherapistVisits),
+      recent3MonthVisits: parseNumber(row?.recent3MonthVisits),
+      previous3MonthVisits: parseNumber(row?.previous3MonthVisits),
+      avgVisitIntervalDays: row?.avgVisitIntervalDays == null ? null : parseNumber(row.avgVisitIntervalDays),
+    },
+    recentCompleted: parseJsonArray(row?.recentCompletedJson),
+    topServices: parseJsonArray(row?.topServicesJson),
+    year: params.year,
+  };
+}
+
 export async function resolveCustomerPortalCandidates(params: {
   clinicCode: string;
   search: string;
@@ -475,75 +651,31 @@ export async function resolveCustomerPortalCandidates(params: {
     joinedDate: string | null;
     lastVisitDate: string | null;
     totalVisits: number;
-    lifetimeSpend: number;
   }>(
     `
-      WITH
-        CandidateVisits AS (
-          SELECT
-            CustomerName AS customerName,
-            CustomerPhoneNumber AS phoneNumber,
-            MAX(COALESCE(CustomerID, '')) AS memberId,
-            MIN(DATE(CheckInTime)) AS joinedDate,
-            MAX(DATE(COALESCE(CheckOutTime, CheckInTime))) AS lastVisitDate,
-            COUNT(DISTINCT COALESCE(CAST(BookingID AS STRING), FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%S', CheckInTime))) AS totalVisits,
-            0 AS lifetimeSpend
-          FROM ${analyticsTables.mainDataView}
-          WHERE LOWER(ClinicCode) = LOWER(@clinicCode)
-            AND CustomerName IS NOT NULL
-            AND CustomerPhoneNumber IS NOT NULL
-            AND CheckInTime IS NOT NULL
-            AND (
-              LOWER(CustomerName) = LOWER(@search)
-              OR LOWER(CustomerName) LIKE LOWER(CONCAT('%', @search, '%'))
-              OR LOWER(COALESCE(CustomerID, '')) = LOWER(@search)
-              OR (@searchDigits != '' AND REGEXP_REPLACE(COALESCE(CustomerPhoneNumber, ''), r'[^0-9]', '') = @searchDigits)
-            )
-          GROUP BY customerName, phoneNumber
-        ),
-        CandidatePayments AS (
-          SELECT
-            CustomerName AS customerName,
-            CustomerPhoneNumber AS phoneNumber,
-            MAX(COALESCE(MemberID, '')) AS memberId,
-            MIN(DATE(OrderCreatedDate)) AS joinedDate,
-            CAST(NULL AS DATE) AS lastVisitDate,
-            0 AS totalVisits,
-            SUM(CAST(COALESCE(NetTotal, 0) AS FLOAT64)) AS lifetimeSpend
-          FROM ${analyticsTables.mainPaymentView}
-          WHERE LOWER(ClinicCode) = LOWER(@clinicCode)
-            AND CustomerName IS NOT NULL
-            AND CustomerPhoneNumber IS NOT NULL
-            AND PaymentStatus = 'PAID'
-            AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
-            AND COALESCE(PaymentMethod, '') != 'PASS'
-            AND (
-              LOWER(CustomerName) = LOWER(@search)
-              OR LOWER(CustomerName) LIKE LOWER(CONCAT('%', @search, '%'))
-              OR LOWER(COALESCE(MemberID, '')) = LOWER(@search)
-              OR (@searchDigits != '' AND REGEXP_REPLACE(COALESCE(CustomerPhoneNumber, ''), r'[^0-9]', '') = @searchDigits)
-            )
-          GROUP BY customerName, phoneNumber
-        ),
-        Combined AS (
-          SELECT * FROM CandidateVisits
-          UNION ALL
-          SELECT * FROM CandidatePayments
-        )
       SELECT
-        customerName,
-        phoneNumber,
-        ARRAY_AGG(memberId IGNORE NULLS ORDER BY memberId DESC LIMIT 1)[SAFE_OFFSET(0)] AS memberId,
-        FORMAT_DATE('%Y-%m-%d', MIN(joinedDate)) AS joinedDate,
-        FORMAT_DATE('%Y-%m-%d', MAX(lastVisitDate)) AS lastVisitDate,
-        SUM(totalVisits) AS totalVisits,
-        SUM(lifetimeSpend) AS lifetimeSpend
-      FROM Combined
+        CustomerName AS customerName,
+        CustomerPhoneNumber AS phoneNumber,
+        MAX(COALESCE(CustomerID, '')) AS memberId,
+        FORMAT_DATE('%Y-%m-%d', MIN(DATE(CheckInTime))) AS joinedDate,
+        FORMAT_DATE('%Y-%m-%d', MAX(DATE(COALESCE(CheckOutTime, CheckInTime)))) AS lastVisitDate,
+        COUNT(DISTINCT COALESCE(CAST(BookingID AS STRING), FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%S', CheckInTime))) AS totalVisits
+      FROM ${analyticsTables.mainDataView}
+      WHERE LOWER(ClinicCode) = LOWER(@clinicCode)
+        AND CustomerName IS NOT NULL
+        AND CustomerPhoneNumber IS NOT NULL
+        AND CheckInTime IS NOT NULL
+        AND (
+          LOWER(CustomerName) = LOWER(@search)
+          OR LOWER(CustomerName) LIKE LOWER(CONCAT('%', @search, '%'))
+          OR LOWER(COALESCE(CustomerID, '')) = LOWER(@search)
+          OR (@searchDigits != '' AND REGEXP_REPLACE(COALESCE(CustomerPhoneNumber, ''), r'[^0-9]', '') = @searchDigits)
+        )
       GROUP BY customerName, phoneNumber
       ORDER BY
         CASE WHEN LOWER(customerName) = LOWER(@search) THEN 0 ELSE 1 END,
         lastVisitDate DESC,
-        lifetimeSpend DESC,
+        totalVisits DESC,
         customerName ASC
       LIMIT @limit
     `,
@@ -568,7 +700,6 @@ export async function resolveCustomerPortalCandidates(params: {
     joinedDate: row.joinedDate,
     lastVisitDate: row.lastVisitDate,
     totalVisits: parseNumber(row.totalVisits),
-    lifetimeSpend: parseNumber(row.lifetimeSpend),
   }));
 }
 

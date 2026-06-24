@@ -1,21 +1,11 @@
 import {
-  fetchApicoreBookingDetails,
-  type ApicoreBookingDetailsRow,
-} from "../apicore.service.js";
-import {
-  getCustomerPortalBookings,
-  getCustomerPortalOverview,
-  getCustomerPortalPayments,
-  getCustomerPortalUsage,
+  getCustomerPortalAgentVisitSnapshot,
   resolveCustomerPortalCandidates,
 } from "../reports/customer-portal.service.js";
-import { getPackagePortalCustomerHoldings } from "../reports/package-portal.service.js";
 import {
   searchCustomerRelationshipProfilesBounded,
   type CustomerRelationshipProfileSearchInput,
 } from "../reports/customer-relationship-profile.repository.js";
-import { buildUtcDayRangeForDateKeyInTimeZone } from "../telegram/time.js";
-import { normalizeAppointmentLifecycle } from "./appointment-lifecycle.js";
 import { extractExplicitCustomerSearchText } from "./customer-query.js";
 import { limitRows, maskPhone, nowIso, sanitizeError } from "./safety.js";
 import type {
@@ -24,7 +14,6 @@ import type {
   AgentToolInput,
   AgentToolResult,
   Customer360FactPack,
-  Customer360PackageStatus,
   GreatTimeAgentSource,
   GreatTimeAgentWarning,
 } from "./types.js";
@@ -56,22 +45,23 @@ type IdentityResolution =
   | { status: "ambiguous"; searchText: string; candidates: CandidateRow[]; sources: GreatTimeAgentSource[] }
   | { status: "not_found" | "not_ready" | "unavailable"; searchText: string; sources: GreatTimeAgentSource[]; warnings: GreatTimeAgentWarning[] };
 
+function withSectionTimeout<T>(promise: Promise<T>, sectionName: string, timeoutMs: number) {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`${sectionName} timed out after ${timeoutMs}ms.`));
+      }, timeoutMs);
+    }),
+  ]);
+}
+
 function normalizeText(value: string | null | undefined) {
   return (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 function normalizeDigits(value: string | null | undefined) {
   return (value ?? "").replace(/\D/g, "");
-}
-
-function dateFromUtc(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function addDays(dateKey: string, days: number) {
-  const date = new Date(`${dateKey}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return dateFromUtc(date);
 }
 
 function source(params: {
@@ -308,89 +298,6 @@ async function resolveCustomerIdentity(input: AgentToolInput): Promise<IdentityR
   };
 }
 
-function matchesCustomer(row: ApicoreBookingDetailsRow, identity: ResolvedCustomerIdentity) {
-  const identityDigits = normalizeDigits(identity.customerPhone);
-  const rowDigits = normalizeDigits(row.MemberPhoneNumber);
-
-  if (identityDigits && rowDigits) {
-    return identityDigits === rowDigits;
-  }
-
-  return normalizeText(row.MemberName) === normalizeText(identity.customerName);
-}
-
-async function fetchLiveCustomerAppointments(input: AgentToolInput, identity: ResolvedCustomerIdentity) {
-  const timezone = input.request.timezone ?? "";
-  const startDateKey = input.period.toDate;
-  const endDateKey = addDays(startDateKey, 30);
-  const startRange = buildUtcDayRangeForDateKeyInTimeZone(startDateKey, timezone);
-  const endRange = buildUtcDayRangeForDateKeyInTimeZone(endDateKey, timezone);
-  const checkedAt = nowIso();
-  const result = await fetchApicoreBookingDetails({
-    clinicCode: input.clinic.clinicCode,
-    startDate: startRange.startIso,
-    endDate: endRange.endIso,
-    take: 200,
-    authorizationHeader: input.requestContext.authorizationHeader,
-  });
-  const now = Date.now();
-  const rows = result.data
-    .filter(
-      (row) =>
-        row.ClinicID === input.clinic.clinicId &&
-        row.ClinicCode.toLowerCase() === input.clinic.clinicCode.toLowerCase() &&
-        matchesCustomer(row, identity),
-    )
-    .map((row) => {
-      const lifecycle = normalizeAppointmentLifecycle({ rawStatus: row.status });
-
-      return {
-        appointmentId: row.bookingid,
-        scheduledFrom: row.FromTime,
-        scheduledTo: row.ToTime,
-        customerName: row.MemberName,
-        customerPhoneMasked: maskPhone(row.MemberPhoneNumber),
-        serviceName: row.ServiceName,
-        practitionerName: row.PractitionerName,
-        rawStatus: row.status,
-        lifecycleState: lifecycle.state,
-        stateConfidence: lifecycle.stateConfidence,
-      };
-    });
-  const terminalStates = new Set(["checked_out", "cancelled", "no_show"]);
-  const current = rows.filter((row) => {
-    const from = new Date(String(row.scheduledFrom)).getTime();
-    const to = new Date(String(row.scheduledTo)).getTime();
-
-    return !terminalStates.has(String(row.lifecycleState)) && Number.isFinite(from) && from <= now && (!Number.isFinite(to) || to >= now);
-  });
-  const upcoming = rows.filter((row) => {
-    const from = new Date(String(row.scheduledFrom)).getTime();
-
-    return !terminalStates.has(String(row.lifecycleState)) && Number.isFinite(from) && from > now;
-  });
-
-  return {
-    checkedAt,
-    current: limitRows(current, 8),
-    upcoming: limitRows(upcoming, 12),
-    period: `${startDateKey} to ${endDateKey}`,
-  };
-}
-
-function packageStatus(remaining: number): Customer360PackageStatus {
-  if (remaining > 3) {
-    return "active";
-  }
-  if (remaining > 0) {
-    return "low_remaining";
-  }
-  if (remaining === 0) {
-    return "completed";
-  }
-  return "unknown";
-}
-
 function momentum(recent?: number, previous?: number): Customer360FactPack["visitPattern"]["momentum"] {
   if (recent == null || previous == null || previous === 0) {
     return "unknown";
@@ -429,24 +336,11 @@ function formatDate(value: string | null | undefined) {
   });
 }
 
-function topPaymentMethod(rows: Array<Record<string, unknown>>) {
-  const counts = new Map<string, number>();
-
-  for (const row of rows) {
-    const method = typeof row.paymentMethod === "string" ? row.paymentMethod : "";
-    if (method) {
-      counts.set(method, (counts.get(method) ?? 0) + 1);
-    }
-  }
-
-  return [...counts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0] ?? null;
-}
-
 function buildRecommendation(factPack: Customer360FactPack): Customer360FactPack["recommendation"] {
   const remaining = factPack.packages.totalRemainingSessions ?? 0;
   const hasUpcoming = (factPack.appointments.upcoming?.length ?? 0) > 0 || (factPack.appointments.current?.length ?? 0) > 0;
 
-  if (remaining > 0 && !hasUpcoming) {
+  if (factPack.packages.dataStatus !== "not_ready" && remaining > 0 && !hasUpcoming) {
     return {
       title: "Rebook unused package care",
       reasonCodes: ["unused_package_balance", "no_live_upcoming_booking"],
@@ -469,10 +363,10 @@ function buildRecommendation(factPack: Customer360FactPack): Customer360FactPack
     };
   }
 
-  if ((factPack.latestActivity.daysSinceLastVisit ?? 0) > 45 && (factPack.value.lifetimeSpend ?? 0) > 0) {
+  if ((factPack.latestActivity.daysSinceLastVisit ?? 0) > 45) {
     return {
-      title: "Warm relationship follow-up",
-      reasonCodes: ["inactive_existing_customer"],
+      title: "Return-visit check-in",
+      reasonCodes: ["inactive_visit_cadence"],
       evidence: [`Last completed visit was ${factPack.latestActivity.daysSinceLastVisit} days ago.`],
     };
   }
@@ -480,7 +374,7 @@ function buildRecommendation(factPack: Customer360FactPack): Customer360FactPack
   return {
     title: "Keep in regular care cadence",
     reasonCodes: ["steady_relationship"],
-    evidence: ["No high-priority package, booking, or visit-frequency trigger is visible in the current fact pack."],
+    evidence: ["No high-priority visit-frequency trigger is visible in the lean Customer 360 snapshot."],
   };
 }
 
@@ -494,13 +388,19 @@ export function composeCustomer360Summary(factPack: Customer360FactPack) {
   const packageRemaining = factPack.packages.totalRemainingSessions;
   const currentCount = factPack.appointments.current?.length ?? 0;
   const upcomingCount = factPack.appointments.upcoming?.length ?? 0;
+  const appointmentSourceChecked = factPack.sources.some((item) => item.tool === "get_customer_live_appointments");
 
   sentences.push(joined ? `${name} joined on ${joined}.` : `${name} is the resolved customer for this Customer 360 briefing.`);
 
-  if (visits != null || spend != null) {
+  if (visits != null) {
+    const year = factPack.usage.selectedYear;
     sentences.push(
-      `${name} has completed ${visits?.toLocaleString("en-US") ?? "unknown"} visits and has ${formatMoney(spend)} in lifetime spend.`,
+      `${name} has completed ${visits.toLocaleString("en-US")} visit${visits === 1 ? "" : "s"}${year ? ` in ${year}` : ""}.`,
     );
+  }
+
+  if (spend != null) {
+    sentences.push(`${name} has ${formatMoney(spend)} in lifetime spend.`);
   }
 
   if (lastVisit) {
@@ -535,11 +435,13 @@ export function composeCustomer360Summary(factPack: Customer360FactPack) {
     sentences.push("Package balances are not presented as an exact combined total because the package source is partial or unavailable.");
   }
 
-  sentences.push(
-    currentCount || upcomingCount
-      ? `APICORE shows ${currentCount} current and ${upcomingCount} upcoming booking${upcomingCount === 1 ? "" : "s"} in the next 30 days.`
-      : "APICORE shows no current or upcoming booking in the next 30 days.",
-  );
+  if (appointmentSourceChecked) {
+    sentences.push(
+      currentCount || upcomingCount
+        ? `APICORE shows ${currentCount} current and ${upcomingCount} upcoming booking${upcomingCount === 1 ? "" : "s"} in the next 30 days.`
+        : "APICORE shows no current or upcoming booking in the next 30 days.",
+    );
+  }
 
   if (factPack.visitPattern.momentum && factPack.visitPattern.momentum !== "unknown") {
     sentences.push(
@@ -644,295 +546,121 @@ export async function buildCustomer360ToolResult(input: AgentToolInput): Promise
   }
 
   const identity = resolved.identity;
+  const usageYear = new Date(`${input.period.toDate}T00:00:00.000Z`).getUTCFullYear();
   const identityParams = {
     customerName: identity.customerName,
     customerPhone: identity.customerPhone,
     memberId: identity.memberId,
   };
-  const usageYear = new Date(`${input.period.toDate}T00:00:00.000Z`).getUTCFullYear();
-  const [
-    overviewResult,
-    packagesResult,
-    bookingsResult,
-    paymentsResult,
-    usageResult,
-    appointmentsResult,
-    learnedResult,
-  ] = await Promise.allSettled([
-    getCustomerPortalOverview({
-      clinicCode: input.clinic.clinicCode,
-      fromDate: input.period.fromDate,
-      toDate: input.period.toDate,
-      ...identityParams,
-    }),
-    getPackagePortalCustomerHoldings({
-      clinicId: input.clinic.clinicId,
-      customerName: identity.customerName,
-      customerPhone: identity.customerPhone,
-      memberId: identity.memberId,
-      throughDate: input.period.toDate,
-      authorizationHeader: input.requestContext.authorizationHeader,
-    }),
-    getCustomerPortalBookings({
-      clinicCode: input.clinic.clinicCode,
-      fromDate: input.period.fromDate,
-      toDate: input.period.toDate,
-      ...identityParams,
-      search: "",
-      page: 1,
-      pageSize: 20,
-    }),
-    getCustomerPortalPayments({
-      clinicCode: input.clinic.clinicCode,
-      fromDate: input.period.fromDate,
-      toDate: input.period.toDate,
-      ...identityParams,
-      search: "",
-      page: 1,
-      pageSize: 20,
-    }),
-    getCustomerPortalUsage({
-      clinicCode: input.clinic.clinicCode,
-      fromDate: input.period.fromDate,
-      toDate: input.period.toDate,
-      ...identityParams,
-      year: usageYear,
-      serviceCategory: "",
-    }),
-    fetchLiveCustomerAppointments(input, identity),
-    searchLearnedProfiles({
-      clinicId: input.clinic.clinicId,
-      search: identity.memberId || identity.customerName,
-      limit: 10,
-    }),
-  ]);
   const sources = [...resolved.sources];
   const dataQuality: Customer360FactPack["dataQuality"] = [];
   const warnings: GreatTimeAgentWarning[] = [];
 
-  const overview = overviewResult.status === "fulfilled" ? overviewResult.value : null;
+  let snapshot: Awaited<ReturnType<typeof getCustomerPortalAgentVisitSnapshot>> | null = null;
+  let snapshotError: unknown;
+  try {
+    snapshot = await withSectionTimeout(
+      getCustomerPortalAgentVisitSnapshot({
+        clinicCode: input.clinic.clinicCode,
+        fromDate: `${usageYear}-01-01`,
+        toDate: input.period.toDate,
+        year: usageYear,
+        ...identityParams,
+      }),
+      "Customer visit snapshot",
+      8_000,
+    );
+  } catch (error) {
+    snapshotError = error;
+  }
+
   sources.push(
     source({
-      tool: "get_customer_overview",
-      sourceName: "BigQuery customer portal",
-      period: "lifetime facts plus selected-period trends",
-      dataStatus: overview ? "ok" : "unavailable",
+      tool: "get_customer_visit_snapshot",
+      sourceName: "BigQuery customer visits",
+      period: `${usageYear}-01-01 to ${input.period.toDate}`,
+      dataStatus: snapshot ? (snapshot.customer.visitsThisYear > 0 ? "ok" : "no_activity") : "unavailable",
       scope: "historical",
     }),
   );
-  if (!overview) {
+  if (!snapshot) {
     dataQuality.push({
-      code: "overview_unavailable",
+      code: "visit_snapshot_unavailable",
       severity: "warning",
-      message: `Customer overview could not be loaded: ${sanitizeError(overviewResult.status === "rejected" ? overviewResult.reason : undefined)}`,
+      message: `Customer visit snapshot could not be loaded: ${sanitizeError(snapshotError)}`,
     });
   }
 
-  const packageData = packagesResult.status === "fulfilled" ? packagesResult.value : null;
-  const packageHoldings = packageData?.holdings ?? [];
-  const packageSourceStatus: AgentDataStatus = packageData ? (packageHoldings.length ? "ok" : "no_activity") : "unavailable";
-  sources.push(
-    source({
-      tool: "get_customer_package_holdings",
-      sourceName: "APICORE package holdings",
-      period: `through ${input.period.toDate}`,
-      dataStatus: packageSourceStatus,
-      scope: "live",
-      live: true,
-    }),
-  );
-  if (!packageData) {
-    dataQuality.push({
-      code: "package_holdings_unavailable",
-      severity: "warning",
-      message:
-        "APICORE package holdings were unavailable, so the combined remaining-session total is not shown as an exact figure.",
-    });
-  }
-
-  const historicalBookings = bookingsResult.status === "fulfilled" ? bookingsResult.value : null;
-  sources.push(
-    source({
-      tool: "get_customer_treatment_history",
-      sourceName: "BigQuery historical completed treatments",
-      period: `${input.period.fromDate} to ${input.period.toDate}`,
-      dataStatus: historicalBookings ? (historicalBookings.rows.length ? "ok" : "no_activity") : "unavailable",
-      scope: "historical",
-    }),
-  );
-
-  const payments = paymentsResult.status === "fulfilled" ? paymentsResult.value : null;
-  sources.push(
-    source({
-      tool: "get_customer_payments",
-      sourceName: "BigQuery customer payment portal",
-      period: `${input.period.fromDate} to ${input.period.toDate}`,
-      dataStatus: payments ? (payments.rows.length ? "ok" : "no_activity") : "unavailable",
-      scope: "historical",
-    }),
-  );
-
-  const usage = usageResult.status === "fulfilled" ? usageResult.value : null;
-  sources.push(
-    source({
-      tool: "get_customer_usage",
-      sourceName: "BigQuery customer usage portal",
-      period: String(usageYear),
-      dataStatus: usage ? (usage.services.length ? "ok" : "no_activity") : "unavailable",
-      scope: "historical",
-    }),
-  );
-
-  const appointments = appointmentsResult.status === "fulfilled" ? appointmentsResult.value : null;
-  sources.push(
-    source({
-      tool: "get_customer_live_appointments",
-      sourceName: "APICORE booking ledger",
-      period: appointments?.period ?? `${input.period.toDate} to ${addDays(input.period.toDate, 30)}`,
-      dataStatus: appointments
-        ? appointments.current.length || appointments.upcoming.length
-          ? "ok"
-          : "no_activity"
-        : "unavailable",
-      scope: "live",
-      live: true,
-    }),
-  );
-  if (!appointments) {
-    dataQuality.push({
-      code: "live_appointments_unavailable",
-      severity: "warning",
-      message: "Current and upcoming appointment state could not be checked from APICORE.",
-    });
-  }
-
-  const learnedRows = learnedResult.status === "fulfilled" ? learnedResult.value.rows : [];
-  const learnedProfile =
-    learnedRows.find((profile) => normalizeText(profile.memberId ?? "") === normalizeText(identity.memberId ?? "")) ??
-    learnedRows.find((profile) => normalizeText(profile.customerName) === normalizeText(identity.customerName)) ??
-    null;
-  sources.push(
-    source({
-      tool: "get_customer_learned_profile",
-      sourceName: "Firestore customer relationship profiles",
-      period: learnedProfile?.sourceLookbackDays ? `lookback ${learnedProfile.sourceLookbackDays} days` : undefined,
-      dataStatus: learnedProfile ? "ok" : "no_activity",
-      scope: "learned",
-    }),
-  );
-  if (learnedProfile) {
-    dataQuality.push({
-      code: "learned_profile_lookback_scoped",
+  dataQuality.push(
+    {
+      code: "apicore_skipped_for_performance",
       severity: "info",
-      message:
-        "Learned profile fields are used only for segments and recommendation support; current source facts come from BigQuery and APICORE.",
-    });
-  }
+      message: "APICORE package and live appointment checks are skipped in this lean Customer 360 path.",
+    },
+    {
+      code: "lifetime_spend_skipped_for_performance",
+      severity: "info",
+      message: "Lifetime spend and payment invoices are skipped to avoid the expensive payment-view scan.",
+    },
+  );
 
-  const recentCompleted = historicalBookings?.rows ?? [];
-  const latestCompleted = recentCompleted[0] as Record<string, unknown> | undefined;
-  const therapistRelationship = overview?.therapistRelationship ?? [];
-  const preferredTherapist = overview?.customer.preferredTherapist || therapistRelationship[0]?.therapistName || null;
-  const activePackageRows = packageHoldings.filter((row) => Number(row.remainingUnits ?? 0) > 0);
-  const totalRemaining = packageData
-    ? packageHoldings.reduce((sum, row) => sum + Math.max(0, Number(row.remainingUnits ?? 0)), 0)
-    : undefined;
-  const paymentRows = payments?.rows ?? [];
-  const usageRows = usage?.services ?? [];
+  const snapshotCustomer = snapshot?.customer;
+  const recentCompleted = snapshot?.recentCompleted ?? [];
+  const preferredTherapist = snapshotCustomer?.preferredTherapist ?? null;
+  const phoneNumber = snapshotCustomer?.phoneNumber || identity.customerPhone;
+  const customerName = snapshotCustomer?.customerName || identity.customerName;
   const factPack: Customer360FactPack = {
     identity: {
       customerKey: identity.customerKey,
-      memberId: identity.memberId,
-      displayName: overview?.customer.customerName ?? identity.customerName,
-      joinedDate: overview?.customer.joinedDate ?? identity.joinedDate ?? null,
-      maskedPhone: overview?.customer.phoneNumber ? maskPhone(overview.customer.phoneNumber) : identity.phoneMasked,
+      memberId: snapshotCustomer?.memberId || identity.memberId,
+      displayName: customerName,
+      joinedDate: identity.joinedDate ?? snapshotCustomer?.firstVisitThisYear ?? null,
+      maskedPhone: phoneNumber ? maskPhone(phoneNumber) : identity.phoneMasked,
       detailPath: customerDetailPath({
-        customerName: overview?.customer.customerName ?? identity.customerName,
-        customerPhone: overview?.customer.phoneNumber ?? identity.customerPhone,
-        fromDate: input.period.fromDate,
+        customerName,
+        customerPhone: phoneNumber,
+        fromDate: `${usageYear}-01-01`,
         toDate: input.period.toDate,
       }),
     },
     value: {
-      lifetimeSpend: overview?.customer.lifetimeSpend,
-      totalVisits: overview?.customer.totalVisits,
-      averageVisitSpend: overview?.customer.averageSpendPerVisit,
+      totalVisits: snapshotCustomer?.visitsThisYear,
     },
     latestActivity: {
-      lastVisitAt: overview?.customer.lastVisitDate ?? null,
-      lastService:
-        typeof latestCompleted?.serviceName === "string"
-          ? latestCompleted.serviceName
-          : overview?.recentServices[0]?.serviceName ?? overview?.customer.preferredService ?? null,
-      lastTherapist: typeof latestCompleted?.therapistName === "string" ? latestCompleted.therapistName : preferredTherapist,
-      daysSinceLastVisit: overview?.customer.daysSinceLastVisit ?? null,
+      lastVisitAt: snapshotCustomer?.lastVisitDate ?? null,
+      lastService: snapshotCustomer?.lastService ?? null,
+      lastTherapist: snapshotCustomer?.lastTherapist ?? preferredTherapist,
+      daysSinceLastVisit: snapshotCustomer?.daysSinceLastVisit ?? null,
     },
     preferences: {
-      preferredService: overview?.customer.preferredService ?? null,
-      preferredServiceCategory: overview?.customer.preferredServiceCategory ?? null,
+      preferredService: snapshotCustomer?.preferredService ?? null,
+      preferredServiceCategory: snapshotCustomer?.preferredServiceCategory ?? null,
       preferredTherapist,
-      preferredTherapistVisits: therapistRelationship[0]?.visitCount,
+      preferredTherapistVisits: snapshotCustomer?.preferredTherapistVisits || undefined,
     },
     visitPattern: {
-      averageVisitIntervalDays: overview?.customer.avgVisitIntervalDays ?? null,
-      recentWindowVisits: overview?.customer.recent3MonthVisits,
-      previousWindowVisits: overview?.customer.previous3MonthVisits,
-      momentum: momentum(overview?.customer.recent3MonthVisits, overview?.customer.previous3MonthVisits),
+      averageVisitIntervalDays: snapshotCustomer?.avgVisitIntervalDays ?? null,
+      recentWindowVisits: snapshotCustomer?.recent3MonthVisits,
+      previousWindowVisits: snapshotCustomer?.previous3MonthVisits,
+      momentum: momentum(snapshotCustomer?.recent3MonthVisits, snapshotCustomer?.previous3MonthVisits),
     },
     packages: {
-      purchaseCount: packageData ? packageHoldings.reduce((sum, row) => sum + Number(row.purchaseCount ?? 0), 0) : undefined,
-      activeHoldingCount: packageData ? activePackageRows.length : undefined,
-      totalRemainingSessions: totalRemaining,
-      dataStatus: packageSourceStatus,
-      holdings: limitRows(
-        packageHoldings.map((row) => ({
-          packageId: String(row.packageId ?? row.id ?? ""),
-          packageName: typeof row.packageName === "string" ? row.packageName : null,
-          serviceName: Array.isArray(row.serviceNames) && row.serviceNames.length ? row.serviceNames.join(", ") : String(row.category ?? "Package service"),
-          totalSessions: Number(row.purchasedUnits ?? 0),
-          usedSessions: Number(row.usedUnits ?? 0),
-          remainingSessions: Number(row.remainingUnits ?? 0),
-          latestUsageDate: typeof row.lastVisitDate === "string" ? row.lastVisitDate : null,
-          latestTherapist: typeof row.therapist === "string" ? row.therapist : null,
-          status: packageStatus(Number(row.remainingUnits ?? -1)),
-        })),
-        12,
-      ),
+      dataStatus: "not_ready",
+      holdings: [],
     },
     appointments: {
-      current: appointments?.current ?? [],
-      upcoming: appointments?.upcoming ?? [],
+      current: [],
+      upcoming: [],
       recentCompleted: limitRows(recentCompleted, 8),
     },
     payments: {
-      selectedPeriodTotal: payments?.summary.totalSpent,
-      invoiceCount: payments?.summary.invoiceCount,
-      averageInvoice: payments?.summary.averageInvoice,
-      outstanding: payments?.summary.outstandingAmount,
-      preferredMethod: topPaymentMethod(paymentRows),
-      recentInvoices: limitRows(paymentRows, 8),
+      recentInvoices: [],
     },
     usage: {
-      selectedYear: usage?.year ?? usageYear,
-      distinctServices: usage?.summary.distinctServices,
-      topServices: limitRows(
-        usageRows.map((row) => ({
-          serviceName: row.serviceName,
-          serviceCategory: row.serviceCategory,
-          totalUsage: row.totalUsage,
-        })),
-        8,
-      ),
-      monthlyServiceUsage: limitRows(
-        usageRows.flatMap((row) =>
-          row.counts.map((count, index) => ({
-            serviceName: row.serviceName,
-            month: usage?.months[index] ?? String(index + 1),
-            usageCount: count,
-          })),
-        ),
-        24,
-      ),
+      selectedYear: usageYear,
+      distinctServices: snapshot?.topServices.length,
+      topServices: limitRows(snapshot?.topServices ?? [], 8),
+      monthlyServiceUsage: [],
     },
     dataQuality,
     sources,
@@ -955,46 +683,29 @@ export async function buildCustomer360ToolResult(input: AgentToolInput): Promise
     toolName: "get_customer_360",
     sourceName: "Customer 360 fact pack",
     checkedAt: nowIso(),
-    period: `${input.period.fromDate} to ${input.period.toDate}`,
+    period: `${usageYear}-01-01 to ${input.period.toDate}`,
     dataStatus,
-    live: true,
+    live: false,
     sources,
     summary,
     customer360: factPack,
     metrics: [
-      { label: "Lifetime visits", value: factPack.value.totalVisits ?? "unknown" },
-      { label: "Lifetime spend", value: factPack.value.lifetimeSpend ?? "unknown", unit: "MMK" },
-      { label: "Active package holdings", value: factPack.packages.activeHoldingCount ?? "unknown" },
-      { label: "Upcoming bookings", value: factPack.appointments.upcoming?.length ?? 0 },
+      { label: `${usageYear} visits`, value: factPack.value.totalVisits ?? 0 },
+      { label: "Recent treatments", value: factPack.appointments.recentCompleted?.length ?? 0 },
+      { label: "Top services", value: factPack.usage.topServices.length },
     ],
     tables: [
-      ...(factPack.packages.holdings.length
+      ...(factPack.appointments.recentCompleted?.length
         ? [
             {
-              title: "Customer 360 package holdings",
+              title: "Customer 360 recent completed visits",
               columns: [
+                { key: "checkInTime", title: "Visit time" },
                 { key: "serviceName", title: "Service" },
-                { key: "packageName", title: "Package" },
-                { key: "remainingSessions", title: "Remaining" },
-                { key: "latestUsageDate", title: "Latest usage" },
+                { key: "therapistName", title: "Therapist" },
                 { key: "status", title: "Status" },
               ],
-              rows: factPack.packages.holdings,
-            },
-          ]
-        : []),
-      ...(factPack.payments.recentInvoices.length
-        ? [
-            {
-              title: "Customer 360 recent invoices",
-              columns: [
-                { key: "dateLabel", title: "Date" },
-                { key: "invoiceNumber", title: "Invoice" },
-                { key: "serviceName", title: "Service" },
-                { key: "paymentMethod", title: "Method" },
-                { key: "netAmount", title: "Amount" },
-              ],
-              rows: factPack.payments.recentInvoices,
+              rows: factPack.appointments.recentCompleted,
             },
           ]
         : []),
@@ -1018,7 +729,7 @@ export async function buildCustomer360ToolResult(input: AgentToolInput): Promise
         customerKey: factPack.identity.customerKey,
         displayName: factPack.identity.displayName,
         customerName: factPack.identity.displayName,
-        customerPhone: overview?.customer.phoneNumber ?? identity.customerPhone,
+        customerPhone: phoneNumber,
         memberId: factPack.identity.memberId,
         rank: 1,
       },
