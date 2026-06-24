@@ -129,6 +129,9 @@ function detectCustomerIntent(message: string) {
   if (/follow[- ]?up|ဆက်သွယ်/i.test(message)) {
     return "follow_up_today";
   }
+  if (/top customers?|best customers?|vip customers?|highest.*customers?|most valuable|valuable customers?|top spend|top visit|အကောင်းဆုံး|အများဆုံး/i.test(message)) {
+    return "top_customers";
+  }
   if (/history|last treatment|practitioner|package|purchase|payment/i.test(message)) {
     return "customer_overview";
   }
@@ -226,6 +229,7 @@ function toolsForIntent(agentId: GreatTimeAgentId, intent: string) {
       case "treatment_due":
       case "churn_risk":
       case "follow_up_today":
+      case "top_customers":
         return ["search_customer_profiles"];
       default:
         return ["search_customer_profiles"];

@@ -101,6 +101,12 @@ function maskPhone(value: string | null | undefined) {
   return `${digits.slice(0, 2)}***${digits.slice(-3)}`;
 }
 
+function addDaysToDateKey(dateKey: string, days: number) {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 function buildServiceCategoryExpression(serviceField: string, packageField: string) {
   return `
     CASE
@@ -674,6 +680,204 @@ export async function getCustomerPortalAgentVisitSnapshot(params: DetailBasePara
     topServices: parseJsonArray(row?.topServicesJson),
     packageHoldings: parseJsonArray(row?.packageHoldingsJson),
     year: params.year,
+  };
+}
+
+export async function getCustomerPortalPriorityCustomers(params: {
+  clinicCode: string;
+  toDate: string;
+  mode: "follow_up" | "top_customers";
+  lookbackDays?: number;
+  limit?: number;
+}) {
+  const lookbackDays = Math.min(Math.max(params.lookbackDays ?? 365, 30), 730);
+  const fromDate = addDaysToDateKey(params.toDate, -(lookbackDays - 1));
+  const limit = Math.min(Math.max(params.limit ?? 25, 1), 50);
+  const rows = await runAnalyticsQuery<{
+    customerName: string;
+    phoneNumber: string;
+    memberId: string;
+    firstVisitDate: string | null;
+    lastVisitDate: string | null;
+    daysSinceLastVisit: number | null;
+    totalVisits: number;
+    recent90DayVisits: number;
+    previous90DayVisits: number;
+    remainingPackageSessions: number;
+    preferredService: string | null;
+    preferredTherapist: string | null;
+    riskLevel: string;
+    priorityScore: number;
+    nextBestAction: string;
+  }>(
+    `
+      WITH
+        ${buildDistinctVisitsCte("DATE(CheckInTime) BETWEEN DATE(@fromDate) AND DATE(@toDate)")}
+        ,
+        CustomerVisitBase AS (
+          SELECT
+            customerName,
+            phoneNumber,
+            MAX(memberId) AS memberId,
+            MIN(DATE(checkInTime)) AS firstVisitDate,
+            MAX(DATE(COALESCE(checkOutTime, checkInTime))) AS lastVisitDate,
+            COUNT(*) AS totalVisits,
+            COUNTIF(DATE(checkInTime) BETWEEN DATE_SUB(DATE(@toDate), INTERVAL 90 DAY) AND DATE(@toDate)) AS recent90DayVisits,
+            COUNTIF(DATE(checkInTime) BETWEEN DATE_SUB(DATE(@toDate), INTERVAL 180 DAY) AND DATE_SUB(DATE(@toDate), INTERVAL 91 DAY)) AS previous90DayVisits,
+            SUM(GREATEST(remainingPackageCount, 0)) AS remainingPackageSessions,
+            ARRAY_AGG(serviceName IGNORE NULLS ORDER BY checkInTime DESC LIMIT 1)[SAFE_OFFSET(0)] AS lastService,
+            ARRAY_AGG(practitionerName IGNORE NULLS ORDER BY checkInTime DESC LIMIT 1)[SAFE_OFFSET(0)] AS lastTherapist
+          FROM DistinctVisits
+          GROUP BY customerName, phoneNumber
+        ),
+        PreferredServiceBase AS (
+          SELECT
+            customerName,
+            phoneNumber,
+            serviceName AS preferredService,
+            COUNT(*) AS usageCount,
+            MAX(checkInTime) AS latestVisitDate
+          FROM DistinctVisits
+          WHERE COALESCE(serviceName, '') != ''
+          GROUP BY customerName, phoneNumber, serviceName
+        ),
+        PreferredService AS (
+          SELECT
+            customerName,
+            phoneNumber,
+            preferredService
+          FROM (
+            SELECT
+              *,
+              ROW_NUMBER() OVER (
+                PARTITION BY customerName, phoneNumber
+                ORDER BY usageCount DESC, latestVisitDate DESC, preferredService ASC
+              ) AS rowNum
+            FROM PreferredServiceBase
+          )
+          WHERE rowNum = 1
+        ),
+        PreferredTherapistBase AS (
+          SELECT
+            customerName,
+            phoneNumber,
+            practitionerName AS preferredTherapist,
+            COUNT(*) AS visitCount,
+            MAX(checkInTime) AS latestVisitDate
+          FROM DistinctVisits
+          WHERE COALESCE(practitionerName, '') != ''
+          GROUP BY customerName, phoneNumber, practitionerName
+        ),
+        PreferredTherapist AS (
+          SELECT
+            customerName,
+            phoneNumber,
+            preferredTherapist
+          FROM (
+            SELECT
+              *,
+              ROW_NUMBER() OVER (
+                PARTITION BY customerName, phoneNumber
+                ORDER BY visitCount DESC, latestVisitDate DESC, preferredTherapist ASC
+              ) AS rowNum
+            FROM PreferredTherapistBase
+          )
+          WHERE rowNum = 1
+        ),
+        ScoredCustomers AS (
+          SELECT
+            base.*,
+            COALESCE(preferredService.preferredService, base.lastService, '') AS preferredService,
+            COALESCE(preferredTherapist.preferredTherapist, base.lastTherapist, 'Unknown') AS preferredTherapist,
+            CASE
+              WHEN base.lastVisitDate IS NULL THEN NULL
+              ELSE DATE_DIFF(DATE(@toDate), base.lastVisitDate, DAY)
+            END AS daysSinceLastVisit
+          FROM CustomerVisitBase base
+          LEFT JOIN PreferredService preferredService USING (customerName, phoneNumber)
+          LEFT JOIN PreferredTherapist preferredTherapist USING (customerName, phoneNumber)
+        ),
+        PriorityCustomers AS (
+          SELECT
+            *,
+            CASE
+              WHEN COALESCE(daysSinceLastVisit, 0) >= 90 THEN 'high'
+              WHEN COALESCE(daysSinceLastVisit, 0) >= 45 THEN 'medium'
+              WHEN recent90DayVisits < previous90DayVisits AND previous90DayVisits > 0 THEN 'medium'
+              ELSE 'low'
+            END AS riskLevel,
+            LEAST(COALESCE(daysSinceLastVisit, 0), 120)
+              + IF(remainingPackageSessions > 0, 25, 0)
+              + IF(recent90DayVisits < previous90DayVisits AND previous90DayVisits > 0, 20, 0)
+              + LEAST(totalVisits, 25) AS priorityScore,
+            CASE
+              WHEN remainingPackageSessions > 0 AND COALESCE(daysSinceLastVisit, 0) >= 14 THEN 'Package balance remains. Invite the customer back for the next session.'
+              WHEN COALESCE(daysSinceLastVisit, 0) >= 45 THEN 'Customer has not visited recently. Send a warm return-visit check-in.'
+              WHEN recent90DayVisits < previous90DayVisits AND previous90DayVisits > 0 THEN 'Visit frequency is slowing. Recommend a return visit based on recent service history.'
+              ELSE 'Good active relationship. Keep in regular care cadence.'
+            END AS nextBestAction
+          FROM ScoredCustomers
+        )
+      SELECT
+        customerName,
+        phoneNumber,
+        COALESCE(memberId, '') AS memberId,
+        FORMAT_DATE('%Y-%m-%d', firstVisitDate) AS firstVisitDate,
+        FORMAT_DATE('%Y-%m-%d', lastVisitDate) AS lastVisitDate,
+        daysSinceLastVisit,
+        totalVisits,
+        recent90DayVisits,
+        previous90DayVisits,
+        remainingPackageSessions,
+        preferredService,
+        preferredTherapist,
+        riskLevel,
+        priorityScore,
+        nextBestAction
+      FROM PriorityCustomers
+      WHERE @mode = 'top_customers'
+        OR remainingPackageSessions > 0
+        OR riskLevel IN ('high', 'medium')
+      ORDER BY
+        IF(@mode = 'top_customers', totalVisits, priorityScore) DESC,
+        lastVisitDate DESC,
+        customerName ASC
+      LIMIT @limit
+    `,
+    {
+      clinicCode: params.clinicCode,
+      fromDate,
+      toDate: params.toDate,
+      mode: params.mode,
+      limit,
+    },
+  );
+
+  return {
+    lookbackDays,
+    rows: rows.map((row) => ({
+      customerKey: hashCustomerKey({
+        clinicCode: params.clinicCode,
+        phoneNumber: row.phoneNumber,
+        customerName: row.customerName,
+      }),
+      customerName: row.customerName,
+      customerPhoneMasked: maskPhone(row.phoneNumber),
+      phoneNumber: row.phoneNumber,
+      memberId: row.memberId || null,
+      firstVisitDate: row.firstVisitDate,
+      lastVisitDate: row.lastVisitDate,
+      daysSinceLastVisit: row.daysSinceLastVisit == null ? null : parseNumber(row.daysSinceLastVisit),
+      totalVisits: parseNumber(row.totalVisits),
+      recent90DayVisits: parseNumber(row.recent90DayVisits),
+      previous90DayVisits: parseNumber(row.previous90DayVisits),
+      remainingPackageSessions: parseNumber(row.remainingPackageSessions),
+      preferredService: row.preferredService ?? null,
+      preferredTherapist: row.preferredTherapist ?? null,
+      riskLevel: row.riskLevel,
+      priorityScore: parseNumber(row.priorityScore),
+      nextBestAction: row.nextBestAction,
+    })),
   };
 }
 

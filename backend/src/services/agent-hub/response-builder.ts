@@ -57,7 +57,17 @@ function followUpsForCustomer360(factPack: Customer360FactPack) {
   return questions.length ? questions.slice(0, 4) : ["Open the customer detail report.", "Show recent treatments.", "Show service usage."];
 }
 
-function followUpsForAgent(plan: GreatTimeAgentIntentPlan, customer360?: Customer360FactPack) {
+function hasActionableCustomerRows(results: AgentToolResult[]) {
+  return results.some((result) => {
+    if (result.customer360 || (result.entityRefs?.length ?? 0) > 0) {
+      return true;
+    }
+
+    return (result.tables ?? []).some((table) => table.rows.length > 0);
+  });
+}
+
+function followUpsForAgent(plan: GreatTimeAgentIntentPlan, results: AgentToolResult[], customer360?: Customer360FactPack) {
   if (customer360) {
     return followUpsForCustomer360(customer360);
   }
@@ -71,6 +81,10 @@ function followUpsForAgent(plan: GreatTimeAgentIntentPlan, customer360?: Custome
   }
 
   if (plan.resolvedAgent === "customer_relationship") {
+    if (!hasActionableCustomerRows(results)) {
+      return [];
+    }
+
     return [
       "Tell me about the first customer.",
       "Show their last treatment and recent purchases.",
@@ -188,7 +202,7 @@ export function buildAgentResponse(params: {
     metrics: metrics.length ? metrics : undefined,
     tables: tables.length ? tables : undefined,
     recommendations: recommendations.length ? recommendations : undefined,
-    followUpQuestions: followUpsForAgent(params.plan, customer360),
+    followUpQuestions: followUpsForAgent(params.plan, params.toolResults, customer360),
     customer360,
     sources,
     dataStatus,

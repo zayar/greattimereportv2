@@ -5,6 +5,7 @@ import {
   getCustomerPortalPackages,
   getCustomerPortalPayments,
   getCustomerQuickView,
+  getCustomerPortalPriorityCustomers,
   getCustomerPortalUsage,
 } from "../../reports/customer-portal.service.js";
 import {
@@ -23,6 +24,12 @@ function periodLabel(input: AgentToolInput) {
 }
 
 function profilePlan(intent: string, message: string) {
+  if (intent === "follow_up_today") {
+    return { sortBy: "priorityScore" as const };
+  }
+  if (intent === "top_customers") {
+    return { sortBy: "priorityScore" as const };
+  }
   if (intent === "unused_package_balance") {
     return { segment: "unused_package_balance" as const, sortBy: "remainingPackageSessions" as const };
   }
@@ -45,6 +52,73 @@ function profilePlan(intent: string, message: string) {
   return { search, sortBy: "priorityScore" as const };
 }
 
+function isMyanmarLanguage(value: AgentToolInput["request"]["aiLanguage"]) {
+  return value === "my-MM" || value === "my";
+}
+
+function shouldUseBigQueryPriorityFallback(input: AgentToolInput, matchedCount: number) {
+  if (matchedCount > 0) {
+    return false;
+  }
+
+  if (input.intent === "customer_search") {
+    return !extractExplicitCustomerSearchText(input.request.message);
+  }
+
+  return ["follow_up_today", "top_customers"].includes(input.intent);
+}
+
+function ownerCustomerSummary(params: {
+  count: number;
+  intent: string;
+  source: "learned" | "bigquery";
+  language: AgentToolInput["request"]["aiLanguage"];
+}) {
+  const count = params.count.toLocaleString("en-US");
+
+  if (isMyanmarLanguage(params.language)) {
+    if (params.count === 0) {
+      return "ဒီမေးခွန်းအတွက် customer match မတွေ့ပါ။";
+    }
+
+    if (params.intent === "top_customers") {
+      return `Top customer ${count} ယောက်ကို visit relationship အရ တွေ့ပါတယ်။`;
+    }
+
+    return `Follow-up လုပ်သင့်တဲ့ customer ${count} ယောက်ကို တွေ့ပါတယ်။`;
+  }
+
+  if (params.count === 0) {
+    return "No customer matches were found for this question.";
+  }
+
+  if (params.intent === "top_customers") {
+    return `${count} top customer${params.count === 1 ? "" : "s"} matched by visit relationship.`;
+  }
+
+  return `${count} customer${params.count === 1 ? "" : "s"} matched for follow-up review.`;
+}
+
+function fallbackActionFromRow(row: Awaited<ReturnType<typeof getCustomerPortalPriorityCustomers>>["rows"][number], language: AgentToolInput["request"]["aiLanguage"]) {
+  if (!isMyanmarLanguage(language)) {
+    return row.nextBestAction;
+  }
+
+  if (row.remainingPackageSessions > 0 && (row.daysSinceLastVisit ?? 0) >= 14) {
+    return `Package session ${row.remainingPackageSessions.toLocaleString("en-US")} ခုကျန်နေပါတယ်။ နောက် session အတွက် ပြန်ချိန်းပေးပါ။`;
+  }
+
+  if ((row.daysSinceLastVisit ?? 0) >= 45) {
+    return `နောက်ဆုံးလာခဲ့တာ ${row.daysSinceLastVisit} ရက်ရှိပါပြီ။ Return visit အတွက် ဆက်သွယ်ပါ။`;
+  }
+
+  if (row.recent90DayVisits < row.previous90DayVisits && row.previous90DayVisits > 0) {
+    return "Visit frequency လျော့နေပါတယ်။ မကြာသေးခင် service ကိုအခြေခံပြီး ပြန်လာဖို့ recommend လုပ်ပါ။";
+  }
+
+  return "Relationship က active ဖြစ်ပါတယ်။ Regular care cadence ထဲ ဆက်ထားပါ။";
+}
+
 async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolResult> {
   const latestRun = await getLatestCustomerRelationshipLearningRun(input.clinic.clinicId);
   const plan = profilePlan(input.intent, input.request.message);
@@ -55,20 +129,68 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
     limit: 25,
     offset: 0,
   });
+  const fallback =
+    shouldUseBigQueryPriorityFallback(input, result.rows.length)
+      ? await getCustomerPortalPriorityCustomers({
+          clinicCode: input.clinic.clinicCode,
+          toDate: input.period.toDate,
+          mode: input.intent === "top_customers" ? "top_customers" : "follow_up",
+          lookbackDays: latestRun?.sourceLookbackDays ?? 365,
+          limit: 25,
+        })
+      : null;
+  const fallbackRows = fallback?.rows ?? [];
+  const learnedRows = result.rows;
+  const usedFallback = fallback !== null;
+  const hasFallback = fallbackRows.length > 0;
+  const rows = hasFallback
+    ? fallbackRows.map((row) => ({
+        customerKey: row.customerKey,
+        customerName: row.customerName,
+        customerPhoneMasked: row.customerPhoneMasked,
+        memberId: row.memberId,
+        lastVisitDate: row.lastVisitDate,
+        daysSinceLastVisit: row.daysSinceLastVisit,
+        remainingPackageSessions: row.remainingPackageSessions,
+        lifetimeSpend: 0,
+        totalVisits: row.totalVisits,
+        riskLevel: row.riskLevel,
+        segments: row.remainingPackageSessions > 0 ? ["unused_package_balance"] : [],
+        nextBestAction: fallbackActionFromRow(row, input.request.aiLanguage),
+      }))
+    : learnedRows;
+  const sourceName = usedFallback ? "BigQuery customer visit and package signals" : "Firestore customer relationship profiles";
+  const dataStatus = rows.length > 0 ? "ok" : latestRun || usedFallback ? "no_activity" : "not_ready";
 
   return {
     toolName: "search_customer_profiles",
-    sourceName: "Firestore customer relationship profiles",
+    sourceName,
     checkedAt: nowIso(),
-    period: latestRun?.learnedAt ? `learned at ${latestRun.learnedAt}` : periodLabel(input),
-    dataStatus: latestRun ? (result.rows.length > 0 ? "ok" : "no_activity") : "not_ready",
+    period: usedFallback
+      ? `lookback ${fallback?.lookbackDays ?? 365} days through ${input.period.toDate}`
+      : latestRun?.learnedAt
+        ? `learned at ${latestRun.learnedAt}`
+        : periodLabel(input),
+    dataStatus,
     live: false,
-    summary: latestRun
-      ? `${result.rows.length.toLocaleString("en-US")} customer profile${result.rows.length === 1 ? "" : "s"} matched.`
-      : "Customer relationship learning has not run yet.",
+    summary: rows.length
+      ? ownerCustomerSummary({
+          count: rows.length,
+          intent: input.intent,
+          source: usedFallback ? "bigquery" : "learned",
+          language: input.request.aiLanguage,
+        })
+      : latestRun || usedFallback
+        ? ownerCustomerSummary({
+            count: 0,
+            intent: input.intent,
+            source: usedFallback ? "bigquery" : "learned",
+            language: input.request.aiLanguage,
+          })
+        : "Customer relationship learning has not run yet.",
     metrics: [
-      { label: "Matched customers", value: result.rows.length },
-      { label: "Source lookback days", value: latestRun?.sourceLookbackDays ?? "not learned" },
+      { label: "Matched customers", value: rows.length },
+      { label: "Source lookback days", value: usedFallback ? fallback?.lookbackDays ?? 365 : latestRun?.sourceLookbackDays ?? "not learned" },
     ],
     tables: [
       {
@@ -81,7 +203,7 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
           { key: "riskLevel", title: "Risk" },
           { key: "nextBestAction", title: "Next action" },
         ],
-        rows: result.rows.map((profile) => ({
+        rows: rows.map((profile) => ({
           customerKey: profile.customerKey,
           customerName: profile.customerName,
           customerPhoneMasked: profile.customerPhoneMasked,
@@ -95,12 +217,12 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
         })),
       },
     ],
-    recommendations: result.rows.slice(0, 3).map((profile) => ({
+    recommendations: rows.slice(0, 3).map((profile) => ({
       title: profile.customerName,
       message: profile.nextBestAction,
       sourceTools: ["search_customer_profiles"],
     })),
-    warnings: latestRun
+    warnings: latestRun || usedFallback
       ? undefined
       : [
           {
@@ -109,7 +231,7 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
             message: "Run customer relationship learning before relying on profile segments.",
           },
         ],
-    entityRefs: result.rows.map((profile, index) => ({
+    entityRefs: rows.map((profile, index) => ({
       entityType: "customer",
       entityId: profile.customerKey,
       customerKey: profile.customerKey,

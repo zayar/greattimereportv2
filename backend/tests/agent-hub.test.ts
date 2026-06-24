@@ -164,6 +164,18 @@ test("planner keeps generic show questions out of Customer 360 and includes usag
 
   assert.equal(overviewPlan.intent, "customer_overview")
   assert.ok(overviewPlan.toolNames.includes("get_customer_usage"))
+
+  const topCustomerPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "customer_relationship",
+      message: "who are the top customers",
+    },
+  })
+
+  assert.equal(topCustomerPlan.intent, "top_customers")
+  assert.deepEqual(topCustomerPlan.toolNames, ["search_customer_profiles"])
 })
 
 test("invoice detail search ignores generic time and display words", () => {
@@ -810,6 +822,47 @@ test("response builder assigns stable recommendation IDs", () => {
 
   assert.ok(first.recommendations?.[0]?.recommendationId?.startsWith("rec_"))
   assert.equal(first.recommendations?.[0]?.recommendationId, second.recommendations?.[0]?.recommendationId)
+})
+
+test("response builder suppresses customer follow-ups when no customer row is bound", () => {
+  const response = buildAgentResponse({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "customer_relationship",
+      message: "Which customers should we follow up today?",
+    },
+    sessionId: "session-1",
+    requestId: "request-1",
+    plan: {
+      requestedAgent: "customer_relationship",
+      resolvedAgent: "customer_relationship",
+      autoMode: false,
+      intent: "follow_up_today",
+      toolNames: ["search_customer_profiles"],
+      period: { fromDate: "2026-06-18", toDate: "2026-06-18", label: "today" },
+    },
+    toolResults: [
+      {
+        toolName: "search_customer_profiles",
+        sourceName: "profiles",
+        checkedAt: "2026-06-18T00:00:00.000Z",
+        dataStatus: "no_activity",
+        live: false,
+        summary: "No customer matches were found for this question.",
+        metrics: [{ label: "Matched customers", value: 0 }],
+        tables: [
+          {
+            title: "Customer relationship matches",
+            columns: [{ key: "customerName", title: "Customer" }],
+            rows: [],
+          },
+        ],
+      },
+    ],
+  })
+
+  assert.deepEqual(response.followUpQuestions, [])
 })
 
 test("memory policy rejects missing scope, transient exact metrics, secrets, and PII", () => {
