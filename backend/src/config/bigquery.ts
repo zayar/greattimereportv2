@@ -26,6 +26,8 @@ const credentials = readCredentials();
 export const analyticsTables = {
   mainDataView: `\`${env.BQ_PROJECT_ID}.${env.BQ_DATASET}.${env.BQ_MAIN_DATA_VIEW}\``,
   mainPaymentView: `\`${env.BQ_PROJECT_ID}.${env.BQ_DATASET}.${env.BQ_MAIN_PAYMENT_VIEW}\``,
+  customerPackageDaily: `\`${env.BQ_PROJECT_ID}.${env.BQ_DATASET}.${env.BQ_CUSTOMER_PACKAGE_DAILY_TABLE}\``,
+  customerRelationshipDaily: `\`${env.BQ_PROJECT_ID}.${env.BQ_DATASET}.${env.BQ_CUSTOMER_RELATIONSHIP_DAILY_TABLE}\``,
 };
 
 export const bigQueryClient = new BigQuery({
@@ -41,4 +43,3 @@ export const bigQueryClient = new BigQuery({
       }
     : {}),
 });
-

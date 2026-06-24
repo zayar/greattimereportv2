@@ -59,6 +59,14 @@ test("supervisor routes appointment questions with customer or service words to 
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "appointment sales" }).resolvedAgent, "finance")
 })
 
+test("supervisor routes customer purchase and never-visited questions to Customer Relationship Agent", () => {
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "Bought but never visited" }).resolvedAgent, "customer_relationship")
+  assert.equal(
+    resolveAgent({ requestedAgent: "auto", message: "Tell me what service win wati ko purchase?" }).resolvedAgent,
+    "customer_relationship",
+  )
+})
+
 test("supervisor handles Myanmar keywords and deterministic tie-breaking", () => {
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "ဒီနေ့ ငွေ ဘယ်လောက်ရလဲ" }).resolvedAgent, "finance")
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "ဖောက်သည် package လက်ကျန်" }).resolvedAgent, "customer_relationship")
@@ -216,6 +224,59 @@ test("planner keeps generic show questions out of Customer 360 and includes usag
 
   assert.equal(callPlan.intent, "follow_up_today")
   assert.deepEqual(callPlan.toolNames, ["search_customer_profiles"])
+
+  const neverVisitedPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "Bought but never visited",
+      timezone: "UTC",
+    },
+    now: new Date("2026-06-24T12:00:00.000Z"),
+  })
+
+  assert.equal(neverVisitedPlan.resolvedAgent, "customer_relationship")
+  assert.equal(neverVisitedPlan.intent, "unactivated_purchase")
+  assert.equal(neverVisitedPlan.period.label, "last 365 days")
+  assert.equal(neverVisitedPlan.period.fromDate, "2025-06-25")
+  assert.equal(neverVisitedPlan.period.toDate, "2026-06-24")
+  assert.deepEqual(neverVisitedPlan.toolNames, ["search_customer_profiles"])
+})
+
+test("planner routes named customer purchase questions to customer purchase history", () => {
+  assert.equal(extractExplicitCustomerSearchText("Tell me what service win wati ko purchase?"), "win wati ko")
+
+  const plan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "Tell me what service win wati ko purchase?",
+    },
+  })
+
+  assert.equal(plan.resolvedAgent, "customer_relationship")
+  assert.equal(plan.intent, "customer_purchase_history")
+  assert.deepEqual(plan.toolNames, ["get_customer_payments", "get_customer_packages"])
+
+  const followUpPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "customer_relationship",
+      message: "what did she purchase?",
+      entityContext: {
+        entityType: "customer",
+        entityId: "customer:win-wati-ko",
+        customerKey: "customer:win-wati-ko",
+        customerName: "Win Wati Ko",
+      },
+    },
+  })
+
+  assert.equal(followUpPlan.intent, "customer_purchase_history")
+  assert.deepEqual(followUpPlan.toolNames, ["get_customer_payments", "get_customer_packages"])
 })
 
 test("planner routes named service questions to one-shot Service 360 with month-to-date default", () => {
@@ -667,6 +728,117 @@ test("Telegram formatter explains appointment services and practitioner rows wit
   assert.match(practitionerMessage, /Wai Phoo က treatment 5 ကြိမ်လုပ်ထားပြီး customer 3 ယောက်/)
   assert.match(practitionerMessage, /အများဆုံးလုပ်ထားတဲ့ service က Whitening Laser ပါ/)
   assert.doesNotMatch(practitionerMessage, /Wai Phoo \| 5 \| 3 \| Whitening Laser/)
+})
+
+test("Telegram formatter explains never-visited package customers and customer purchases", () => {
+  const neverVisitedMessage = formatAgentHubTelegramReply({
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "customer_relationship",
+    autoMode: true,
+    intent: "package_bought_never_came",
+    period: {
+      fromDate: "2025-06-25",
+      toDate: "2026-06-24",
+      label: "last 365 days",
+    },
+    assistantMessage: "1 customer bought a package and has no visit after that purchase.",
+    summary: "1 customer bought a package and has no visit after that purchase.",
+    metrics: [
+      { label: "Matched customers", value: 1 },
+      { label: "Source lookback days", value: 365 },
+    ],
+    tables: [
+      {
+        title: "Customer relationship matches",
+        columns: [
+          { key: "customerName", title: "Customer" },
+          { key: "customerPhoneMasked", title: "Phone" },
+          { key: "lastPackagePurchaseDate", title: "Package purchase" },
+          { key: "lastPackageServiceName", title: "Package service" },
+          { key: "remainingPackageSessions", title: "Package balance" },
+        ],
+        rows: [
+          {
+            customerName: "Win Wati Ko",
+            customerPhoneMasked: "********2486",
+            lastVisitDate: "2026-03-21",
+            lastPackagePurchaseDate: "2026-04-01",
+            lastPackageServiceName: "Whitening Laser",
+            remainingPackageSessions: 4,
+            packageBoughtNeverCame: true,
+          },
+        ],
+      },
+    ],
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  })
+
+  assert.match(neverVisitedMessage, /Package ဝယ်ပြီးနောက် မလာသေးတဲ့ customer/)
+  assert.match(neverVisitedMessage, /2026-04-01 မှာ Whitening Laser ဝယ်ထားပါတယ်/)
+  assert.match(neverVisitedMessage, /ဝယ်ပြီးနောက် လာသုံးထားတဲ့ visit မတွေ့သေးပါ/)
+  assert.doesNotMatch(neverVisitedMessage, /နောက်ဆုံးလာခဲ့တာ 2026-03-21/)
+
+  const purchaseMessage = formatAgentHubTelegramReply({
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "customer_relationship",
+    autoMode: true,
+    intent: "customer_purchase_history",
+    period: {
+      fromDate: "2026-06-01",
+      toDate: "2026-06-24",
+      label: "this month",
+    },
+    assistantMessage: "Customer purchase history.",
+    summary: "Customer purchase history.",
+    metrics: [],
+    tables: [
+      {
+        title: "Customer recent purchases",
+        columns: [
+          { key: "dateLabel", title: "Date" },
+          { key: "invoiceNumber", title: "Invoice" },
+          { key: "serviceName", title: "Service" },
+          { key: "paymentMethod", title: "Method" },
+          { key: "netAmount", title: "Amount" },
+        ],
+        rows: [
+          {
+            dateLabel: "2026-06-21",
+            invoiceNumber: "INV-1",
+            serviceName: "Whitening Laser",
+            paymentMethod: "KBZ",
+            netAmount: 250000,
+          },
+        ],
+      },
+      {
+        title: "Customer packages",
+        columns: [
+          { key: "serviceName", title: "Service" },
+          { key: "totalSessions", title: "Total" },
+          { key: "usedSessions", title: "Used" },
+          { key: "remainingSessions", title: "Remaining" },
+        ],
+        rows: [{ serviceName: "Whitening Laser", totalSessions: 5, usedSessions: 1, remainingSessions: 4 }],
+      },
+    ],
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  })
+
+  assert.match(purchaseMessage, /Customer ရဲ့ purchase\/service history/)
+  assert.match(purchaseMessage, /2026-06-21 — Whitening Laser၊ invoice INV-1၊ KBZ၊ 250,000 ကျပ်/)
+  assert.match(purchaseMessage, /Whitening Laser — 5 session၊ သုံးပြီး 1၊ ကျန် 4/)
+  assert.doesNotMatch(purchaseMessage, /Service အလိုက် owner/)
 })
 
 test("appointment helpers count active checked-ins and exclude merchant cancellations from totals", () => {

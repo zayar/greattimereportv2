@@ -208,6 +208,10 @@ function forceFollowUpPlan(params: {
   }
 
   if (params.plan.resolvedAgent === "customer_relationship" && params.entityContext.entityType === "customer") {
+    if (params.plan.intent === "customer_purchase_history") {
+      return params.plan;
+    }
+
     return {
       ...params.plan,
       intent: "customer_360",

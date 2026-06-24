@@ -171,10 +171,34 @@ function followUpsForAgent(
       return [];
     }
 
+    if (plan.intent === "customer_purchase_history") {
+      return [
+        "Show this customer's package balance.",
+        "Show this customer's treatment history.",
+        "Show full customer profile.",
+      ];
+    }
+
+    if (["unactivated_purchase", "package_bought_never_came", "package_bought_never_used", "package_bought_not_used"].includes(plan.intent)) {
+      return [
+        "Tell me about the first customer.",
+        "Show the first customer's purchase details.",
+        "Show the first customer's package balance.",
+      ];
+    }
+
+    if (["dormant_with_active_balance_90d", "lapsed_customer_90d", "reactivated_customer"].includes(plan.intent)) {
+      return [
+        "Tell me about the first customer.",
+        "Show dormant package customers.",
+        "Who should the relationship team contact today?",
+      ];
+    }
+
     return [
-      "Tell me about the first customer.",
-      "Show the first customer's last treatment and package balance.",
-      "Which top customers should we thank this month?",
+      "Bought but not started customers.",
+      "Dormant package customers.",
+      "Follow-up opportunities today.",
     ];
   }
 

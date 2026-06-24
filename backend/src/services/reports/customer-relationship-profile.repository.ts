@@ -1,4 +1,5 @@
 import { firestoreDb } from "../../config/firebase.js";
+import { env } from "../../config/env.js";
 import type {
   CustomerRelationshipFeedbackOutcome,
   CustomerRelationshipIntent,
@@ -15,6 +16,7 @@ const AGENT_INTERACTIONS_COLLECTION = "customerRelationshipAgentInteractions";
 
 export type CustomerRelationshipProfileSearchInput = {
   clinicId: string;
+  intent?: CustomerRelationshipIntent;
   segment?: CustomerRelationshipSegment | "";
   riskLevel?: CustomerRelationshipRiskLevel | "";
   search?: string;
@@ -52,6 +54,39 @@ function isProfile(data: FirebaseFirestore.DocumentData | undefined): data is Cu
   return Boolean(data?.clinicId && data?.customerKey && data?.customerName);
 }
 
+export function mergeCustomerRelationshipProfileForRefresh(params: {
+  nextProfile: CustomerRelationshipProfile;
+  existingProfile?: CustomerRelationshipProfile | null;
+}) {
+  return {
+    ...params.nextProfile,
+    lastFollowUpAt: params.existingProfile?.lastFollowUpAt ?? params.nextProfile.lastFollowUpAt,
+    lastFollowUpOutcome: params.existingProfile?.lastFollowUpOutcome ?? params.nextProfile.lastFollowUpOutcome,
+    followUpCount: params.existingProfile?.followUpCount ?? params.nextProfile.followUpCount,
+    lastMatchedAt: params.existingProfile?.lastMatchedAt ?? params.nextProfile.lastMatchedAt ?? null,
+    lastMatchedIntent: params.existingProfile?.lastMatchedIntent ?? params.nextProfile.lastMatchedIntent ?? null,
+  } satisfies CustomerRelationshipProfile;
+}
+
+export function selectLatestCompletedCustomerRelationshipLearningRun<
+  T extends { createdAt?: string; status?: string },
+>(runs: T[]) {
+  return (
+    runs
+      .filter((run) => (run.status ?? "completed") === "completed")
+      .sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? ""))[0] ?? null
+  );
+}
+
+export function filterProfilesToLearningRun(params: {
+  profiles: CustomerRelationshipProfile[];
+  learningRunId: string | null | undefined;
+}) {
+  return params.learningRunId
+    ? params.profiles.filter((profile) => profile.learningRunId === params.learningRunId)
+    : params.profiles;
+}
+
 export function normalizeCustomerRelationshipProfile(
   data: CustomerRelationshipProfile,
 ): CustomerRelationshipProfile {
@@ -60,6 +95,11 @@ export function normalizeCustomerRelationshipProfile(
 
   return {
     ...data,
+    learningRunId: data.learningRunId ?? null,
+    snapshotDate: data.snapshotDate ?? null,
+    sourceWatermark: data.sourceWatermark ?? data.learnedAt ?? null,
+    ruleVersion: data.ruleVersion ?? null,
+    dataStatus: data.dataStatus ?? "ok",
     customerPhoneMasked: data.customerPhoneMasked ?? "",
     memberId: data.memberId ?? null,
     firstSeenDate: data.firstSeenDate ?? null,
@@ -83,17 +123,21 @@ export function normalizeCustomerRelationshipProfile(
     lastPaymentMethod: data.lastPaymentMethod ?? null,
     packagePurchaseCount: Number(data.packagePurchaseCount ?? 0),
     activePackageCount: Number(data.activePackageCount ?? 0),
+    unactivatedPurchaseCount: Number(data.unactivatedPurchaseCount ?? 0),
+    dormantActiveBalanceCount: Number(data.dormantActiveBalanceCount ?? 0),
     totalPackageSessions,
     usedPackageSessions: Number(data.usedPackageSessions ?? Math.max(0, totalPackageSessions - remainingPackageSessions)),
     remainingPackageSessions,
     packageHoldings: Array.isArray(data.packageHoldings) ? data.packageHoldings : [],
     packagePurchases: Array.isArray(data.packagePurchases) ? data.packagePurchases : [],
+    packageLifecycles: Array.isArray(data.packageLifecycles) ? data.packageLifecycles : [],
     serviceUsageByMonth: Array.isArray(data.serviceUsageByMonth) ? data.serviceUsageByMonth : [],
     packageBoughtNeverCame: Boolean(data.packageBoughtNeverCame),
     packageBoughtButNoUsage: Boolean(data.packageBoughtButNoUsage),
     hasUnusedPackageBalance: Boolean(data.hasUnusedPackageBalance ?? remainingPackageSessions > 0),
     relationshipHealthScore: Number(data.relationshipHealthScore ?? 0),
     rebookingStatus: data.rebookingStatus ?? "unknown",
+    primarySegment: data.primarySegment ?? null,
     segments: Array.isArray(data.segments) ? data.segments : [],
     reasons: Array.isArray(data.reasons) ? data.reasons : [],
     nextBestAction: data.nextBestAction ?? "Review the learned customer profile and record the next follow-up.",
@@ -124,6 +168,122 @@ function normalizeSearch(value: string | undefined) {
   return value?.trim().toLowerCase() ?? "";
 }
 
+function daysSinceIso(value: string | null | undefined, now = Date.now()) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value).getTime();
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  return Math.floor((now - parsed) / 86_400_000);
+}
+
+function followUpAdjustedPriority(profile: CustomerRelationshipProfile) {
+  let score = profile.priorityScore;
+  if (profile.lastFollowUpOutcome === "replied") {
+    score -= 10;
+  }
+  if (profile.lastFollowUpOutcome === "no_reply") {
+    score += 4;
+  }
+  return Math.max(0, Math.min(100, score));
+}
+
+function isFollowUpCandidate(profile: CustomerRelationshipProfile) {
+  const daysSinceFollowUp = daysSinceIso(profile.lastFollowUpAt);
+  const daysSinceMatched = daysSinceIso(profile.lastMatchedAt);
+
+  if (profile.lastFollowUpOutcome === "wrong_number") {
+    return false;
+  }
+
+  if (profile.lastFollowUpOutcome === "booked" && (daysSinceFollowUp ?? 0) <= env.CUSTOMER_RELATIONSHIP_FOLLOW_UP_COOLDOWN_DAYS) {
+    return false;
+  }
+
+  if (
+    profile.lastFollowUpOutcome === "not_interested" &&
+    (daysSinceFollowUp ?? 0) <= env.CUSTOMER_RELATIONSHIP_NOT_INTERESTED_COOLDOWN_DAYS
+  ) {
+    return false;
+  }
+
+  if (daysSinceMatched != null && daysSinceMatched < env.CUSTOMER_RELATIONSHIP_FOLLOW_UP_COOLDOWN_DAYS) {
+    return false;
+  }
+
+  return true;
+}
+
+function applySearchFilters(input: CustomerRelationshipProfileSearchInput, rows: CustomerRelationshipProfile[]) {
+  const search = normalizeSearch(input.search);
+
+  return rows
+    .filter((profile) => (input.segment ? profile.segments.includes(input.segment) : true))
+    .filter((profile) => (input.riskLevel ? profile.riskLevel === input.riskLevel : true))
+    .filter((profile) => (input.intent === "follow_up_today" ? isFollowUpCandidate(profile) : true))
+    .filter((profile) => {
+      if (!search) {
+        return true;
+      }
+      return (
+        profile.customerName.toLowerCase().includes(search) ||
+        profile.customerPhoneMasked.toLowerCase().includes(search) ||
+        (profile.memberId ?? "").toLowerCase().includes(search)
+      );
+    });
+}
+
+function sortProfiles(input: CustomerRelationshipProfileSearchInput, rows: CustomerRelationshipProfile[]) {
+  const sortBy = input.sortBy ?? "priorityScore";
+  const direction = input.sortDirection ?? "desc";
+
+  rows.sort((left, right) => {
+    let result = 0;
+
+    if (input.intent === "follow_up_today") {
+      result = followUpAdjustedPriority(left) - followUpAdjustedPriority(right);
+    } else if (sortBy === "lastVisitDate") {
+      result = compareNullableDate(left.lastVisitDate, right.lastVisitDate);
+    } else {
+      const leftValue = left[sortBy] ?? 0;
+      const rightValue = right[sortBy] ?? 0;
+      result = Number(leftValue) - Number(rightValue);
+    }
+
+    return direction === "asc" ? result : -result;
+  });
+
+  return rows;
+}
+
+async function loadSearchableProfiles(clinicId: string) {
+  const [profileSnapshot, latestRun] = await Promise.all([
+    profilesCollection().where("clinicId", "==", clinicId).get(),
+    getLatestCustomerRelationshipLearningRun(clinicId),
+  ]);
+  const activeLearningRunId = env.CUSTOMER_RELATIONSHIP_DAILY_MEMORY_V2_ENABLED
+    ? latestRun?.learningRunId ?? null
+    : null;
+
+  if (env.CUSTOMER_RELATIONSHIP_DAILY_MEMORY_V2_ENABLED && !activeLearningRunId) {
+    return [];
+  }
+
+  const profiles = profileSnapshot.docs
+    .map((doc) => doc.data())
+    .filter(isProfile)
+    .map(normalizeCustomerRelationshipProfile);
+
+  return filterProfilesToLearningRun({
+    profiles,
+    learningRunId: activeLearningRunId,
+  });
+}
+
 export async function saveCustomerRelationshipProfiles(params: {
   clinicId: string;
   profiles: CustomerRelationshipProfile[];
@@ -143,14 +303,10 @@ export async function saveCustomerRelationshipProfiles(params: {
 
   params.profiles.forEach((profile) => {
     const existingProfile = existingProfiles.get(profile.customerKey);
-    const nextProfile = {
-      ...profile,
-      lastFollowUpAt: existingProfile?.lastFollowUpAt ?? profile.lastFollowUpAt,
-      lastFollowUpOutcome: existingProfile?.lastFollowUpOutcome ?? profile.lastFollowUpOutcome,
-      followUpCount: existingProfile?.followUpCount ?? profile.followUpCount,
-      lastMatchedAt: existingProfile?.lastMatchedAt ?? profile.lastMatchedAt ?? null,
-      lastMatchedIntent: existingProfile?.lastMatchedIntent ?? profile.lastMatchedIntent ?? null,
-    };
+    const nextProfile = mergeCustomerRelationshipProfileForRefresh({
+      nextProfile: profile,
+      existingProfile,
+    });
 
     currentBatch.set(profilesCollection().doc(profileDocId(params.clinicId, profile.customerKey)), nextProfile, {
       merge: true,
@@ -176,24 +332,48 @@ export async function saveCustomerRelationshipLearningRun(params: {
   clinicCode: string;
   summary: CustomerRelationshipLearningSummary;
   lookbackDays: number;
+  learningRunId?: string;
+  snapshotDate?: string;
+  sourceWatermark?: string;
+  ruleVersion?: string;
+  status?: "completed" | "failed" | "partial";
+  error?: unknown;
 }) {
-  await learningRunsCollection().doc().set({
+  const docRef = params.learningRunId ? learningRunsCollection().doc(params.learningRunId) : learningRunsCollection().doc();
+
+  await docRef.set({
     clinicId: params.clinicId,
     clinicCode: params.clinicCode,
+    learningRunId: params.learningRunId ?? null,
+    snapshotDate: params.snapshotDate ?? params.summary.snapshotDate ?? null,
+    status: params.status ?? "completed",
+    sourceWatermark: params.sourceWatermark ?? params.summary.sourceWatermark ?? null,
+    ruleVersion: params.ruleVersion ?? params.summary.ruleVersion ?? null,
     ...params.summary,
     lookbackDays: params.lookbackDays,
     createdAt: params.summary.learnedAt,
+    error:
+      params.error instanceof Error
+        ? params.error.message
+        : typeof params.error === "string"
+          ? params.error
+          : null,
   });
 }
 
 export async function getLatestCustomerRelationshipLearningRun(clinicId: string) {
   const snapshot = await learningRunsCollection().where("clinicId", "==", clinicId).get();
-  const data = snapshot.docs
-    .map((doc) => doc.data() as CustomerRelationshipLearningSummary & {
+  const data = selectLatestCompletedCustomerRelationshipLearningRun(
+    snapshot.docs.map((doc) => doc.data() as CustomerRelationshipLearningSummary & {
       lookbackDays?: number;
       createdAt?: string;
-    })
-    .sort((left, right) => (right.createdAt ?? "").localeCompare(left.createdAt ?? ""))[0];
+      status?: string;
+      learningRunId?: string | null;
+      snapshotDate?: string | null;
+      sourceWatermark?: string | null;
+      ruleVersion?: string | null;
+    }),
+  );
 
   return data
     ? {
@@ -204,41 +384,7 @@ export async function getLatestCustomerRelationshipLearningRun(clinicId: string)
 }
 
 export async function searchCustomerRelationshipProfiles(input: CustomerRelationshipProfileSearchInput) {
-  const snapshot = await profilesCollection().where("clinicId", "==", input.clinicId).get();
-  const search = normalizeSearch(input.search);
-  const sortBy = input.sortBy ?? "priorityScore";
-  const direction = input.sortDirection ?? "desc";
-
-  const filtered = snapshot.docs
-    .map((doc) => doc.data())
-    .filter(isProfile)
-    .map(normalizeCustomerRelationshipProfile)
-    .filter((profile) => (input.segment ? profile.segments.includes(input.segment) : true))
-    .filter((profile) => (input.riskLevel ? profile.riskLevel === input.riskLevel : true))
-    .filter((profile) => {
-      if (!search) {
-        return true;
-      }
-      return (
-        profile.customerName.toLowerCase().includes(search) ||
-        profile.customerPhoneMasked.toLowerCase().includes(search) ||
-        (profile.memberId ?? "").toLowerCase().includes(search)
-      );
-    });
-
-  filtered.sort((left, right) => {
-    let result = 0;
-
-    if (sortBy === "lastVisitDate") {
-      result = compareNullableDate(left.lastVisitDate, right.lastVisitDate);
-    } else {
-      const leftValue = left[sortBy] ?? 0;
-      const rightValue = right[sortBy] ?? 0;
-      result = Number(leftValue) - Number(rightValue);
-    }
-
-    return direction === "asc" ? result : -result;
-  });
+  const filtered = sortProfiles(input, applySearchFilters(input, await loadSearchableProfiles(input.clinicId)));
 
   const offset = input.offset ?? 0;
   const limit = input.limit ?? 25;
@@ -251,52 +397,7 @@ export async function searchCustomerRelationshipProfiles(input: CustomerRelation
 
 export async function searchCustomerRelationshipProfilesBounded(input: CustomerRelationshipProfileSearchInput) {
   const limit = Math.min(Math.max(input.limit ?? 25, 1), 100);
-  let query: FirebaseFirestore.Query<FirebaseFirestore.DocumentData> = profilesCollection().where(
-    "clinicId",
-    "==",
-    input.clinicId,
-  );
-
-  if (input.riskLevel) {
-    query = query.where("riskLevel", "==", input.riskLevel);
-  }
-
-  if (input.segment) {
-    query = query.where("segments", "array-contains", input.segment);
-  }
-
-  const snapshot = await query.limit(limit * 2).get();
-  const search = normalizeSearch(input.search);
-  const sortBy = input.sortBy ?? "priorityScore";
-  const direction = input.sortDirection ?? "desc";
-
-  const rows = snapshot.docs
-    .map((doc) => doc.data())
-    .filter(isProfile)
-    .map(normalizeCustomerRelationshipProfile)
-    .filter((profile) => {
-      if (!search) {
-        return true;
-      }
-
-      return (
-        profile.customerName.toLowerCase().includes(search) ||
-        profile.customerPhoneMasked.toLowerCase().includes(search) ||
-        (profile.memberId ?? "").toLowerCase().includes(search)
-      );
-    });
-
-  rows.sort((left, right) => {
-    let result = 0;
-
-    if (sortBy === "lastVisitDate") {
-      result = compareNullableDate(left.lastVisitDate, right.lastVisitDate);
-    } else {
-      result = Number(left[sortBy] ?? 0) - Number(right[sortBy] ?? 0);
-    }
-
-    return direction === "asc" ? result : -result;
-  });
+  const rows = sortProfiles(input, applySearchFilters(input, await loadSearchableProfiles(input.clinicId)));
 
   const offset = input.offset ?? 0;
 

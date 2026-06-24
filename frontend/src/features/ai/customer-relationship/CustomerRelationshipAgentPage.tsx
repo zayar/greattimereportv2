@@ -23,6 +23,7 @@ import type {
   CustomerRelationshipPackagePurchase,
   CustomerRelationshipFeedbackOutcome,
   CustomerRelationshipFollowUpMessage,
+  CustomerRelationshipIntent,
   CustomerRelationshipProfile,
   CustomerRelationshipRiskLevel,
   CustomerRelationshipSegment,
@@ -35,17 +36,18 @@ type BusyAction = "learn" | "profiles" | "ask" | "evidence" | "message" | "feedb
 type SegmentFilter = {
   id: string;
   label: string;
+  intent?: CustomerRelationshipIntent;
   segment?: CustomerRelationshipSegment;
   riskLevel?: CustomerRelationshipRiskLevel;
 };
 
 const SEGMENT_FILTERS: SegmentFilter[] = [
-  { id: "follow_up_today", label: "Follow up today" },
-  { id: "package_bought_never_came", label: "Package bought never came", segment: "package_bought_never_came" },
-  { id: "unused_package_balance", label: "Unused package balance", segment: "unused_package_balance" },
-  { id: "inactive_vip", label: "Inactive VIP", segment: "inactive_vip" },
-  { id: "treatment_due", label: "Treatment due", segment: "treatment_due" },
-  { id: "high_risk", label: "High risk", riskLevel: "high" },
+  { id: "follow_up_today", label: "Follow-up today", intent: "follow_up_today" },
+  { id: "unactivated_purchase", label: "Bought but not started", segment: "unactivated_purchase" },
+  { id: "dormant_with_active_balance_90d", label: "Dormant package customers", segment: "dormant_with_active_balance_90d" },
+  { id: "unused_package_balance", label: "Active balance", segment: "unused_package_balance" },
+  { id: "lapsed_customer_90d", label: "Lapsed customers", segment: "lapsed_customer_90d" },
+  { id: "reactivated_customer", label: "Returned after follow-up", segment: "reactivated_customer" },
 ];
 
 const FEEDBACK_OPTIONS: Array<{ value: CustomerRelationshipFeedbackOutcome; label: string }> = [
@@ -56,14 +58,14 @@ const FEEDBACK_OPTIONS: Array<{ value: CustomerRelationshipFeedbackOutcome; labe
   { value: "not_interested", label: "Not interested" },
 ];
 
-const DEFAULT_QUESTION = "Who bought package but never came?";
+const DEFAULT_QUESTION = "Who bought a package but has not started using it?";
 const SUGGESTED_QUESTIONS = [
-  { label: "Package bought never came", question: "Who bought package but never came?" },
-  { label: "Unused package balance", question: "Which customers have unused package balance?" },
-  { label: "Inactive VIP", question: "Which VIP customers are inactive?" },
-  { label: "Treatment due", question: "Which customers are treatment due?" },
-  { label: "High risk", question: "Which customers are at risk?" },
-  { label: "Likely renewal", question: "Which customers are likely renewal opportunities?" },
+  { label: "Bought but not started", question: "Who bought a package but has not started using it?" },
+  { label: "Dormant package customers", question: "Show dormant package customers." },
+  { label: "Active balance, no visit for 90 days", question: "Which customers still have package sessions but have not visited for 90 days?" },
+  { label: "Follow-up opportunities today", question: "Who should the relationship team contact today?" },
+  { label: "Lapsed customers", question: "Show lapsed customers." },
+  { label: "Returned after follow-up", question: "Which customers returned after our follow-up?" },
 ];
 
 function formatMoney(value: number) {
@@ -86,10 +88,55 @@ function formatDate(value: string | null | undefined) {
 }
 
 function formatSegment(segment: string) {
+  if (segment === "unactivated_purchase" || segment === "package_bought_never_came" || segment === "package_bought_not_used") {
+    return "Bought but not started";
+  }
+
+  if (segment === "dormant_with_active_balance_90d") {
+    return "Dormant package customer";
+  }
+
+  if (segment === "lapsed_customer_90d") {
+    return "Lapsed customer";
+  }
+
+  if (segment === "purchase_pending_activation") {
+    return "Bought recently, not started yet";
+  }
+
+  if (segment === "reactivated_customer") {
+    return "Returned after follow-up";
+  }
+
   return segment
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function selectDisplayLifecycle(row: Pick<CustomerRelationshipProfile, "packageLifecycles" | "primarySegment">) {
+  const lifecycles = row.packageLifecycles ?? [];
+  const preferredStatus =
+    row.primarySegment === "dormant_with_active_balance_90d"
+      ? "activated"
+      : row.primarySegment === "purchase_pending_activation"
+        ? "purchase_pending_activation"
+        : "unactivated_purchase";
+
+  return (
+    lifecycles.find((lifecycle) => lifecycle.activationStatus === preferredStatus) ??
+    lifecycles.find((lifecycle) => lifecycle.balanceStatus === "confirmed" && (lifecycle.remainingSessions ?? 0) > 0) ??
+    lifecycles[0] ??
+    null
+  );
+}
+
+function formatRemainingSessions(value: number | null | undefined, balanceStatus?: string | null) {
+  if (balanceStatus !== "confirmed" || value == null) {
+    return "Unknown";
+  }
+
+  return value.toLocaleString("en-US");
 }
 
 function riskTone(riskLevel: CustomerRelationshipRiskLevel) {
@@ -197,18 +244,40 @@ function buildPurchasedServiceItems(
 }
 
 function profileToAgentRow(profile: CustomerRelationshipProfile) {
+  const lifecycle = selectDisplayLifecycle(profile);
+  const packageOrServiceName =
+    lifecycle?.packageName && lifecycle.serviceName
+      ? `${lifecycle.serviceName} / ${lifecycle.packageName}`
+      : lifecycle?.serviceName ?? profile.lastPackageServiceName ?? profile.lastService;
+
   return {
     customerKey: profile.customerKey,
     customerName: profile.customerName,
     customerPhoneMasked: profile.customerPhoneMasked,
+    learningRunId: profile.learningRunId ?? null,
+    snapshotDate: profile.snapshotDate ?? null,
+    sourceWatermark: profile.sourceWatermark ?? null,
+    ruleVersion: profile.ruleVersion ?? null,
+    dataStatus: profile.dataStatus ?? "ok",
     lastVisitDate: profile.lastVisitDate,
     daysSinceLastVisit: profile.daysSinceLastVisit,
     lastService: profile.lastService,
     lastPackageServiceName: profile.lastPackageServiceName,
     lastPackageName: profile.lastPackageName,
+    purchaseDate: lifecycle?.purchaseDate ?? profile.lastPackagePurchaseDate,
+    firstMatchingUsageDate: lifecycle?.firstMatchingUsageDate ?? null,
+    lastMatchingUsageDate: lifecycle?.lastMatchingUsageDate ?? null,
+    daysSinceMatchingUsage: lifecycle?.daysSinceMatchingUsage ?? null,
+    packageOrServiceName,
+    remainingSessions: lifecycle?.remainingSessions ?? null,
+    balanceStatus: lifecycle?.balanceStatus ?? (profile.hasUnusedPackageBalance ? "confirmed" : "unknown"),
+    segmentLabel: formatSegment(profile.primarySegment ?? profile.segments[0] ?? ""),
+    primarySegment: profile.primarySegment ?? profile.segments[0] ?? null,
+    evidenceReason: lifecycle?.evidenceReason ?? profile.reasons[0] ?? null,
     remainingPackageSessions: profile.remainingPackageSessions,
     packageHoldings: profile.packageHoldings,
     packagePurchases: profile.packagePurchases,
+    packageLifecycles: profile.packageLifecycles ?? [],
     lifetimeSpend: profile.lifetimeSpend,
     riskLevel: profile.riskLevel,
     segments: profile.segments,
@@ -255,6 +324,7 @@ export function CustomerRelationshipAgentPage() {
       const result = await fetchCustomerRelationshipProfiles({
         clinicId: currentClinic.id,
         clinicCode: currentClinic.code,
+        intent: activeFilter.intent ?? "",
         segment: activeFilter.segment ?? "",
         riskLevel: activeFilter.riskLevel ?? "",
         search,
@@ -272,7 +342,7 @@ export function CustomerRelationshipAgentPage() {
     } finally {
       setBusyAction((current) => (current === "profiles" ? null : current));
     }
-  }, [activeFilter.id, activeFilter.riskLevel, activeFilter.segment, currentClinic, search]);
+  }, [activeFilter.id, activeFilter.intent, activeFilter.riskLevel, activeFilter.segment, currentClinic, search]);
 
   useEffect(() => {
     void loadProfiles();
@@ -655,27 +725,38 @@ export function CustomerRelationshipAgentPage() {
               },
               { key: "lastVisit", header: "Last visit", render: (row) => formatDate(row.lastVisitDate) },
               {
-                key: "days",
-                header: "Days since",
-                render: (row) => (row.daysSinceLastVisit == null ? "—" : row.daysSinceLastVisit.toLocaleString("en-US")),
+                key: "packageOrService",
+                header: "Package/service",
+                render: (row) => row.packageOrServiceName ?? row.lastPackageServiceName ?? row.lastService ?? "—",
+              },
+              { key: "purchaseDate", header: "Purchase date", render: (row) => formatDate(row.purchaseDate) },
+              {
+                key: "usageDate",
+                header: "Usage date",
+                render: (row) => formatDate(row.lastMatchingUsageDate ?? row.firstMatchingUsageDate),
               },
               {
                 key: "balance",
-                header: "Package balance",
-                render: (row) => row.remainingPackageSessions.toLocaleString("en-US"),
+                header: "Remaining",
+                render: (row) => formatRemainingSessions(row.remainingSessions, row.balanceStatus),
               },
-              { key: "spend", header: "Lifetime spend", render: (row) => formatMoney(row.lifetimeSpend) },
               {
-                key: "risk",
-                header: "Risk",
-                render: (row) => <span className={`status-pill status-pill--${riskTone(row.riskLevel)}`}>{row.riskLevel}</span>,
+                key: "days",
+                header: "Days inactive",
+                render: (row) =>
+                  (row.daysSinceMatchingUsage ?? row.daysSinceLastVisit) == null
+                    ? "—"
+                    : (row.daysSinceMatchingUsage ?? row.daysSinceLastVisit)?.toLocaleString("en-US"),
               },
               {
                 key: "segments",
-                header: "Segments",
-                render: (row) => row.segments.slice(0, 2).map(formatSegment).join(", "),
+                header: "Segment",
+                render: (row) => row.segmentLabel ?? row.segments.slice(0, 1).map(formatSegment).join(", "),
               },
-              { key: "action", header: "Next best action", render: (row) => row.nextBestAction },
+              { key: "priority", header: "Priority", render: (row) => row.priorityScore.toLocaleString("en-US") },
+              { key: "freshness", header: "Freshness", render: (row) => formatDate(row.sourceWatermark ?? row.snapshotDate) },
+              { key: "evidence", header: "Evidence reason", render: (row) => row.evidenceReason ?? row.reasons[0] ?? "—" },
+              { key: "action", header: "Recommended action", render: (row) => row.nextBestAction },
               {
                 key: "followUp",
                 header: "Follow-up",

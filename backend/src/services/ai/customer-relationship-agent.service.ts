@@ -36,6 +36,7 @@ const AGENT_ROW_LIMIT = 25;
 const STALE_LEARNING_MS = 24 * 60 * 60_000;
 
 type SearchToolPlan = {
+  intent?: CustomerRelationshipIntent;
   segment?: CustomerRelationshipSegment;
   riskLevel?: CustomerRelationshipRiskLevel;
   search?: string;
@@ -99,6 +100,22 @@ export function detectCustomerRelationshipIntent(question: string): CustomerRela
     return "general_summary";
   }
 
+  if (/(returned after|came back after|reactivated|ပြန်လာ.*follow|follow.*ပြန်လာ)/i.test(normalized)) {
+    return "reactivated_customer";
+  }
+
+  if (/(lapsed|inactive.*90|90\s+days.*no visit|မလာတာ.*90|90.*မလာ)/i.test(normalized)) {
+    return "lapsed_customer_90d";
+  }
+
+  if (/(dormant package|active balance.*90|sessions?.*90|package sessions?.*not visited|လက်ကျန်.*90|package.*မလာတာ)/i.test(normalized)) {
+    return "dormant_with_active_balance_90d";
+  }
+
+  if (/(bought but not started|not started|never checked in afterward|bought.*never.*visited|purchased.*never.*visited|ဝယ်.*မစ|ဝယ်.*မလာ)/i.test(normalized)) {
+    return "unactivated_purchase";
+  }
+
   if (/(never came|never visit|never visited|package.*မလာ|ဝယ်.*မလာ|မလာသေး)/i.test(normalized)) {
     return "package_bought_never_came";
   }
@@ -157,44 +174,122 @@ function extractCustomerSearch(question: string) {
 
 function buildToolPlan(intent: CustomerRelationshipIntent, question: string): SearchToolPlan | null {
   switch (intent) {
+    case "unactivated_purchase":
+      return { intent, segment: "unactivated_purchase", sortBy: "priorityScore", sortDirection: "desc" };
+    case "dormant_with_active_balance_90d":
+      return { intent, segment: "dormant_with_active_balance_90d", sortBy: "priorityScore", sortDirection: "desc" };
+    case "lapsed_customer_90d":
+      return { intent, segment: "lapsed_customer_90d", sortBy: "priorityScore", sortDirection: "desc" };
+    case "reactivated_customer":
+      return { intent, segment: "reactivated_customer", sortBy: "priorityScore", sortDirection: "desc" };
     case "package_bought_never_came":
-      return { segment: "package_bought_never_came", sortBy: "priorityScore", sortDirection: "desc" };
+      return {
+        intent,
+        segment: env.CUSTOMER_RELATIONSHIP_DAILY_MEMORY_V2_ENABLED ? "unactivated_purchase" : "package_bought_never_came",
+        sortBy: "priorityScore",
+        sortDirection: "desc",
+      };
     case "package_bought_not_used":
-      return { segment: "package_bought_not_used", sortBy: "priorityScore", sortDirection: "desc" };
+      return {
+        intent,
+        segment: env.CUSTOMER_RELATIONSHIP_DAILY_MEMORY_V2_ENABLED ? "unactivated_purchase" : "package_bought_not_used",
+        sortBy: "priorityScore",
+        sortDirection: "desc",
+      };
     case "unused_package_balance":
-      return { segment: "unused_package_balance", sortBy: "remainingPackageSessions", sortDirection: "desc" };
+      return { intent, segment: "unused_package_balance", sortBy: "remainingPackageSessions", sortDirection: "desc" };
     case "follow_up_today":
-      return { sortBy: "priorityScore", sortDirection: "desc" };
+      return { intent, sortBy: "priorityScore", sortDirection: "desc" };
     case "inactive_vip":
-      return { segment: "inactive_vip", sortBy: "priorityScore", sortDirection: "desc" };
+      return { intent, segment: "inactive_vip", sortBy: "priorityScore", sortDirection: "desc" };
     case "churn_risk":
-      return { riskLevel: "high", sortBy: "priorityScore", sortDirection: "desc" };
+      return { intent, riskLevel: "high", sortBy: "priorityScore", sortDirection: "desc" };
     case "treatment_due":
-      return { segment: "treatment_due", sortBy: "priorityScore", sortDirection: "desc" };
+      return { intent, segment: "treatment_due", sortBy: "priorityScore", sortDirection: "desc" };
     case "high_value_no_recent_visit":
-      return { segment: "high_value_no_recent_visit", sortBy: "priorityScore", sortDirection: "desc" };
+      return { intent, segment: "high_value_no_recent_visit", sortBy: "priorityScore", sortDirection: "desc" };
     case "customer_search":
-      return { search: extractCustomerSearch(question), sortBy: "priorityScore", sortDirection: "desc" };
+      return { intent, search: extractCustomerSearch(question), sortBy: "priorityScore", sortDirection: "desc" };
     case "general_summary":
-      return { sortBy: "priorityScore", sortDirection: "desc" };
+      return { intent, sortBy: "priorityScore", sortDirection: "desc" };
     default:
       return null;
   }
 }
 
+function segmentLabel(segment: CustomerRelationshipSegment | null | undefined) {
+  switch (segment) {
+    case "purchase_pending_activation":
+      return "Bought recently, not started yet";
+    case "unactivated_purchase":
+    case "package_bought_never_came":
+    case "package_bought_not_used":
+      return "Bought but not started";
+    case "dormant_with_active_balance_90d":
+      return "Dormant package customer";
+    case "lapsed_customer_90d":
+      return "Lapsed customer";
+    case "reactivated_customer":
+      return "Returned after follow-up";
+    case "unused_package_balance":
+      return "Active package balance";
+    default:
+      return segment ? segment.replace(/_/g, " ") : null;
+  }
+}
+
+function selectDisplayLifecycle(profile: CustomerRelationshipProfile) {
+  const lifecycles = profile.packageLifecycles ?? [];
+  const preferredStatus =
+    profile.primarySegment === "dormant_with_active_balance_90d"
+      ? "activated"
+      : profile.primarySegment === "purchase_pending_activation"
+        ? "purchase_pending_activation"
+        : "unactivated_purchase";
+
+  return (
+    lifecycles.find((lifecycle) => lifecycle.activationStatus === preferredStatus) ??
+    lifecycles.find((lifecycle) => lifecycle.balanceStatus === "confirmed" && (lifecycle.remainingSessions ?? 0) > 0) ??
+    lifecycles[0] ??
+    null
+  );
+}
+
 function toAgentRow(profile: CustomerRelationshipProfile): CustomerRelationshipAgentRow {
+  const lifecycle = selectDisplayLifecycle(profile);
+  const packageOrServiceName =
+    lifecycle?.packageName && lifecycle.serviceName
+      ? `${lifecycle.serviceName} / ${lifecycle.packageName}`
+      : lifecycle?.serviceName ?? profile.lastPackageServiceName ?? profile.lastService;
+
   return {
     customerKey: profile.customerKey,
     customerName: profile.customerName,
     customerPhoneMasked: profile.customerPhoneMasked,
+    learningRunId: profile.learningRunId ?? null,
+    snapshotDate: profile.snapshotDate ?? null,
+    sourceWatermark: profile.sourceWatermark ?? null,
+    ruleVersion: profile.ruleVersion ?? null,
+    dataStatus: profile.dataStatus ?? "ok",
     lastVisitDate: profile.lastVisitDate,
     daysSinceLastVisit: profile.daysSinceLastVisit,
     lastService: profile.lastService,
     lastPackageServiceName: profile.lastPackageServiceName,
     lastPackageName: profile.lastPackageName,
+    purchaseDate: lifecycle?.purchaseDate ?? profile.lastPackagePurchaseDate,
+    firstMatchingUsageDate: lifecycle?.firstMatchingUsageDate ?? null,
+    lastMatchingUsageDate: lifecycle?.lastMatchingUsageDate ?? null,
+    daysSinceMatchingUsage: lifecycle?.daysSinceMatchingUsage ?? null,
+    packageOrServiceName,
+    remainingSessions: lifecycle?.remainingSessions ?? null,
+    balanceStatus: lifecycle?.balanceStatus ?? (profile.hasUnusedPackageBalance ? "confirmed" : "unknown"),
+    segmentLabel: segmentLabel(profile.primarySegment ?? profile.segments[0]),
+    primarySegment: profile.primarySegment ?? profile.segments[0] ?? null,
+    evidenceReason: lifecycle?.evidenceReason ?? profile.reasons[0] ?? null,
     remainingPackageSessions: profile.remainingPackageSessions,
     packageHoldings: profile.packageHoldings,
     packagePurchases: profile.packagePurchases,
+    packageLifecycles: profile.packageLifecycles ?? [],
     lifetimeSpend: profile.lifetimeSpend,
     riskLevel: profile.riskLevel,
     segments: profile.segments,
@@ -209,10 +304,13 @@ function toAgentRow(profile: CustomerRelationshipProfile): CustomerRelationshipA
 
 export function selectCustomerRelationshipEvidenceType(intent: CustomerRelationshipIntent): CustomerRelationshipEvidenceType {
   switch (intent) {
+    case "unactivated_purchase":
+    case "dormant_with_active_balance_90d":
     case "package_bought_never_came":
     case "package_bought_not_used":
     case "unused_package_balance":
       return "package_usage";
+    case "lapsed_customer_90d":
     case "treatment_due":
       return "visit_pattern";
     case "churn_risk":
@@ -230,10 +328,22 @@ function buildDataFreshnessNote(params: {
   profileCount: number;
 }) {
   if (!params.learnedAt) {
-    return "Customer behavior has not been learned yet. Run learning first to answer from profile data.";
+    return "Customer relationship daily memory is not ready yet. Ask an admin to run the scheduled learning job before relying on profile answers.";
   }
 
-  return `Learned from ${params.profileCount.toLocaleString("en-US")} customer profile${params.profileCount === 1 ? "" : "s"} on ${params.learnedAt}; source lookback ${params.sourceLookbackDays ?? "unknown"} days.`;
+  const ageMs = Date.now() - new Date(params.learnedAt).getTime();
+  const ageHours = Number.isFinite(ageMs) ? ageMs / 3_600_000 : null;
+  const base = `Learned from ${params.profileCount.toLocaleString("en-US")} customer profile${params.profileCount === 1 ? "" : "s"} on ${params.learnedAt}; source lookback ${params.sourceLookbackDays ?? "unknown"} days.`;
+
+  if (ageHours == null || ageHours <= 24) {
+    return base;
+  }
+
+  if (ageHours <= 48) {
+    return `${base} Notice: this learned memory is more than 24 hours old, so treat it as slightly stale.`;
+  }
+
+  return `${base} Warning: this learned memory is more than 48 hours old. Use it as historical context only, not as a current customer list.`;
 }
 
 function buildUnsupportedAnswer(): CustomerRelationshipAgentResponse {
@@ -283,12 +393,12 @@ export function buildFallbackAgentCopy(params: {
     ? first.reasons.slice(0, 4)
     : ["No matched customers were found for the selected intent."];
   const evidenceNarrative = first
-    ? `${first.customerName} is the top matched customer. The priority is based on learned profile reasons and the sorted customer list.`
+    ? `${first.customerName} is the top matched customer. ${first.evidenceReason ?? "The priority is based on learned profile reasons and the sorted customer list."}`
     : "No customer evidence is available for this answer. Refresh learning if the data looks stale.";
   const nextQuestionSuggestions = [
-    "Which customers have unused package balance?",
-    "Which customers are at risk?",
-    "Who should we follow up today?",
+    "Show dormant package customers.",
+    "Who bought a package but has not started using it?",
+    "Who should the relationship team contact today?",
   ];
 
   if (params.aiLanguage === "my-MM") {
@@ -330,7 +440,7 @@ async function ensureLearningIfNeeded(params: {
   const learnedTime = latestRun?.learnedAt ? new Date(latestRun.learnedAt).getTime() : 0;
   const stale = !learnedTime || Date.now() - learnedTime > STALE_LEARNING_MS;
 
-  if (params.autoLearnIfStale && stale) {
+  if (params.autoLearnIfStale && stale && !env.CUSTOMER_RELATIONSHIP_DAILY_MEMORY_V2_ENABLED) {
     await runCustomerRelationshipLearning({
       clinicId: params.clinicId,
       clinicCode: params.clinicCode,
@@ -364,6 +474,7 @@ export async function askCustomerRelationshipAgent(params: {
   });
   const result = await searchCustomerRelationshipProfiles({
     clinicId: params.clinicId,
+    intent: plan.intent,
     segment: plan.segment,
     riskLevel: plan.riskLevel,
     search: plan.search,

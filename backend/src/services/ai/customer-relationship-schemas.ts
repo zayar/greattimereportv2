@@ -3,6 +3,11 @@ import type { AiLanguage } from "./language.js";
 
 export const customerRelationshipRiskLevels = ["low", "medium", "high"] as const;
 export const customerRelationshipSegments = [
+  "purchase_pending_activation",
+  "unactivated_purchase",
+  "dormant_with_active_balance_90d",
+  "lapsed_customer_90d",
+  "reactivated_customer",
   "package_bought_never_came",
   "package_bought_not_used",
   "unused_package_balance",
@@ -16,6 +21,10 @@ export const customerRelationshipSegments = [
   "healthy_active_customer",
 ] as const;
 export const customerRelationshipIntents = [
+  "unactivated_purchase",
+  "dormant_with_active_balance_90d",
+  "lapsed_customer_90d",
+  "reactivated_customer",
   "package_bought_never_came",
   "package_bought_not_used",
   "unused_package_balance",
@@ -46,6 +55,21 @@ export const customerRelationshipEvidenceTypes = [
   "renewal_opportunity",
   "none",
 ] as const;
+export const customerRelationshipDataStatuses = ["ok", "partial", "stale", "not_ready", "unavailable"] as const;
+export const customerRelationshipBalanceStatuses = ["confirmed", "unknown"] as const;
+export const customerRelationshipActivationStatuses = [
+  "activated",
+  "purchase_pending_activation",
+  "unactivated_purchase",
+  "unknown",
+] as const;
+export const customerRelationshipMatchMethods = [
+  "stable_purchase_line_id",
+  "stable_customer_service_identity",
+  "phone_service_identity",
+  "name_service_identity",
+  "unmatched",
+] as const;
 
 export type CustomerRelationshipRiskLevel = (typeof customerRelationshipRiskLevels)[number];
 export type CustomerRelationshipSegment = (typeof customerRelationshipSegments)[number];
@@ -54,8 +78,14 @@ export type CustomerRelationshipFeedbackOutcome = (typeof customerRelationshipFe
 export type CustomerRelationshipFollowUpTone = (typeof customerRelationshipFollowUpTones)[number];
 export type CustomerRelationshipRebookingStatus = "onTrack" | "dueSoon" | "overdue" | "unknown";
 export type CustomerRelationshipEvidenceType = (typeof customerRelationshipEvidenceTypes)[number];
+export type CustomerRelationshipDataStatus = (typeof customerRelationshipDataStatuses)[number];
+export type CustomerRelationshipBalanceStatus = (typeof customerRelationshipBalanceStatuses)[number];
+export type CustomerRelationshipActivationStatus = (typeof customerRelationshipActivationStatuses)[number];
+export type CustomerRelationshipMatchMethod = (typeof customerRelationshipMatchMethods)[number];
 
 export type CustomerRelationshipPackageHolding = {
+  serviceId?: string | null;
+  packageId?: string | null;
   serviceName: string;
   packageName: string | null;
   serviceCategory: string;
@@ -68,12 +98,42 @@ export type CustomerRelationshipPackageHolding = {
 };
 
 export type CustomerRelationshipPackagePurchase = {
+  purchaseKey?: string | null;
+  invoiceNumber?: string | null;
+  purchaseLineKey?: string | null;
+  serviceId?: string | null;
+  packageId?: string | null;
   serviceName: string;
   packageName: string | null;
   serviceCategory: string;
   purchaseCount: number;
   latestPurchaseDate: string | null;
   totalAmount: number;
+};
+
+export type CustomerRelationshipPackageLifecycle = {
+  purchaseKey: string;
+  invoiceNumber: string | null;
+  purchaseLineKey: string | null;
+  serviceId: string | null;
+  serviceName: string;
+  packageId: string | null;
+  packageName: string | null;
+  purchaseDate: string | null;
+  purchaseAgeDays: number | null;
+  purchasedSessions: number | null;
+  usedSessions: number | null;
+  remainingSessions: number | null;
+  balanceStatus: CustomerRelationshipBalanceStatus;
+  firstMatchingUsageDate: string | null;
+  lastMatchingUsageDate: string | null;
+  lastCustomerVisitDate: string | null;
+  daysSinceMatchingUsage: number | null;
+  activationStatus: CustomerRelationshipActivationStatus;
+  matchMethod: CustomerRelationshipMatchMethod;
+  matchConfidence: number;
+  dataStatus: CustomerRelationshipDataStatus;
+  evidenceReason: string;
 };
 
 export type CustomerRelationshipServiceUsage = {
@@ -148,6 +208,11 @@ export type CustomerRelationshipEvidence = {
 export type CustomerRelationshipProfile = {
   clinicId: string;
   clinicCode: string;
+  learningRunId?: string | null;
+  snapshotDate?: string | null;
+  sourceWatermark?: string | null;
+  ruleVersion?: string | null;
+  dataStatus?: CustomerRelationshipDataStatus;
   customerKey: string;
   customerName: string;
   customerPhoneMasked: string;
@@ -174,11 +239,14 @@ export type CustomerRelationshipProfile = {
   lastPaymentMethod: string | null;
   packagePurchaseCount: number;
   activePackageCount: number;
+  unactivatedPurchaseCount?: number;
+  dormantActiveBalanceCount?: number;
   totalPackageSessions: number;
   usedPackageSessions: number;
   remainingPackageSessions: number;
   packageHoldings: CustomerRelationshipPackageHolding[];
   packagePurchases: CustomerRelationshipPackagePurchase[];
+  packageLifecycles?: CustomerRelationshipPackageLifecycle[];
   serviceUsageByMonth: CustomerRelationshipServiceUsage[];
   packageBoughtNeverCame: boolean;
   packageBoughtButNoUsage: boolean;
@@ -186,6 +254,7 @@ export type CustomerRelationshipProfile = {
   relationshipHealthScore: number;
   riskLevel: CustomerRelationshipRiskLevel;
   rebookingStatus: CustomerRelationshipRebookingStatus;
+  primarySegment?: CustomerRelationshipSegment | null;
   segments: CustomerRelationshipSegment[];
   reasons: string[];
   nextBestAction: string;
@@ -200,8 +269,14 @@ export type CustomerRelationshipProfile = {
 };
 
 export type CustomerRelationshipLearningSummary = {
+  learningRunId?: string;
+  snapshotDate?: string;
   learnedAt: string;
+  sourceWatermark?: string;
+  ruleVersion?: string;
+  dataStatus?: CustomerRelationshipDataStatus;
   totalCustomersAnalyzed: number;
+  packageRowsSaved?: number;
   profilesSaved: number;
   highRiskCount: number;
   mediumRiskCount: number;
@@ -213,14 +288,30 @@ export type CustomerRelationshipAgentRow = {
   customerKey: string;
   customerName: string;
   customerPhoneMasked: string;
+  learningRunId?: string | null;
+  snapshotDate?: string | null;
+  sourceWatermark?: string | null;
+  ruleVersion?: string | null;
+  dataStatus?: CustomerRelationshipDataStatus;
   lastVisitDate: string | null;
   daysSinceLastVisit: number | null;
   lastService: string | null;
   lastPackageServiceName: string | null;
   lastPackageName: string | null;
+  purchaseDate?: string | null;
+  firstMatchingUsageDate?: string | null;
+  lastMatchingUsageDate?: string | null;
+  daysSinceMatchingUsage?: number | null;
+  packageOrServiceName?: string | null;
+  remainingSessions?: number | null;
+  balanceStatus?: CustomerRelationshipBalanceStatus;
+  segmentLabel?: string | null;
+  primarySegment?: CustomerRelationshipSegment | null;
+  evidenceReason?: string | null;
   remainingPackageSessions: number;
   packageHoldings: CustomerRelationshipPackageHolding[];
   packagePurchases: CustomerRelationshipPackagePurchase[];
+  packageLifecycles?: CustomerRelationshipPackageLifecycle[];
   lifetimeSpend: number;
   riskLevel: CustomerRelationshipRiskLevel;
   segments: CustomerRelationshipSegment[];

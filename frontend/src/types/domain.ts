@@ -455,6 +455,11 @@ export interface ReportAiPayload {
 }
 
 export type CustomerRelationshipSegment =
+  | "purchase_pending_activation"
+  | "unactivated_purchase"
+  | "dormant_with_active_balance_90d"
+  | "lapsed_customer_90d"
+  | "reactivated_customer"
   | "package_bought_never_came"
   | "package_bought_not_used"
   | "unused_package_balance"
@@ -485,7 +490,24 @@ export type CustomerRelationshipEvidenceType =
   | "risk_explanation"
   | "renewal_opportunity"
   | "none";
+export type CustomerRelationshipDataStatus = "ok" | "partial" | "stale" | "not_ready" | "unavailable";
+export type CustomerRelationshipBalanceStatus = "confirmed" | "unknown";
+export type CustomerRelationshipActivationStatus =
+  | "activated"
+  | "purchase_pending_activation"
+  | "unactivated_purchase"
+  | "unknown";
+export type CustomerRelationshipMatchMethod =
+  | "stable_purchase_line_id"
+  | "stable_customer_service_identity"
+  | "phone_service_identity"
+  | "name_service_identity"
+  | "unmatched";
 export type CustomerRelationshipIntent =
+  | "unactivated_purchase"
+  | "dormant_with_active_balance_90d"
+  | "lapsed_customer_90d"
+  | "reactivated_customer"
   | "package_bought_never_came"
   | "package_bought_not_used"
   | "unused_package_balance"
@@ -499,6 +521,8 @@ export type CustomerRelationshipIntent =
   | "unsupported";
 
 export interface CustomerRelationshipPackageHolding {
+  serviceId?: string | null;
+  packageId?: string | null;
   serviceName: string;
   packageName: string | null;
   serviceCategory: string;
@@ -511,12 +535,42 @@ export interface CustomerRelationshipPackageHolding {
 }
 
 export interface CustomerRelationshipPackagePurchase {
+  purchaseKey?: string | null;
+  invoiceNumber?: string | null;
+  purchaseLineKey?: string | null;
+  serviceId?: string | null;
+  packageId?: string | null;
   serviceName: string;
   packageName: string | null;
   serviceCategory: string;
   purchaseCount: number;
   latestPurchaseDate: string | null;
   totalAmount: number;
+}
+
+export interface CustomerRelationshipPackageLifecycle {
+  purchaseKey: string;
+  invoiceNumber: string | null;
+  purchaseLineKey: string | null;
+  serviceId: string | null;
+  serviceName: string;
+  packageId: string | null;
+  packageName: string | null;
+  purchaseDate: string | null;
+  purchaseAgeDays: number | null;
+  purchasedSessions: number | null;
+  usedSessions: number | null;
+  remainingSessions: number | null;
+  balanceStatus: CustomerRelationshipBalanceStatus;
+  firstMatchingUsageDate: string | null;
+  lastMatchingUsageDate: string | null;
+  lastCustomerVisitDate: string | null;
+  daysSinceMatchingUsage: number | null;
+  activationStatus: CustomerRelationshipActivationStatus;
+  matchMethod: CustomerRelationshipMatchMethod;
+  matchConfidence: number;
+  dataStatus: CustomerRelationshipDataStatus;
+  evidenceReason: string;
 }
 
 export interface CustomerRelationshipServiceUsage {
@@ -591,6 +645,11 @@ export interface CustomerRelationshipEvidence {
 export interface CustomerRelationshipProfile {
   clinicId: string;
   clinicCode: string;
+  learningRunId?: string | null;
+  snapshotDate?: string | null;
+  sourceWatermark?: string | null;
+  ruleVersion?: string | null;
+  dataStatus?: CustomerRelationshipDataStatus;
   customerKey: string;
   customerName: string;
   customerPhoneMasked: string;
@@ -617,11 +676,14 @@ export interface CustomerRelationshipProfile {
   lastPaymentMethod: string | null;
   packagePurchaseCount: number;
   activePackageCount: number;
+  unactivatedPurchaseCount?: number;
+  dormantActiveBalanceCount?: number;
   totalPackageSessions: number;
   usedPackageSessions: number;
   remainingPackageSessions: number;
   packageHoldings: CustomerRelationshipPackageHolding[];
   packagePurchases: CustomerRelationshipPackagePurchase[];
+  packageLifecycles?: CustomerRelationshipPackageLifecycle[];
   serviceUsageByMonth: CustomerRelationshipServiceUsage[];
   packageBoughtNeverCame: boolean;
   packageBoughtButNoUsage: boolean;
@@ -629,6 +691,7 @@ export interface CustomerRelationshipProfile {
   relationshipHealthScore: number;
   riskLevel: CustomerRelationshipRiskLevel;
   rebookingStatus: CustomerRelationshipRebookingStatus;
+  primarySegment?: CustomerRelationshipSegment | null;
   segments: CustomerRelationshipSegment[];
   reasons: string[];
   nextBestAction: string;
@@ -641,8 +704,14 @@ export interface CustomerRelationshipProfile {
 }
 
 export interface CustomerRelationshipLearningSummary {
+  learningRunId?: string;
+  snapshotDate?: string;
   learnedAt: string;
+  sourceWatermark?: string;
+  ruleVersion?: string;
+  dataStatus?: CustomerRelationshipDataStatus;
   totalCustomersAnalyzed: number;
+  packageRowsSaved?: number;
   profilesSaved: number;
   highRiskCount: number;
   mediumRiskCount: number;
@@ -661,14 +730,30 @@ export interface CustomerRelationshipAgentRow {
   customerKey: string;
   customerName: string;
   customerPhoneMasked: string;
+  learningRunId?: string | null;
+  snapshotDate?: string | null;
+  sourceWatermark?: string | null;
+  ruleVersion?: string | null;
+  dataStatus?: CustomerRelationshipDataStatus;
   lastVisitDate: string | null;
   daysSinceLastVisit: number | null;
   lastService: string | null;
   lastPackageServiceName: string | null;
   lastPackageName: string | null;
+  purchaseDate?: string | null;
+  firstMatchingUsageDate?: string | null;
+  lastMatchingUsageDate?: string | null;
+  daysSinceMatchingUsage?: number | null;
+  packageOrServiceName?: string | null;
+  remainingSessions?: number | null;
+  balanceStatus?: CustomerRelationshipBalanceStatus;
+  segmentLabel?: string | null;
+  primarySegment?: CustomerRelationshipSegment | null;
+  evidenceReason?: string | null;
   remainingPackageSessions: number;
   packageHoldings: CustomerRelationshipPackageHolding[];
   packagePurchases: CustomerRelationshipPackagePurchase[];
+  packageLifecycles?: CustomerRelationshipPackageLifecycle[];
   lifetimeSpend: number;
   riskLevel: CustomerRelationshipRiskLevel;
   segments: CustomerRelationshipSegment[];

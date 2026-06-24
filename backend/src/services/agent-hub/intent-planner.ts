@@ -1,7 +1,7 @@
 import { env } from "../../config/env.js";
 import { shiftRange, toIsoDate } from "../../utils/date-range.js";
 import { formatDateKeyInTimeZone, normalizeTimeZone } from "../telegram/time.js";
-import { isCustomer360Question } from "./customer-query.js";
+import { hasCustomerEntityReference, hasExplicitCustomerSearchIntent, isCustomer360Question } from "./customer-query.js";
 import { isService360Question } from "./service-query.js";
 import { resolveAgent } from "./supervisor.js";
 import type {
@@ -82,6 +82,10 @@ export function extractAgentPeriod(params: {
   const timeZone = normalizeTimeZone(params.timezone || env.DEFAULT_TIMEZONE);
   const today = formatDateKeyInTimeZone(params.now ?? new Date(), timeZone);
 
+  if (/last\s+365\s+days|365\s+days|ရက်\s*365/i.test(params.message)) {
+    return buildPeriod(addDays(today, -364), today, "last 365 days");
+  }
+
   if (/last\s+90\s+days|90\s+days|ရက်\s*90/i.test(params.message)) {
     return buildPeriod(addDays(today, -89), today, "last 90 days");
   }
@@ -125,6 +129,12 @@ export function extractAgentPeriod(params: {
   return buildThisMonthPeriod(today);
 }
 
+function hasExplicitPeriodCue(message: string) {
+  return /last\s+\d+\s+days|last\s+365\s+days|365\s+days|last\s+90\s+days|90\s+days|last\s+30\s+days|30\s+days|this\s+week|current\s+week|last\s+week|previous\s+week|yesterday|today|now|right now|this\s+month|current\s+month|month\s+to\s+date|mtd|this\s+year|current\s+year|year\s+to\s+date|ytd|ဒီနေ့|ဒီ\s*လ|ဒီ\s*နှစ်|မနေ့/i.test(
+    message,
+  );
+}
+
 function detectFinanceIntent(message: string) {
   if (/compare|versus|vs|last week|previous|ယှဉ်/i.test(message)) {
     return "sales_period_comparison";
@@ -145,11 +155,32 @@ function detectFinanceIntent(message: string) {
 }
 
 function detectCustomerIntent(message: string) {
+  if (/returned after|came back after|reactivated|ပြန်လာ.*follow|follow.*ပြန်လာ/i.test(message)) {
+    return "reactivated_customer";
+  }
+  if (/dormant package|active balance.*90|sessions?.*90|package sessions?.*not visited|လက်ကျန်.*90|package.*မလာတာ/i.test(message)) {
+    return "dormant_with_active_balance_90d";
+  }
+  if (/lapsed|inactive.*90|90\s+days.*no visit|မလာတာ.*90|90.*မလာ/i.test(message)) {
+    return "lapsed_customer_90d";
+  }
+  if (/(?:bought|purchase|purchased|package|service|ဝယ်)[\s\S]{0,80}(?:not started|never checked in|never visited|မစ|မလာသေး|မလာ)|(?:not started|never checked in|never visited|မစ|မလာသေး|မလာ)[\s\S]{0,80}(?:bought|purchase|purchased|package|service|ဝယ်)/i.test(message)) {
+    return "unactivated_purchase";
+  }
+  if (/(?:bought|purchase|purchased|package|ဝယ်)[\s\S]{0,80}(?:never came|never visit|never visited|မလာသေး|မလာ)|(?:never came|never visit|never visited|မလာသေး|မလာ)[\s\S]{0,80}(?:bought|purchase|purchased|package|ဝယ်)/i.test(message)) {
+    return "package_bought_never_came";
+  }
+  if (/(not used|unused package|package.*not use|မသုံး|အသုံးမပြု)/i.test(message)) {
+    return "package_bought_not_used";
+  }
+  if (
+    (hasExplicitCustomerSearchIntent(message) || hasCustomerEntityReference(message)) &&
+    /purchase history|purchase|purchased|bought|buy|payment|package|ဝယ်/i.test(message)
+  ) {
+    return "customer_purchase_history";
+  }
   if (isCustomer360Question(message)) {
     return "customer_360";
-  }
-  if (/package.*never|never came|never visit|မလာသေး/i.test(message)) {
-    return "package_bought_never_used";
   }
   if (/unused|balance|remaining|လက်ကျန်|ကျန်/i.test(message)) {
     return "unused_package_balance";
@@ -274,7 +305,15 @@ function toolsForIntent(agentId: GreatTimeAgentId, intent: string) {
         ];
       case "customer_360":
         return ["get_customer_360"];
+      case "customer_purchase_history":
+        return ["get_customer_payments", "get_customer_packages"];
       case "unused_package_balance":
+      case "unactivated_purchase":
+      case "dormant_with_active_balance_90d":
+      case "lapsed_customer_90d":
+      case "reactivated_customer":
+      case "package_bought_never_came":
+      case "package_bought_not_used":
       case "package_bought_never_used":
       case "treatment_due":
       case "churn_risk":
@@ -335,7 +374,7 @@ export function planAgentRequest(params: {
     requestedAgent,
     message: params.request.message,
   });
-  const period = extractAgentPeriod({
+  let period = extractAgentPeriod({
     message: params.request.message,
     fromDate: params.request.fromDate,
     toDate: params.request.toDate,
@@ -359,11 +398,21 @@ export function planAgentRequest(params: {
   const intent =
     resolvedAgent === "finance"
       ? detectFinanceIntent(params.request.message)
-      : resolvedAgent === "customer_relationship"
-        ? detectCustomerIntent(params.request.message)
-        : resolvedAgent === "business"
-          ? detectBusinessIntent(params.request.message)
-          : detectAppointmentIntent(params.request.message);
+        : resolvedAgent === "customer_relationship"
+          ? detectCustomerIntent(params.request.message)
+          : resolvedAgent === "business"
+            ? detectBusinessIntent(params.request.message)
+            : detectAppointmentIntent(params.request.message);
+
+  if (
+    resolvedAgent === "customer_relationship" &&
+    ["unactivated_purchase", "package_bought_never_came", "package_bought_never_used", "package_bought_not_used"].includes(intent) &&
+    !params.request.fromDate &&
+    !params.request.toDate &&
+    !hasExplicitPeriodCue(params.request.message)
+  ) {
+    period = buildPeriod(addDays(period.toDate, -364), period.toDate, "last 365 days");
+  }
 
   return {
     requestedAgent,

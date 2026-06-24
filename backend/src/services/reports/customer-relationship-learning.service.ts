@@ -1,10 +1,15 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { analyticsTables } from "../../config/bigquery.js";
+import { env } from "../../config/env.js";
 import { runAnalyticsQuery } from "../bigquery.service.js";
 import { calculateCustomerRiskSignals } from "../ai/customer-risk.service.js";
 import type {
+  CustomerRelationshipBalanceStatus,
+  CustomerRelationshipDataStatus,
   CustomerRelationshipLearningSummary,
+  CustomerRelationshipMatchMethod,
   CustomerRelationshipPackageHolding,
+  CustomerRelationshipPackageLifecycle,
   CustomerRelationshipPackagePurchase,
   CustomerRelationshipProfile,
   CustomerRelationshipRiskLevel,
@@ -15,6 +20,8 @@ import {
   saveCustomerRelationshipLearningRun,
   saveCustomerRelationshipProfiles,
 } from "./customer-relationship-profile.repository.js";
+
+export const CUSTOMER_RELATIONSHIP_DAILY_MEMORY_V2_RULE_VERSION = "customer_relationship_daily_memory_v2.2026-06-24";
 
 export type CustomerRelationshipLearningRow = {
   customerName: string | null;
@@ -48,6 +55,76 @@ export type CustomerRelationshipLearningRow = {
   packageHoldingsJson: string | null;
   packagePurchasesJson: string | null;
   serviceUsageJson: string | null;
+};
+
+export type CustomerRelationshipPackageDailyMemoryRow = {
+  snapshotDate: string;
+  learningRunId: string;
+  computedAt: string;
+  sourceWatermark: string;
+  ruleVersion: string;
+  clinicId: string;
+  clinicCode: string;
+  customerKey: string;
+  customerName: string;
+  customerPhoneMasked: string;
+  memberId: string | null;
+  customerIdentityConfidence: number;
+  purchaseKey: string;
+  invoiceNumber: string | null;
+  purchaseLineKey: string | null;
+  serviceId: string | null;
+  serviceName: string;
+  packageId: string | null;
+  packageName: string | null;
+  purchaseDate: string | null;
+  purchaseAgeDays: number | null;
+  purchasedSessions: number | null;
+  usedSessions: number | null;
+  remainingSessions: number | null;
+  balanceStatus: CustomerRelationshipBalanceStatus;
+  firstMatchingUsageDate: string | null;
+  lastMatchingUsageDate: string | null;
+  lastCustomerVisitDate: string | null;
+  daysSinceMatchingUsage: number | null;
+  activationStatus: CustomerRelationshipPackageLifecycle["activationStatus"];
+  matchMethod: CustomerRelationshipMatchMethod;
+  matchConfidence: number;
+  dataStatus: CustomerRelationshipDataStatus;
+  evidenceReason: string;
+};
+
+export type CustomerRelationshipDailyMemoryRow = {
+  snapshotDate: string;
+  learningRunId: string;
+  computedAt: string;
+  sourceWatermark: string;
+  ruleVersion: string;
+  clinicId: string;
+  clinicCode: string;
+  customerKey: string;
+  customerName: string;
+  customerPhoneMasked: string;
+  memberId: string | null;
+  firstVisitDate: string | null;
+  lastVisitDate: string | null;
+  daysSinceLastVisit: number | null;
+  lifetimeSpend: number;
+  totalVisits: number;
+  recent90DayVisits: number;
+  previous90DayVisits: number;
+  activePackageCount: number;
+  remainingPackageSessions: number;
+  unactivatedPurchaseCount: number;
+  dormantActiveBalanceCount: number;
+  primarySegment: CustomerRelationshipSegment | null;
+  segments: CustomerRelationshipSegment[];
+  riskLevel: CustomerRelationshipRiskLevel;
+  relationshipHealthScore: number;
+  priorityScore: number;
+  reasons: string[];
+  nextBestAction: string;
+  dataStatus: CustomerRelationshipDataStatus;
 };
 
 function parseNumber(value: unknown) {
@@ -114,7 +191,7 @@ function parseJsonArray(value: unknown): unknown[] {
 
 function normalizePackageHoldings(value: unknown): CustomerRelationshipPackageHolding[] {
   return parseJsonArray(value)
-    .map((item) => {
+    .map((item): CustomerRelationshipPackageHolding | null => {
       if (!item || typeof item !== "object") {
         return null;
       }
@@ -125,6 +202,8 @@ function normalizePackageHoldings(value: unknown): CustomerRelationshipPackageHo
       const remainingCount = parseNumber(record.remainingCount);
 
       return {
+        serviceId: parseText(record.serviceId) || null,
+        packageId: parseText(record.packageId) || null,
         serviceName,
         packageName: parseText(record.packageName) || null,
         serviceCategory: parseText(record.serviceCategory, "Other"),
@@ -142,7 +221,7 @@ function normalizePackageHoldings(value: unknown): CustomerRelationshipPackageHo
 
 function normalizePackagePurchases(value: unknown): CustomerRelationshipPackagePurchase[] {
   return parseJsonArray(value)
-    .map((item) => {
+    .map((item): CustomerRelationshipPackagePurchase | null => {
       if (!item || typeof item !== "object") {
         return null;
       }
@@ -150,6 +229,11 @@ function normalizePackagePurchases(value: unknown): CustomerRelationshipPackageP
       const record = item as Record<string, unknown>;
 
       return {
+        purchaseKey: parseText(record.purchaseKey) || null,
+        invoiceNumber: parseText(record.invoiceNumber) || null,
+        purchaseLineKey: parseText(record.purchaseLineKey) || null,
+        serviceId: parseText(record.serviceId) || null,
+        packageId: parseText(record.packageId) || null,
         serviceName: parseText(record.serviceName, "Unknown service"),
         packageName: parseText(record.packageName) || null,
         serviceCategory: parseText(record.serviceCategory, "Other"),
@@ -477,7 +561,12 @@ function buildLearningQuery() {
           TO_JSON_STRING(
             ARRAY_AGG(
               STRUCT(
+                purchaseKey,
+                invoiceNumber,
+                purchaseLineKey,
+                serviceId,
                 serviceName,
+                packageId,
                 packageName,
                 serviceCategory,
                 purchaseCount,
@@ -492,15 +581,27 @@ function buildLearningQuery() {
           SELECT
             customerName,
             phoneNumber,
+            TO_HEX(SHA256(CONCAT(
+              COALESCE(invoiceNumber, ''),
+              '|',
+              COALESCE(serviceName, ''),
+              '|',
+              COALESCE(servicePackageName, ''),
+              '|',
+              FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%S', orderCreatedDate)
+            ))) AS purchaseKey,
+            invoiceNumber,
+            CAST(NULL AS STRING) AS purchaseLineKey,
+            CAST(NULL AS STRING) AS serviceId,
             COALESCE(NULLIF(serviceName, ''), 'Unknown service') AS serviceName,
+            CAST(NULL AS STRING) AS packageId,
             NULLIF(servicePackageName, '') AS packageName,
             COALESCE(NULLIF(serviceCategory, ''), 'Other') AS serviceCategory,
-            COUNT(*) AS purchaseCount,
-            MAX(DATE(orderCreatedDate)) AS latestPurchaseDate,
-            SUM(invoiceNetTotal) AS totalAmount
+            1 AS purchaseCount,
+            DATE(orderCreatedDate) AS latestPurchaseDate,
+            invoiceNetTotal AS totalAmount
           FROM InvoiceLevelPayments
           WHERE COALESCE(servicePackageName, '') != ''
-          GROUP BY customerName, phoneNumber, serviceName, packageName, serviceCategory
         )
         GROUP BY customerName, phoneNumber
       ),
@@ -938,6 +1039,848 @@ export function buildCustomerRelationshipProfilesFromRows(params: {
   });
 }
 
+function normalizeIdentityText(value: string | null | undefined) {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u1000-\u109f]+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function sameNullableIdentity(left: string | null | undefined, right: string | null | undefined) {
+  const normalizedLeft = normalizeIdentityText(left);
+  const normalizedRight = normalizeIdentityText(right);
+  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
+}
+
+function toDateKey(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  const dateKey = trimmed.match(/^\d{4}-\d{2}-\d{2}/)?.[0];
+  if (dateKey) {
+    return dateKey;
+  }
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed.toISOString().slice(0, 10);
+}
+
+function diffDays(fromDateKey: string, toDateKeyValue: string | null | undefined) {
+  const dateKey = toDateKey(toDateKeyValue);
+  if (!dateKey) {
+    return null;
+  }
+
+  const from = new Date(`${fromDateKey}T00:00:00.000Z`).getTime();
+  const to = new Date(`${dateKey}T00:00:00.000Z`).getTime();
+  const diff = Math.floor((from - to) / 86_400_000);
+  return Number.isFinite(diff) ? diff : null;
+}
+
+function isOnOrAfterDate(left: string | null | undefined, right: string | null | undefined) {
+  const leftKey = toDateKey(left);
+  const rightKey = toDateKey(right);
+  return Boolean(leftKey && rightKey && leftKey >= rightKey);
+}
+
+function maxIsoTimestamp(values: Array<string | null | undefined>, fallback: string) {
+  const candidates = values
+    .map((value) => {
+      const dateKey = toDateKey(value);
+      return dateKey ? `${dateKey}T23:59:59.000Z` : null;
+    })
+    .filter((value): value is string => value != null)
+    .sort();
+
+  return candidates.at(-1) ?? fallback;
+}
+
+function buildLearningRunId(params: { clinicId: string; snapshotDate: string }) {
+  return `crmem_${params.snapshotDate.replace(/-/g, "")}_${hashValue(`${params.clinicId}:${randomUUID()}`).slice(0, 16)}`;
+}
+
+function customerIdentityConfidence(row: CustomerRelationshipLearningRow) {
+  if (parseText(row.memberId)) {
+    return 0.9;
+  }
+
+  if (normalizePhoneDigits(row.phoneNumber)) {
+    return 0.95;
+  }
+
+  return 0.55;
+}
+
+function matchPackageHolding(params: {
+  purchase: CustomerRelationshipPackagePurchase;
+  holdings: CustomerRelationshipPackageHolding[];
+  row: CustomerRelationshipLearningRow;
+}) {
+  const exactIdMatch = params.holdings.find(
+    (holding) =>
+      (params.purchase.packageId && holding.packageId && params.purchase.packageId === holding.packageId) ||
+      (params.purchase.serviceId && holding.serviceId && params.purchase.serviceId === holding.serviceId),
+  );
+
+  if (exactIdMatch) {
+    return {
+      holding: exactIdMatch,
+      method: "stable_customer_service_identity" as const,
+      confidence: 0.96,
+    };
+  }
+
+  const serviceAndPackageMatch = params.holdings.find(
+    (holding) =>
+      sameNullableIdentity(holding.serviceName, params.purchase.serviceName) &&
+      (!params.purchase.packageName || !holding.packageName || sameNullableIdentity(holding.packageName, params.purchase.packageName)),
+  );
+
+  if (!serviceAndPackageMatch) {
+    return {
+      holding: null,
+      method: "unmatched" as const,
+      confidence: 0,
+    };
+  }
+
+  if (parseText(params.row.memberId)) {
+    return {
+      holding: serviceAndPackageMatch,
+      method: "stable_customer_service_identity" as const,
+      confidence: 0.9,
+    };
+  }
+
+  if (normalizePhoneDigits(params.row.phoneNumber)) {
+    return {
+      holding: serviceAndPackageMatch,
+      method: "phone_service_identity" as const,
+      confidence: 0.82,
+    };
+  }
+
+  return {
+    holding: serviceAndPackageMatch,
+    method: "name_service_identity" as const,
+    confidence: 0.45,
+  };
+}
+
+function buildPurchaseFallback(row: CustomerRelationshipLearningRow): CustomerRelationshipPackagePurchase[] {
+  const purchaseDate = toDateKey(row.lastPackagePurchaseDate);
+  const serviceName = parseText(row.lastPackageServiceName);
+  const packageName = parseText(row.lastPackageName) || null;
+
+  if (!purchaseDate && !serviceName && !packageName) {
+    return [];
+  }
+
+  return [
+    {
+      purchaseKey: null,
+      invoiceNumber: null,
+      purchaseLineKey: null,
+      serviceId: null,
+      packageId: null,
+      serviceName: serviceName || "Unknown service",
+      packageName,
+      serviceCategory: "Other",
+      purchaseCount: Math.max(1, parseNumber(row.packagePurchaseCount)),
+      latestPurchaseDate: purchaseDate,
+      totalAmount: 0,
+    },
+  ];
+}
+
+function lifecycleEvidenceReason(params: {
+  lifecycle: CustomerRelationshipPackageLifecycle;
+  serviceLabel: string;
+}) {
+  const purchaseText = params.lifecycle.purchaseDate ? `purchased on ${params.lifecycle.purchaseDate}` : "purchase date is unknown";
+  const lowConfidence =
+    params.lifecycle.matchMethod === "name_service_identity";
+
+  if (params.lifecycle.activationStatus === "activated") {
+    return `${params.serviceLabel} was ${purchaseText}; matching usage was found on ${params.lifecycle.lastMatchingUsageDate}.`;
+  }
+
+  if (lowConfidence) {
+    return `${params.serviceLabel} was ${purchaseText}; usage could not be confirmed from reliable package/service matching.`;
+  }
+
+  if (params.lifecycle.activationStatus === "purchase_pending_activation") {
+    return `${params.serviceLabel} was ${purchaseText}; it is still inside the ${env.CUSTOMER_RELATIONSHIP_UNACTIVATED_GRACE_DAYS}-day start grace period.`;
+  }
+
+  if (params.lifecycle.activationStatus === "unactivated_purchase") {
+    return `${params.serviceLabel} was ${purchaseText}; no matching usage after that purchase was found.`;
+  }
+
+  return `${params.serviceLabel} was ${purchaseText}; usage status is unavailable from the current source data.`;
+}
+
+function buildPackageLifecycleRows(params: {
+  profile: CustomerRelationshipProfile;
+  row: CustomerRelationshipLearningRow;
+  learningRunId: string;
+  snapshotDate: string;
+  computedAt: string;
+  sourceWatermark: string;
+}) {
+  const purchases = params.profile.packagePurchases.length
+    ? params.profile.packagePurchases
+    : buildPurchaseFallback(params.row);
+  const customerConfidence = customerIdentityConfidence(params.row);
+
+  return purchases.map((purchase, index) => {
+    const purchaseDate = toDateKey(purchase.latestPurchaseDate);
+    const match = matchPackageHolding({
+      purchase,
+      holdings: params.profile.packageHoldings,
+      row: params.row,
+    });
+    const matchingUsageDate =
+      match.holding && isOnOrAfterDate(match.holding.latestUsageDate, purchaseDate)
+        ? toDateKey(match.holding.latestUsageDate)
+        : null;
+    const purchaseAgeDays = diffDays(params.snapshotDate, purchaseDate);
+    const daysSinceMatchingUsage = matchingUsageDate ? diffDays(params.snapshotDate, matchingUsageDate) : null;
+    const balanceIsConfirmed = Boolean(match.holding && match.method !== "name_service_identity");
+    const remainingSessions = balanceIsConfirmed ? Math.max(0, parseNumber(match.holding?.remainingCount)) : null;
+    const purchasedSessions =
+      balanceIsConfirmed && match.holding
+        ? Math.max(parseNumber(match.holding.packageTotal), parseNumber(match.holding.usedCount) + parseNumber(match.holding.remainingCount))
+        : null;
+    const usedSessions =
+      balanceIsConfirmed && matchingUsageDate && match.holding
+        ? Math.max(0, parseNumber(match.holding.usedCount))
+        : matchingUsageDate
+          ? 1
+          : 0;
+    const activationStatus: CustomerRelationshipPackageLifecycle["activationStatus"] = matchingUsageDate
+      ? "activated"
+      : purchaseAgeDays == null
+        ? "unknown"
+        : purchaseAgeDays >= env.CUSTOMER_RELATIONSHIP_UNACTIVATED_GRACE_DAYS
+          ? "unactivated_purchase"
+          : "purchase_pending_activation";
+    const dataStatus: CustomerRelationshipDataStatus =
+      match.method === "name_service_identity" || match.confidence < 0.6 || !purchaseDate ? "partial" : "ok";
+    const serviceLabel = purchase.packageName
+      ? `${purchase.serviceName} / ${purchase.packageName}`
+      : purchase.serviceName;
+    const lifecycle: CustomerRelationshipPackageLifecycle = {
+      purchaseKey:
+        purchase.purchaseKey ||
+        hashValue(
+          [
+            params.profile.customerKey,
+            purchase.invoiceNumber ?? "",
+            purchase.serviceName,
+            purchase.packageName ?? "",
+            purchaseDate ?? "",
+            index,
+          ].join("|"),
+        ).slice(0, 32),
+      invoiceNumber: purchase.invoiceNumber ?? null,
+      purchaseLineKey: purchase.purchaseLineKey ?? null,
+      serviceId: purchase.serviceId ?? null,
+      serviceName: purchase.serviceName,
+      packageId: purchase.packageId ?? null,
+      packageName: purchase.packageName ?? null,
+      purchaseDate,
+      purchaseAgeDays,
+      purchasedSessions: purchasedSessions && purchasedSessions > 0 ? purchasedSessions : null,
+      usedSessions,
+      remainingSessions,
+      balanceStatus: remainingSessions == null ? "unknown" : "confirmed",
+      firstMatchingUsageDate: matchingUsageDate,
+      lastMatchingUsageDate: matchingUsageDate,
+      lastCustomerVisitDate: params.profile.lastVisitDate,
+      daysSinceMatchingUsage,
+      activationStatus,
+      matchMethod: match.method,
+      matchConfidence: match.confidence,
+      dataStatus,
+      evidenceReason: "",
+    };
+
+    lifecycle.evidenceReason = lifecycleEvidenceReason({
+      lifecycle,
+      serviceLabel,
+    });
+
+    return {
+      ...lifecycle,
+      snapshotDate: params.snapshotDate,
+      learningRunId: params.learningRunId,
+      computedAt: params.computedAt,
+      sourceWatermark: params.sourceWatermark,
+      ruleVersion: CUSTOMER_RELATIONSHIP_DAILY_MEMORY_V2_RULE_VERSION,
+      clinicId: params.profile.clinicId,
+      clinicCode: params.profile.clinicCode,
+      customerKey: params.profile.customerKey,
+      customerName: params.profile.customerName,
+      customerPhoneMasked: params.profile.customerPhoneMasked,
+      memberId: params.profile.memberId ?? null,
+      customerIdentityConfidence: customerConfidence,
+    } satisfies CustomerRelationshipPackageDailyMemoryRow & CustomerRelationshipPackageLifecycle;
+  });
+}
+
+const LEGACY_PACKAGE_SEGMENTS = new Set<CustomerRelationshipSegment>([
+  "package_bought_never_came",
+  "package_bought_not_used",
+  "unused_package_balance",
+]);
+
+const PRIMARY_SEGMENT_PRECEDENCE: CustomerRelationshipSegment[] = [
+  "unactivated_purchase",
+  "dormant_with_active_balance_90d",
+  "lapsed_customer_90d",
+  "purchase_pending_activation",
+  "inactive_vip",
+  "overdue_customer",
+  "treatment_due",
+  "high_value_no_recent_visit",
+  "new_customer_no_second_visit",
+  "declining_frequency",
+  "loyal_vip",
+  "healthy_active_customer",
+];
+
+function segmentLabel(segment: CustomerRelationshipSegment | null | undefined) {
+  switch (segment) {
+    case "purchase_pending_activation":
+      return "Bought recently, not started yet";
+    case "unactivated_purchase":
+      return "Bought but not started";
+    case "dormant_with_active_balance_90d":
+      return "Dormant package customer";
+    case "lapsed_customer_90d":
+      return "Lapsed customer";
+    case "reactivated_customer":
+      return "Returned after follow-up";
+    default:
+      return segment ? segment.replace(/_/g, " ") : "Customer relationship profile";
+  }
+}
+
+function buildV2Reasons(params: {
+  baseReasons: string[];
+  packageRows: CustomerRelationshipPackageDailyMemoryRow[];
+  primarySegment: CustomerRelationshipSegment | null;
+  daysSinceLastVisit: number | null;
+}) {
+  const reasons: string[] = [];
+  const unactivated = params.packageRows.find((row) => row.activationStatus === "unactivated_purchase");
+  const pending = params.packageRows.find((row) => row.activationStatus === "purchase_pending_activation");
+  const dormant = params.packageRows.find(
+    (row) =>
+      row.balanceStatus === "confirmed" &&
+      (row.remainingSessions ?? 0) > 0 &&
+      ((row.daysSinceMatchingUsage ?? 0) >= env.CUSTOMER_RELATIONSHIP_DORMANT_ACTIVE_BALANCE_DAYS ||
+        (!row.lastMatchingUsageDate && (row.purchaseAgeDays ?? 0) >= env.CUSTOMER_RELATIONSHIP_DORMANT_ACTIVE_BALANCE_DAYS)),
+  );
+
+  if (unactivated) {
+    reasons.push(unactivated.evidenceReason);
+  }
+
+  if (dormant) {
+    const inactiveDays =
+      dormant.daysSinceMatchingUsage ??
+      dormant.purchaseAgeDays ??
+      params.daysSinceLastVisit;
+    reasons.push(
+      `${dormant.serviceName} has ${dormant.remainingSessions?.toLocaleString("en-US") ?? "unknown"} confirmed remaining session(s), with no matching usage for ${inactiveDays ?? "unknown"} days.`,
+    );
+  }
+
+  if (params.primarySegment === "lapsed_customer_90d" && params.daysSinceLastVisit != null) {
+    reasons.push(`Last customer visit was ${params.daysSinceLastVisit.toLocaleString("en-US")} days ago and no confirmed active package balance is available.`);
+  }
+
+  if (pending && reasons.length === 0) {
+    reasons.push(pending.evidenceReason);
+  }
+
+  params.packageRows
+    .filter((row) => row.matchMethod === "name_service_identity" || row.matchConfidence < 0.6)
+    .slice(0, 1)
+    .forEach((row) => {
+      reasons.push(`${row.serviceName} usage could not be confirmed because matching confidence is low.`);
+    });
+
+  params.baseReasons.forEach((reason) => {
+    if (reasons.length < 6 && !/Package purchase found|Package usage appears|package session/i.test(reason)) {
+      reasons.push(reason);
+    }
+  });
+
+  return reasons.slice(0, 6);
+}
+
+function buildV2NextAction(primarySegment: CustomerRelationshipSegment | null, fallback: string) {
+  switch (primarySegment) {
+    case "unactivated_purchase":
+      return "Contact the customer with the purchased service name and help book the first usage visit.";
+    case "dormant_with_active_balance_90d":
+      return "Remind the customer about the remaining package sessions and offer an easy return appointment.";
+    case "lapsed_customer_90d":
+      return "Send a gentle return-visit message based on their last known service.";
+    case "purchase_pending_activation":
+      return "Keep this customer in light monitoring; follow up after the start grace period if no usage appears.";
+    case "reactivated_customer":
+      return "Record the successful return and review whether the follow-up script should be reused.";
+    default:
+      return fallback;
+  }
+}
+
+function buildV2PriorityScore(params: {
+  primarySegment: CustomerRelationshipSegment | null;
+  riskLevel: CustomerRelationshipRiskLevel;
+  lifetimeSpend: number;
+  maxLifetimeSpend: number;
+  daysSinceLastVisit: number | null;
+  confirmedRemainingSessions: number;
+}) {
+  let score = params.riskLevel === "high" ? 62 : params.riskLevel === "medium" ? 42 : 18;
+  const primaryWeights: Partial<Record<CustomerRelationshipSegment, number>> = {
+    unactivated_purchase: 28,
+    dormant_with_active_balance_90d: 24,
+    lapsed_customer_90d: 18,
+    purchase_pending_activation: 4,
+    inactive_vip: 16,
+    high_value_no_recent_visit: 14,
+    overdue_customer: 12,
+    treatment_due: 8,
+    new_customer_no_second_visit: 8,
+    declining_frequency: 8,
+    loyal_vip: 3,
+    healthy_active_customer: -10,
+  };
+
+  score += primaryWeights[params.primarySegment ?? "healthy_active_customer"] ?? 0;
+
+  if (params.maxLifetimeSpend > 0) {
+    score += Math.min(12, Math.round((params.lifetimeSpend / params.maxLifetimeSpend) * 12));
+  }
+
+  if ((params.daysSinceLastVisit ?? 0) >= 90) {
+    score += 8;
+  }
+
+  if (params.confirmedRemainingSessions >= 5) {
+    score += 6;
+  }
+
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+function deriveV2CustomerProfile(params: {
+  profile: CustomerRelationshipProfile;
+  packageRows: CustomerRelationshipPackageDailyMemoryRow[];
+  learningRunId: string;
+  snapshotDate: string;
+  computedAt: string;
+  sourceWatermark: string;
+  maxLifetimeSpend: number;
+}) {
+  const confirmedActiveRows = params.packageRows.filter(
+    (row) => row.balanceStatus === "confirmed" && (row.remainingSessions ?? 0) > 0,
+  );
+  const unactivatedRows = params.packageRows.filter((row) => row.activationStatus === "unactivated_purchase");
+  const pendingRows = params.packageRows.filter((row) => row.activationStatus === "purchase_pending_activation");
+  const dormantRows = confirmedActiveRows.filter(
+    (row) =>
+      ((row.daysSinceMatchingUsage ?? 0) >= env.CUSTOMER_RELATIONSHIP_DORMANT_ACTIVE_BALANCE_DAYS ||
+        (!row.lastMatchingUsageDate && (row.purchaseAgeDays ?? 0) >= env.CUSTOMER_RELATIONSHIP_DORMANT_ACTIVE_BALANCE_DAYS)),
+  );
+  const confirmedRemainingSessions = confirmedActiveRows.reduce(
+    (sum, row) => sum + Math.max(0, row.remainingSessions ?? 0),
+    0,
+  );
+  const segments = new Set<CustomerRelationshipSegment>(
+    params.profile.segments.filter((segment) => !LEGACY_PACKAGE_SEGMENTS.has(segment)),
+  );
+
+  if (unactivatedRows.length > 0) {
+    segments.add("unactivated_purchase");
+    segments.add("package_bought_never_came");
+    segments.add("package_bought_not_used");
+  }
+
+  if (dormantRows.length > 0) {
+    segments.add("dormant_with_active_balance_90d");
+  }
+
+  if (confirmedActiveRows.length > 0) {
+    segments.add("unused_package_balance");
+  }
+
+  if (
+    (params.profile.daysSinceLastVisit ?? 0) >= env.CUSTOMER_RELATIONSHIP_DORMANT_ACTIVE_BALANCE_DAYS &&
+    confirmedActiveRows.length === 0
+  ) {
+    segments.add("lapsed_customer_90d");
+  }
+
+  if (pendingRows.length > 0) {
+    segments.add("purchase_pending_activation");
+  }
+
+  if (segments.size === 0) {
+    segments.add("healthy_active_customer");
+  }
+
+  const primarySegment = PRIMARY_SEGMENT_PRECEDENCE.find((segment) => segments.has(segment)) ?? null;
+  if (primarySegment && primarySegment !== "healthy_active_customer") {
+    segments.delete("healthy_active_customer");
+  }
+
+  const dataStatus: CustomerRelationshipDataStatus =
+    params.packageRows.some((row) => row.dataStatus === "partial") ? "partial" : "ok";
+  const riskLevel: CustomerRelationshipRiskLevel =
+    primarySegment === "unactivated_purchase" || primarySegment === "dormant_with_active_balance_90d"
+      ? "high"
+      : primarySegment === "lapsed_customer_90d"
+        ? "medium"
+        : params.profile.riskLevel;
+  const relationshipHealthScore =
+    primarySegment === "unactivated_purchase"
+      ? Math.min(params.profile.relationshipHealthScore, 35)
+      : primarySegment === "dormant_with_active_balance_90d"
+        ? Math.min(params.profile.relationshipHealthScore, 40)
+        : primarySegment === "lapsed_customer_90d"
+          ? Math.min(params.profile.relationshipHealthScore, 55)
+          : params.profile.relationshipHealthScore;
+  const reasons = buildV2Reasons({
+    baseReasons: params.profile.reasons,
+    packageRows: params.packageRows,
+    primarySegment,
+    daysSinceLastVisit: params.profile.daysSinceLastVisit,
+  });
+  const priorityScore = buildV2PriorityScore({
+    primarySegment,
+    riskLevel,
+    lifetimeSpend: params.profile.lifetimeSpend,
+    maxLifetimeSpend: params.maxLifetimeSpend,
+    daysSinceLastVisit: params.profile.daysSinceLastVisit,
+    confirmedRemainingSessions,
+  });
+
+  return {
+    ...params.profile,
+    learningRunId: params.learningRunId,
+    snapshotDate: params.snapshotDate,
+    learnedAt: params.computedAt,
+    sourceWatermark: params.sourceWatermark,
+    ruleVersion: CUSTOMER_RELATIONSHIP_DAILY_MEMORY_V2_RULE_VERSION,
+    dataStatus,
+    activePackageCount: confirmedActiveRows.length,
+    unactivatedPurchaseCount: unactivatedRows.length,
+    dormantActiveBalanceCount: dormantRows.length,
+    totalPackageSessions: params.profile.totalPackageSessions,
+    usedPackageSessions: params.profile.usedPackageSessions,
+    remainingPackageSessions: confirmedRemainingSessions,
+    packageLifecycles: params.packageRows.map((row) => ({
+      purchaseKey: row.purchaseKey,
+      invoiceNumber: row.invoiceNumber,
+      purchaseLineKey: row.purchaseLineKey,
+      serviceId: row.serviceId,
+      serviceName: row.serviceName,
+      packageId: row.packageId,
+      packageName: row.packageName,
+      purchaseDate: row.purchaseDate,
+      purchaseAgeDays: row.purchaseAgeDays,
+      purchasedSessions: row.purchasedSessions,
+      usedSessions: row.usedSessions,
+      remainingSessions: row.remainingSessions,
+      balanceStatus: row.balanceStatus,
+      firstMatchingUsageDate: row.firstMatchingUsageDate,
+      lastMatchingUsageDate: row.lastMatchingUsageDate,
+      lastCustomerVisitDate: row.lastCustomerVisitDate,
+      daysSinceMatchingUsage: row.daysSinceMatchingUsage,
+      activationStatus: row.activationStatus,
+      matchMethod: row.matchMethod,
+      matchConfidence: row.matchConfidence,
+      dataStatus: row.dataStatus,
+      evidenceReason: row.evidenceReason,
+    })),
+    packageBoughtNeverCame: unactivatedRows.length > 0,
+    packageBoughtButNoUsage: unactivatedRows.length > 0,
+    hasUnusedPackageBalance: confirmedActiveRows.length > 0,
+    relationshipHealthScore,
+    riskLevel,
+    primarySegment,
+    segments: [...segments],
+    reasons,
+    nextBestAction: buildV2NextAction(primarySegment, params.profile.nextBestAction),
+    priorityScore,
+  } satisfies CustomerRelationshipProfile;
+}
+
+function buildDailyMemoryRow(profile: CustomerRelationshipProfile): CustomerRelationshipDailyMemoryRow {
+  return {
+    snapshotDate: profile.snapshotDate ?? profile.learnedAt.slice(0, 10),
+    learningRunId: profile.learningRunId ?? "",
+    computedAt: profile.learnedAt,
+    sourceWatermark: profile.sourceWatermark ?? profile.learnedAt,
+    ruleVersion: profile.ruleVersion ?? CUSTOMER_RELATIONSHIP_DAILY_MEMORY_V2_RULE_VERSION,
+    clinicId: profile.clinicId,
+    clinicCode: profile.clinicCode,
+    customerKey: profile.customerKey,
+    customerName: profile.customerName,
+    customerPhoneMasked: profile.customerPhoneMasked,
+    memberId: profile.memberId ?? null,
+    firstVisitDate: profile.firstSeenDate,
+    lastVisitDate: profile.lastVisitDate,
+    daysSinceLastVisit: profile.daysSinceLastVisit,
+    lifetimeSpend: profile.lifetimeSpend,
+    totalVisits: profile.totalVisits,
+    recent90DayVisits: profile.recent90DayVisits,
+    previous90DayVisits: profile.previous90DayVisits,
+    activePackageCount: profile.activePackageCount,
+    remainingPackageSessions: profile.remainingPackageSessions,
+    unactivatedPurchaseCount: profile.unactivatedPurchaseCount ?? 0,
+    dormantActiveBalanceCount: profile.dormantActiveBalanceCount ?? 0,
+    primarySegment: profile.primarySegment ?? null,
+    segments: profile.segments,
+    riskLevel: profile.riskLevel,
+    relationshipHealthScore: profile.relationshipHealthScore,
+    priorityScore: profile.priorityScore,
+    reasons: profile.reasons,
+    nextBestAction: profile.nextBestAction,
+    dataStatus: profile.dataStatus ?? "ok",
+  };
+}
+
+export function buildCustomerRelationshipDailyMemoryV2FromRows(params: {
+  clinicId: string;
+  clinicCode: string;
+  rows: CustomerRelationshipLearningRow[];
+  learnedAt: string;
+  lookbackDays: number;
+  learningRunId?: string;
+  snapshotDate?: string;
+}) {
+  const snapshotDate = params.snapshotDate ?? params.learnedAt.slice(0, 10);
+  const learningRunId = params.learningRunId ?? buildLearningRunId({ clinicId: params.clinicId, snapshotDate });
+  const sourceWatermark = maxIsoTimestamp(
+    params.rows.flatMap((row) => [row.lastPaymentDate, row.lastVisitDate, row.lastPackagePurchaseDate]),
+    params.learnedAt,
+  );
+  const baseProfiles = buildCustomerRelationshipProfilesFromRows({
+    clinicId: params.clinicId,
+    clinicCode: params.clinicCode,
+    rows: params.rows,
+    learnedAt: params.learnedAt,
+    lookbackDays: params.lookbackDays,
+  });
+  const maxLifetimeSpend = Math.max(...baseProfiles.map((profile) => profile.lifetimeSpend), 0);
+  const packageRows: CustomerRelationshipPackageDailyMemoryRow[] = [];
+  const profiles = baseProfiles.map((profile, index) => {
+    const rowPackageRows = buildPackageLifecycleRows({
+      profile,
+      row: params.rows[index],
+      learningRunId,
+      snapshotDate,
+      computedAt: params.learnedAt,
+      sourceWatermark,
+    });
+    packageRows.push(...rowPackageRows);
+
+    return deriveV2CustomerProfile({
+      profile,
+      packageRows: rowPackageRows,
+      learningRunId,
+      snapshotDate,
+      computedAt: params.learnedAt,
+      sourceWatermark,
+      maxLifetimeSpend,
+    });
+  });
+
+  const relationshipRows = profiles.map(buildDailyMemoryRow);
+  const summary = buildLearningSummary(profiles, params.learnedAt);
+
+  return {
+    learningRunId,
+    snapshotDate,
+    sourceWatermark,
+    ruleVersion: CUSTOMER_RELATIONSHIP_DAILY_MEMORY_V2_RULE_VERSION,
+    packageRows,
+    relationshipRows,
+    profiles,
+    summary: {
+      ...summary,
+      learningRunId,
+      snapshotDate,
+      sourceWatermark,
+      ruleVersion: CUSTOMER_RELATIONSHIP_DAILY_MEMORY_V2_RULE_VERSION,
+      dataStatus: profiles.some((profile) => profile.dataStatus === "partial") ? "partial" : "ok",
+      packageRowsSaved: packageRows.length,
+    } satisfies CustomerRelationshipLearningSummary,
+  };
+}
+
+async function replaceBigQuerySnapshot(params: {
+  table: string;
+  clinicId: string;
+  snapshotDate: string;
+  rowsJson: string[];
+  insertSelectSql: string;
+}) {
+  await runAnalyticsQuery(
+    `
+      DELETE FROM ${params.table}
+      WHERE clinicId = @clinicId
+        AND snapshotDate = DATE(@snapshotDate)
+    `,
+    {
+      clinicId: params.clinicId,
+      snapshotDate: params.snapshotDate,
+    },
+  );
+
+  if (params.rowsJson.length === 0) {
+    return;
+  }
+
+  await runAnalyticsQuery(
+    `
+      INSERT INTO ${params.table}
+      ${params.insertSelectSql}
+    `,
+    {
+      rowsJson: params.rowsJson,
+    },
+  );
+}
+
+async function writeDailyMemoryV2ToBigQuery(params: {
+  clinicId: string;
+  snapshotDate: string;
+  packageRows: CustomerRelationshipPackageDailyMemoryRow[];
+  relationshipRows: CustomerRelationshipDailyMemoryRow[];
+}) {
+  await replaceBigQuerySnapshot({
+    table: analyticsTables.customerPackageDaily,
+    clinicId: params.clinicId,
+    snapshotDate: params.snapshotDate,
+    rowsJson: params.packageRows.map((row) => JSON.stringify(row)),
+    insertSelectSql: `
+        (
+          snapshotDate, learningRunId, computedAt, sourceWatermark, ruleVersion,
+          clinicId, clinicCode, customerKey, customerName, customerPhoneMasked, memberId,
+          customerIdentityConfidence, purchaseKey, invoiceNumber, purchaseLineKey, serviceId,
+          serviceName, packageId, packageName, purchaseDate, purchaseAgeDays, purchasedSessions,
+          usedSessions, remainingSessions, balanceStatus, firstMatchingUsageDate,
+          lastMatchingUsageDate, lastCustomerVisitDate, daysSinceMatchingUsage, activationStatus,
+          matchMethod, matchConfidence, dataStatus, evidenceReason
+        )
+        SELECT
+          DATE(JSON_VALUE(row, '$.snapshotDate')),
+          JSON_VALUE(row, '$.learningRunId'),
+          TIMESTAMP(JSON_VALUE(row, '$.computedAt')),
+          TIMESTAMP(JSON_VALUE(row, '$.sourceWatermark')),
+          JSON_VALUE(row, '$.ruleVersion'),
+          JSON_VALUE(row, '$.clinicId'),
+          JSON_VALUE(row, '$.clinicCode'),
+          JSON_VALUE(row, '$.customerKey'),
+          JSON_VALUE(row, '$.customerName'),
+          JSON_VALUE(row, '$.customerPhoneMasked'),
+          JSON_VALUE(row, '$.memberId'),
+          SAFE_CAST(JSON_VALUE(row, '$.customerIdentityConfidence') AS FLOAT64),
+          JSON_VALUE(row, '$.purchaseKey'),
+          JSON_VALUE(row, '$.invoiceNumber'),
+          JSON_VALUE(row, '$.purchaseLineKey'),
+          JSON_VALUE(row, '$.serviceId'),
+          JSON_VALUE(row, '$.serviceName'),
+          JSON_VALUE(row, '$.packageId'),
+          JSON_VALUE(row, '$.packageName'),
+          SAFE_CAST(JSON_VALUE(row, '$.purchaseDate') AS DATE),
+          SAFE_CAST(JSON_VALUE(row, '$.purchaseAgeDays') AS INT64),
+          SAFE_CAST(JSON_VALUE(row, '$.purchasedSessions') AS INT64),
+          SAFE_CAST(JSON_VALUE(row, '$.usedSessions') AS INT64),
+          SAFE_CAST(JSON_VALUE(row, '$.remainingSessions') AS INT64),
+          JSON_VALUE(row, '$.balanceStatus'),
+          SAFE_CAST(JSON_VALUE(row, '$.firstMatchingUsageDate') AS DATE),
+          SAFE_CAST(JSON_VALUE(row, '$.lastMatchingUsageDate') AS DATE),
+          SAFE_CAST(JSON_VALUE(row, '$.lastCustomerVisitDate') AS DATE),
+          SAFE_CAST(JSON_VALUE(row, '$.daysSinceMatchingUsage') AS INT64),
+          JSON_VALUE(row, '$.activationStatus'),
+          JSON_VALUE(row, '$.matchMethod'),
+          SAFE_CAST(JSON_VALUE(row, '$.matchConfidence') AS FLOAT64),
+          JSON_VALUE(row, '$.dataStatus'),
+          JSON_VALUE(row, '$.evidenceReason')
+        FROM UNNEST(@rowsJson) AS rowJson,
+        UNNEST([PARSE_JSON(rowJson)]) AS row
+    `,
+  });
+
+  await replaceBigQuerySnapshot({
+    table: analyticsTables.customerRelationshipDaily,
+    clinicId: params.clinicId,
+    snapshotDate: params.snapshotDate,
+    rowsJson: params.relationshipRows.map((row) => JSON.stringify(row)),
+    insertSelectSql: `
+        (
+          snapshotDate, learningRunId, computedAt, sourceWatermark, ruleVersion,
+          clinicId, clinicCode, customerKey, customerName, customerPhoneMasked, memberId,
+          firstVisitDate, lastVisitDate, daysSinceLastVisit, lifetimeSpend, totalVisits,
+          recent90DayVisits, previous90DayVisits, activePackageCount, remainingPackageSessions,
+          unactivatedPurchaseCount, dormantActiveBalanceCount, primarySegment, segments, riskLevel,
+          relationshipHealthScore, priorityScore, reasons, nextBestAction, dataStatus
+        )
+        SELECT
+          DATE(JSON_VALUE(row, '$.snapshotDate')),
+          JSON_VALUE(row, '$.learningRunId'),
+          TIMESTAMP(JSON_VALUE(row, '$.computedAt')),
+          TIMESTAMP(JSON_VALUE(row, '$.sourceWatermark')),
+          JSON_VALUE(row, '$.ruleVersion'),
+          JSON_VALUE(row, '$.clinicId'),
+          JSON_VALUE(row, '$.clinicCode'),
+          JSON_VALUE(row, '$.customerKey'),
+          JSON_VALUE(row, '$.customerName'),
+          JSON_VALUE(row, '$.customerPhoneMasked'),
+          JSON_VALUE(row, '$.memberId'),
+          SAFE_CAST(JSON_VALUE(row, '$.firstVisitDate') AS DATE),
+          SAFE_CAST(JSON_VALUE(row, '$.lastVisitDate') AS DATE),
+          SAFE_CAST(JSON_VALUE(row, '$.daysSinceLastVisit') AS INT64),
+          SAFE_CAST(JSON_VALUE(row, '$.lifetimeSpend') AS FLOAT64),
+          SAFE_CAST(JSON_VALUE(row, '$.totalVisits') AS INT64),
+          SAFE_CAST(JSON_VALUE(row, '$.recent90DayVisits') AS INT64),
+          SAFE_CAST(JSON_VALUE(row, '$.previous90DayVisits') AS INT64),
+          SAFE_CAST(JSON_VALUE(row, '$.activePackageCount') AS INT64),
+          SAFE_CAST(JSON_VALUE(row, '$.remainingPackageSessions') AS INT64),
+          SAFE_CAST(JSON_VALUE(row, '$.unactivatedPurchaseCount') AS INT64),
+          SAFE_CAST(JSON_VALUE(row, '$.dormantActiveBalanceCount') AS INT64),
+          JSON_VALUE(row, '$.primarySegment'),
+          ARRAY(SELECT JSON_VALUE(segment) FROM UNNEST(JSON_QUERY_ARRAY(row, '$.segments')) AS segment),
+          JSON_VALUE(row, '$.riskLevel'),
+          SAFE_CAST(JSON_VALUE(row, '$.relationshipHealthScore') AS INT64),
+          SAFE_CAST(JSON_VALUE(row, '$.priorityScore') AS INT64),
+          ARRAY(SELECT JSON_VALUE(reason) FROM UNNEST(JSON_QUERY_ARRAY(row, '$.reasons')) AS reason),
+          JSON_VALUE(row, '$.nextBestAction'),
+          JSON_VALUE(row, '$.dataStatus')
+        FROM UNNEST(@rowsJson) AS rowJson,
+        UNNEST([PARSE_JSON(rowJson)]) AS row
+    `,
+  });
+}
+
 function buildLearningSummary(profiles: CustomerRelationshipProfile[], learnedAt: string): CustomerRelationshipLearningSummary {
   const segmentCounts: Record<string, number> = {};
 
@@ -962,6 +1905,7 @@ export async function runCustomerRelationshipLearning(params: {
   clinicId: string;
   clinicCode: string;
   lookbackDays?: number;
+  snapshotDate?: string;
 }) {
   const lookbackDays = Math.min(730, Math.max(30, params.lookbackDays ?? 365));
   const learnedAt = new Date().toISOString();
@@ -969,6 +1913,63 @@ export async function runCustomerRelationshipLearning(params: {
     clinicCode: params.clinicCode,
     lookbackDays,
   });
+
+  if (env.CUSTOMER_RELATIONSHIP_DAILY_MEMORY_V2_ENABLED) {
+    const memory = buildCustomerRelationshipDailyMemoryV2FromRows({
+      clinicId: params.clinicId,
+      clinicCode: params.clinicCode,
+      rows,
+      learnedAt,
+      lookbackDays,
+      snapshotDate: params.snapshotDate,
+    });
+
+    try {
+      await writeDailyMemoryV2ToBigQuery({
+        clinicId: params.clinicId,
+        snapshotDate: memory.snapshotDate,
+        packageRows: memory.packageRows,
+        relationshipRows: memory.relationshipRows,
+      });
+      await saveCustomerRelationshipProfiles({
+        clinicId: params.clinicId,
+        profiles: memory.profiles,
+      });
+      await saveCustomerRelationshipLearningRun({
+        clinicId: params.clinicId,
+        clinicCode: params.clinicCode,
+        summary: memory.summary,
+        lookbackDays,
+        learningRunId: memory.learningRunId,
+        snapshotDate: memory.snapshotDate,
+        sourceWatermark: memory.sourceWatermark,
+        ruleVersion: memory.ruleVersion,
+        status: "completed",
+      });
+    } catch (error) {
+      await saveCustomerRelationshipLearningRun({
+        clinicId: params.clinicId,
+        clinicCode: params.clinicCode,
+        summary: {
+          ...memory.summary,
+          dataStatus: "unavailable",
+          profilesSaved: 0,
+          packageRowsSaved: 0,
+        },
+        lookbackDays,
+        learningRunId: memory.learningRunId,
+        snapshotDate: memory.snapshotDate,
+        sourceWatermark: memory.sourceWatermark,
+        ruleVersion: memory.ruleVersion,
+        status: "failed",
+        error: error instanceof Error ? error.message : "Customer relationship daily memory V2 learning failed.",
+      });
+      throw error;
+    }
+
+    return memory.summary;
+  }
+
   const profiles = buildCustomerRelationshipProfilesFromRows({
     clinicId: params.clinicId,
     clinicCode: params.clinicCode,

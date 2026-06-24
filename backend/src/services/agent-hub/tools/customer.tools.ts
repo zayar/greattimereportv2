@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { env } from "../../../config/env.js";
 import {
   getCustomerPortalBookings,
   getCustomerPortalOverview,
@@ -25,16 +26,39 @@ function periodLabel(input: AgentToolInput) {
 
 function profilePlan(intent: string, message: string) {
   if (intent === "follow_up_today") {
-    return { sortBy: "priorityScore" as const };
+    return { intent: "follow_up_today" as const, sortBy: "priorityScore" as const };
   }
   if (intent === "top_customers") {
     return { sortBy: "priorityScore" as const };
   }
+  if (intent === "unactivated_purchase") {
+    return { intent: "unactivated_purchase" as const, segment: "unactivated_purchase" as const, sortBy: "priorityScore" as const };
+  }
+  if (intent === "dormant_with_active_balance_90d") {
+    return { intent: "dormant_with_active_balance_90d" as const, segment: "dormant_with_active_balance_90d" as const, sortBy: "priorityScore" as const };
+  }
+  if (intent === "lapsed_customer_90d") {
+    return { intent: "lapsed_customer_90d" as const, segment: "lapsed_customer_90d" as const, sortBy: "priorityScore" as const };
+  }
+  if (intent === "reactivated_customer") {
+    return { intent: "reactivated_customer" as const, segment: "reactivated_customer" as const, sortBy: "priorityScore" as const };
+  }
   if (intent === "unused_package_balance") {
     return { segment: "unused_package_balance" as const, sortBy: "remainingPackageSessions" as const };
   }
-  if (intent === "package_bought_never_used") {
-    return { segment: "package_bought_not_used" as const, sortBy: "priorityScore" as const };
+  if (intent === "package_bought_never_came" || intent === "package_bought_never_used") {
+    return {
+      intent: "package_bought_never_came" as const,
+      segment: env.CUSTOMER_RELATIONSHIP_DAILY_MEMORY_V2_ENABLED ? "unactivated_purchase" as const : "package_bought_never_came" as const,
+      sortBy: "priorityScore" as const,
+    };
+  }
+  if (intent === "package_bought_not_used") {
+    return {
+      intent: "package_bought_not_used" as const,
+      segment: env.CUSTOMER_RELATIONSHIP_DAILY_MEMORY_V2_ENABLED ? "unactivated_purchase" as const : "package_bought_not_used" as const,
+      sortBy: "priorityScore" as const,
+    };
   }
   if (intent === "treatment_due") {
     return { segment: "treatment_due" as const, sortBy: "priorityScore" as const };
@@ -61,6 +85,10 @@ function isMyanmarLanguage(value: AgentToolInput["request"]["aiLanguage"]) {
 }
 
 function shouldUseBigQueryPriorityFallback(input: AgentToolInput, matchedCount: number) {
+  if (env.CUSTOMER_RELATIONSHIP_DAILY_MEMORY_V2_ENABLED) {
+    return false;
+  }
+
   if (matchedCount > 0) {
     return false;
   }
@@ -85,6 +113,26 @@ function ownerCustomerSummary(params: {
       return "ဒီမေးခွန်းအတွက် customer match မတွေ့ပါ။";
     }
 
+    if (params.intent === "package_bought_never_came" || params.intent === "package_bought_never_used") {
+      return `Package ဝယ်ပြီးနောက် လာမသုံးသေးတဲ့ customer ${count} ယောက်ကို တွေ့ပါတယ်။`;
+    }
+
+    if (params.intent === "unactivated_purchase") {
+      return `ဝယ်ထားပြီး မစသေးတဲ့ customer ${count} ယောက်ကို တွေ့ပါတယ်။`;
+    }
+
+    if (params.intent === "dormant_with_active_balance_90d") {
+      return `Package လက်ကျန်ရှိပြီး 90 ရက်ကျော် မလာသေးတဲ့ customer ${count} ယောက်ကို တွေ့ပါတယ်။`;
+    }
+
+    if (params.intent === "lapsed_customer_90d") {
+      return `နောက်ဆုံးလာပြီး 90 ရက်ကျော်တဲ့ customer ${count} ယောက်ကို တွေ့ပါတယ်။`;
+    }
+
+    if (params.intent === "package_bought_not_used") {
+      return `Package ဝယ်ထားပြီး အသုံးမပြုသေးတဲ့ customer ${count} ယောက်ကို တွေ့ပါတယ်။`;
+    }
+
     if (params.intent === "top_customers") {
       return `Top customer ${count} ယောက်ကို visit relationship အရ တွေ့ပါတယ်။`;
     }
@@ -94,6 +142,26 @@ function ownerCustomerSummary(params: {
 
   if (params.count === 0) {
     return "No customer matches were found for this question.";
+  }
+
+  if (params.intent === "package_bought_never_came" || params.intent === "package_bought_never_used") {
+    return `${count} customer${params.count === 1 ? "" : "s"} bought a package and have no visit after that purchase.`;
+  }
+
+  if (params.intent === "unactivated_purchase") {
+    return `${count} customer${params.count === 1 ? "" : "s"} bought a package or service but have not started using it.`;
+  }
+
+  if (params.intent === "dormant_with_active_balance_90d") {
+    return `${count} dormant package customer${params.count === 1 ? "" : "s"} have confirmed remaining sessions and no matching usage for at least 90 days.`;
+  }
+
+  if (params.intent === "lapsed_customer_90d") {
+    return `${count} lapsed customer${params.count === 1 ? "" : "s"} have not visited for at least 90 days and have no confirmed active balance.`;
+  }
+
+  if (params.intent === "package_bought_not_used") {
+    return `${count} customer${params.count === 1 ? "" : "s"} bought a package and have no confirmed package usage.`;
   }
 
   if (params.intent === "top_customers") {
@@ -121,6 +189,43 @@ function fallbackActionFromRow(row: Awaited<ReturnType<typeof getCustomerPortalP
   }
 
   return "Relationship က active ဖြစ်ပါတယ်။ Regular care cadence ထဲ ဆက်ထားပါ။";
+}
+
+function latestLearningDataStatus(learnedAt: string | null | undefined, hasRows: boolean): AgentToolResult["dataStatus"] {
+  if (!learnedAt) {
+    return "not_ready";
+  }
+
+  const ageMs = Date.now() - new Date(learnedAt).getTime();
+  if (!Number.isFinite(ageMs)) {
+    return hasRows ? "partial" : "not_ready";
+  }
+
+  if (ageMs > 48 * 60 * 60_000) {
+    return "stale";
+  }
+
+  return hasRows ? "ok" : "no_activity";
+}
+
+function selectLifecycleForTool(profile: Record<string, unknown>) {
+  const lifecycles = Array.isArray(profile.packageLifecycles)
+    ? profile.packageLifecycles as Array<Record<string, unknown>>
+    : [];
+  const primarySegment = typeof profile.primarySegment === "string" ? profile.primarySegment : "";
+  const preferredStatus =
+    primarySegment === "dormant_with_active_balance_90d"
+      ? "activated"
+      : primarySegment === "purchase_pending_activation"
+        ? "purchase_pending_activation"
+        : "unactivated_purchase";
+
+  return (
+    lifecycles.find((row) => row.activationStatus === preferredStatus) ??
+    lifecycles.find((row) => row.balanceStatus === "confirmed" && Number(row.remainingSessions ?? 0) > 0) ??
+    lifecycles[0] ??
+    null
+  );
 }
 
 async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolResult> {
@@ -163,8 +268,40 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
         nextBestAction: fallbackActionFromRow(row, input.request.aiLanguage),
       }))
     : learnedRows;
-  const sourceName = usedFallback ? "BigQuery customer visit and package signals" : "Firestore customer relationship profiles";
-  const dataStatus = rows.length > 0 ? "ok" : latestRun || usedFallback ? "no_activity" : "not_ready";
+  const sourceName = usedFallback ? "Customer visit and package signals" : "Learned customer relationship memory";
+  const dataStatus = usedFallback
+    ? rows.length > 0 ? "ok" : "no_activity"
+    : latestLearningDataStatus(latestRun?.learnedAt, rows.length > 0);
+  const packageNeverCameIntent = input.intent === "package_bought_never_came" || input.intent === "package_bought_never_used";
+  const packageNotUsedIntent = input.intent === "package_bought_not_used" || input.intent === "unactivated_purchase";
+  const packageLifecycleIntent =
+    packageNeverCameIntent ||
+    packageNotUsedIntent ||
+    input.intent === "dormant_with_active_balance_90d" ||
+    input.intent === "lapsed_customer_90d";
+  const profileColumns =
+    packageLifecycleIntent
+      ? [
+          { key: "customerName", title: "Customer" },
+          { key: "customerPhoneMasked", title: "Phone" },
+          { key: "packageOrServiceName", title: "Package/service" },
+          { key: "purchaseDate", title: "Purchase date" },
+          { key: "lastMatchingUsageDate", title: "Usage date" },
+          { key: "remainingSessionsDisplay", title: "Remaining" },
+          { key: "daysInactive", title: "Days inactive" },
+          { key: "segmentLabel", title: "Segment" },
+          { key: "priorityScore", title: "Priority" },
+          { key: "evidenceReason", title: "Evidence" },
+          { key: "nextBestAction", title: "Next action" },
+        ]
+      : [
+          { key: "customerName", title: "Customer" },
+          { key: "customerPhoneMasked", title: "Phone" },
+          { key: "lastVisitDate", title: "Last visit" },
+          { key: "remainingPackageSessions", title: "Package balance" },
+          { key: "riskLevel", title: "Risk" },
+          { key: "nextBestAction", title: "Next action" },
+        ];
 
   return {
     toolName: "search_customer_profiles",
@@ -199,26 +336,51 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
     tables: [
       {
         title: "Customer relationship matches",
-        columns: [
-          { key: "customerName", title: "Customer" },
-          { key: "customerPhoneMasked", title: "Phone" },
-          { key: "lastVisitDate", title: "Last visit" },
-          { key: "remainingPackageSessions", title: "Package balance" },
-          { key: "riskLevel", title: "Risk" },
-          { key: "nextBestAction", title: "Next action" },
-        ],
-        rows: rows.map((profile) => ({
-          customerKey: profile.customerKey,
-          customerName: profile.customerName,
-          customerPhoneMasked: profile.customerPhoneMasked,
-          lastVisitDate: profile.lastVisitDate,
-          daysSinceLastVisit: profile.daysSinceLastVisit,
-          remainingPackageSessions: profile.remainingPackageSessions,
-          lifetimeSpend: profile.lifetimeSpend,
-          riskLevel: profile.riskLevel,
-          segments: profile.segments.join(", "),
-          nextBestAction: profile.nextBestAction,
-        })),
+        columns: profileColumns,
+        rows: rows.map((profile) => {
+          const record = profile as Record<string, unknown>;
+          const lifecycle = selectLifecycleForTool(record);
+          const packageOrServiceName =
+            typeof lifecycle?.packageName === "string" && lifecycle.packageName
+              ? `${String(lifecycle.serviceName ?? "")} / ${lifecycle.packageName}`
+              : String(lifecycle?.serviceName ?? ("lastPackageServiceName" in profile ? profile.lastPackageServiceName : "") ?? "");
+          const remainingSessions = lifecycle?.remainingSessions;
+
+          return {
+            customerKey: profile.customerKey,
+            customerName: profile.customerName,
+            customerPhoneMasked: profile.customerPhoneMasked,
+            lastVisitDate: profile.lastVisitDate,
+            daysSinceLastVisit: profile.daysSinceLastVisit,
+            packageOrServiceName: packageOrServiceName || null,
+            purchaseDate: lifecycle?.purchaseDate ?? ("lastPackagePurchaseDate" in profile ? profile.lastPackagePurchaseDate : null),
+            lastMatchingUsageDate: lifecycle?.lastMatchingUsageDate ?? null,
+            firstMatchingUsageDate: lifecycle?.firstMatchingUsageDate ?? null,
+            remainingSessionsDisplay:
+              lifecycle?.balanceStatus === "confirmed" && remainingSessions != null
+                ? Number(remainingSessions).toLocaleString("en-US")
+                : "Unknown",
+            daysInactive: lifecycle?.daysSinceMatchingUsage ?? profile.daysSinceLastVisit,
+            segmentLabel:
+              typeof record.primarySegment === "string"
+                ? record.primarySegment.replace(/_/g, " ")
+                : Array.isArray(profile.segments)
+                  ? profile.segments[0]?.replace(/_/g, " ") ?? null
+                  : null,
+            evidenceReason: lifecycle?.evidenceReason ?? ("reasons" in profile && Array.isArray(profile.reasons) ? profile.reasons[0] : null),
+            lastPackagePurchaseDate: "lastPackagePurchaseDate" in profile ? profile.lastPackagePurchaseDate : null,
+            lastPackageServiceName: "lastPackageServiceName" in profile ? profile.lastPackageServiceName : null,
+            lastPackageName: "lastPackageName" in profile ? profile.lastPackageName : null,
+            packageBoughtNeverCame: "packageBoughtNeverCame" in profile ? profile.packageBoughtNeverCame : false,
+            packageBoughtButNoUsage: "packageBoughtButNoUsage" in profile ? profile.packageBoughtButNoUsage : false,
+            remainingPackageSessions: profile.remainingPackageSessions,
+            lifetimeSpend: profile.lifetimeSpend,
+            riskLevel: profile.riskLevel,
+            segments: Array.isArray(profile.segments) ? profile.segments.join(", ") : "",
+            priorityScore: "priorityScore" in profile ? profile.priorityScore : null,
+            nextBestAction: profile.nextBestAction,
+          };
+        }),
       },
     ],
     recommendations: rows.slice(0, 3).map((profile) => ({
@@ -226,15 +388,24 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
       message: profile.nextBestAction,
       sourceTools: ["search_customer_profiles"],
     })),
-    warnings: latestRun || usedFallback
-      ? undefined
-      : [
-          {
-            type: "learning_not_ready",
-            title: "Customer learning not ready",
-            message: "Run customer relationship learning before relying on profile segments.",
-          },
-        ],
+    warnings:
+      dataStatus === "stale"
+        ? [
+            {
+              type: "learning_stale",
+              title: "Customer learning is stale",
+              message: "The latest completed customer relationship memory is more than 48 hours old. Use it as historical context only.",
+            },
+          ]
+        : latestRun || usedFallback
+          ? undefined
+          : [
+              {
+                type: "learning_not_ready",
+                title: "Customer learning not ready",
+                message: "Run customer relationship learning before relying on profile segments.",
+              },
+            ],
     entityRefs: rows.map((profile, index) => ({
       entityType: "customer",
       entityId: profile.customerKey,
@@ -248,11 +419,31 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
 }
 
 function customerIdentity(input: AgentToolInput) {
+  const customerSearchText = extractExplicitCustomerSearchText(input.request.message);
+
   return {
-    customerName: input.entityContext?.customerName ?? input.entityContext?.displayName ?? "",
+    customerName: input.entityContext?.customerName ?? input.entityContext?.displayName ?? customerSearchText ?? "",
     customerPhone: input.entityContext?.customerPhone ?? "",
     memberId: input.entityContext?.memberId ?? "",
   };
+}
+
+function customerEntityRefFromIdentity(identity: ReturnType<typeof customerIdentity>) {
+  const entityId = identity.memberId || identity.customerPhone || identity.customerName;
+
+  return entityId
+    ? [
+        {
+          entityType: "customer" as const,
+          entityId,
+          displayName: identity.customerName || identity.customerPhone || identity.memberId,
+          customerName: identity.customerName || undefined,
+          customerPhone: identity.customerPhone || undefined,
+          memberId: identity.memberId || undefined,
+          rank: 1,
+        },
+      ]
+    : undefined;
 }
 
 function notReadyCustomerTool(toolName: string, input: AgentToolInput): AgentToolResult {
@@ -367,6 +558,7 @@ async function getCustomerPackages(input: AgentToolInput): Promise<AgentToolResu
         ),
       },
     ],
+    entityRefs: customerEntityRefFromIdentity(identity),
   };
 }
 
@@ -405,6 +597,7 @@ async function getCustomerBookings(input: AgentToolInput): Promise<AgentToolResu
         rows: limitRows(data.rows, 20),
       },
     ],
+    entityRefs: customerEntityRefFromIdentity(identity),
   };
 }
 
@@ -444,6 +637,7 @@ async function getCustomerPayments(input: AgentToolInput): Promise<AgentToolResu
         rows: limitRows(data.rows, 20),
       },
     ],
+    entityRefs: customerEntityRefFromIdentity(identity),
   };
 }
 
@@ -480,6 +674,7 @@ async function getCustomerUsage(input: AgentToolInput): Promise<AgentToolResult>
         rows: limitRows(data.services, 20),
       },
     ],
+    entityRefs: customerEntityRefFromIdentity(identity),
   };
 }
 

@@ -401,6 +401,7 @@ async function runJob(params: {
         clinicId: params.clinicId,
         clinicCode: params.clinicCode,
         lookbackDays: Number(env.AGENT_LEARNING_DEFAULT_LOOKBACK_DAYS),
+        snapshotDate: params.dateKey,
       });
       return {
         rowCount: summary.profilesSaved,

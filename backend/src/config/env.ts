@@ -35,6 +35,8 @@ const envSchema = z.object({
   BQ_LOCATION: z.string().default("US"),
   BQ_MAIN_DATA_VIEW: z.string().default("MainDataView"),
   BQ_MAIN_PAYMENT_VIEW: z.string().default("MainPaymentView"),
+  BQ_CUSTOMER_PACKAGE_DAILY_TABLE: z.string().default("gt_ai_customer_package_daily"),
+  BQ_CUSTOMER_RELATIONSHIP_DAILY_TABLE: z.string().default("gt_ai_customer_relationship_daily"),
   GT_GROWTH_AI_DEFAULT_ENABLED: booleanEnv(false),
   GT_GROWTH_AI_ENABLED_CLINIC_IDS: z.string().default(""),
   GT_GROWTH_AI_FEATURE_STORE_ENABLED: booleanEnv(true),
@@ -69,6 +71,11 @@ const envSchema = z.object({
   AGENT_LEARNING_SCHEDULER_TIME_ZONE: z.string().default("Asia/Yangon"),
   AGENT_OPERATIONAL_SNAPSHOT_INTERVAL_MINUTES: z.coerce.number().int().refine((value) => [15, 30, 60].includes(value)).default(15),
   AGENT_LEARNING_MAX_CLINIC_CONCURRENCY: z.coerce.number().int().positive().default(3),
+  CUSTOMER_RELATIONSHIP_DAILY_MEMORY_V2_ENABLED: booleanEnv(false),
+  CUSTOMER_RELATIONSHIP_UNACTIVATED_GRACE_DAYS: z.coerce.number().int().min(1).max(60).default(7),
+  CUSTOMER_RELATIONSHIP_DORMANT_ACTIVE_BALANCE_DAYS: z.coerce.number().int().min(30).max(365).default(90),
+  CUSTOMER_RELATIONSHIP_FOLLOW_UP_COOLDOWN_DAYS: z.coerce.number().int().min(0).max(90).default(7),
+  CUSTOMER_RELATIONSHIP_NOT_INTERESTED_COOLDOWN_DAYS: z.coerce.number().int().min(1).max(365).default(60),
 });
 
 export const env = envSchema.parse(process.env);

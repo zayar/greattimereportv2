@@ -12,6 +12,7 @@ import type {
   CustomerRelationshipFollowUpTone,
   CustomerRelationshipLearningSummary,
   CustomerRelationshipProfilesResponse,
+  CustomerRelationshipIntent,
   CustomerRelationshipRiskLevel,
   CustomerRelationshipSegment,
   GreatTimeAgentChatRequest,
@@ -86,6 +87,7 @@ export async function runCustomerRelationshipLearning(
 
 export async function fetchCustomerRelationshipProfiles(
   params: CustomerRelationshipBaseRequest & {
+    intent?: CustomerRelationshipIntent | "";
     segment?: CustomerRelationshipSegment | "";
     riskLevel?: CustomerRelationshipRiskLevel | "";
     search?: string;

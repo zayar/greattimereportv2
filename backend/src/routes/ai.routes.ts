@@ -21,6 +21,7 @@ import {
   customerRelationshipEvidenceTypes,
   customerRelationshipFeedbackOutcomes,
   customerRelationshipFollowUpTones,
+  customerRelationshipIntents,
   customerRelationshipSegments,
   customerRelationshipRiskLevels,
 } from "../services/ai/customer-relationship-schemas.js";
@@ -105,6 +106,7 @@ const customerRelationshipLearnSchema = customerRelationshipBaseSchema
   }));
 
 const customerRelationshipProfilesSchema = customerRelationshipBaseSchema.extend({
+  intent: optionalEmptyString(z.enum(customerRelationshipIntents)),
   segment: optionalEmptyString(z.enum(customerRelationshipSegments)),
   riskLevel: optionalEmptyString(z.enum(customerRelationshipRiskLevels)),
   search: z.string().default(""),

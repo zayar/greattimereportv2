@@ -38,6 +38,19 @@ function isAppointmentLedgerQuestion(message: string) {
   return mentionsAppointment && asksLedgerDetail && !asksFinance;
 }
 
+function isNamedCustomerPurchaseQuestion(message: string) {
+  return (
+    hasExplicitCustomerSearchIntent(message) &&
+    /purchase|purchased|bought|buy|payment|payments|package|packages|ဝယ်/i.test(message)
+  );
+}
+
+function isCustomerRelationshipOpportunityQuestion(message: string) {
+  return /(?:bought|purchase|purchased|package|service|ဝယ်)[\s\S]{0,80}(?:never came|never visit|never visited|not used|unused|not started|never checked in|မလာသေး|မလာ|မသုံး|အသုံးမပြု|မစ)|(?:never came|never visit|never visited|not used|unused|not started|never checked in|မလာသေး|မလာ|မသုံး|အသုံးမပြု|မစ)[\s\S]{0,80}(?:bought|purchase|purchased|package|service|ဝယ်)|dormant package|active balance.*90|lapsed customer|returned after follow/i.test(
+    message,
+  );
+}
+
 export function resolveAgent(params: {
   requestedAgent: GreatTimeRequestedAgentId | undefined;
   message: string;
@@ -61,6 +74,14 @@ export function resolveAgent(params: {
 
   if (hasExplicitServiceSearchIntent(params.message)) {
     scores.business += 2;
+  }
+
+  if (isNamedCustomerPurchaseQuestion(params.message)) {
+    scores.customer_relationship += 4;
+  }
+
+  if (isCustomerRelationshipOpportunityQuestion(params.message)) {
+    scores.customer_relationship += 4;
   }
 
   if (isAppointmentLedgerQuestion(params.message)) {

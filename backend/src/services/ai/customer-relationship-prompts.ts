@@ -50,6 +50,7 @@ Rules:
 - Refer to visual evidence only when the evidence object is provided.
 - Recommended actions must be operational actions only: call, message, review, book, record follow-up.
 - Do not say that a message was already sent.
+- If package usage confidence is low, describe it as "usage could not be confirmed" rather than confirmed non-usage.
 - If facts are insufficient, say what data should be refreshed.
 - Keep JSON keys in English.
 - ${languageInstruction(params.aiLanguage)}
@@ -71,6 +72,15 @@ ${stringifyFacts({
   rows: params.rows.slice(0, 8).map((row) => ({
     customerName: row.customerName,
     customerPhoneMasked: row.customerPhoneMasked,
+    segmentLabel: row.segmentLabel,
+    primarySegment: row.primarySegment,
+    packageOrServiceName: row.packageOrServiceName,
+    purchaseDate: row.purchaseDate,
+    firstMatchingUsageDate: row.firstMatchingUsageDate,
+    lastMatchingUsageDate: row.lastMatchingUsageDate,
+    remainingSessions: row.remainingSessions,
+    balanceStatus: row.balanceStatus,
+    evidenceReason: row.evidenceReason,
     lastService: row.lastService,
     lastPackageServiceName: row.lastPackageServiceName,
     lastPackageName: row.lastPackageName,

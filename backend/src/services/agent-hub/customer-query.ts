@@ -27,12 +27,28 @@ function looksLikeNamedCustomer(value: string) {
 
 export function extractExplicitCustomerSearchText(message: string) {
   const normalized = message.trim();
+  const purchaseSubjectMatch =
+    normalized.match(
+      /^(?:can\s+you\s+)?(?:tell\s+me\s+)?(?:what|which)\s+(?:services?|packages?|items?)\s+(?:did\s+)?(.+?)\s+(?:purchase|purchased|buy|bought|ဝယ်)[?.!]?(?:\s+.*)?$/i,
+    ) ??
+    normalized.match(
+      /^(?:can\s+you\s+)?(?:tell\s+me\s+)?(?:what|which)\s+(?:did|has|have)\s+(.+?)\s+(?:purchase|purchased|buy|bought|ဝယ်)[?.!]?(?:\s+.*)?$/i,
+    ) ??
+    normalized.match(
+      /^(?:show|view|display|tell\s+me)\s+([A-Za-z\u1000-\u109F][A-Za-z\u1000-\u109F\s().-]{1,80}?)\s+(?:purchase|purchases|payment|payments|package|packages)\s*(?:history|details?|စာရင်း)?[?.!]?$/i,
+    );
+  const purchaseSubject = cleanupSearchText(purchaseSubjectMatch?.[1]);
+
+  if (purchaseSubject && looksLikeNamedCustomer(purchaseSubject)) {
+    return purchaseSubject;
+  }
+
   const directMatch = normalized.match(
     /^(?:can\s+you\s+)?(?:find|search|look\s+up|show(?:\s+me)?(?:\s+details?\s+(?:about|for))?|tell\s+me\s+about|details?\s+(?:about|for)|what\s+about|who\s+is|what\s+do\s+we\s+know\s+about)\s+(.+)$/i,
   );
   const directSearch = cleanupSearchText(directMatch?.[1]);
 
-  if (directSearch && !ORDINAL_OR_PRONOUN.test(directSearch)) {
+  if (directSearch && !ORDINAL_OR_PRONOUN.test(directSearch) && looksLikeNamedCustomer(directSearch)) {
     return directSearch;
   }
 

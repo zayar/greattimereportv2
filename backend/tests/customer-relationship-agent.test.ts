@@ -7,10 +7,15 @@ process.env.APICORE_GRAPHQL_URL ??= "https://example.com/graphql"
 const { buildFallbackAgentCopy, detectCustomerRelationshipIntent, selectCustomerRelationshipEvidenceType } = await import(
   "../src/services/ai/customer-relationship-agent.service.ts"
 )
-const { buildCustomerRelationshipProfilesFromRows } = await import(
+const { buildCustomerRelationshipDailyMemoryV2FromRows, buildCustomerRelationshipProfilesFromRows } = await import(
   "../src/services/reports/customer-relationship-learning.service.ts"
 )
-const { normalizeCustomerRelationshipProfile } = await import(
+const {
+  filterProfilesToLearningRun,
+  mergeCustomerRelationshipProfileForRefresh,
+  normalizeCustomerRelationshipProfile,
+  selectLatestCompletedCustomerRelationshipLearningRun,
+} = await import(
   "../src/services/reports/customer-relationship-profile.repository.ts"
 )
 
@@ -269,4 +274,300 @@ test("normalizes legacy learned profiles that do not have evidence arrays", () =
   assert.deepEqual(normalized.serviceUsageByMonth, [])
   assert.equal(normalized.lastPackageServiceName, null)
   assert.equal(normalized.lastPackageName, null)
+})
+
+function buildV2Row(overrides: Partial<ReturnType<typeof buildProfiles>[number]> & Record<string, unknown> = {}) {
+  const packageHolding = overrides.packageHoldingsJson ?? null
+  const packagePurchase = overrides.packagePurchasesJson ?? JSON.stringify([
+    {
+      purchaseKey: "purchase-1",
+      invoiceNumber: "INV-1",
+      serviceId: overrides.serviceId ?? null,
+      packageId: overrides.packageId ?? null,
+      serviceName: overrides.lastPackageServiceName ?? "Whitening Laser",
+      packageName: overrides.lastPackageName ?? "Laser Package",
+      serviceCategory: "Laser",
+      purchaseCount: 1,
+      latestPurchaseDate: overrides.lastPackagePurchaseDate ?? "2026-06-01",
+      totalAmount: 500000,
+    },
+  ])
+
+  return {
+    customerName: "Win Wati Ko",
+    phoneNumber: "09991232486",
+    memberId: "M-2486",
+    firstSeenDate: "2025-01-01",
+    lastVisitDate: "2026-01-01",
+    daysSinceLastVisit: 174,
+    lastPaymentDate: overrides.lastPackagePurchaseDate ?? "2026-06-01",
+    lastPackagePurchaseDate: overrides.lastPackagePurchaseDate ?? "2026-06-01",
+    lastPackageServiceName: overrides.lastPackageServiceName ?? "Whitening Laser",
+    lastPackageName: overrides.lastPackageName ?? "Laser Package",
+    totalVisits: 1,
+    lifetimeSpend: 500000,
+    averageSpend: 500000,
+    recent90DayVisits: 0,
+    previous90DayVisits: 0,
+    avgVisitGapDays: null,
+    preferredService: "Whitening Laser",
+    preferredServiceCategory: "Laser",
+    preferredTherapist: null,
+    preferredDayOfWeek: null,
+    preferredHour: null,
+    lastService: "Whitening Laser",
+    lastPaymentMethod: "Cash",
+    packagePurchaseCount: 1,
+    activePackageCount: 0,
+    totalPackageSessions: 0,
+    remainingPackageSessions: 0,
+    visitsAfterLastPackagePurchase: overrides.visitsAfterLastPackagePurchase ?? 0,
+    packageHoldingsJson: packageHolding,
+    packagePurchasesJson: packagePurchase,
+    serviceUsageJson: null,
+    ...overrides,
+  }
+}
+
+function buildV2Memory(rows: ReturnType<typeof buildV2Row>[]) {
+  return buildCustomerRelationshipDailyMemoryV2FromRows({
+    clinicId: "clinic-1",
+    clinicCode: "QUEEN",
+    rows,
+    learnedAt: "2026-06-24T02:00:00.000Z",
+    lookbackDays: 365,
+    learningRunId: "run-20260624",
+    snapshotDate: "2026-06-24",
+  })
+}
+
+test("V2 classifies recent purchase with zero usage as purchase pending activation", () => {
+  const memory = buildV2Memory([
+    buildV2Row({
+      lastPackagePurchaseDate: "2026-06-22",
+      lastVisitDate: "2026-06-20",
+      daysSinceLastVisit: 4,
+    }),
+  ])
+  const profile = memory.profiles[0]
+
+  assert.ok(profile.segments.includes("purchase_pending_activation"))
+  assert.equal(profile.primarySegment, "purchase_pending_activation")
+  assert.equal(profile.packageBoughtNeverCame, false)
+})
+
+test("V2 classifies purchase older than grace period with zero matching usage as unactivated purchase", () => {
+  const memory = buildV2Memory([
+    buildV2Row({
+      lastPackagePurchaseDate: "2026-06-01",
+    }),
+  ])
+  const profile = memory.profiles[0]
+
+  assert.ok(profile.segments.includes("unactivated_purchase"))
+  assert.ok(profile.segments.includes("package_bought_never_came"))
+  assert.equal(profile.primarySegment, "unactivated_purchase")
+  assert.match(profile.reasons[0], /no matching usage/i)
+})
+
+test("V2 does not treat an unrelated visit as activation of a different purchased package", () => {
+  const memory = buildV2Memory([
+    buildV2Row({
+      lastVisitDate: "2026-06-10",
+      daysSinceLastVisit: 14,
+      lastService: "Hydra Facial",
+      lastPackagePurchaseDate: "2026-06-01",
+      packageHoldingsJson: JSON.stringify([
+        {
+          serviceName: "Hydra Facial",
+          packageName: "Facial Package",
+          serviceCategory: "Facial",
+          packageTotal: 5,
+          usedCount: 1,
+          remainingCount: 4,
+          latestUsageDate: "2026-06-10",
+          latestTherapist: "May",
+        },
+      ]),
+    }),
+  ])
+  const lifecycle = memory.profiles[0].packageLifecycles?.[0]
+
+  assert.equal(lifecycle?.activationStatus, "unactivated_purchase")
+  assert.equal(lifecycle?.lastMatchingUsageDate, null)
+})
+
+test("V2 classifies confirmed remaining balance plus 90 days without usage as dormant active balance", () => {
+  const memory = buildV2Memory([
+    buildV2Row({
+      lastPackagePurchaseDate: "2025-12-01",
+      packageHoldingsJson: JSON.stringify([
+        {
+          serviceName: "Whitening Laser",
+          packageName: "Laser Package",
+          serviceCategory: "Laser",
+          packageTotal: 10,
+          usedCount: 3,
+          remainingCount: 7,
+          latestUsageDate: "2026-01-01",
+          latestTherapist: "Wai Phoo",
+        },
+      ]),
+    }),
+  ])
+  const profile = memory.profiles[0]
+
+  assert.ok(profile.segments.includes("dormant_with_active_balance_90d"))
+  assert.equal(profile.primarySegment, "dormant_with_active_balance_90d")
+  assert.equal(profile.remainingPackageSessions, 7)
+})
+
+test("V2 does not classify unknown balance as confirmed active balance", () => {
+  const memory = buildV2Memory([
+    buildV2Row({
+      lastPackagePurchaseDate: "2025-12-01",
+      packageHoldingsJson: null,
+    }),
+  ])
+  const profile = memory.profiles[0]
+
+  assert.equal(profile.remainingPackageSessions, 0)
+  assert.equal(profile.hasUnusedPackageBalance, false)
+  assert.equal(profile.segments.includes("dormant_with_active_balance_90d"), false)
+})
+
+test("V2 classifies 90-day inactive customer without confirmed balance as lapsed customer", () => {
+  const memory = buildV2Memory([
+    buildV2Row({
+      packagePurchaseCount: 0,
+      lastPackagePurchaseDate: null,
+      lastPackageServiceName: null,
+      lastPackageName: null,
+      packagePurchasesJson: null,
+      packageHoldingsJson: null,
+      lastVisitDate: "2026-03-01",
+      daysSinceLastVisit: 115,
+    }),
+  ])
+  const profile = memory.profiles[0]
+
+  assert.ok(profile.segments.includes("lapsed_customer_90d"))
+  assert.equal(profile.primarySegment, "lapsed_customer_90d")
+})
+
+test("V2 prefers stable service IDs over name matching", () => {
+  const memory = buildV2Memory([
+    buildV2Row({
+      serviceId: "svc-1",
+      lastPackagePurchaseDate: "2026-06-01",
+      packagePurchasesJson: JSON.stringify([
+        {
+          purchaseKey: "purchase-stable",
+          invoiceNumber: "INV-STABLE",
+          serviceId: "svc-1",
+          packageId: null,
+          serviceName: "Whitening Laser",
+          packageName: "Laser Package",
+          serviceCategory: "Laser",
+          purchaseCount: 1,
+          latestPurchaseDate: "2026-06-01",
+          totalAmount: 500000,
+        },
+      ]),
+      packageHoldingsJson: JSON.stringify([
+        {
+          serviceId: "svc-1",
+          serviceName: "Different display name",
+          packageName: "Laser Package",
+          serviceCategory: "Laser",
+          packageTotal: 5,
+          usedCount: 1,
+          remainingCount: 4,
+          latestUsageDate: "2026-06-05",
+          latestTherapist: "Wai Phoo",
+        },
+      ]),
+    }),
+  ])
+  const lifecycle = memory.profiles[0].packageLifecycles?.[0]
+
+  assert.equal(lifecycle?.matchMethod, "stable_customer_service_identity")
+  assert.equal(lifecycle?.activationStatus, "activated")
+})
+
+test("V2 describes low-confidence name matching as unconfirmed", () => {
+  const memory = buildV2Memory([
+    buildV2Row({
+      phoneNumber: null,
+      memberId: null,
+      lastPackagePurchaseDate: "2026-06-01",
+      packageHoldingsJson: JSON.stringify([
+        {
+          serviceName: "Whitening Laser",
+          packageName: "Laser Package",
+          serviceCategory: "Laser",
+          packageTotal: 5,
+          usedCount: 0,
+          remainingCount: 5,
+          latestUsageDate: null,
+          latestTherapist: null,
+        },
+      ]),
+    }),
+  ])
+  const lifecycle = memory.profiles[0].packageLifecycles?.[0]
+
+  assert.equal(lifecycle?.matchMethod, "name_service_identity")
+  assert.equal(lifecycle?.dataStatus, "partial")
+  assert.match(lifecycle?.evidenceReason ?? "", /usage could not be confirmed/i)
+})
+
+test("V2 active run filtering excludes profiles from older learning runs", () => {
+  const older = { ...buildV2Memory([buildV2Row({ customerName: "Old Customer" })]).profiles[0], learningRunId: "old-run" }
+  const newer = { ...buildV2Memory([buildV2Row({ customerName: "New Customer" })]).profiles[0], learningRunId: "new-run" }
+  const filtered = filterProfilesToLearningRun({
+    profiles: [older, newer],
+    learningRunId: "new-run",
+  })
+
+  assert.equal(filtered.length, 1)
+  assert.equal(filtered[0].customerName, "New Customer")
+})
+
+test("V2 failed learning run leaves previous completed run active", () => {
+  const latest = selectLatestCompletedCustomerRelationshipLearningRun([
+    { learningRunId: "old-run", status: "completed", createdAt: "2026-06-23T02:00:00.000Z" },
+    { learningRunId: "failed-run", status: "failed", createdAt: "2026-06-24T02:00:00.000Z" },
+  ])
+
+  assert.equal(latest?.learningRunId, "old-run")
+})
+
+test("V2 follow-up mutable fields survive profile refresh", () => {
+  const nextProfile = buildV2Memory([buildV2Row({ customerName: "Refresh Customer" })]).profiles[0]
+  const merged = mergeCustomerRelationshipProfileForRefresh({
+    nextProfile,
+    existingProfile: {
+      ...nextProfile,
+      lastFollowUpAt: "2026-06-20T09:00:00.000Z",
+      lastFollowUpOutcome: "replied",
+      followUpCount: 3,
+      lastMatchedAt: "2026-06-21T09:00:00.000Z",
+      lastMatchedIntent: "follow_up_today",
+    },
+  })
+
+  assert.equal(merged.lastFollowUpAt, "2026-06-20T09:00:00.000Z")
+  assert.equal(merged.lastFollowUpOutcome, "replied")
+  assert.equal(merged.followUpCount, 3)
+  assert.equal(merged.lastMatchedIntent, "follow_up_today")
+})
+
+test("V2 daily memory output is idempotent for same clinic, snapshot, and learning run", () => {
+  const rows = [buildV2Row({ lastPackagePurchaseDate: "2026-06-01" })]
+  const first = buildV2Memory(rows)
+  const second = buildV2Memory(rows)
+
+  assert.deepEqual(first.packageRows, second.packageRows)
+  assert.deepEqual(first.relationshipRows, second.relationshipRows)
 })

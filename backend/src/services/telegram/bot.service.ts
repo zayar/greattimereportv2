@@ -295,6 +295,9 @@ function translatePeriodLabel(label: string) {
   if (normalized === "last 90 days") {
     return "ပြီးခဲ့တဲ့ ၉၀ ရက်";
   }
+  if (normalized === "last 365 days") {
+    return "ပြီးခဲ့တဲ့ ၃၆၅ ရက်";
+  }
   if (normalized === "year to date") {
     return "ဒီနှစ်အစမှ ယနေ့အထိ";
   }
@@ -392,6 +395,8 @@ function translateMetricLabel(label: string) {
     "distinct services": "Service အမျိုးအစား",
     "avg bookings/service": "Service တစ်ခုလျှင် ပျမ်းမျှ booking",
     collected: "စုဆောင်းငွေ",
+    "matched customers": "တွေ့ရှိသော customer",
+    "source lookback days": "စစ်ထားတဲ့ နောက်ကြည့်ရက်",
   };
 
   return map[normalized] ?? label;
@@ -517,12 +522,33 @@ function formatCustomerMatchesConversation(response: GreatTimeAgentChatResponse)
     return [];
   }
 
-  const lines = ["Customer list ကို owner ဖတ်ရလွယ်အောင် ပြထားပါတယ်:"];
+  const isPackageNeverCame = ["package_bought_never_came", "package_bought_never_used"].includes(response.intent);
+  const isPackageNotUsed = response.intent === "package_bought_not_used";
+  const lines = [
+    isPackageNeverCame
+      ? "Package ဝယ်ပြီးနောက် မလာသေးတဲ့ customer များ:"
+      : isPackageNotUsed
+        ? "Package ဝယ်ထားပြီး အသုံးမပြုသေးတဲ့ customer များ:"
+        : "Customer list ကို owner ဖတ်ရလွယ်အောင် ပြထားပါတယ်:",
+  ];
   table.rows.slice(0, 8).forEach((row, index) => {
     const name = stringValue(row, "customerName", "Customer");
     const phone = stringValue(row, "maskedPhone", stringValue(row, "customerPhoneMasked", ""));
     const lastVisit = stringValue(row, "lastVisitDate", "");
+    const packagePurchaseDate = stringValue(row, "lastPackagePurchaseDate", "");
+    const packageService = stringValue(row, "lastPackageServiceName", stringValue(row, "lastPackageName", ""));
     const remaining = numberValue(row, "remainingPackageSessions");
+
+    if (isPackageNeverCame || isPackageNotUsed) {
+      const phoneText = phone && phone !== "-" ? `phone ${phone}၊ ` : "";
+      const dateText = packagePurchaseDate && packagePurchaseDate !== "-" ? `${packagePurchaseDate} မှာ ` : "";
+      const serviceText = packageService && packageService !== "-" ? `${packageService} ` : "package ";
+      const remainingText = remaining != null ? ` လက်ကျန် ${remaining.toLocaleString("en-US")} session ရှိပါတယ်။` : "";
+      const statusText = isPackageNeverCame ? "ဝယ်ပြီးနောက် လာသုံးထားတဲ့ visit မတွေ့သေးပါ။" : "အသုံးပြုထားတာ မတွေ့သေးပါ။";
+      lines.push(`${index + 1}. ${name} — ${phoneText}${dateText}${serviceText}ဝယ်ထားပါတယ်။ ${statusText}${remainingText}`);
+      return;
+    }
+
     const parts = [`${index + 1}. ${name}`];
     if (phone && phone !== "-") {
       parts.push(`phone ${phone}`);
@@ -535,6 +561,49 @@ function formatCustomerMatchesConversation(response: GreatTimeAgentChatResponse)
     }
     lines.push(`${parts.join(" — ")}။`);
   });
+
+  return lines;
+}
+
+function formatCustomerPurchaseConversation(response: GreatTimeAgentChatResponse) {
+  const purchaseTable = response.tables?.find((item) => /customer recent purchases/i.test(item.title));
+  const packageTable = response.tables?.find((item) => /customer packages/i.test(item.title));
+  if (!purchaseTable?.rows.length && !packageTable?.rows.length) {
+    return [];
+  }
+
+  const lines = ["Customer ရဲ့ purchase/service history ကို ဖတ်ရလွယ်အောင် ပြထားပါတယ်:"];
+
+  if (purchaseTable?.rows.length) {
+    lines.push("", "ဝယ်ထားတဲ့ service / invoice များ:");
+    purchaseTable.rows.slice(0, 10).forEach((row, index) => {
+      const date = stringValue(row, "dateLabel", "-");
+      const service = stringValue(row, "serviceName", "Service");
+      const invoice = stringValue(row, "invoiceNumber", "");
+      const method = stringValue(row, "paymentMethod", "");
+      const amount = numberValue(row, "netAmount");
+      const invoiceText = invoice && invoice !== "-" ? `၊ invoice ${invoice}` : "";
+      const methodText = method && method !== "-" ? `၊ ${method}` : "";
+      const amountText = amount != null ? `၊ ${amount.toLocaleString("en-US")} ကျပ်` : "";
+      lines.push(`${index + 1}. ${date} — ${service}${invoiceText}${methodText}${amountText}`);
+    });
+  }
+
+  if (packageTable?.rows.length) {
+    lines.push("", "Package/session အခြေအနေ:");
+    packageTable.rows.slice(0, 8).forEach((row, index) => {
+      const service = stringValue(row, "serviceName", "Package service");
+      const total = numberValue(row, "totalSessions");
+      const used = numberValue(row, "usedSessions");
+      const remaining = numberValue(row, "remainingSessions");
+      const latestUsage = stringValue(row, "latestUsageDate", "");
+      const totalText = total != null ? `${total.toLocaleString("en-US")} session` : "session";
+      const usedText = used != null ? `သုံးပြီး ${used.toLocaleString("en-US")}` : "သုံးပြီး -";
+      const remainingText = remaining != null ? `ကျန် ${remaining.toLocaleString("en-US")}` : "ကျန် -";
+      const latestText = latestUsage && latestUsage !== "-" ? `၊ နောက်ဆုံးသုံးခဲ့တာ ${latestUsage}` : "";
+      lines.push(`${index + 1}. ${service} — ${totalText}၊ ${usedText}၊ ${remainingText}${latestText}`);
+    });
+  }
 
   return lines;
 }
@@ -575,6 +644,11 @@ function formatConversationTablePreview(response: GreatTimeAgentChatResponse) {
   const customers = formatCustomerMatchesConversation(response);
   if (customers.length) {
     return customers;
+  }
+
+  const purchases = formatCustomerPurchaseConversation(response);
+  if (purchases.length) {
+    return purchases;
   }
 
   return formatGenericTableConversation(response);
@@ -690,6 +764,15 @@ function suggestionCategory(question: string) {
   if (/recent completed treatments?|completed treatments?/.test(normalized)) {
     return "recent_treatments";
   }
+  if (/full customer profile|customer profile/.test(normalized)) {
+    return "customer_profile";
+  }
+  if (/package balance|package/.test(normalized) && /customer|first|this|that|her|him/.test(normalized)) {
+    return "customer_package_balance";
+  }
+  if (/treatment history|last treatment|treatments?/.test(normalized) && /customer|first|this|that|her|him/.test(normalized)) {
+    return "customer_treatment_history";
+  }
   if (/cancel|no[- ]?show|မလာ|ဖျက်/.test(normalized)) {
     return "appointment_cancelled_no_show";
   }
@@ -755,6 +838,15 @@ function suggestionLabel(question: string, index: number) {
   const normalized = question.toLowerCase();
   if (/recent completed treatments?|completed treatments?/.test(normalized)) {
     return "နောက်ဆုံး treatment ကြည့်မယ်";
+  }
+  if (/full customer profile|customer profile/.test(normalized)) {
+    return "Customer profile ကြည့်မယ်";
+  }
+  if (/package balance|package/.test(normalized) && /customer|first|this|that|her|him/.test(normalized)) {
+    return "Package လက်ကျန် ကြည့်မယ်";
+  }
+  if (/treatment history|last treatment|treatments?/.test(normalized) && /customer|first|this|that|her|him/.test(normalized)) {
+    return "Treatment history ကြည့်မယ်";
   }
   if (/cancel|no[- ]?show|မလာ|ဖျက်/.test(normalized)) {
     return "ဖျက်/မလာ ကြည့်မယ်";
