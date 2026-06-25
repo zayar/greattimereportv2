@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { fetchCustomerBehavior } from "../../../api/analytics";
+import { fetchCustomerBehavior, fetchCustomerBehaviorCustomerSearch } from "../../../api/analytics";
 import { DataTable } from "../../../components/DataTable";
 import { DateRangeControls } from "../../../components/DateRangeControls";
 import { DualMetricBarChart } from "../../../components/DualMetricBarChart";
@@ -9,8 +9,24 @@ import { PageHeader } from "../../../components/PageHeader";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import { useAccess } from "../../access/AccessProvider";
 import { startOfCurrentYear, today } from "../../../utils/date";
-import type { CustomerBehaviorResponse } from "../../../types/domain";
+import type { CustomerBehaviorCustomerRow, CustomerBehaviorResponse } from "../../../types/domain";
 import { buildCustomerPortalDetailPath } from "../customer-portal/customerPortalLink";
+
+const CUSTOMER_SEARCH_LIMIT = 25;
+
+type CustomerTableRow = CustomerBehaviorCustomerRow & {
+  rank: number;
+};
+
+function normalizePhoneDigits(value: string) {
+  return value.replace(/\D/g, "");
+}
+
+function isRunnableCustomerSearch(value: string) {
+  const trimmed = value.trim();
+  const digits = normalizePhoneDigits(trimmed);
+  return trimmed.length >= 2 || digits.length >= 3;
+}
 
 export function CustomerBehaviorPage() {
   const navigate = useNavigate();
@@ -24,6 +40,13 @@ export function CustomerBehaviorPage() {
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<CustomerBehaviorResponse | null>(null);
   const [customerSearch, setCustomerSearch] = useState("");
+  const [customerSearchRows, setCustomerSearchRows] = useState<CustomerBehaviorCustomerRow[]>([]);
+  const [customerSearchLoading, setCustomerSearchLoading] = useState(false);
+  const [customerSearchError, setCustomerSearchError] = useState<string | null>(null);
+  const trimmedCustomerSearch = customerSearch.trim();
+  const deferredCustomerSearch = useDeferredValue(trimmedCustomerSearch);
+  const isCustomerSearchActive = trimmedCustomerSearch.length > 0;
+  const canRunCustomerSearch = isRunnableCustomerSearch(deferredCustomerSearch);
 
   useEffect(() => {
     if (!currentClinic) {
@@ -62,16 +85,138 @@ export function CustomerBehaviorPage() {
     };
   }, [currentClinic, granularity, range.fromDate, range.toDate]);
 
-  const filteredTopCustomers = useMemo(() => {
-    if (!data?.topCustomers.length) {
-      return [];
+  useEffect(() => {
+    if (!currentClinic || !deferredCustomerSearch || !canRunCustomerSearch) {
+      setCustomerSearchRows([]);
+      setCustomerSearchLoading(false);
+      setCustomerSearchError(null);
+      return;
     }
-    const q = customerSearch.trim().toLowerCase();
-    if (!q) {
-      return data.topCustomers;
+
+    let active = true;
+    setCustomerSearchLoading(true);
+    setCustomerSearchError(null);
+
+    fetchCustomerBehaviorCustomerSearch({
+      clinicId: currentClinic.id,
+      clinicCode: currentClinic.code,
+      search: deferredCustomerSearch,
+      limit: CUSTOMER_SEARCH_LIMIT,
+    })
+      .then((result) => {
+        if (active) {
+          setCustomerSearchRows(result.rows);
+        }
+      })
+      .catch((loadError) => {
+        if (active) {
+          setCustomerSearchError(loadError instanceof Error ? loadError.message : "Customer search failed.");
+          setCustomerSearchRows([]);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setCustomerSearchLoading(false);
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [canRunCustomerSearch, currentClinic, deferredCustomerSearch]);
+
+  const customerTableRows = useMemo<CustomerTableRow[]>(() => {
+    const rows = isCustomerSearchActive ? customerSearchRows : data?.topCustomers ?? [];
+    return rows.map((row, index) => ({
+      ...row,
+      rank: index + 1,
+    }));
+  }, [customerSearchRows, data?.topCustomers, isCustomerSearchActive]);
+
+  const openCustomerDetail = (row: CustomerBehaviorCustomerRow) => {
+    navigate(
+      buildCustomerPortalDetailPath({
+        customerName: row.customerName,
+        customerPhone: row.phoneNumber,
+        fromDate: range.fromDate,
+        toDate: range.toDate,
+      }),
+    );
+  };
+
+  const renderCustomerTable = () => (
+    <DataTable
+      rows={customerTableRows}
+      rowKey={(row) => `${row.customerName}-${row.phoneNumber || row.memberId || row.rank}`}
+      columns={[
+        {
+          key: "rank",
+          header: "#",
+          render: (row) => row.rank.toLocaleString("en-US"),
+        },
+        {
+          key: "customer",
+          header: "Customer",
+          render: (row) => (
+            <div className="behavior-report__customer-cell">
+              <button
+                type="button"
+                className="entity-link-button entity-link-button--strong"
+                onClick={() => openCustomerDetail(row)}
+              >
+                {row.customerName}
+              </button>
+              <small>{row.memberId ? `Member ${row.memberId}` : "Member ID unavailable"}</small>
+            </div>
+          ),
+        },
+        {
+          key: "phone",
+          header: "Phone",
+          render: (row) => row.phoneNumber || row.phoneMasked || "—",
+        },
+        { key: "visits", header: "Visits", render: (row) => row.visitCount.toLocaleString("en-US") },
+        {
+          key: "lastActivity",
+          header: isCustomerSearchActive ? "Last activity" : "Last visit",
+          render: (row) => row.lastActivityDate ?? row.lastVisitDate ?? "—",
+        },
+      ]}
+    />
+  );
+
+  const renderCustomerPanelContent = () => {
+    if (isCustomerSearchActive && !canRunCustomerSearch) {
+      return <EmptyState label="Keep typing" detail="Enter at least 2 letters or 3 phone digits." />;
     }
-    return data.topCustomers.filter((row) => row.customerName.toLowerCase().includes(q));
-  }, [data?.topCustomers, customerSearch]);
+
+    if (isCustomerSearchActive && customerSearchLoading) {
+      return <div className="inline-note inline-note--loading">Searching customers...</div>;
+    }
+
+    if (isCustomerSearchActive && customerSearchError) {
+      return <ErrorState label="Customer search could not be loaded" detail={customerSearchError} />;
+    }
+
+    if (!isCustomerSearchActive && loading) {
+      return <div className="inline-note inline-note--loading">Loading active members...</div>;
+    }
+
+    if (!isCustomerSearchActive && (!data || data.topCustomers.length === 0)) {
+      return <EmptyState label="No customer activity found" />;
+    }
+
+    if (customerTableRows.length === 0) {
+      return (
+        <EmptyState
+          label={isCustomerSearchActive ? "No customer matches" : "No matches"}
+          detail={isCustomerSearchActive ? "Try another customer name or phone number." : "Try a different search."}
+        />
+      );
+    }
+
+    return renderCustomerTable();
+  };
 
   const summary = data?.summary;
 
@@ -143,14 +288,18 @@ export function CustomerBehaviorPage() {
 
         <Panel
           className="behavior-report__panel"
-          title="Top active members"
-          subtitle="Highest-activity members in the selected range."
+          title={isCustomerSearchActive ? "Customer search results" : "Top active members"}
+          subtitle={
+            isCustomerSearchActive
+              ? "Matching customers from the selected merchant."
+              : "Highest-activity members in the selected range."
+          }
           action={
             <label className="field field--compact field--search">
-              <span>Search</span>
+              <span>Customer search</span>
               <input
                 type="search"
-                placeholder="Search name…"
+                placeholder="Search name or phone..."
                 value={customerSearch}
                 onChange={(event) => setCustomerSearch(event.target.value)}
                 autoComplete="off"
@@ -158,48 +307,7 @@ export function CustomerBehaviorPage() {
             </label>
           }
         >
-          {!data || data.topCustomers.length === 0 ? (
-            <EmptyState label="No customer activity found" />
-          ) : filteredTopCustomers.length === 0 ? (
-            <EmptyState label="No matches" detail="Try a different search." />
-          ) : (
-            <DataTable
-              rows={filteredTopCustomers}
-              rowKey={(row) => row.customerName}
-              columns={[
-                {
-                  key: "rank",
-                  header: "#",
-                  render: (row) =>
-                    (data.topCustomers.findIndex((r) => r.customerName === row.customerName) + 1).toLocaleString("en-US"),
-                },
-                {
-                  key: "customer",
-                  header: "Member name",
-                  render: (row) => (
-                    <button
-                      type="button"
-                      className="entity-link-button entity-link-button--strong"
-                      onClick={() =>
-                        navigate(
-                          buildCustomerPortalDetailPath({
-                            customerName: row.customerName,
-                            customerPhone: "",
-                            fromDate: range.fromDate,
-                            toDate: range.toDate,
-                          }),
-                        )
-                      }
-                    >
-                      {row.customerName}
-                    </button>
-                  ),
-                },
-                { key: "visits", header: "Visits", render: (row) => row.visitCount.toLocaleString("en-US") },
-                { key: "lastVisit", header: "Last visit", render: (row) => row.lastVisitDate },
-              ]}
-            />
-          )}
+          {renderCustomerPanelContent()}
         </Panel>
       </div>
     </div>

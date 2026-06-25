@@ -1372,6 +1372,17 @@ export interface DashboardResponse {
   }>;
 }
 
+export interface CustomerBehaviorCustomerRow {
+  customerName: string;
+  phoneNumber: string;
+  phoneMasked: string;
+  memberId: string | null;
+  visitCount: number;
+  firstActivityDate?: string | null;
+  lastVisitDate: string | null;
+  lastActivityDate: string | null;
+}
+
 export interface CustomerBehaviorResponse {
   summary: {
     uniqueCustomers: number;
@@ -1379,7 +1390,12 @@ export interface CustomerBehaviorResponse {
     avgVisitsPerCustomer: number;
   };
   trend: Array<{ bucket: string; uniqueCustomers: number; visits: number }>;
-  topCustomers: Array<{ customerName: string; visitCount: number; lastVisitDate: string }>;
+  topCustomers: CustomerBehaviorCustomerRow[];
+}
+
+export interface CustomerBehaviorSearchResponse {
+  query: string;
+  rows: CustomerBehaviorCustomerRow[];
 }
 
 export interface ServiceBehaviorResponse {

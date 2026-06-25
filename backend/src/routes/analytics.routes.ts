@@ -3,7 +3,10 @@ import { z } from "zod";
 import { requireClinicAccess } from "../middleware/clinic-access.js";
 import { verifyFirebaseToken } from "../middleware/auth.js";
 import { getDashboardOverview } from "../services/reports/dashboard.service.js";
-import { getCustomerBehaviorReport } from "../services/reports/customer-behavior.service.js";
+import {
+  getCustomerBehaviorReport,
+  searchCustomerBehaviorCustomers,
+} from "../services/reports/customer-behavior.service.js";
 import { getServiceBehaviorReport } from "../services/reports/service-behavior.service.js";
 import {
   getTherapistPortalCustomers,
@@ -54,6 +57,13 @@ const baseAnalyticsSchema = z.object({
   clinicCode: z.string().min(1),
   fromDate: z.string().min(1),
   toDate: z.string().min(1),
+});
+
+const clinicSearchSchema = z.object({
+  clinicId: z.string().min(1),
+  clinicCode: z.string().min(1),
+  search: z.string().default(""),
+  limit: z.coerce.number().min(1).max(50).default(25),
 });
 
 const customerIdentityFields = {
@@ -163,6 +173,16 @@ router.get(
       .parse(req.query);
 
     const data = await getCustomerBehaviorReport(params);
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/customer-behavior/customer-search",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = clinicSearchSchema.parse(req.query);
+    const data = await searchCustomerBehaviorCustomers(params);
     res.json({ success: true, data });
   }),
 );

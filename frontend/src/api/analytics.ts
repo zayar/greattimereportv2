@@ -11,6 +11,7 @@ import type {
   CustomerPortalUsageResponse,
   CustomersBySalespersonResponse,
   CustomerBehaviorResponse,
+  CustomerBehaviorSearchResponse,
   DashboardResponse,
   DailyTreatmentResponse,
   PackagePortalDetailResponse,
@@ -52,6 +53,19 @@ export async function fetchCustomerBehavior(
 ) {
   const response = await apiClient.get<{ success: true; data: CustomerBehaviorResponse }>(
     "/analytics/customer-behavior",
+    { params },
+  );
+  return response.data.data;
+}
+
+export async function fetchCustomerBehaviorCustomerSearch(
+  params: Pick<BaseParams, "clinicId" | "clinicCode"> & {
+    search: string;
+    limit?: number;
+  },
+) {
+  const response = await apiClient.get<{ success: true; data: CustomerBehaviorSearchResponse }>(
+    "/analytics/customer-behavior/customer-search",
     { params },
   );
   return response.data.data;

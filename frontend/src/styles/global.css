@@ -10577,6 +10577,17 @@ a {
   border-bottom-color: var(--report-divider);
 }
 
+.behavior-report__customer-cell {
+  display: grid;
+  gap: 4px;
+  min-width: 220px;
+}
+
+.behavior-report__customer-cell small {
+  color: #6b7280;
+  font-size: 0.82rem;
+}
+
 .panel--tall {
   min-height: 380px;
 }
