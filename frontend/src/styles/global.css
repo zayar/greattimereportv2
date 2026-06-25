@@ -5081,6 +5081,15 @@ a {
   line-height: 1.4;
 }
 
+.telegram-routing-matrix .telegram-routing-matrix__table {
+  width: 100%;
+}
+
+.telegram-routing-matrix .telegram-routing-matrix__table th,
+.telegram-routing-matrix .telegram-routing-matrix__table td {
+  padding-inline: 12px;
+}
+
 .telegram-routing-matrix__row--selected {
   outline: 2px solid rgba(29, 119, 93, 0.22);
   outline-offset: -2px;

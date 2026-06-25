@@ -938,7 +938,7 @@ export function TelegramSettingsPage() {
 
       <div className="telegram-settings__layout">
         <Panel
-          className="telegram-settings__card"
+          className="telegram-settings__card telegram-settings__card--wide"
           title="Connection"
           subtitle="Link one or more Telegram owner chats or groups to this clinic with a short-lived code."
           action={<span className={`telegram-settings__badge telegram-settings__badge--${status?.connectionStatus ?? "idle"}`}>{formatStatusLabel(status)}</span>}
