@@ -2,6 +2,7 @@ import { env } from "../../config/env.js";
 import { shiftRange, toIsoDate } from "../../utils/date-range.js";
 import { formatDateKeyInTimeZone, normalizeTimeZone } from "../telegram/time.js";
 import { hasCustomerEntityReference, hasExplicitCustomerSearchIntent, isCustomer360Question } from "./customer-query.js";
+import { isAgentCsvExportRequested } from "./export-intent.js";
 import { isService360Question } from "./service-query.js";
 import { resolveAgent } from "./supervisor.js";
 import type {
@@ -11,12 +12,34 @@ import type {
   GreatTimeAgentIntentPlan,
 } from "./types.js";
 
-const WRITE_ACTION =
-  /(?:create|book|cancel|reschedule|update|delete|refund|collect|charge|send|message|sms|write\s+back|edit)/i;
-const WRITE_REQUEST = new RegExp(
-  `^(?:please\\s+)?${WRITE_ACTION.source}\\b|\\b(?:can you|could you|please|help me|i need you to|i want you to)\\s+${WRITE_ACTION.source}\\b|(?:ပြင်|ဖျက်|ချိန်းပေး|ပို့)`,
+const STRONG_WRITE_ACTION =
+  /(?:create|book|cancel|reschedule|update|delete|refund|collect|charge|edit|write\s+back)/i;
+const STRONG_WRITE_REQUEST = new RegExp(
+  `^(?:please\\s+)?${STRONG_WRITE_ACTION.source}\\b|\\b(?:can you|could you|please|help me|i need you to|i want you to)\\s+${STRONG_WRITE_ACTION.source}\\b|(?:ပြင်|ဖျက်|ချိန်းပေး|ပို့)`,
   "i",
 );
+const WRITE_OBJECT_REQUEST =
+  /\b(?:create|book|cancel|reschedule|update|delete|refund|collect|charge|edit|make)\s+(?:an?\s+|the\s+|this\s+|that\s+|first\s+|second\s+|third\s+)?(?:appointment|booking|customer|payment|record|invoice|service|sale)\b/i;
+const CUSTOMER_MESSAGE_REQUEST =
+  /\b(?:send\s+(?:an?\s+)?(?:sms|message|text)|message|sms)\s+(?:message\s+)?(?:to\s+)?(?:this\s+|that\s+|the\s+)?customer\b/i;
+const SMS_MESSAGE_REQUEST = /\bsend\s+(?:sms|message|text)\b/i;
+
+function isUnsupportedWriteRequest(message: string) {
+  if (STRONG_WRITE_REQUEST.test(message) || WRITE_OBJECT_REQUEST.test(message)) {
+    return true;
+  }
+
+  const normalized = message.toLowerCase().replace(/[\/_-]+/g, " ");
+  if (CUSTOMER_MESSAGE_REQUEST.test(normalized) || SMS_MESSAGE_REQUEST.test(normalized)) {
+    return true;
+  }
+
+  if (isAgentCsvExportRequested(message)) {
+    return false;
+  }
+
+  return false;
+}
 
 function dateFromUtc(date: Date) {
   return toIsoDate(date);
@@ -383,7 +406,7 @@ export function planAgentRequest(params: {
     now: params.now,
   });
 
-  if (WRITE_REQUEST.test(params.request.message)) {
+  if (isUnsupportedWriteRequest(params.request.message)) {
     return {
       requestedAgent,
       resolvedAgent,

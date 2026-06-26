@@ -3,9 +3,19 @@ import { env } from "../../config/env.js";
 import { HttpError } from "../../utils/http-error.js";
 import { hasFeatureAccess } from "../feature-access.service.js";
 import { askAgentHub, buildLockedAgentHubResponse } from "../agent-hub/agent-hub.service.js";
+import { isAgentCsvExportRequested, isExportOnlyFollowUp } from "../agent-hub/export-intent.js";
 import type { Customer360FactPack, GreatTimeAgentChatResponse, GreatTimeAgentId } from "../agent-hub/types.js";
 import { buildTelegramSalesAssistantReply } from "../gt-growth-ai/sales-assistant.service.js";
 import { GT_GROWTH_AI_FEATURE_GATE } from "../../types/report-ai.js";
+import {
+  buildGreatTimeAgentCsvCaption,
+  buildGreatTimeAgentCsvExportFromTables,
+} from "./agent-csv-export.service.js";
+import {
+  getLatestTelegramAgentExportCache,
+  getTelegramAgentExportCacheById,
+  saveLatestTelegramAgentExportCache,
+} from "./agent-export-cache.js";
 import { getTelegramTargetByChatId, redeemTelegramLinkCode } from "./storage.service.js";
 import type { TelegramChatTarget, TelegramTargetStatus } from "./types.js";
 
@@ -91,6 +101,43 @@ async function callTelegramApi<T>(method: string, body?: Record<string, unknown>
         "Content-Type": "application/json",
       },
       body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(env.TELEGRAM_API_TIMEOUT_MS),
+    });
+  } catch (error) {
+    if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) {
+      throw new HttpError(504, `Telegram API request timed out for ${method}.`);
+    }
+
+    throw error;
+  }
+
+  const responseText = await response.text();
+  let payload: TelegramApiResponse<T>;
+
+  try {
+    payload = responseText ? (JSON.parse(responseText) as TelegramApiResponse<T>) : { ok: false };
+  } catch {
+    throw new HttpError(502, `Telegram API returned an invalid response for ${method}.`);
+  }
+
+  if (!response.ok) {
+    throw new HttpError(response.status, payload.description || `Telegram API request failed for ${method}.`);
+  }
+
+  if (!payload.ok || payload.result === undefined) {
+    throw new HttpError(502, payload.description || `Telegram API request failed for ${method}.`);
+  }
+
+  return payload.result;
+}
+
+async function callTelegramMultipartApi<T>(method: string, formData: FormData) {
+  let response: Response;
+
+  try {
+    response = await fetch(getTelegramApiUrl(method), {
+      method: "POST",
+      body: formData,
       signal: AbortSignal.timeout(env.TELEGRAM_API_TIMEOUT_MS),
     });
   } catch (error) {
@@ -899,7 +946,12 @@ function registerSuggestedQuestion(question: string) {
   return key;
 }
 
-export function buildAgentHubTelegramReplyMarkup(response: GreatTimeAgentChatResponse) {
+export function buildAgentHubTelegramReplyMarkup(
+  response: GreatTimeAgentChatResponse,
+  options?: {
+    exportCallbackData?: string;
+  },
+) {
   const seenCategories = new Set<string>();
   const seenLabels = new Set<string>();
   const questions = (response.followUpQuestions ?? []).filter(Boolean).reduce<string[]>((selected, question) => {
@@ -919,17 +971,29 @@ export function buildAgentHubTelegramReplyMarkup(response: GreatTimeAgentChatRes
     return selected;
   }, []);
 
-  if (questions.length === 0) {
+  if (questions.length === 0 && !options?.exportCallbackData) {
     return undefined;
   }
 
   return {
-    inline_keyboard: questions.map((question, index) => [
-      {
-        text: suggestionLabel(question, index),
-        callback_data: `gtask:${registerSuggestedQuestion(question)}`,
-      },
-    ]),
+    inline_keyboard: [
+      ...(options?.exportCallbackData
+        ? [
+            [
+              {
+                text: "⬇️ Download CSV",
+                callback_data: options.exportCallbackData,
+              },
+            ],
+          ]
+        : []),
+      ...questions.map((question, index) => [
+        {
+          text: suggestionLabel(question, index),
+          callback_data: `gtask:${registerSuggestedQuestion(question)}`,
+        },
+      ]),
+    ],
   };
 }
 
@@ -980,6 +1044,10 @@ async function buildAgentHubReply(params: {
   });
 }
 
+function hasExportableAgentTables(response: GreatTimeAgentChatResponse) {
+  return response.tables?.some((table) => table.rows.length > 0) ?? false;
+}
+
 async function handleAgentQuestion(params: {
   chatId: string;
   chatType: TelegramChat["type"];
@@ -1011,13 +1079,94 @@ async function handleAgentQuestion(params: {
     return;
   }
 
+  const question = params.question.trim();
+  const excelRequested = /\b(?:excel|xls|xlsx|spreadsheet|google\s+sheets?|sheets?\s+file)\b/i.test(question);
+
+  if (isExportOnlyFollowUp(question)) {
+    const cache = getLatestTelegramAgentExportCache({
+      clinicId: target.clinicId,
+      telegramChatId: params.chatId,
+      telegramUserId: params.telegramUserId,
+    });
+
+    if (!cache) {
+      await sendTelegramMessage(
+        params.chatId,
+        "I don’t have a recent table to export. Please ask for the report again, for example: top customers this month export csv.",
+      );
+      return;
+    }
+
+    const exportFile = buildGreatTimeAgentCsvExportFromTables({
+      tables: cache.tables,
+      resolvedAgent: cache.resolvedAgent,
+      intent: cache.intent,
+      period: cache.period,
+      originalMessage: cache.originalMessage,
+      now: cache.createdAt,
+    });
+    await sendTelegramDocument(params.chatId, {
+      fileName: exportFile.fileName,
+      content: exportFile.csv,
+      caption: buildGreatTimeAgentCsvCaption({
+        rowCount: exportFile.rowCount,
+        fromPreviousResult: true,
+        excelRequested: true,
+      }),
+    });
+    return;
+  }
+
   const response = await buildAgentHubReply({
     target,
-    question: params.question.trim(),
+    question,
     telegramUserId: params.telegramUserId,
   });
+
+  const cacheEntry =
+    response.intent !== "unsupported_write_request" && hasExportableAgentTables(response)
+      ? saveLatestTelegramAgentExportCache({
+          clinicId: target.clinicId,
+          clinicCode: target.clinicCode,
+          telegramChatId: params.chatId,
+          telegramUserId: params.telegramUserId,
+          resolvedAgent: response.resolvedAgent,
+          intent: response.intent,
+          originalMessage: question,
+          period: response.period,
+          tables: response.tables,
+        })
+      : null;
+
   await sendTelegramMessage(params.chatId, formatAgentHubTelegramReply(response), {
-    replyMarkup: buildAgentHubTelegramReplyMarkup(response),
+    replyMarkup: buildAgentHubTelegramReplyMarkup(response, {
+      exportCallbackData: cacheEntry ? `gtcsv:${cacheEntry.exportId}` : undefined,
+    }),
+  });
+
+  if (!isAgentCsvExportRequested(question)) {
+    return;
+  }
+
+  if (!hasExportableAgentTables(response)) {
+    await sendTelegramMessage(params.chatId, "I couldn't generate a CSV because this response doesn't contain table/list rows.");
+    return;
+  }
+
+  const exportFile = buildGreatTimeAgentCsvExportFromTables({
+    tables: response.tables,
+    resolvedAgent: response.resolvedAgent,
+    intent: response.intent,
+    period: response.period,
+    originalMessage: question,
+  });
+  await sendTelegramDocument(params.chatId, {
+    fileName: exportFile.fileName,
+    content: exportFile.csv,
+    caption: buildGreatTimeAgentCsvCaption({
+      rowCount: exportFile.rowCount,
+      excelRequested,
+    }),
   });
 }
 
@@ -1079,6 +1228,36 @@ export async function sendTelegramMessage(
   });
 }
 
+export async function sendTelegramDocument(
+  chatId: string,
+  params: {
+    fileName: string;
+    content: string | Buffer | Uint8Array;
+    contentType?: string;
+    caption?: string;
+  },
+) {
+  const formData = new FormData();
+  const contentType = params.contentType ?? "text/csv;charset=utf-8";
+  const blobPart =
+    typeof params.content === "string"
+      ? params.content
+      : (() => {
+          const buffer = new ArrayBuffer(params.content.byteLength);
+          new Uint8Array(buffer).set(params.content);
+          return buffer;
+        })();
+  const blob = new Blob([blobPart], { type: contentType });
+
+  formData.append("chat_id", chatId);
+  if (params.caption) {
+    formData.append("caption", params.caption);
+  }
+  formData.append("document", blob, params.fileName);
+
+  return callTelegramMultipartApi("sendDocument", formData);
+}
+
 async function answerTelegramCallback(callbackQueryId: string, text?: string) {
   await callTelegramApi("answerCallbackQuery", {
     callback_query_id: callbackQueryId,
@@ -1111,7 +1290,57 @@ async function handleSuggestedQuestionCallback(callback: TelegramCallbackQuery) 
   });
 }
 
+async function handleCsvExportCallback(callback: TelegramCallbackQuery) {
+  const exportId = callback.data?.match(/^gtcsv:([A-Za-z0-9-]+)$/)?.[1];
+  const chat = callback.message?.chat;
+
+  if (!exportId || !chat) {
+    await answerTelegramCallback(callback.id, "CSV export expired.");
+    return;
+  }
+
+  const chatId = String(chat.id);
+  const target = await getTelegramTargetByChatId(chatId);
+  const telegramUserId = callback.from?.id == null ? null : String(callback.from.id);
+
+  if (!target || !canTelegramUserChatWithAgent({ target, telegramUserId })) {
+    await answerTelegramCallback(callback.id, "CSV export unavailable.");
+    return;
+  }
+
+  const cache = getTelegramAgentExportCacheById({ exportId });
+  if (!cache || cache.clinicId !== target.clinicId || cache.telegramChatId !== chatId) {
+    await answerTelegramCallback(callback.id, "CSV export expired.");
+    await sendTelegramMessage(chatId, "This CSV export expired. Please ask for the report again.");
+    return;
+  }
+
+  await answerTelegramCallback(callback.id, "Preparing CSV...");
+  const exportFile = buildGreatTimeAgentCsvExportFromTables({
+    tables: cache.tables,
+    resolvedAgent: cache.resolvedAgent,
+    intent: cache.intent,
+    period: cache.period,
+    originalMessage: cache.originalMessage,
+    now: cache.createdAt,
+  });
+  await sendTelegramDocument(chatId, {
+    fileName: exportFile.fileName,
+    content: exportFile.csv,
+    caption: buildGreatTimeAgentCsvCaption({
+      rowCount: exportFile.rowCount,
+      fromPreviousResult: true,
+      excelRequested: true,
+    }),
+  });
+}
+
 export async function handleTelegramUpdate(update: TelegramUpdate) {
+  if (update.callback_query?.data?.startsWith("gtcsv:")) {
+    await handleCsvExportCallback(update.callback_query);
+    return;
+  }
+
   if (update.callback_query?.data?.startsWith("gtask:")) {
     await handleSuggestedQuestionCallback(update.callback_query);
     return;
