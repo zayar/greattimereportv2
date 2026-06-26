@@ -10,7 +10,8 @@ import {
   type LiveAppointmentRow,
 } from "../appointment-live.service.js";
 import { buildUtcDayRangeForDateKey } from "../../telegram/time.js";
-import { limitRows, maskPhone, nowIso } from "../safety.js";
+import { getLatestFactSnapshot } from "../memory/memory.repository.js";
+import { limitRows, maskPhone, nowIso, sanitizeError } from "../safety.js";
 import type { AgentDataStatus, AgentToolDefinition, AgentToolInput, AgentToolResult } from "../types.js";
 
 const toolInputSchema = z.custom<AgentToolInput>(() => true);
@@ -289,7 +290,7 @@ function treatmentStartProxyWarning(): NonNullable<AgentToolResult["warnings"]>[
   };
 }
 
-async function snapshot(input: AgentToolInput) {
+async function snapshot(input: AgentToolInput, options?: { includeCheckIns?: boolean }) {
   return fetchLiveAppointmentSnapshot({
     clinicId: input.clinic.clinicId,
     clinicCode: input.clinic.clinicCode,
@@ -297,7 +298,80 @@ async function snapshot(input: AgentToolInput) {
     timezone: input.request.timezone ?? "",
     authorizationHeader: input.requestContext.authorizationHeader,
     rowLimit: 200,
+    includeCheckIns: options?.includeCheckIns,
   });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function numberFrom(value: unknown) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function countFromRecord(record: Record<string, unknown>, keys: string[]) {
+  return keys.reduce((total, key) => total + (numberFrom(record[key]) ?? 0), 0);
+}
+
+async function buildCachedAppointmentCountResult(input: AgentToolInput, liveUnavailableMessage: string): Promise<AgentToolResult | null> {
+  const cached = await getLatestFactSnapshot({
+    clinicId: input.clinic.clinicId,
+    snapshotType: "appointment_operational_snapshot",
+  }).catch(() => null);
+
+  if (!cached) {
+    return null;
+  }
+
+  const snapshotDate = cached.dateRange?.toDate ?? cached.dateRange?.fromDate;
+  if (snapshotDate !== input.period.toDate) {
+    return null;
+  }
+
+  const summary = cached.summary;
+  const lifecycleCounts = isRecord(summary.lifecycleCounts) ? summary.lifecycleCounts : {};
+  const totalAppointments =
+    numberFrom(summary.bookingAppointmentCount) ??
+    numberFrom(summary.bookingRowCount) ??
+    numberFrom(summary.rowCount) ??
+    0;
+  const booked = countFromRecord(lifecycleCounts, ["booked", "requested"]);
+  const checkedIn = countFromRecord(lifecycleCounts, ["arrived_start_unknown", "treatment_in_progress"]);
+  const checkedOut = countFromRecord(lifecycleCounts, ["checked_out"]);
+  const cancelled = countFromRecord(lifecycleCounts, ["cancelled"]);
+  const noShow = countFromRecord(lifecycleCounts, ["no_show"]);
+
+  return {
+    toolName: "get_live_appointment_counts",
+    sourceName: "Cached appointment snapshot",
+    checkedAt: cached.checkedAt,
+    period: input.period.toDate,
+    dataStatus: totalAppointments > 0 ? "stale" : "no_activity",
+    live: false,
+    summary: `Latest saved appointment snapshot has ${totalAppointments.toLocaleString("en-US")} scheduled appointment${totalAppointments === 1 ? "" : "s"} for ${input.period.toDate}.`,
+    metrics: [
+      { label: "Total appointments today", value: totalAppointments, helperText: "From the latest saved APICORE appointment snapshot." },
+      { label: "Booked", value: booked },
+      { label: "Checked in at snapshot time", value: checkedIn },
+      { label: "Checked out", value: checkedOut },
+      { label: "Cancelled", value: cancelled },
+      { label: "No-show", value: noShow },
+    ],
+    warnings: [
+      {
+        type: "live_appointment_source_unavailable",
+        title: "Live source unavailable",
+        message: liveUnavailableMessage,
+      },
+      {
+        type: "cached_snapshot_fallback",
+        title: "Using recent appointment snapshot",
+        message: `The latest saved appointment snapshot was checked at ${cached.checkedAt}.`,
+      },
+    ],
+  };
 }
 
 async function getAppointmentLedger(input: AgentToolInput): Promise<AgentToolResult> {
@@ -364,33 +438,60 @@ async function getTreatmentStartProxy(input: AgentToolInput): Promise<AgentToolR
 }
 
 async function getLiveAppointmentCounts(input: AgentToolInput): Promise<AgentToolResult> {
-  const data = await snapshot(input);
-  const countableRows = data.rows.filter(isCountableTodayAppointment);
-  const activeCheckedInRows = countableRows.filter(isActiveCheckedInAppointment);
+  let data: Awaited<ReturnType<typeof snapshot>>;
+  const includeCheckIns = input.intent !== "appointment_summary";
+
+  try {
+    data = await snapshot(input, { includeCheckIns });
+  } catch (error) {
+    const fallback = await buildCachedAppointmentCountResult(input, sanitizeError(error));
+    if (fallback) {
+      return fallback;
+    }
+    throw error;
+  }
+
+  const bookingSourceUnavailable = data.warnings.some((warning) => warning.type === "booking_source_unavailable");
+  if (bookingSourceUnavailable) {
+    const fallback = await buildCachedAppointmentCountResult(input, "Live appointment bookings could not be loaded.");
+    if (fallback) {
+      return fallback;
+    }
+  }
+
+  const bookingRows = data.rows.filter((row) => row.sourceType === "booking");
+  const checkInRows = data.rows.filter((row) => row.sourceType === "check_in");
+  const countableRows = bookingRows.filter(isCountableTodayAppointment);
+  const activeCheckedInRows = checkInRows.filter(isActiveCheckedInAppointment);
   const countableLifecycle = {
     booked: countableRows.filter((row) => row.lifecycleState === "booked").length,
     activeCheckedIn: activeCheckedInRows.length,
-    checkedOut: countableRows.filter((row) => row.lifecycleState === "checked_out").length,
+    checkedOut: includeCheckIns
+      ? checkInRows.filter((row) => row.lifecycleState === "checked_out").length
+      : countableRows.filter((row) => row.lifecycleState === "checked_out").length,
     cancelled: countableRows.filter((row) => row.lifecycleState === "cancelled").length,
     noShow: countableRows.filter((row) => row.lifecycleState === "no_show").length,
   };
+  const metrics = [
+    { label: "Total appointments today", value: countableRows.length, helperText: "Excludes MERCHANT_CANCEL rows." },
+    { label: "Booked", value: countableLifecycle.booked },
+    ...(includeCheckIns
+      ? [{ label: "Checked in now", value: countableLifecycle.activeCheckedIn, helperText: "Has check-in time and no check-out time." }]
+      : []),
+    { label: "Checked out", value: countableLifecycle.checkedOut },
+    { label: "Cancelled", value: countableLifecycle.cancelled },
+    { label: "No-show", value: countableLifecycle.noShow },
+  ];
 
   return {
     toolName: "get_live_appointment_counts",
-    sourceName: "APICORE live bookings and check-ins",
+    sourceName: includeCheckIns ? "APICORE live bookings and check-ins" : "APICORE live bookings",
     checkedAt: data.checkedAt,
     period: input.period.toDate,
     dataStatus: data.dataStatus,
     live: true,
-    summary: `Today's appointment snapshot has ${countableRows.length.toLocaleString("en-US")} appointment${countableRows.length === 1 ? "" : "s"} for ${input.period.toDate}, excluding merchant-cancelled rows.`,
-    metrics: [
-      { label: "Total appointments today", value: countableRows.length, helperText: "Excludes MERCHANT_CANCEL rows." },
-      { label: "Booked", value: countableLifecycle.booked },
-      { label: "Checked in now", value: countableLifecycle.activeCheckedIn, helperText: "Has check-in time and no check-out time." },
-      { label: "Checked out", value: countableLifecycle.checkedOut },
-      { label: "Cancelled", value: countableLifecycle.cancelled },
-      { label: "No-show", value: countableLifecycle.noShow },
-    ],
+    summary: `Today's appointment snapshot has ${countableRows.length.toLocaleString("en-US")} scheduled appointment${countableRows.length === 1 ? "" : "s"} for ${input.period.toDate}, excluding merchant-cancelled rows.`,
+    metrics,
     tables: [liveTable("Today's appointment rows", countableRows)],
     warnings: data.warnings,
     entityRefs: countableRows.map((row, index) => liveAppointmentEntityRef(row, index + 1)),

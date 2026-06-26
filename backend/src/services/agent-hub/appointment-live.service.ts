@@ -27,6 +27,26 @@ export type LiveAppointmentRow = {
   sourceType: "booking" | "check_in";
 };
 
+export type LiveAppointmentSnapshot = {
+  checkedAt: string;
+  dataStatus: AgentDataStatus;
+  rows: LiveAppointmentRow[];
+  countsByLifecycle: Record<string, number>;
+  countsByService: Record<string, number>;
+  countsByPractitioner: Record<string, number>;
+  warnings: Array<{ type: string; title: string; message: string }>;
+};
+
+const LIVE_APPOINTMENT_SNAPSHOT_CACHE_TTL_MS = 15_000;
+const liveAppointmentSnapshotCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    promise?: Promise<LiveAppointmentSnapshot>;
+    value?: LiveAppointmentSnapshot;
+  }
+>();
+
 function normalizeText(value: string | null | undefined, fallback = "Unknown") {
   const text = value?.trim();
   return text || fallback;
@@ -112,14 +132,33 @@ function countBy<T extends string>(rows: LiveAppointmentRow[], key: (row: LiveAp
   );
 }
 
-export async function fetchLiveAppointmentSnapshot(params: {
+function snapshotCacheKey(params: {
+  clinicId: string;
+  clinicCode: string;
+  dateKey: string;
+  timezone: string;
+  rowLimit?: number;
+  includeCheckIns?: boolean;
+}) {
+  return [
+    params.clinicId,
+    params.clinicCode.toLowerCase(),
+    params.dateKey,
+    params.timezone,
+    String(params.rowLimit ?? 200),
+    params.includeCheckIns === false ? "bookings_only" : "bookings_and_checkins",
+  ].join("|");
+}
+
+async function loadLiveAppointmentSnapshot(params: {
   clinicId: string;
   clinicCode: string;
   dateKey: string;
   timezone: string;
   authorizationHeader?: string;
   rowLimit?: number;
-}) {
+  includeCheckIns?: boolean;
+}): Promise<LiveAppointmentSnapshot> {
   const checkedAt = new Date().toISOString();
   const range = buildUtcDayRangeForDateKeyInTimeZone(params.dateKey, params.timezone);
   const warnings: Array<{ type: string; title: string; message: string }> = [];
@@ -157,30 +196,35 @@ export async function fetchLiveAppointmentSnapshot(params: {
       )
       .map(bookingToLiveRow);
   } catch {
-    dataStatus = "partial";
+    dataStatus = params.includeCheckIns === false ? "unavailable" : "partial";
     warnings.push({
       type: "booking_source_unavailable",
       title: "Booking source unavailable",
-      message: "Live booking details could not be loaded. Check-in data is still shown when available.",
+      message:
+        params.includeCheckIns === false
+          ? "Live booking details could not be loaded."
+          : "Live booking details could not be loaded. Check-in data is still shown when available.",
     });
   }
 
-  try {
-    const checkIns = await fetchApicoreCheckIns({
-      clinicId: params.clinicId,
-      startDate: range.startIso,
-      endDate: range.endIso,
-      take: params.rowLimit ?? 200,
-      authorizationHeader: params.authorizationHeader,
-    });
-    checkInRows = checkIns.data.map(checkInToLiveRow);
-  } catch {
-    dataStatus = bookingRows.length ? "partial" : "unavailable";
-    warnings.push({
-      type: "check_in_source_unavailable",
-      title: "Check-in source unavailable",
-      message: "Live check-in/out data could not be loaded.",
-    });
+  if (params.includeCheckIns !== false) {
+    try {
+      const checkIns = await fetchApicoreCheckIns({
+        clinicId: params.clinicId,
+        startDate: range.startIso,
+        endDate: range.endIso,
+        take: params.rowLimit ?? 200,
+        authorizationHeader: params.authorizationHeader,
+      });
+      checkInRows = checkIns.data.map(checkInToLiveRow);
+    } catch {
+      dataStatus = bookingRows.length ? "partial" : "unavailable";
+      warnings.push({
+        type: "check_in_source_unavailable",
+        title: "Check-in source unavailable",
+        message: "Live check-in/out data could not be loaded.",
+      });
+    }
   }
 
   const rows = [...checkInRows, ...bookingRows].slice(0, params.rowLimit ?? 200);
@@ -197,6 +241,54 @@ export async function fetchLiveAppointmentSnapshot(params: {
     countsByPractitioner: countBy(rows, (row) => row.practitionerName),
     warnings,
   };
+}
+
+export async function fetchLiveAppointmentSnapshot(params: {
+  clinicId: string;
+  clinicCode: string;
+  dateKey: string;
+  timezone: string;
+  authorizationHeader?: string;
+  rowLimit?: number;
+  includeCheckIns?: boolean;
+}) {
+  const key = snapshotCacheKey(params);
+  const now = Date.now();
+  const cached = liveAppointmentSnapshotCache.get(key);
+
+  if (cached && cached.expiresAt > now) {
+    if (cached.value) {
+      return cached.value;
+    }
+    if (cached.promise) {
+      return cached.promise;
+    }
+  }
+
+  const promise = loadLiveAppointmentSnapshot(params).then(
+    (value) => {
+      if (value.dataStatus === "unavailable") {
+        liveAppointmentSnapshotCache.delete(key);
+      } else {
+        liveAppointmentSnapshotCache.set(key, {
+          expiresAt: Date.now() + LIVE_APPOINTMENT_SNAPSHOT_CACHE_TTL_MS,
+          value,
+        });
+      }
+      return value;
+    },
+    (error) => {
+      liveAppointmentSnapshotCache.delete(key);
+      throw error;
+    },
+  );
+
+  liveAppointmentSnapshotCache.set(key, {
+    expiresAt: now + LIVE_APPOINTMENT_SNAPSHOT_CACHE_TTL_MS,
+    promise,
+  });
+
+  return promise;
 }
 
 export function liveAppointmentEntityRef(row: LiveAppointmentRow, rank: number): GreatTimeAgentEntityContext {

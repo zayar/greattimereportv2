@@ -7,7 +7,7 @@ import { runCustomerRelationshipLearning } from "../reports/customer-relationshi
 import { getServiceBehaviorReport } from "../reports/service-behavior.service.js";
 import { getTherapistPortalReport } from "../reports/therapist-portal.service.js";
 import { searchCustomerRelationshipProfiles } from "../reports/customer-relationship-profile.repository.js";
-import { fetchLiveAppointmentSnapshot } from "./appointment-live.service.js";
+import { fetchLiveAppointmentSnapshot, isCountableTodayAppointment } from "./appointment-live.service.js";
 import { listUnprocessedAgentFeedback, markAgentFeedbackProcessed } from "./feedback.repository.js";
 import {
   acquireAgentLearningLock,
@@ -20,7 +20,7 @@ import {
   type AgentLearningScheduleRecord,
 } from "./learning.repository.js";
 import { learnMemoriesFromFeedbackEvents } from "./memory/memory-writer.js";
-import { getInsightCardById, saveFactSnapshot, saveInsightCard } from "./memory/memory.repository.js";
+import { getInsightCardById, saveFactSnapshot, saveInsightCard, saveLatestFactSnapshot } from "./memory/memory.repository.js";
 import type { AgentDataStatus } from "./types.js";
 
 export const DEFAULT_JOB_TYPES: AgentLearningJobType[] = [
@@ -288,7 +288,7 @@ async function saveSnapshot(params: {
   summary: Record<string, unknown>;
   ttlHours?: number;
 }) {
-  await saveFactSnapshot({
+  const snapshot = {
     id: stableId("fact", [params.clinicId, params.snapshotType, params.bucket]),
     clinicId: params.clinicId,
     clinicCode: params.clinicCode,
@@ -300,7 +300,9 @@ async function saveSnapshot(params: {
     dateRange: params.dateRange,
     summary: params.summary,
     expiresAt: params.ttlHours ? nextExpiry(params.ttlHours) : null,
-  });
+  };
+
+  await Promise.all([saveFactSnapshot(snapshot), saveLatestFactSnapshot(snapshot)]);
 }
 
 async function runFeedbackLearningJob(params: { clinicId: string }): Promise<AgentLearningJobOutcome> {
@@ -534,6 +536,8 @@ async function runJob(params: {
         dateKey: params.dateKey,
         timezone: params.timezone,
       });
+      const bookingRows = snapshot.rows.filter((row) => row.sourceType === "booking");
+      const checkInRows = snapshot.rows.filter((row) => row.sourceType === "check_in");
       await saveSnapshot({
         clinicId: params.clinicId,
         clinicCode: params.clinicCode,
@@ -545,6 +549,9 @@ async function runJob(params: {
         dateRange: { fromDate: params.dateKey, toDate: params.dateKey, timezone: params.timezone },
         summary: {
           rowCount: snapshot.rows.length,
+          bookingAppointmentCount: bookingRows.filter(isCountableTodayAppointment).length,
+          bookingRowCount: bookingRows.length,
+          checkInRowCount: checkInRows.length,
           lifecycleCounts: snapshot.countsByLifecycle,
         },
         ttlHours: 1,
@@ -563,6 +570,8 @@ async function runJob(params: {
         dateKey: settledDateKey,
         timezone: params.timezone,
       });
+      const bookingRows = snapshot.rows.filter((row) => row.sourceType === "booking");
+      const checkInRows = snapshot.rows.filter((row) => row.sourceType === "check_in");
       await saveSnapshot({
         clinicId: params.clinicId,
         clinicCode: params.clinicCode,
@@ -574,6 +583,9 @@ async function runJob(params: {
         dateRange: { fromDate: settledDateKey, toDate: settledDateKey, timezone: params.timezone },
         summary: {
           rowCount: snapshot.rows.length,
+          bookingAppointmentCount: bookingRows.filter(isCountableTodayAppointment).length,
+          bookingRowCount: bookingRows.length,
+          checkInRowCount: checkInRows.length,
           lifecycleCounts: snapshot.countsByLifecycle,
         },
       });

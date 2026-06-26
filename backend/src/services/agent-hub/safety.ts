@@ -10,7 +10,23 @@ export function newId(prefix: string) {
 
 export function sanitizeError(error: unknown) {
   if (error instanceof Error && error.message.trim()) {
-    return error.message.replace(/Bearer\s+[A-Za-z0-9._-]+/g, "Bearer [redacted]").slice(0, 240);
+    const message = error.message.trim();
+    const normalized = message.toLowerCase();
+
+    if (
+      normalized.includes("prisma.$queryraw") ||
+      normalized.includes("connection pool") ||
+      normalized.includes("timed out fetching a new connection") ||
+      normalized.includes("pris.ly/d/connection-pool")
+    ) {
+      return "Live appointment source is busy right now. Please retry in a moment.";
+    }
+
+    if (normalized.includes("gt.apicore graphql request timed out")) {
+      return "Live GreatTime source timed out. Please retry in a moment.";
+    }
+
+    return message.replace(/Bearer\s+[A-Za-z0-9._-]+/g, "Bearer [redacted]").slice(0, 240);
   }
 
   return "The source tool is temporarily unavailable.";

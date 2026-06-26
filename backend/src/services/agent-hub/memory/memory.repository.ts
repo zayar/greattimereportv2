@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { firestoreDb } from "../../../config/firebase.js";
 import { evaluateMemoryCandidate } from "./memory-policy.js";
 import {
@@ -36,6 +37,14 @@ function insightCardCollection() {
 
 function factSnapshotCollection() {
   return firestoreDb().collection(GT_AGENT_FACT_SNAPSHOTS_COLLECTION);
+}
+
+function stableFactSnapshotId(prefix: string, parts: string[]) {
+  return `${prefix}_${createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 24)}`;
+}
+
+function latestFactSnapshotId(params: { clinicId: string; snapshotType: string }) {
+  return stableFactSnapshotId("fact_latest", [params.clinicId, params.snapshotType]);
 }
 
 function isMemoryRecord(data: FirebaseFirestore.DocumentData | undefined): data is GtAgentMemoryRecord {
@@ -277,6 +286,37 @@ export async function getInsightCardById(cardId: string) {
 
 export async function saveFactSnapshot(snapshot: GtAgentFactSnapshot) {
   await factSnapshotCollection().doc(snapshot.id).set(snapshot, { merge: true });
+}
+
+export async function saveLatestFactSnapshot(snapshot: GtAgentFactSnapshot) {
+  await factSnapshotCollection()
+    .doc(latestFactSnapshotId(snapshot))
+    .set(
+      {
+        ...snapshot,
+        id: latestFactSnapshotId(snapshot),
+        bucket: "latest",
+      },
+      { merge: true },
+    );
+}
+
+export async function getLatestFactSnapshot(params: {
+  clinicId: string;
+  snapshotType: string;
+}) {
+  const snapshot = await factSnapshotCollection().doc(latestFactSnapshotId(params)).get();
+  const data = snapshot.data() as GtAgentFactSnapshot | undefined;
+
+  if (!data || data.clinicId !== params.clinicId || data.snapshotType !== params.snapshotType) {
+    return null;
+  }
+
+  if (data.expiresAt && new Date(data.expiresAt).getTime() <= Date.now()) {
+    return null;
+  }
+
+  return data;
 }
 
 export async function countActiveMemories(params: { clinicId: string }) {

@@ -343,6 +343,7 @@ function toolsForIntent(agentId: GreatTimeAgentId, intent: string) {
 
   switch (intent) {
     case "appointment_summary":
+      return ["get_live_appointment_counts"];
     case "appointment_list":
       return ["get_appointment_ledger"];
     case "live_appointment_counts":

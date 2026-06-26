@@ -10,6 +10,7 @@ const { composeCustomer360Summary } = await import("../src/services/agent-hub/cu
 const { resolveEntityReference } = await import("../src/services/agent-hub/entity-context.ts")
 const { extractAgentPeriod, planAgentRequest } = await import("../src/services/agent-hub/intent-planner.ts")
 const { buildAgentResponse } = await import("../src/services/agent-hub/response-builder.ts")
+const { sanitizeError } = await import("../src/services/agent-hub/safety.ts")
 const { resolveAgent } = await import("../src/services/agent-hub/supervisor.ts")
 const { assertToolAllowed } = await import("../src/services/agent-hub/tool-executor.ts")
 const { createAgentToolRegistry, getAgentToolAllowlist } = await import("../src/services/agent-hub/tool-registry.ts")
@@ -390,7 +391,7 @@ test("planner maps checked-in appointment questions to active check-in rows", ()
   assert.deepEqual(plan.toolNames, ["get_checked_in_customers"])
 })
 
-test("planner maps general appointment questions to the APICORE appointment ledger", () => {
+test("planner maps appointment count questions to the live count tool and lists to the ledger", () => {
   const countPlan = planAgentRequest({
     request: {
       clinicId: "clinic-1",
@@ -400,7 +401,7 @@ test("planner maps general appointment questions to the APICORE appointment ledg
     },
   })
   assert.equal(countPlan.intent, "appointment_summary")
-  assert.deepEqual(countPlan.toolNames, ["get_appointment_ledger"])
+  assert.deepEqual(countPlan.toolNames, ["get_live_appointment_counts"])
 
   const listPlan = planAgentRequest({
     request: {
@@ -424,6 +425,18 @@ test("planner maps general appointment questions to the APICORE appointment ledg
   assert.equal(servicesTodayPlan.resolvedAgent, "appointment")
   assert.equal(servicesTodayPlan.intent, "appointment_list")
   assert.deepEqual(servicesTodayPlan.toolNames, ["get_appointment_ledger"])
+})
+
+test("source error sanitizer hides APICORE Prisma pool details", () => {
+  const message = sanitizeError(
+    new Error(
+      "Invalid `prisma.$queryRaw()` invocation: Timed out fetching a new connection from the connection pool. More info: http://pris.ly/d/connection-pool",
+    ),
+  )
+
+  assert.match(message, /Live appointment source is busy/)
+  assert.doesNotMatch(message, /prisma/i)
+  assert.doesNotMatch(message, /connection pool/i)
 })
 
 test("planner maps treatment-start appointment questions to the APICORE status proxy", () => {
