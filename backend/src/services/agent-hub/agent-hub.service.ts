@@ -6,6 +6,7 @@ import {
   hasCustomerEntityReference,
   hasExplicitCustomerSearchIntent as hasCustomerSearchIntent,
 } from "./customer-query.js";
+import { isExportOnlyFollowUp } from "./export-intent.js";
 import { extractExplicitServiceSearchText, hasExplicitServiceSearchIntent, isService360Question } from "./service-query.js";
 import { planAgentRequest } from "./intent-planner.js";
 import { enhanceAgentResponseNarrative } from "./narrative.service.js";
@@ -242,6 +243,52 @@ function forceFollowUpPlan(params: {
   return params.plan;
 }
 
+function buildExportOnlyFollowUpResponse(params: {
+  request: GreatTimeAgentChatRequest;
+  sessionId: string;
+  requestId: string;
+}): GreatTimeAgentChatResponse {
+  const request = {
+    ...params.request,
+    entityContext: undefined,
+  };
+  const plan = planAgentRequest({ request });
+  const message = [
+    "I can export only from structured table rows in a previous answer.",
+    "Use the CSV export action on the table, or ask the report again with export csv.",
+    "Excel requests currently return CSV.",
+  ].join("\n");
+
+  return {
+    sessionId: params.sessionId,
+    requestId: params.requestId,
+    responseId: newId("resp"),
+    requestedAgent: plan.requestedAgent,
+    resolvedAgent: plan.resolvedAgent,
+    autoMode: plan.autoMode,
+    intent: "csv_export_follow_up",
+    period: plan.period,
+    assistantMessage: message,
+    summary: message,
+    followUpQuestions: [],
+    sources: [],
+    dataStatus: "not_ready",
+    warnings: [
+      {
+        type: "csv_export_requires_table",
+        title: "CSV export needs a table",
+        message: "This request is export-only, so Agent Hub did not run a new report.",
+      },
+    ],
+    actions: [
+      {
+        type: "read_only_agent_response",
+        detail: "No GreatTime records were changed.",
+      },
+    ],
+  };
+}
+
 export async function askAgentHub(params: {
   request: GreatTimeAgentChatRequest;
   clinic: AgentClinicContext;
@@ -249,6 +296,15 @@ export async function askAgentHub(params: {
 }): Promise<GreatTimeAgentChatResponse> {
   const sessionId = params.request.sessionId ?? newId("session");
   const requestId = params.request.requestId ?? newId("req");
+
+  if (isExportOnlyFollowUp(params.request.message)) {
+    return buildExportOnlyFollowUpResponse({
+      request: params.request,
+      sessionId,
+      requestId,
+    });
+  }
+
   const registry = createAgentToolRegistry();
   const session = params.request.sessionId
     ? await getAgentSession({

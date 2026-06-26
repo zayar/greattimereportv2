@@ -21,6 +21,13 @@ import type {
   GreatTimeAgentTable,
   GreatTimeRequestedAgentId,
 } from "../../../types/domain";
+import {
+  buildAgentHubCsvExport,
+  downloadAgentHubCsvExport,
+  hasExportableAgentTable,
+  isAgentHubCsvExportRequested,
+  isAgentHubExportOnlyFollowUp,
+} from "./agentHubExport";
 import { agentHubStatusClass, contextFromAgentHubRow } from "./agentHubViewModel";
 
 type ChatTurn = {
@@ -28,6 +35,7 @@ type ChatTurn = {
   question: string;
   response?: GreatTimeAgentChatResponse;
   error?: string;
+  exportNotice?: string;
 };
 
 type AgentIconName = "auto" | "finance" | "relationship" | "business" | "appointment";
@@ -579,6 +587,10 @@ export function AgentHubPage() {
   const activeAgent = AGENT_OPTIONS.find((option) => option.value === agent) ?? AGENT_OPTIONS[0];
   const suggestions = SUGGESTIONS[agent];
   const latestResponse = useMemo(() => [...turns].reverse().find((turn) => turn.response)?.response, [turns]);
+  const latestExportableResponse = useMemo(
+    () => [...turns].reverse().find((turn) => turn.response && hasExportableAgentTable(turn.response))?.response,
+    [turns],
+  );
 
   const submitQuestion = async (question: string) => {
     const trimmed = question.trim();
@@ -589,6 +601,46 @@ export function AgentHubPage() {
     const turnId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     setTurns((current) => [...current, { id: turnId, question: trimmed }]);
     setMessage("");
+
+    if (isAgentHubExportOnlyFollowUp(trimmed)) {
+      const exportFile = latestExportableResponse
+        ? buildAgentHubCsvExport({
+            response: latestExportableResponse,
+            originalMessage: trimmed,
+          })
+        : null;
+
+      if (exportFile) {
+        downloadAgentHubCsvExport(exportFile);
+        setTurns((current) =>
+          current.map((turn) =>
+            turn.id === turnId
+              ? {
+                  ...turn,
+                  exportNotice: [
+                    "CSV export ready from the previous result.",
+                    `Rows: ${exportFile.rowCount.toLocaleString("en-US")}`,
+                    "Excel requests currently return CSV.",
+                  ].join("\n"),
+                }
+              : turn,
+          ),
+        );
+      } else {
+        setTurns((current) =>
+          current.map((turn) =>
+            turn.id === turnId
+              ? {
+                  ...turn,
+                  exportNotice: "I don’t have a recent table to export. Ask for the report again, for example: top customers this month export csv.",
+                }
+              : turn,
+          ),
+        );
+      }
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -604,12 +656,36 @@ export function AgentHubPage() {
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         entityContext: activeContext,
       });
+      const exportRequested = isAgentHubCsvExportRequested(trimmed);
+      const exportFile = exportRequested
+        ? buildAgentHubCsvExport({
+            response,
+            originalMessage: trimmed,
+          })
+        : null;
 
       setSessionId(response.sessionId);
       if (response.entityContext) {
         setActiveContext(response.entityContext);
       }
-      setTurns((current) => current.map((turn) => (turn.id === turnId ? { ...turn, response } : turn)));
+      if (exportFile) {
+        downloadAgentHubCsvExport(exportFile);
+      }
+      setTurns((current) =>
+        current.map((turn) =>
+          turn.id === turnId
+            ? {
+                ...turn,
+                response,
+                exportNotice: exportRequested
+                  ? exportFile
+                    ? ["CSV export ready.", `Rows: ${exportFile.rowCount.toLocaleString("en-US")}`, "Excel requests currently return CSV."].join("\n")
+                    : "I couldn't generate a CSV because this response doesn't contain table/list rows."
+                  : undefined,
+              }
+            : turn,
+        ),
+      );
     } catch (submitError) {
       setTurns((current) =>
         current.map((turn) =>
@@ -789,10 +865,17 @@ export function AgentHubPage() {
                 {turn.error ? <ErrorState label="Agent issue" detail={turn.error} /> : null}
 
                 {!turn.response && !turn.error ? (
+                  turn.exportNotice ? (
+                    <div className="agent-message agent-message--assistant">
+                      <span className="agent-message__speaker">GreatTime</span>
+                      <p className="agent-answer-summary">{turn.exportNotice}</p>
+                    </div>
+                  ) : (
                   <div className="agent-message agent-message--assistant agent-message--loading" aria-live="polite">
                     <span className="agent-message__speaker">GreatTime</span>
                     <p>Thinking through the latest clinic data...</p>
                   </div>
+                  )
                 ) : null}
 
                 {turn.response ? (
@@ -853,6 +936,7 @@ export function AgentHubPage() {
                     </div>
 
                     <p className="agent-answer-summary">{turn.response.assistantMessage}</p>
+                    {turn.exportNotice ? <p className="agent-export-notice">{turn.exportNotice}</p> : null}
                     {turn.response.summary && turn.response.summary !== turn.response.assistantMessage ? (
                       <p className="agent-answer-detail">{turn.response.summary}</p>
                     ) : null}

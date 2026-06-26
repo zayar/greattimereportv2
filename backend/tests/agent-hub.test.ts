@@ -18,6 +18,7 @@ const { extractInvoiceSearch } = await import("../src/services/agent-hub/tools/f
 const { extractLikelyCustomerSearchText } = await import("../src/services/agent-hub/customer-query.ts")
 const { extractExplicitServiceSearchText } = await import("../src/services/agent-hub/service-query.ts")
 const {
+  askAgentHub,
   buildLockedAgentHubResponse,
   extractExplicitCustomerSearchText,
   shouldIgnoreExplicitEntityContext,
@@ -147,6 +148,35 @@ test("planner does not block read-only questions that mention collected or cance
   })
   assert.equal(appointmentPlan.intent, "cancelled_no_show")
   assert.deepEqual(appointmentPlan.toolNames, ["get_cancelled_no_show_customers"])
+})
+
+test("Agent Hub does not run appointment detail for export-only follow-ups", async () => {
+  const response = await askAgentHub({
+    request: {
+      sessionId: "session-export-only",
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "appointment",
+      message: "export to excel",
+      entityContext: {
+        entityType: "appointment",
+        entityId: "appointment-1",
+        appointmentId: "appointment-1",
+      },
+    },
+    clinic: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+    },
+    requestContext: {
+      userId: "user-1",
+    },
+  })
+
+  assert.equal(response.intent, "csv_export_follow_up")
+  assert.deepEqual(response.tables, undefined)
+  assert.deepEqual(response.sources, [])
+  assert.match(response.assistantMessage, /Excel requests currently return CSV/)
 })
 
 test("planner routes exact named customer briefings to one-shot Customer 360", () => {

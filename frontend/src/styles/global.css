@@ -1012,6 +1012,14 @@ textarea:focus-visible,
   color: var(--text-muted);
 }
 
+.agent-export-notice {
+  margin: 0;
+  white-space: pre-line;
+  color: var(--gt-green-dark);
+  font-size: 0.9rem;
+  font-weight: 750;
+}
+
 .agent-warning {
   display: grid;
   gap: 6px;
