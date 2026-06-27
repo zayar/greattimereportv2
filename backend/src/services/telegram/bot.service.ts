@@ -4,7 +4,7 @@ import { HttpError } from "../../utils/http-error.js";
 import { hasFeatureAccess } from "../feature-access.service.js";
 import { askAgentHub, buildLockedAgentHubResponse } from "../agent-hub/agent-hub.service.js";
 import { isAgentCsvExportRequested, isExportOnlyFollowUp } from "../agent-hub/export-intent.js";
-import type { Customer360FactPack, GreatTimeAgentChatResponse, GreatTimeAgentId } from "../agent-hub/types.js";
+import type { Customer360FactPack, GreatTimeAgentChatResponse, GreatTimeAgentId, GreatTimeAgentMetric } from "../agent-hub/types.js";
 import { buildTelegramSalesAssistantReply } from "../gt-growth-ai/sales-assistant.service.js";
 import { GT_GROWTH_AI_FEATURE_GATE } from "../../types/report-ai.js";
 import {
@@ -253,7 +253,10 @@ export function canTelegramUserChatWithAgent(params: {
 }
 
 function formatMetricValue(value: string | number, unit: string | undefined) {
-  const formatted = typeof value === "number" ? value.toLocaleString("en-US") : value;
+  const formatted =
+    typeof value === "number"
+      ? value.toLocaleString("en-US", unit === "amount" ? { maximumFractionDigits: 0 } : undefined)
+      : value;
   if (unit === "amount") {
     return `${formatted} ကျပ်`;
   }
@@ -442,6 +445,9 @@ function translateMetricLabel(label: string) {
     "distinct services": "Service အမျိုးအစား",
     "avg bookings/service": "Service တစ်ခုလျှင် ပျမ်းမျှ booking",
     collected: "စုဆောင်းငွေ",
+    "total sales": "ရောင်းအားစုစုပေါင်း",
+    invoices: "Invoice",
+    "average invoice": "Invoice တစ်စောင်ပျမ်းမျှ",
     "matched customers": "တွေ့ရှိသော customer",
     "source lookback days": "စစ်ထားတဲ့ နောက်ကြည့်ရက်",
   };
@@ -531,6 +537,74 @@ function formatPractitionerPerformanceConversation(response: GreatTimeAgentChatR
       `${index + 1}. ${name} က treatment ${treatments.toLocaleString("en-US")} ကြိမ်လုပ်ထားပြီး customer ${customers.toLocaleString("en-US")} ယောက်ကို service ပေးထားပါတယ်။${topServiceText}`,
     );
   });
+
+  return lines;
+}
+
+function metricByLabel(response: GreatTimeAgentChatResponse, label: string): GreatTimeAgentMetric | undefined {
+  return response.metrics?.find((metric) => metric.label.toLowerCase() === label.toLowerCase());
+}
+
+function isFinanceSalesSummaryResponse(response: GreatTimeAgentChatResponse) {
+  return response.resolvedAgent === "finance" && Boolean(metricByLabel(response, "Total sales"));
+}
+
+function isUnknownServiceName(value: string) {
+  const normalized = value.trim().toLowerCase();
+  return !normalized || normalized === "-" || normalized === "unknown" || normalized === "unknown service";
+}
+
+function formatFinanceSalesConversation(response: GreatTimeAgentChatResponse) {
+  if (!isFinanceSalesSummaryResponse(response)) {
+    return [];
+  }
+
+  const totalSales = metricByLabel(response, "Total sales");
+  const invoices = metricByLabel(response, "Invoices");
+  const customers = metricByLabel(response, "Customers");
+  const averageInvoice = metricByLabel(response, "Average invoice");
+  const periodLabel = translatePeriodLabel(response.period.label);
+  const lines = [`${periodLabel} total sales က ${formatMetricValue(totalSales?.value ?? "-", totalSales?.unit)} ပါ။`];
+  const details: string[] = [];
+
+  if (invoices) {
+    details.push(`invoice ${formatMetricValue(invoices.value, invoices.unit)} စောင်`);
+  }
+  if (customers) {
+    details.push(`customer ${formatMetricValue(customers.value, customers.unit)} ယောက်`);
+  }
+  if (averageInvoice) {
+    details.push(`average invoice ${formatMetricValue(averageInvoice.value, averageInvoice.unit)}`);
+  }
+  if (details.length > 0) {
+    lines.push(`${details.join("၊ ")}။`);
+  }
+
+  const serviceTable = response.tables?.find((item) => /top services by sales|top services|service performance/i.test(item.title));
+  const serviceRows = serviceTable?.rows ?? [];
+  const knownRows = serviceRows.filter((row) => !isUnknownServiceName(stringValue(row, "serviceName", "")));
+  const unknownRevenue = serviceRows
+    .filter((row) => isUnknownServiceName(stringValue(row, "serviceName", "")))
+    .reduce((sum, row) => sum + (numberValue(row, "totalRevenue") ?? numberValue(row, "revenue") ?? 0), 0);
+
+  if (knownRows.length > 0) {
+    lines.push("", "Service သိထားတဲ့ sales breakdown:");
+    knownRows.slice(0, 5).forEach((row, index) => {
+      const service = stringValue(row, "serviceName", "Service");
+      const revenue = numberValue(row, "totalRevenue") ?? numberValue(row, "revenue");
+      const invoiceCount = numberValue(row, "invoiceCount");
+      const invoiceText = invoiceCount != null ? `၊ invoice ${invoiceCount.toLocaleString("en-US")} စောင်` : "";
+      const revenueText = revenue != null ? formatMetricValue(revenue, "amount") : "-";
+      lines.push(`${index + 1}. ${service} — ${revenueText}${invoiceText}`);
+    });
+  }
+
+  if (unknownRevenue > 0) {
+    lines.push(
+      "",
+      `မှတ်ချက်: ${formatMetricValue(unknownRevenue, "amount")} က service name မပါတဲ့ invoice rows ("Unknown") ထဲမှာ ပါနေပါတယ်။ Total sales ထဲမှာ ထည့်တွက်ပြီးသားပါ။`,
+    );
+  }
 
   return lines;
 }
@@ -678,6 +752,11 @@ function formatConversationTablePreview(response: GreatTimeAgentChatResponse) {
     return formatAppointmentConversation(response);
   }
 
+  const financeSales = formatFinanceSalesConversation(response);
+  if (financeSales.length) {
+    return financeSales;
+  }
+
   const practitioner = formatPractitionerPerformanceConversation(response);
   if (practitioner.length) {
     return practitioner;
@@ -779,7 +858,7 @@ export function formatAgentHubTelegramReply(response: GreatTimeAgentChatResponse
     lines.push("", sanitizeOwnerFacingText(response.summary || response.assistantMessage));
   }
 
-  if (metrics.length > 0 && response.resolvedAgent !== "appointment") {
+  if (metrics.length > 0 && response.resolvedAgent !== "appointment" && !isFinanceSalesSummaryResponse(response)) {
     lines.push("", "အဓိကကိန်းဂဏန်းများ:");
     metrics.forEach((metric) => {
       lines.push(`- ${translateMetricLabel(metric.label)}: ${formatMetricValue(metric.value, metric.unit)}`);

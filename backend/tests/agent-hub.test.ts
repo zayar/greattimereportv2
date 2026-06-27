@@ -2340,6 +2340,57 @@ test("Telegram formatter explains appointment services and practitioner rows wit
   assert.doesNotMatch(practitionerMessage, /Wai Phoo \| 5 \| 3 \| Whitening Laser/)
 })
 
+test("Telegram formatter leads finance sales answers with total sales and treats unknown services as caveat", () => {
+  const message = formatAgentHubTelegramReply({
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "finance",
+    autoMode: true,
+    intent: "sales_summary",
+    period: {
+      fromDate: "2026-06-27",
+      toDate: "2026-06-27",
+      label: "yesterday",
+    },
+    assistantMessage: "Sales for yesterday: 7,320,000 from 18 invoices.",
+    summary: "Sales for yesterday: 7,320,000 from 18 invoices.",
+    metrics: [
+      { label: "Total sales", value: 7_320_000, unit: "amount" },
+      { label: "Invoices", value: 18 },
+      { label: "Customers", value: 18 },
+      { label: "Average invoice", value: 406_666.667, unit: "amount" },
+    ],
+    tables: [
+      {
+        title: "Top services by sales",
+        columns: [
+          { key: "serviceName", title: "Service" },
+          { key: "totalRevenue", title: "Revenue" },
+          { key: "invoiceCount", title: "Invoices" },
+        ],
+        rows: [
+          { serviceName: "Unknown", totalRevenue: 7_290_000, invoiceCount: 17 },
+          { serviceName: "Booking deposit", totalRevenue: 30_000, invoiceCount: 1 },
+        ],
+      },
+    ],
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  })
+
+  assert.match(message, /မနေ့ total sales က 7,320,000 ကျပ် ပါ/)
+  assert.match(message, /invoice 18 စောင်၊ customer 18 ယောက်၊ average invoice 406,667 ကျပ်/)
+  assert.match(message, /Booking deposit — 30,000 ကျပ်၊ invoice 1 စောင်/)
+  assert.match(message, /service name မပါတဲ့ invoice rows \("Unknown"\)/)
+  assert.doesNotMatch(message, /Service အလိုက် owner/)
+  assert.doesNotMatch(message, /1\. Unknown — ဝင်ငွေ/)
+  assert.doesNotMatch(message, /အဓိကကိန်းဂဏန်းများ/)
+  assert.doesNotMatch(message, /406,666\.667/)
+})
+
 test("Telegram formatter explains never-visited package customers and customer purchases", () => {
   const neverVisitedMessage = formatAgentHubTelegramReply({
     sessionId: "session-1",
