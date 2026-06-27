@@ -1,5 +1,6 @@
 import { env } from "../config/env.js";
 import { HttpError } from "../utils/http-error.js";
+import { assertAgentReadOnlyGraphql } from "./agent-hub/read-only-guard.js";
 
 const CANONICAL_APICORE_GRAPHQL_URL = "https://greattime-api-core-hs6rtohe3q-uc.a.run.app/apicore";
 const DEV_APICORE_GRAPHQL_HOST = "greattime-api-core-dev-75918019031.us-central1.run.app";
@@ -469,7 +470,16 @@ async function executeApicoreQueryWithFallback<T>(input: {
   requestBody: Record<string, unknown>;
   authorizationHeader?: string;
   errorMessage: string;
+  readOnly?: boolean;
 }) {
+  if (input.readOnly) {
+    const query = input.requestBody.query;
+    if (typeof query !== "string") {
+      throw new Error("Agent Hub APICORE access is read-only.");
+    }
+    assertAgentReadOnlyGraphql(query);
+  }
+
   const usingCallerAuthorization =
     Boolean(input.authorizationHeader) && input.authorizationHeader!.trim().length > 0;
   const authorization = usingCallerAuthorization
@@ -506,6 +516,7 @@ export async function queryApicoreWithFallback<T>(input: {
   variables?: Record<string, unknown>;
   authorizationHeader?: string;
   errorMessage: string;
+  readOnly?: boolean;
 }) {
   const payload = await executeApicoreQueryWithFallback<T>({
     requestBody: {
@@ -514,6 +525,7 @@ export async function queryApicoreWithFallback<T>(input: {
     },
     authorizationHeader: input.authorizationHeader,
     errorMessage: input.errorMessage,
+    readOnly: input.readOnly,
   });
 
   return payload.data;
@@ -634,6 +646,7 @@ export async function fetchApicoreBookingDetails(params: {
   skip?: number;
   take?: number;
   authorizationHeader?: string;
+  readOnly?: boolean;
 }) {
   const payload = await executeApicoreQueryWithFallback<BookingDetailsPayload>({
     requestBody: {
@@ -649,6 +662,7 @@ export async function fetchApicoreBookingDetails(params: {
     },
     authorizationHeader: params.authorizationHeader,
     errorMessage: "Booking details query failed.",
+    readOnly: params.readOnly,
   });
 
   return {
@@ -665,6 +679,7 @@ export async function fetchApicoreCheckIns(params: {
   skip?: number;
   take?: number;
   authorizationHeader?: string;
+  readOnly?: boolean;
 }) {
   const andFilters: Array<Record<string, unknown>> = [
     {
@@ -711,6 +726,7 @@ export async function fetchApicoreCheckIns(params: {
     },
     authorizationHeader: params.authorizationHeader,
     errorMessage: "Check-in query failed.",
+    readOnly: params.readOnly,
   });
 
   return {

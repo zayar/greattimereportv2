@@ -39,6 +39,7 @@ function runFinanceBigQueryOperation<T>(params: {
       },
       timeoutMs: env.AGENT_BIGQUERY_TIMEOUT_MS,
       ttlMs: env.BQ_QUERY_DEFAULT_TTL_MS,
+      readOnly: true,
     },
     params.callback,
   );
@@ -534,7 +535,7 @@ async function getInvoiceDetail(input: AgentToolInput): Promise<AgentToolResult>
 export function createFinanceTools(overrides: Partial<FinanceToolDeps> = {}): AgentToolDefinition[] {
   const deps = { ...defaultFinanceToolDeps, ...overrides };
 
-  return [
+  const tools: AgentToolDefinition[] = [
     {
       name: "get_sales_summary",
       agentId: "finance",
@@ -613,4 +614,6 @@ export function createFinanceTools(overrides: Partial<FinanceToolDeps> = {}): Ag
       execute: getInvoiceDetail,
     },
   ];
+
+  return tools.map((tool) => ({ ...tool, capability: "read_only" }));
 }

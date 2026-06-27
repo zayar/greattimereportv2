@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { buildReadOnlyRefusalMessage } from "./read-only-guard.js";
 import { combineStatuses, newId, nowIso } from "./safety.js";
 import type {
   AgentSourceScope,
@@ -29,6 +30,14 @@ function defaultSummary(plan: GreatTimeAgentIntentPlan, results: AgentToolResult
   }
 
   return `I checked ${sourceCount} source tool${sourceCount === 1 ? "" : "s"} and ${okSources} returned current data.`;
+}
+
+function buildUnsupportedWriteSummary() {
+  return [
+    buildReadOnlyRefusalMessage(),
+    "",
+    "I can show the relevant sourced records so an authorized person can review them manually.",
+  ].join("\n");
 }
 
 function followUpsForCustomer360(factPack: Customer360FactPack) {
@@ -417,8 +426,9 @@ export function buildAgentResponse(params: {
   unsupportedReason?: string;
 }): GreatTimeAgentChatResponse {
   const responseId = newId("resp");
+  const isUnsupportedWriteRequest = params.plan.intent === "unsupported_write_request" || Boolean(params.unsupportedReason);
   const sourceStatuses = params.toolResults.map((result) => result.dataStatus);
-  const dataStatus = params.unsupportedReason ? "not_ready" : combineStatuses(sourceStatuses);
+  const dataStatus = isUnsupportedWriteRequest ? "not_ready" : combineStatuses(sourceStatuses);
   const metrics = params.toolResults.flatMap((result) => result.metrics ?? []);
   const tables = params.toolResults.flatMap((result) => result.tables ?? []);
   const recommendations = params.toolResults
@@ -447,7 +457,7 @@ export function buildAgentResponse(params: {
   const entityContext = params.toolResults.flatMap((result) => result.entityRefs ?? [])[0] ?? params.request.entityContext;
   const ownerDailyBriefResult = params.toolResults.find((result) => result.toolName === "get_owner_daily_brief");
   const summary =
-    params.unsupportedReason ??
+    isUnsupportedWriteRequest ? buildUnsupportedWriteSummary() :
     (ownerDailyBriefResult ? buildOwnerDailyBriefMessage(ownerDailyBriefResult) : defaultSummary(params.plan, params.toolResults));
   const sources = params.toolResults.flatMap((result) =>
     result.sources?.length
@@ -478,7 +488,9 @@ export function buildAgentResponse(params: {
     metrics: metrics.length ? metrics : undefined,
     tables: tables.length ? tables : undefined,
     recommendations: recommendations.length ? recommendations : undefined,
-    followUpQuestions: followUpsForAgent(params.plan, params.toolResults, customer360, service360),
+    followUpQuestions: isUnsupportedWriteRequest
+      ? ["Show the relevant records for manual review."]
+      : followUpsForAgent(params.plan, params.toolResults, customer360, service360),
     customer360,
     service360,
     sources,
@@ -488,7 +500,9 @@ export function buildAgentResponse(params: {
     actions: [
       {
         type: "read_only_agent_response",
-        detail: "No GreatTime records were changed.",
+        detail: isUnsupportedWriteRequest
+          ? "Write request blocked. No GreatTime records were changed."
+          : "No GreatTime records were changed.",
       },
     ],
   };

@@ -69,6 +69,7 @@ const envSchema = z.object({
   FIREBASE_AUTH_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
   AGENT_MEMORY_V2_ENABLED: booleanEnv(false),
   AGENT_LEARNING_ENABLED: booleanEnv(false),
+  AGENT_HUB_READ_ONLY_MODE: booleanEnv(true),
   AGENT_BIGQUERY_TIMEOUT_MS: z.coerce.number().int().positive().default(8_000),
   AGENT_TOOL_MAX_CONCURRENCY: z.coerce.number().int().positive().default(3),
   AGENT_NARRATIVE_ENABLED: booleanEnv(true),

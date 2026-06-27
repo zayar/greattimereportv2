@@ -2,7 +2,7 @@ import { env } from "../../config/env.js";
 import { shiftRange, toIsoDate } from "../../utils/date-range.js";
 import { formatDateKeyInTimeZone, normalizeTimeZone } from "../telegram/time.js";
 import { hasCustomerEntityReference, hasExplicitCustomerSearchIntent, isCustomer360Question } from "./customer-query.js";
-import { isAgentCsvExportRequested } from "./export-intent.js";
+import { buildReadOnlyRefusalMessage, isDangerousBusinessMutationRequest } from "./read-only-guard.js";
 import { isService360Question } from "./service-query.js";
 import { resolveAgent } from "./supervisor.js";
 import type {
@@ -12,33 +12,11 @@ import type {
   GreatTimeAgentIntentPlan,
 } from "./types.js";
 
-const STRONG_WRITE_ACTION =
-  /(?:create|book|cancel|reschedule|update|delete|refund|collect|charge|edit|write\s+back)/i;
-const STRONG_WRITE_REQUEST = new RegExp(
-  `^(?:please\\s+)?${STRONG_WRITE_ACTION.source}\\b|\\b(?:can you|could you|please|help me|i need you to|i want you to)\\s+${STRONG_WRITE_ACTION.source}\\b|(?:ပြင်|ဖျက်|ချိန်းပေး|ပို့)`,
-  "i",
-);
-const WRITE_OBJECT_REQUEST =
-  /\b(?:create|book|cancel|reschedule|update|delete|refund|collect|charge|edit|make)\s+(?:an?\s+|the\s+|this\s+|that\s+|first\s+|second\s+|third\s+)?(?:appointment|booking|customer|payment|record|invoice|service|sale)\b/i;
-const CUSTOMER_MESSAGE_REQUEST =
-  /\b(?:send\s+(?:an?\s+)?(?:sms|message|text)|message|sms)\s+(?:message\s+)?(?:to\s+)?(?:this\s+|that\s+|the\s+)?customer\b/i;
-const SMS_MESSAGE_REQUEST = /\bsend\s+(?:sms|message|text)\b/i;
+export { isDangerousBusinessMutationRequest } from "./read-only-guard.js";
+export const isBusinessSourceMutationRequest = isDangerousBusinessMutationRequest;
 
 function isUnsupportedWriteRequest(message: string) {
-  if (STRONG_WRITE_REQUEST.test(message) || WRITE_OBJECT_REQUEST.test(message)) {
-    return true;
-  }
-
-  const normalized = message.toLowerCase().replace(/[\/_-]+/g, " ");
-  if (CUSTOMER_MESSAGE_REQUEST.test(normalized) || SMS_MESSAGE_REQUEST.test(normalized)) {
-    return true;
-  }
-
-  if (isAgentCsvExportRequested(message)) {
-    return false;
-  }
-
-  return false;
+  return isDangerousBusinessMutationRequest(message);
 }
 
 function dateFromUtc(date: Date) {
@@ -430,8 +408,7 @@ export function planAgentRequest(params: {
       intent: "unsupported_write_request",
       toolNames: [],
       period,
-      unsupportedReason:
-        "The Agent Hub is read-only in this release. I can explain sourced data, but cannot create, update, cancel, collect, refund, or message customers.",
+      unsupportedReason: buildReadOnlyRefusalMessage(params.request.message),
     };
   }
 

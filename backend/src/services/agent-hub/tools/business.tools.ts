@@ -38,6 +38,7 @@ function runBusinessBigQueryOperation<T>(params: {
       },
       timeoutMs: env.AGENT_BIGQUERY_TIMEOUT_MS,
       ttlMs: env.BQ_QUERY_DEFAULT_TTL_MS,
+      readOnly: true,
     },
     params.callback,
   );
@@ -1016,7 +1017,7 @@ async function getOwnerDailyBrief(input: AgentToolInput): Promise<AgentToolResul
 }
 
 export function createBusinessTools(): AgentToolDefinition[] {
-  return [
+  const tools: AgentToolDefinition[] = [
     {
       name: "get_owner_daily_brief",
       agentId: "business",
@@ -1150,4 +1151,6 @@ export function createBusinessTools(): AgentToolDefinition[] {
       execute: getBusinessHealthSnapshot,
     },
   ];
+
+  return tools.map((tool) => ({ ...tool, capability: "read_only" }));
 }

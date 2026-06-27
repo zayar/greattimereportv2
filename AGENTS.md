@@ -43,6 +43,15 @@ Before finishing code changes, run `npm ci`, `npm run build`, and `npm run test`
 - Return safe `partial`, `stale`, `not_ready`, or `unavailable` statuses instead of guessing.
 - Do not expose raw backend errors, stack traces, secrets, authorization headers, or service credentials.
 
+## Agent Hub Read-Only Enforcement
+
+- User-facing Agent Hub tools are read-only for business source data.
+- Business source mutations are forbidden through Agent Hub, including APICORE/MySQL writes, BigQuery DDL/DML, arbitrary SQL or GraphQL mutations, booking/canceling appointments, charging/refunding payments, editing customers, or sending messages.
+- Agent metadata writes are allowed for sessions, traces, feedback, memory, learning logs, insight cards, and source-backed snapshots.
+- Future approved action workflows must create draft, approval, and audit records before any external business action is possible.
+- Any future mutation-capable tool must not be available when `AGENT_HUB_READ_ONLY_MODE=true`.
+- User-facing Agent Hub BigQuery execution must run under the read-only analytics query guard.
+
 ## Clinic Isolation And Privacy
 
 - Every user-facing data route requires Firebase authentication and clinic authorization.

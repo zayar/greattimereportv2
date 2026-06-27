@@ -53,6 +53,7 @@ function runAppointmentBigQueryOperation<T>(params: {
       },
       timeoutMs: env.AGENT_BIGQUERY_TIMEOUT_MS,
       ttlMs: env.BQ_QUERY_DEFAULT_TTL_MS,
+      readOnly: true,
     },
     params.callback,
   );
@@ -221,6 +222,7 @@ async function fetchAppointmentLedger(input: AgentToolInput) {
       skip,
       take,
       authorizationHeader: input.requestContext.authorizationHeader,
+      readOnly: true,
     });
 
     totalCount = result.totalCount;
@@ -307,7 +309,7 @@ function ledgerStatusMetrics(rows: ApicoreBookingDetailsRow[], totalCount: numbe
     { label: "Checked out", value: counts.checkedOut, helperText },
     { label: "Cancelled", value: counts.cancelled, helperText },
     { label: "No-show", value: counts.noShow, helperText },
-  ];
+  ].map((tool) => ({ ...tool, capability: "read_only" }));
 }
 
 function isOpenTreatmentCandidate(row: ApicoreBookingDetailsRow) {
@@ -784,7 +786,7 @@ async function getAppointmentTrends(input: AgentToolInput): Promise<AgentToolRes
 export function createAppointmentTools(overrides: Partial<AppointmentToolDeps> = {}): AgentToolDefinition[] {
   const deps = { ...defaultAppointmentToolDeps, ...overrides };
 
-  return [
+  const tools: AgentToolDefinition[] = [
     {
       name: "get_appointment_ledger",
       agentId: "appointment",
@@ -885,4 +887,6 @@ export function createAppointmentTools(overrides: Partial<AppointmentToolDeps> =
       execute: getAppointmentTrends,
     },
   ];
+
+  return tools.map((tool) => ({ ...tool, capability: "read_only" }));
 }

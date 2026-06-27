@@ -8,6 +8,7 @@ export type AnalyticsQueryContext = {
   useQueryCache?: boolean;
   forceRefresh?: boolean;
   maxBytesBilled?: number;
+  readOnly?: boolean;
 };
 
 const analyticsQueryContextStorage = new AsyncLocalStorage<AnalyticsQueryContext>();

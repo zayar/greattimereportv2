@@ -765,7 +765,7 @@ async function getCustomerUsage(input: AgentToolInput): Promise<AgentToolResult>
 }
 
 export function createCustomerTools(): AgentToolDefinition[] {
-  return [
+  const tools: AgentToolDefinition[] = [
     {
       name: "get_customer_360",
       agentId: "customer_relationship",
@@ -877,4 +877,6 @@ export function createCustomerTools(): AgentToolDefinition[] {
       execute: searchCustomerProfiles,
     },
   ];
+
+  return tools.map((tool) => ({ ...tool, capability: "read_only" }));
 }

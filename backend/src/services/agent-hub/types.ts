@@ -330,6 +330,7 @@ export type AgentToolDefinition = {
   description: string;
   inputSchema: z.ZodTypeAny;
   sourceName: string;
+  capability?: "read_only" | "agent_metadata_write" | "approved_action_draft";
   live: boolean;
   maxRows: number;
   timeoutMs: number;

@@ -173,6 +173,7 @@ async function loadLiveAppointmentSnapshot(params: {
       endDate: range.endIso,
       take: params.rowLimit ?? 200,
       authorizationHeader: params.authorizationHeader,
+      readOnly: true,
     });
     const mismatched = bookings.data.filter(
       (row) =>
@@ -215,6 +216,7 @@ async function loadLiveAppointmentSnapshot(params: {
         endDate: range.endIso,
         take: params.rowLimit ?? 200,
         authorizationHeader: params.authorizationHeader,
+        readOnly: true,
       });
       checkInRows = checkIns.data.map(checkInToLiveRow);
     } catch {

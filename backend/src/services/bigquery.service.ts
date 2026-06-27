@@ -3,6 +3,7 @@ import type { Query } from "@google-cloud/bigquery";
 import { bigQueryClient } from "../config/bigquery.js";
 import { env } from "../config/env.js";
 import { getAnalyticsQueryContext } from "./analytics-query-context.js";
+import { assertAgentReadOnlySql } from "./agent-hub/read-only-guard.js";
 
 export type AnalyticsQueryOptions = {
   location?: string;
@@ -312,6 +313,15 @@ export async function runAnalyticsQuery<T>(
   const ttlMs = options.ttlMs ?? context?.ttlMs ?? env.BQ_QUERY_DEFAULT_TTL_MS;
   const forceRefresh = options.forceRefresh ?? context?.forceRefresh ?? false;
   const cacheKey = buildAnalyticsQueryCacheKey(query, params, location, options.cacheKey);
+  const rawLabels = {
+    ...(context?.labels ?? {}),
+    ...(options.labels ?? {}),
+  };
+
+  if (context?.readOnly === true) {
+    assertAgentReadOnlySql(query);
+  }
+
   const shouldUseCache =
     env.BQ_QUERY_CACHE_ENABLED && !forceRefresh && ttlMs > 0 && isSelectStyleQuery(query);
 
@@ -333,10 +343,7 @@ export async function runAnalyticsQuery<T>(
   }
 
   const maxBytesBilled = options.maxBytesBilled ?? context?.maxBytesBilled ?? env.BQ_MAX_BYTES_BILLED;
-  const labels = sanitizeLabels({
-    ...(context?.labels ?? {}),
-    ...(options.labels ?? {}),
-  });
+  const labels = sanitizeLabels(rawLabels);
   const useQueryCache = options.useQueryCache ?? context?.useQueryCache;
   const queryOptions: Query = {
     query,
@@ -392,4 +399,13 @@ export async function runAnalyticsQuery<T>(
 
     throw error;
   }
+}
+
+export async function runAgentReadOnlyAnalyticsQuery<T>(
+  query: string,
+  params: Record<string, unknown> = {},
+  options: AnalyticsQueryOptions = {},
+) {
+  assertAgentReadOnlySql(query);
+  return runAnalyticsQuery<T>(query, params, options);
 }

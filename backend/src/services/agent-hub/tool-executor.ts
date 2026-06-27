@@ -15,6 +15,10 @@ export function assertToolAllowed(params: {
     throw new Error(`Tool ${params.requestedToolName} is not allowed for ${params.agentId}.`);
   }
 
+  if (env.AGENT_HUB_READ_ONLY_MODE && tool.capability !== "read_only") {
+    throw new Error("Tool is not available in read-only Agent Hub mode.");
+  }
+
   return tool;
 }
 
@@ -99,6 +103,7 @@ async function executeSingleTool(params: {
         },
         timeoutMs: env.AGENT_BIGQUERY_TIMEOUT_MS,
         ttlMs: env.BQ_QUERY_DEFAULT_TTL_MS,
+        readOnly: true,
       },
       () => executeWithTimeout(tool, params.input),
     );
