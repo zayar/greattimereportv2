@@ -33,6 +33,12 @@ function buildNarrativePrompt(response: GreatTimeAgentChatResponse, memories: Gt
     customer360: response.customer360
       ? {
           ...response.customer360,
+          identity: {
+            customerKey: response.customer360.identity.customerKey,
+            memberId: response.customer360.identity.memberId,
+            displayName: response.customer360.identity.displayName,
+            joinedDate: response.customer360.identity.joinedDate,
+          },
           appointments: {
             current: (response.customer360.appointments.current ?? []).slice(0, 5),
             upcoming: (response.customer360.appointments.upcoming ?? []).slice(0, 5),

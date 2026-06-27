@@ -1090,6 +1090,7 @@ test("Telegram formatter explains never-visited package customers and customer p
         rows: [
           {
             customerName: "Win Wati Ko",
+            customerPhone: "09123452486",
             customerPhoneMasked: "********2486",
             lastVisitDate: "2026-03-21",
             lastPackagePurchaseDate: "2026-04-01",
@@ -1106,6 +1107,7 @@ test("Telegram formatter explains never-visited package customers and customer p
   })
 
   assert.match(neverVisitedMessage, /Package ဝယ်ပြီးနောက် မလာသေးတဲ့ customer/)
+  assert.match(neverVisitedMessage, /phone 09123452486/)
   assert.match(neverVisitedMessage, /2026-04-01 မှာ Whitening Laser ဝယ်ထားပါတယ်/)
   assert.match(neverVisitedMessage, /ဝယ်ပြီးနောက် လာသုံးထားတဲ့ visit မတွေ့သေးပါ/)
   assert.doesNotMatch(neverVisitedMessage, /နောက်ဆုံးလာခဲ့တာ 2026-03-21/)
@@ -1545,6 +1547,48 @@ test("successful narrative updates assistant message only", async () => {
   assert.equal(result.response.tables, deterministicResponse.tables)
   assert.equal(result.response.recommendations, deterministicResponse.recommendations)
   assert.equal(result.response.sources, deterministicResponse.sources)
+})
+
+test("narrative prompt omits customer phone fields", async () => {
+  const deterministicResponse = {
+    ...buildDeterministicAgentResponseFixture(),
+    customer360: {
+      identity: {
+        customerKey: "cust-1",
+        displayName: "Soe Moe Thu",
+        phoneNumber: "09123456789",
+        maskedPhone: "09***789",
+      },
+      appointments: {
+        current: [],
+        upcoming: [],
+        recentCompleted: [],
+      },
+      payments: {
+        recentInvoices: [],
+      },
+      usage: {
+        topServices: [],
+        monthlyServiceUsage: [],
+      },
+    },
+  } as Parameters<typeof enhanceAgentResponseNarrative>[0]
+  let capturedPrompt = ""
+
+  const result = await enhanceAgentResponseNarrative(deterministicResponse, {
+    memories: [],
+    provider: {
+      modelName: "fixture",
+      async generateJson(prompt) {
+        capturedPrompt = prompt
+        return JSON.stringify({ assistantMessage: "AI narrative." })
+      },
+    },
+  })
+
+  assert.equal(result.fallbackUsed, false)
+  assert.doesNotMatch(capturedPrompt, /09123456789/)
+  assert.doesNotMatch(capturedPrompt, /09\*\*\*789/)
 })
 
 test("response builder keeps tool metrics and source metadata grounded", () => {

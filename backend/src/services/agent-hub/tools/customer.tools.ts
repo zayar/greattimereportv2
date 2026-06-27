@@ -7,6 +7,7 @@ import {
   getCustomerPortalPayments,
   getCustomerQuickView,
   getCustomerPortalPriorityCustomers,
+  resolveCustomerPortalPhonesByNames,
   getCustomerPortalUsage,
 } from "../../reports/customer-portal.service.js";
 import {
@@ -208,6 +209,87 @@ function latestLearningDataStatus(learnedAt: string | null | undefined, hasRows:
   return hasRows ? "ok" : "no_activity";
 }
 
+function normalizeLookupText(value: string | null | undefined) {
+  return (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function phoneSuffix(value: string | null | undefined) {
+  return (value ?? "").match(/(\d+)$/)?.[1] ?? "";
+}
+
+function phoneDigits(value: string | null | undefined) {
+  return (value ?? "").replace(/\D/g, "");
+}
+
+type CustomerProfileToolRow = {
+  customerKey: string;
+  customerName: string;
+  customerPhoneMasked: string;
+  customerPhone?: string;
+  memberId?: string | null;
+  lastVisitDate?: string | null;
+  daysSinceLastVisit?: number | null;
+  remainingPackageSessions: number;
+  lifetimeSpend?: number;
+  totalVisits?: number;
+  riskLevel?: string;
+  segments?: string[];
+  nextBestAction: string;
+};
+
+type CustomerPhoneCandidate = Awaited<ReturnType<typeof resolveCustomerPortalPhonesByNames>>[number];
+
+function choosePhoneCandidate(profile: CustomerProfileToolRow, candidates: CustomerPhoneCandidate[]) {
+  const memberId = normalizeLookupText(profile.memberId);
+  if (memberId) {
+    const memberMatch = candidates.find((candidate) => normalizeLookupText(candidate.memberId) === memberId);
+    if (memberMatch) {
+      return memberMatch;
+    }
+  }
+
+  const suffix = phoneSuffix(profile.customerPhoneMasked);
+  if (suffix) {
+    const suffixMatches = candidates.filter((candidate) => phoneDigits(candidate.phoneNumber).endsWith(suffix));
+    if (suffixMatches.length === 1) {
+      return suffixMatches[0];
+    }
+  }
+
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
+async function attachFullCustomerPhones(input: AgentToolInput, rows: CustomerProfileToolRow[], usedFallback: boolean) {
+  if (rows.length === 0) {
+    return rows;
+  }
+
+  if (usedFallback) {
+    return rows;
+  }
+
+  const candidates = await resolveCustomerPortalPhonesByNames({
+    clinicCode: input.clinic.clinicCode,
+    customerNames: rows.map((row) => row.customerName),
+    limit: Math.min(rows.length * 5, 100),
+  }).catch(() => []);
+
+  if (candidates.length === 0) {
+    return rows;
+  }
+
+  const candidatesByName = new Map<string, CustomerPhoneCandidate[]>();
+  candidates.forEach((candidate) => {
+    const key = normalizeLookupText(candidate.customerName);
+    candidatesByName.set(key, [...(candidatesByName.get(key) ?? []), candidate]);
+  });
+
+  return rows.map((row) => {
+    const candidate = choosePhoneCandidate(row, candidatesByName.get(normalizeLookupText(row.customerName)) ?? []);
+    return candidate?.phoneNumber ? { ...row, customerPhone: candidate.phoneNumber } : row;
+  });
+}
+
 function selectLifecycleForTool(profile: Record<string, unknown>) {
   const lifecycles = Array.isArray(profile.packageLifecycles)
     ? profile.packageLifecycles as Array<Record<string, unknown>>
@@ -252,11 +334,12 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
   const learnedRows = result.rows;
   const usedFallback = fallback !== null;
   const hasFallback = fallbackRows.length > 0;
-  const rows = hasFallback
+  const rawRows: CustomerProfileToolRow[] = hasFallback
     ? fallbackRows.map((row) => ({
         customerKey: row.customerKey,
         customerName: row.customerName,
         customerPhoneMasked: row.customerPhoneMasked,
+        customerPhone: row.phoneNumber,
         memberId: row.memberId,
         lastVisitDate: row.lastVisitDate,
         daysSinceLastVisit: row.daysSinceLastVisit,
@@ -268,6 +351,7 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
         nextBestAction: fallbackActionFromRow(row, input.request.aiLanguage),
       }))
     : learnedRows;
+  const rows = await attachFullCustomerPhones(input, rawRows, usedFallback);
   const sourceName = usedFallback ? "Customer visit and package signals" : "Learned customer relationship memory";
   const dataStatus = usedFallback
     ? rows.length > 0 ? "ok" : "no_activity"
@@ -283,7 +367,7 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
     packageLifecycleIntent
       ? [
           { key: "customerName", title: "Customer" },
-          { key: "customerPhoneMasked", title: "Phone" },
+          { key: "customerPhone", title: "Phone" },
           { key: "packageOrServiceName", title: "Package/service" },
           { key: "purchaseDate", title: "Purchase date" },
           { key: "lastMatchingUsageDate", title: "Usage date" },
@@ -296,7 +380,7 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
         ]
       : [
           { key: "customerName", title: "Customer" },
-          { key: "customerPhoneMasked", title: "Phone" },
+          { key: "customerPhone", title: "Phone" },
           { key: "lastVisitDate", title: "Last visit" },
           { key: "remainingPackageSessions", title: "Package balance" },
           { key: "riskLevel", title: "Risk" },
@@ -349,6 +433,7 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
           return {
             customerKey: profile.customerKey,
             customerName: profile.customerName,
+            customerPhone: profile.customerPhone ?? profile.customerPhoneMasked,
             customerPhoneMasked: profile.customerPhoneMasked,
             lastVisitDate: profile.lastVisitDate,
             daysSinceLastVisit: profile.daysSinceLastVisit,
@@ -413,6 +498,7 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
       memberId: profile.memberId ?? undefined,
       displayName: profile.customerName,
       customerName: profile.customerName,
+      customerPhone: profile.customerPhone,
       rank: index + 1,
     })),
   };

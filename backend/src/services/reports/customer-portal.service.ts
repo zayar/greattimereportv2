@@ -84,9 +84,13 @@ function normalizePhoneDigits(value: string) {
   return value.replace(/\D/g, "");
 }
 
+function normalizeNameKey(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
 function hashCustomerKey(params: { clinicCode: string; phoneNumber: string; customerName: string }) {
   const digits = normalizePhoneDigits(params.phoneNumber);
-  const identity = digits || params.customerName.trim().toLowerCase().replace(/\s+/g, " ");
+  const identity = digits || normalizeNameKey(params.customerName);
 
   return createHash("sha256").update(`${params.clinicCode.toLowerCase()}:${identity}`).digest("hex").slice(0, 32);
 }
@@ -948,6 +952,63 @@ export async function resolveCustomerPortalCandidates(params: {
     phoneMasked: maskPhone(row.phoneNumber),
     memberId: row.memberId || null,
     joinedDate: row.joinedDate,
+    lastVisitDate: row.lastVisitDate,
+    totalVisits: parseNumber(row.totalVisits),
+  }));
+}
+
+export async function resolveCustomerPortalPhonesByNames(params: {
+  clinicCode: string;
+  customerNames: string[];
+  limit?: number;
+}) {
+  const customerNames = [...new Set(params.customerNames.map(normalizeNameKey).filter(Boolean))].slice(0, 50);
+  const limit = Math.min(Math.max(params.limit ?? customerNames.length * 5, 1), 250);
+
+  if (customerNames.length === 0) {
+    return [];
+  }
+
+  const rows = await runAnalyticsQuery<{
+    customerName: string;
+    phoneNumber: string;
+    memberId: string;
+    lastVisitDate: string | null;
+    totalVisits: number;
+  }>(
+    `
+      SELECT
+        CustomerName AS customerName,
+        CustomerPhoneNumber AS phoneNumber,
+        MAX(COALESCE(CustomerID, '')) AS memberId,
+        FORMAT_DATE('%Y-%m-%d', MAX(DATE(COALESCE(CheckOutTime, CheckInTime)))) AS lastVisitDate,
+        COUNT(DISTINCT COALESCE(CAST(BookingID AS STRING), FORMAT_TIMESTAMP('%Y-%m-%d %H:%M:%S', CheckInTime))) AS totalVisits
+      FROM ${analyticsTables.mainDataView}
+      WHERE LOWER(ClinicCode) = LOWER(@clinicCode)
+        AND CustomerName IS NOT NULL
+        AND CustomerPhoneNumber IS NOT NULL
+        AND CheckInTime IS NOT NULL
+        AND LOWER(TRIM(REGEXP_REPLACE(CustomerName, r'\\s+', ' '))) IN UNNEST(@customerNames)
+      GROUP BY customerName, phoneNumber
+      ORDER BY lastVisitDate DESC, totalVisits DESC, customerName ASC
+      LIMIT @limit
+    `,
+    {
+      clinicCode: params.clinicCode,
+      customerNames,
+      limit,
+    },
+    {
+      queryName: "report.customerPortal.resolveCustomerPhones",
+      ttlMs: 5 * 60_000,
+    },
+  );
+
+  return rows.map((row) => ({
+    customerName: row.customerName,
+    phoneNumber: row.phoneNumber,
+    phoneMasked: maskPhone(row.phoneNumber),
+    memberId: row.memberId || null,
     lastVisitDate: row.lastVisitDate,
     totalVisits: parseNumber(row.totalVisits),
   }));

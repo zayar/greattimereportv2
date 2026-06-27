@@ -402,7 +402,9 @@ function AgentCustomer360Card({ factPack }: { factPack: Customer360FactPack }) {
           <h3>{factPack.identity.displayName}</h3>
           <div className="agent-customer360__badges">
             {factPack.identity.memberId ? <span>Member {factPack.identity.memberId}</span> : null}
-            {factPack.identity.maskedPhone ? <span>{factPack.identity.maskedPhone}</span> : null}
+            {factPack.identity.phoneNumber || factPack.identity.maskedPhone ? (
+              <span>{factPack.identity.phoneNumber ?? factPack.identity.maskedPhone}</span>
+            ) : null}
           </div>
         </div>
         {factPack.identity.detailPath ? (

@@ -94,6 +94,7 @@ export type Customer360FactPack = {
     memberId?: string;
     displayName: string;
     joinedDate?: string | null;
+    phoneNumber?: string;
     maskedPhone?: string;
     detailPath?: string;
   };

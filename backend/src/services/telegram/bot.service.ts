@@ -580,7 +580,7 @@ function formatCustomerMatchesConversation(response: GreatTimeAgentChatResponse)
   ];
   table.rows.slice(0, 8).forEach((row, index) => {
     const name = stringValue(row, "customerName", "Customer");
-    const phone = stringValue(row, "maskedPhone", stringValue(row, "customerPhoneMasked", ""));
+    const phone = stringValue(row, "customerPhone", stringValue(row, "maskedPhone", stringValue(row, "customerPhoneMasked", "")));
     const lastVisit = stringValue(row, "lastVisitDate", "");
     const packagePurchaseDate = stringValue(row, "lastPackagePurchaseDate", "");
     const packageService = stringValue(row, "lastPackageServiceName", stringValue(row, "lastPackageName", ""));

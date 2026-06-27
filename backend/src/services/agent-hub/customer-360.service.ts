@@ -772,6 +772,7 @@ export async function buildCustomer360ToolResult(input: AgentToolInput): Promise
       memberId: snapshotCustomer?.memberId || identity.memberId,
       displayName: customerName,
       joinedDate: identity.joinedDate ?? snapshotCustomer?.firstVisitThisYear ?? null,
+      phoneNumber: phoneNumber || undefined,
       maskedPhone: phoneNumber ? maskPhone(phoneNumber) : identity.phoneMasked,
       detailPath: customerDetailPath({
         customerName,
