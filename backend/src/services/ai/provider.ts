@@ -2,7 +2,7 @@ import { env } from "../../config/env.js";
 
 export type AiJsonProvider = {
   modelName: string;
-  generateJson: (prompt: string) => Promise<string>;
+  generateJson: (prompt: string, options?: { timeoutMs?: number }) => Promise<string>;
 };
 
 type GeminiGenerateContentResponse = {
@@ -34,9 +34,18 @@ function createGeminiProvider(): AiJsonProvider | null {
 
   return {
     modelName: env.GEMINI_MODEL,
-    async generateJson(prompt: string) {
+    async generateJson(prompt: string, options?: { timeoutMs?: number }) {
+      const timeoutMs = options?.timeoutMs;
+      const controller = timeoutMs && timeoutMs > 0 ? new AbortController() : undefined;
+      const timeoutHandle = controller
+        ? setTimeout(() => {
+            controller.abort();
+          }, timeoutMs)
+        : undefined;
+
       const response = await fetch(buildGeminiEndpoint(env.GEMINI_MODEL), {
         method: "POST",
+        signal: controller?.signal,
         headers: {
           "Content-Type": "application/json",
         },
@@ -53,6 +62,10 @@ function createGeminiProvider(): AiJsonProvider | null {
             maxOutputTokens: 900,
           },
         }),
+      }).finally(() => {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
+        }
       });
 
       if (!response.ok) {

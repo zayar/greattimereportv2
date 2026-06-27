@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { env } from "../../config/env.js";
 import { createAiProvider } from "../ai/provider.js";
+import type { AiJsonProvider } from "../ai/provider.js";
 import type { GtAgentRelevantMemory } from "./memory/memory-types.js";
 import type { GreatTimeAgentChatResponse } from "./types.js";
 
@@ -86,17 +88,50 @@ function buildNarrativePrompt(response: GreatTimeAgentChatResponse, memories: Gt
   });
 }
 
+function generateNarrativeJsonWithTimeout(provider: AiJsonProvider, prompt: string, timeoutMs: number) {
+  if (timeoutMs <= 0) {
+    return provider.generateJson(prompt);
+  }
+
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+  return new Promise<string>((resolve, reject) => {
+    timeoutHandle = setTimeout(() => {
+      reject(new Error(`Agent narrative timed out after ${timeoutMs}ms.`));
+    }, timeoutMs);
+
+    provider.generateJson(prompt, { timeoutMs }).then(resolve, reject).finally(() => {
+      if (timeoutHandle) {
+        clearTimeout(timeoutHandle);
+      }
+    });
+  });
+}
+
 export async function enhanceAgentResponseNarrative(
   response: GreatTimeAgentChatResponse,
-  options?: { memories?: GtAgentRelevantMemory[] },
+  options?: { memories?: GtAgentRelevantMemory[]; provider?: AiJsonProvider | null; timeoutMs?: number },
 ) {
-  const provider = createAiProvider();
+  if (!env.AGENT_NARRATIVE_ENABLED) {
+    return { response, fallbackUsed: true };
+  }
+
+  const provider = options?.provider === undefined ? createAiProvider() : options.provider;
   if (!provider) {
     return { response, fallbackUsed: true };
   }
 
   try {
-    const raw = await provider.generateJson(buildNarrativePrompt(response, options?.memories ?? []));
+    const timeoutMs = options?.timeoutMs ?? env.AGENT_NARRATIVE_TIMEOUT_MS;
+    const prompt = buildNarrativePrompt(response, options?.memories ?? []);
+    const raw = env.AGENT_FAST_MODE_ENABLED
+      ? await generateNarrativeJsonWithTimeout(provider, prompt, timeoutMs)
+      : await provider.generateJson(prompt);
+
+    if (!raw.trim()) {
+      return { response, fallbackUsed: true };
+    }
+
     const parsed = narrativeSchema.safeParse(JSON.parse(stripJsonFences(raw)));
 
     if (!parsed.success) {

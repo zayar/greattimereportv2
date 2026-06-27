@@ -37,6 +37,12 @@ const envSchema = z.object({
   BQ_MAIN_PAYMENT_VIEW: z.string().default("MainPaymentView"),
   BQ_CUSTOMER_PACKAGE_DAILY_TABLE: z.string().default("gt_ai_customer_package_daily"),
   BQ_CUSTOMER_RELATIONSHIP_DAILY_TABLE: z.string().default("gt_ai_customer_relationship_daily"),
+  BQ_QUERY_CACHE_ENABLED: booleanEnv(true),
+  BQ_QUERY_DEFAULT_TTL_MS: z.coerce.number().int().positive().default(60_000),
+  BQ_QUERY_CACHE_MAX_ENTRIES: z.coerce.number().int().positive().default(500),
+  BQ_QUERY_SLOW_MS: z.coerce.number().int().positive().default(2_500),
+  BQ_QUERY_TIMEOUT_MS: z.coerce.number().int().positive().default(8_000),
+  BQ_MAX_BYTES_BILLED: z.coerce.number().int().min(0).default(0),
   GT_GROWTH_AI_DEFAULT_ENABLED: booleanEnv(false),
   GT_GROWTH_AI_ENABLED_CLINIC_IDS: z.string().default(""),
   GT_GROWTH_AI_FEATURE_STORE_ENABLED: booleanEnv(true),
@@ -63,6 +69,10 @@ const envSchema = z.object({
   FIREBASE_AUTH_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
   AGENT_MEMORY_V2_ENABLED: booleanEnv(false),
   AGENT_LEARNING_ENABLED: booleanEnv(false),
+  AGENT_TOOL_MAX_CONCURRENCY: z.coerce.number().int().positive().default(3),
+  AGENT_NARRATIVE_ENABLED: booleanEnv(true),
+  AGENT_FAST_MODE_ENABLED: booleanEnv(true),
+  AGENT_NARRATIVE_TIMEOUT_MS: z.coerce.number().int().positive().default(1_500),
   AGENT_LEARNING_SCHEDULER_SECRET: z.string().optional(),
   AGENT_LEARNING_DEFAULT_LOOKBACK_DAYS: z.coerce.number().int().positive().default(365),
   AGENT_STALE_THRESHOLD_HOURS: z.coerce.number().int().positive().default(24),
@@ -78,4 +88,10 @@ const envSchema = z.object({
   CUSTOMER_RELATIONSHIP_NOT_INTERESTED_COOLDOWN_DAYS: z.coerce.number().int().min(1).max(365).default(60),
 });
 
-export const env = envSchema.parse(process.env);
+export function parseEnv(source: NodeJS.ProcessEnv) {
+  return envSchema.parse(source);
+}
+
+export type Env = z.infer<typeof envSchema>;
+
+export const env = parseEnv(process.env);

@@ -20,6 +20,7 @@ import {
   saveAgentSessionTurn,
 } from "./session.repository.js";
 import { saveAgentRunTrace } from "./trace.repository.js";
+import { getAnalyticsQueryCacheStats } from "../bigquery.service.js";
 import type {
   AgentClinicContext,
   AgentRequestContext,
@@ -294,6 +295,7 @@ export async function askAgentHub(params: {
   clinic: AgentClinicContext;
   requestContext: AgentRequestContext;
 }): Promise<GreatTimeAgentChatResponse> {
+  const totalStartedAt = Date.now();
   const sessionId = params.request.sessionId ?? newId("session");
   const requestId = params.request.requestId ?? newId("req");
 
@@ -306,6 +308,7 @@ export async function askAgentHub(params: {
   }
 
   const registry = createAgentToolRegistry();
+  const planningStartedAt = Date.now();
   const session = params.request.sessionId
     ? await getAgentSession({
         clinicId: params.clinic.clinicId,
@@ -350,13 +353,18 @@ export async function askAgentHub(params: {
     entityContext: request.entityContext,
     request,
   });
+  const planningLatencyMs = Date.now() - planningStartedAt;
+  const memoryStartedAt = Date.now();
   const memoryContext = await retrieveMemoryContext({
     clinicId: params.clinic.clinicId,
     userId: params.requestContext.userId,
     request,
     plan,
   }).catch(() => ({ memories: [], usedMemoryIds: [] }));
+  const memoryLatencyMs = Date.now() - memoryStartedAt;
 
+  const cacheStatsBefore = getAnalyticsQueryCacheStats();
+  const toolStartedAt = Date.now();
   const toolResults = plan.unsupportedReason
     ? []
     : await executeToolPlan({
@@ -372,6 +380,8 @@ export async function askAgentHub(params: {
         },
         registry,
       });
+  const toolLatencyMs = Date.now() - toolStartedAt;
+  const cacheStatsAfter = getAnalyticsQueryCacheStats();
 
   const deterministicResponse = buildAgentResponse({
     request,
@@ -381,9 +391,11 @@ export async function askAgentHub(params: {
     toolResults,
     unsupportedReason: plan.unsupportedReason,
   });
+  const narrativeStartedAt = Date.now();
   const narrativeResult = await enhanceAgentResponseNarrative(deterministicResponse, {
     memories: memoryContext.memories,
   });
+  const narrativeLatencyMs = Date.now() - narrativeStartedAt;
   const narrativeResponse = narrativeResult.response;
   const response = applyMemoryPreferencesToResponse(narrativeResponse, memoryContext.memories);
   const entityRefs = toolResults.flatMap((result) => result.entityRefs ?? []).map((ref) => ({
@@ -415,6 +427,15 @@ export async function askAgentHub(params: {
       dataStatus: response.dataStatus,
       fallbackUsed: narrativeResult.fallbackUsed,
       usedMemoryIds: memoryContext.usedMemoryIds,
+      totalLatencyMs: Date.now() - totalStartedAt,
+      planningLatencyMs,
+      memoryLatencyMs,
+      toolLatencyMs,
+      narrativeLatencyMs,
+      cacheStats: {
+        bigQueryHits: cacheStatsAfter.hits - cacheStatsBefore.hits,
+        bigQueryMisses: cacheStatsAfter.misses - cacheStatsBefore.misses,
+      },
       createdAt: nowIso(),
     }).catch((error) =>
       saveAgentRunTrace({
@@ -431,6 +452,15 @@ export async function askAgentHub(params: {
         dataStatus: response.dataStatus,
         fallbackUsed: narrativeResult.fallbackUsed,
         usedMemoryIds: memoryContext.usedMemoryIds,
+        totalLatencyMs: Date.now() - totalStartedAt,
+        planningLatencyMs,
+        memoryLatencyMs,
+        toolLatencyMs,
+        narrativeLatencyMs,
+        cacheStats: {
+          bigQueryHits: cacheStatsAfter.hits - cacheStatsBefore.hits,
+          bigQueryMisses: cacheStatsAfter.misses - cacheStatsBefore.misses,
+        },
         createdAt: nowIso(),
         sanitizedError: sanitizeError(error),
       }),

@@ -342,6 +342,21 @@ export type AgentRunTrace = {
   dataStatus: AgentDataStatus;
   fallbackUsed: boolean;
   usedMemoryIds?: string[];
+  totalLatencyMs?: number;
+  planningLatencyMs?: number;
+  memoryLatencyMs?: number;
+  toolLatencyMs?: number;
+  narrativeLatencyMs?: number;
+  persistenceLatencyMs?: number;
+  cacheStats?: {
+    bigQueryHits?: number;
+    bigQueryMisses?: number;
+  };
+  sourceDurations?: Array<{
+    toolName: string;
+    durationMs: number;
+    dataStatus: AgentDataStatus;
+  }>;
   createdAt: string;
   sanitizedError?: string;
 };

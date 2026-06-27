@@ -1,9 +1,18 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import { z } from "zod"
 
 process.env.APICORE_GRAPHQL_URL ??= "https://example.com/graphql"
 process.env.AGENT_LEARNING_SCHEDULER_SECRET ??= "scheduler-secret"
 
+const { parseEnv } = await import("../src/config/env.ts")
+const { bigQueryClient } = await import("../src/config/bigquery.ts")
+const {
+  buildAnalyticsQueryCacheKey,
+  clearAnalyticsQueryCache,
+  getAnalyticsQueryCacheStats,
+  runAnalyticsQuery,
+} = await import("../src/services/bigquery.service.ts")
 const { normalizeAppointmentLifecycle } = await import("../src/services/agent-hub/appointment-lifecycle.ts")
 const { isActiveCheckedInAppointment, isCountableTodayAppointment } = await import("../src/services/agent-hub/appointment-live.service.ts")
 const { composeCustomer360Summary } = await import("../src/services/agent-hub/customer-360.service.ts")
@@ -12,11 +21,12 @@ const { extractAgentPeriod, planAgentRequest } = await import("../src/services/a
 const { buildAgentResponse } = await import("../src/services/agent-hub/response-builder.ts")
 const { sanitizeError } = await import("../src/services/agent-hub/safety.ts")
 const { resolveAgent } = await import("../src/services/agent-hub/supervisor.ts")
-const { assertToolAllowed } = await import("../src/services/agent-hub/tool-executor.ts")
+const { assertToolAllowed, executeToolPlan } = await import("../src/services/agent-hub/tool-executor.ts")
 const { createAgentToolRegistry, getAgentToolAllowlist } = await import("../src/services/agent-hub/tool-registry.ts")
 const { extractInvoiceSearch } = await import("../src/services/agent-hub/tools/finance.tools.ts")
 const { extractLikelyCustomerSearchText } = await import("../src/services/agent-hub/customer-query.ts")
 const { extractExplicitServiceSearchText } = await import("../src/services/agent-hub/service-query.ts")
+const { enhanceAgentResponseNarrative } = await import("../src/services/agent-hub/narrative.service.ts")
 const {
   askAgentHub,
   buildLockedAgentHubResponse,
@@ -35,6 +45,87 @@ const {
   extractTelegramAgentQuestion,
   formatAgentHubTelegramReply,
 } = await import("../src/services/telegram/bot.service.ts")
+
+function delay(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
+}
+
+test("env defaults parse Agent Hub and BigQuery performance knobs", () => {
+  const parsed = parseEnv({
+    APICORE_GRAPHQL_URL: "https://example.com/graphql",
+  })
+
+  assert.equal(parsed.BQ_QUERY_CACHE_ENABLED, true)
+  assert.equal(parsed.BQ_QUERY_DEFAULT_TTL_MS, 60_000)
+  assert.equal(parsed.BQ_QUERY_CACHE_MAX_ENTRIES, 500)
+  assert.equal(parsed.BQ_QUERY_SLOW_MS, 2_500)
+  assert.equal(parsed.BQ_QUERY_TIMEOUT_MS, 8_000)
+  assert.equal(parsed.BQ_MAX_BYTES_BILLED, 0)
+  assert.equal(parsed.AGENT_TOOL_MAX_CONCURRENCY, 3)
+  assert.equal(parsed.AGENT_NARRATIVE_ENABLED, true)
+  assert.equal(parsed.AGENT_FAST_MODE_ENABLED, true)
+  assert.equal(parsed.AGENT_NARRATIVE_TIMEOUT_MS, 1_500)
+})
+
+test("BigQuery cache key is stable for equivalent query params", () => {
+  const query = "SELECT @clinicCode AS clinicCode, @limit AS limit"
+
+  assert.equal(
+    buildAnalyticsQueryCacheKey(query, { clinicCode: "ABC", limit: 10 }, "US"),
+    buildAnalyticsQueryCacheKey(query, { limit: 10, clinicCode: "ABC" }, "US"),
+  )
+  assert.notEqual(
+    buildAnalyticsQueryCacheKey(query, { clinicCode: "ABC", limit: 10 }, "US"),
+    buildAnalyticsQueryCacheKey(query, { clinicCode: "ABC", limit: 10 }, "asia-southeast1"),
+  )
+})
+
+test("BigQuery cache stats record hit, miss, and set", async () => {
+  const client = bigQueryClient as typeof bigQueryClient & {
+    query: (options: unknown) => Promise<[Array<{ value: number }>]>
+  }
+  const originalQuery = client.query
+  const originalInfo = console.info
+  const originalWarn = console.warn
+  let queryCalls = 0
+
+  console.info = () => undefined
+  console.warn = () => undefined
+  clearAnalyticsQueryCache()
+  client.query = async () => {
+    queryCalls += 1
+    return [[{ value: 42 }]]
+  }
+
+  try {
+    const firstRows = await runAnalyticsQuery<{ value: number }>(
+      "SELECT @value AS value",
+      { value: 42 },
+      { queryName: "test_cache_stats", ttlMs: 1_000 },
+    )
+    const secondRows = await runAnalyticsQuery<{ value: number }>(
+      "SELECT @value AS value",
+      { value: 42 },
+      { queryName: "test_cache_stats", ttlMs: 1_000 },
+    )
+    const stats = getAnalyticsQueryCacheStats()
+
+    assert.deepEqual(firstRows, [{ value: 42 }])
+    assert.deepEqual(secondRows, [{ value: 42 }])
+    assert.equal(queryCalls, 1)
+    assert.equal(stats.misses, 1)
+    assert.equal(stats.hits, 1)
+    assert.equal(stats.sets, 1)
+    assert.equal(stats.entries, 1)
+  } finally {
+    client.query = originalQuery
+    console.info = originalInfo
+    console.warn = originalWarn
+    clearAnalyticsQueryCache()
+  }
+})
 
 test("supervisor routes four agent domains and respects explicit override", () => {
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "sales revenue by payment method" }).resolvedAgent, "finance")
@@ -941,6 +1032,140 @@ test("tool registry enforces per-agent allowlists", () => {
   assert.throws(() => assertToolAllowed({ requestedToolName: "get_sales_summary", agentId: "appointment", registry }))
 })
 
+test("executeToolPlan preserves order while running independent tools concurrently", async () => {
+  let activeExecutions = 0
+  let maxActiveExecutions = 0
+  const makeTool = (name: string) => ({
+    name,
+    agentId: "finance" as const,
+    description: name,
+    inputSchema: z.object({}),
+    sourceName: "fixture",
+    live: false,
+    maxRows: 10,
+    timeoutMs: 1_000,
+    async execute(input: { period: { label: string } }) {
+      activeExecutions += 1
+      maxActiveExecutions = Math.max(maxActiveExecutions, activeExecutions)
+      await delay(100)
+      activeExecutions -= 1
+
+      return {
+        toolName: name,
+        sourceName: "fixture",
+        checkedAt: "2026-06-18T00:00:00.000Z",
+        period: input.period.label,
+        dataStatus: "ok" as const,
+        live: false,
+      }
+    },
+  })
+  const registry = new Map([
+    ["tool_a", makeTool("tool_a")],
+    ["tool_b", makeTool("tool_b")],
+  ])
+  const startedAt = Date.now()
+
+  const results = await executeToolPlan({
+    toolNames: ["tool_a", "tool_b"],
+    agentId: "finance",
+    input: {
+      request: {
+        clinicId: "clinic-1",
+        clinicCode: "ABC",
+        agent: "finance",
+        message: "test",
+      },
+      clinic: {
+        clinicId: "clinic-1",
+        clinicCode: "ABC",
+      },
+      period: {
+        fromDate: "2026-06-18",
+        toDate: "2026-06-18",
+        label: "today",
+      },
+      intent: "test",
+      requestContext: {
+        userId: "user-1",
+      },
+    },
+    registry,
+    maxConcurrency: 2,
+  })
+
+  assert.deepEqual(
+    results.map((result) => result.toolName),
+    ["tool_a", "tool_b"],
+  )
+  assert.equal(maxActiveExecutions, 2)
+  assert.ok(Date.now() - startedAt < 190)
+})
+
+test("executeToolPlan returns unavailable for one failing tool without failing the plan", async () => {
+  const makeTool = (name: string, shouldFail = false) => ({
+    name,
+    agentId: "finance" as const,
+    description: name,
+    inputSchema: z.object({}),
+    sourceName: "fixture",
+    live: false,
+    maxRows: 10,
+    timeoutMs: 1_000,
+    async execute(input: { period: { label: string } }) {
+      if (shouldFail) {
+        throw new Error("fixture failure")
+      }
+
+      return {
+        toolName: name,
+        sourceName: "fixture",
+        checkedAt: "2026-06-18T00:00:00.000Z",
+        period: input.period.label,
+        dataStatus: "ok" as const,
+        live: false,
+      }
+    },
+  })
+  const registry = new Map([
+    ["tool_ok", makeTool("tool_ok")],
+    ["tool_fail", makeTool("tool_fail", true)],
+  ])
+
+  const results = await executeToolPlan({
+    toolNames: ["tool_ok", "tool_fail"],
+    agentId: "finance",
+    input: {
+      request: {
+        clinicId: "clinic-1",
+        clinicCode: "ABC",
+        agent: "finance",
+        message: "test",
+      },
+      clinic: {
+        clinicId: "clinic-1",
+        clinicCode: "ABC",
+      },
+      period: {
+        fromDate: "2026-06-18",
+        toDate: "2026-06-18",
+        label: "today",
+      },
+      intent: "test",
+      requestContext: {
+        userId: "user-1",
+      },
+    },
+    registry,
+    maxConcurrency: 2,
+  })
+
+  assert.equal(results[0]?.dataStatus, "ok")
+  assert.equal(results[1]?.toolName, "tool_fail")
+  assert.equal(results[1]?.dataStatus, "unavailable")
+  assert.equal(results[1]?.warnings?.[0]?.type, "tool_unavailable")
+})
+
 test("entity context resolves ordinal customer references", () => {
   const ref = resolveEntityReference({
     message: "Tell me about the second customer",
@@ -958,6 +1183,55 @@ test("entity context resolves ordinal customer references", () => {
     ],
   })
   assert.equal(serviceRef?.entityId, "svc-1")
+})
+
+test("narrative timeout returns deterministic response", async () => {
+  const deterministicResponse = {
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "finance",
+    resolvedAgent: "finance",
+    autoMode: false,
+    intent: "sales_summary",
+    period: {
+      fromDate: "2026-06-18",
+      toDate: "2026-06-18",
+      label: "today",
+    },
+    assistantMessage: "Deterministic sales summary.",
+    summary: "Deterministic sales summary.",
+    metrics: [{ label: "Total sales", value: 1200 }],
+    followUpQuestions: [],
+    sources: [
+      {
+        tool: "get_sales_summary",
+        sourceName: "fixture",
+        checkedAt: "2026-06-18T00:00:00.000Z",
+        dataStatus: "ok",
+        live: false,
+      },
+    ],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  } as const
+  const startedAt = Date.now()
+
+  const result = await enhanceAgentResponseNarrative(deterministicResponse, {
+    memories: [],
+    timeoutMs: 15,
+    provider: {
+      modelName: "slow-fixture",
+      async generateJson() {
+        await delay(100)
+        return JSON.stringify({ assistantMessage: "AI narrative." })
+      },
+    },
+  })
+
+  assert.equal(result.response, deterministicResponse)
+  assert.equal(result.fallbackUsed, true)
+  assert.ok(Date.now() - startedAt < 90)
 })
 
 test("response builder keeps tool metrics and source metadata grounded", () => {

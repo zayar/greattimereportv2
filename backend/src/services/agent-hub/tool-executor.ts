@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { env } from "../../config/env.js";
 import { sanitizeError, nowIso } from "./safety.js";
 import type { AgentToolDefinition, AgentToolInput, AgentToolResult, GreatTimeAgentId } from "./types.js";
 
@@ -17,10 +18,12 @@ export function assertToolAllowed(params: {
 }
 
 async function executeWithTimeout(tool: AgentToolDefinition, input: AgentToolInput) {
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
   return Promise.race([
     tool.execute(input),
     new Promise<AgentToolResult>((resolve) => {
-      setTimeout(() => {
+      timeoutHandle = setTimeout(() => {
         resolve({
           toolName: tool.name,
           sourceName: tool.sourceName,
@@ -38,7 +41,70 @@ async function executeWithTimeout(tool: AgentToolDefinition, input: AgentToolInp
         });
       }, tool.timeoutMs);
     }),
-  ]);
+  ]).finally(() => {
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+  });
+}
+
+export async function mapWithConcurrency<T, R>(
+  items: T[],
+  maxConcurrency: number,
+  mapper: (item: T, index: number) => Promise<R>,
+) {
+  if (items.length === 0) {
+    return [];
+  }
+
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(items.length, Math.max(1, Math.floor(maxConcurrency)));
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+      }
+    }),
+  );
+
+  return results;
+}
+
+async function executeSingleTool(params: {
+  toolName: string;
+  agentId: GreatTimeAgentId;
+  input: AgentToolInput;
+  registry: Map<string, AgentToolDefinition>;
+}) {
+  try {
+    const tool = assertToolAllowed({
+      requestedToolName: params.toolName,
+      agentId: params.agentId,
+      registry: params.registry,
+    });
+    tool.inputSchema.parse(params.input);
+    return await executeWithTimeout(tool, params.input);
+  } catch (error) {
+    return {
+      toolName: params.toolName,
+      sourceName: params.registry.get(params.toolName)?.sourceName ?? "GreatTime source",
+      checkedAt: nowIso(),
+      period: params.input.period.label,
+      dataStatus: "unavailable",
+      live: params.registry.get(params.toolName)?.live,
+      warnings: [
+        {
+          type: error instanceof z.ZodError ? "invalid_tool_input" : "tool_unavailable",
+          title: "Source unavailable",
+          message: sanitizeError(error),
+        },
+      ],
+    } satisfies AgentToolResult;
+  }
 }
 
 export async function executeToolPlan(params: {
@@ -46,36 +112,14 @@ export async function executeToolPlan(params: {
   agentId: GreatTimeAgentId;
   input: AgentToolInput;
   registry: Map<string, AgentToolDefinition>;
+  maxConcurrency?: number;
 }) {
-  const results: AgentToolResult[] = [];
-
-  for (const toolName of params.toolNames) {
-    try {
-      const tool = assertToolAllowed({
-        requestedToolName: toolName,
-        agentId: params.agentId,
-        registry: params.registry,
-      });
-      tool.inputSchema.parse(params.input);
-      results.push(await executeWithTimeout(tool, params.input));
-    } catch (error) {
-      results.push({
-        toolName,
-        sourceName: params.registry.get(toolName)?.sourceName ?? "GreatTime source",
-        checkedAt: nowIso(),
-        period: params.input.period.label,
-        dataStatus: "unavailable",
-        live: params.registry.get(toolName)?.live,
-        warnings: [
-          {
-            type: error instanceof z.ZodError ? "invalid_tool_input" : "tool_unavailable",
-            title: "Source unavailable",
-            message: sanitizeError(error),
-          },
-        ],
-      });
-    }
-  }
-
-  return results;
+  return mapWithConcurrency(params.toolNames, params.maxConcurrency ?? env.AGENT_TOOL_MAX_CONCURRENCY, (toolName) =>
+    executeSingleTool({
+      toolName,
+      agentId: params.agentId,
+      input: params.input,
+      registry: params.registry,
+    }),
+  );
 }
