@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { env } from "../../config/env.js";
+import { runWithAnalyticsQueryContext } from "../analytics-query-context.js";
 import { sanitizeError, nowIso } from "./safety.js";
 import type { AgentToolDefinition, AgentToolInput, AgentToolResult, GreatTimeAgentId } from "./types.js";
 
@@ -87,7 +88,20 @@ async function executeSingleTool(params: {
       registry: params.registry,
     });
     tool.inputSchema.parse(params.input);
-    return await executeWithTimeout(tool, params.input);
+    return await runWithAnalyticsQueryContext(
+      {
+        queryNamePrefix: `agent.${params.agentId}.${tool.name}`,
+        labels: {
+          app: "greattime",
+          feature: "agent_hub",
+          agent: params.agentId,
+          tool: tool.name,
+        },
+        timeoutMs: env.AGENT_BIGQUERY_TIMEOUT_MS,
+        ttlMs: env.BQ_QUERY_DEFAULT_TTL_MS,
+      },
+      () => executeWithTimeout(tool, params.input),
+    );
   } catch (error) {
     return {
       toolName: params.toolName,

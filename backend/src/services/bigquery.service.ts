@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Query } from "@google-cloud/bigquery";
 import { bigQueryClient } from "../config/bigquery.js";
 import { env } from "../config/env.js";
+import { getAnalyticsQueryContext } from "./analytics-query-context.js";
 
 export type AnalyticsQueryOptions = {
   location?: string;
@@ -78,7 +79,7 @@ export function buildAnalyticsQueryCacheKey(
   location = env.BQ_LOCATION,
   cacheKey?: string,
 ) {
-  const cacheInput = cacheKey ?? stableStringify({ query, params, location });
+  const cacheInput = stableStringify({ cacheKey: cacheKey ?? null, query, params, location });
   return `analytics:${hashText(cacheInput)}`;
 }
 
@@ -143,16 +144,50 @@ function getCachedRows<T>(cacheKey: string, now: number): T[] | null {
   }
 
   analyticsQueryCacheStats.hits += 1;
-  return entry.rows as T[];
+  return cloneRows(entry.rows) as T[];
 }
 
 function setCachedRows(cacheKey: string, rows: unknown[], ttlMs: number, now: number) {
   analyticsQueryCache.set(cacheKey, {
-    rows,
+    rows: cloneRows(rows),
     expiresAt: now + ttlMs,
   });
   analyticsQueryCacheStats.sets += 1;
   evictOldestEntries(env.BQ_QUERY_CACHE_MAX_ENTRIES);
+}
+
+function cloneRows(rows: unknown[]) {
+  if (typeof globalThis.structuredClone === "function") {
+    try {
+      return globalThis.structuredClone(rows) as unknown[];
+    } catch {
+      return rows.map((row) => cloneCacheValue(row));
+    }
+  }
+
+  return rows.map((row) => cloneCacheValue(row));
+}
+
+function cloneCacheValue(value: unknown): unknown {
+  if (value == null || typeof value === "number" || typeof value === "string" || typeof value === "boolean" || typeof value === "bigint") {
+    return value;
+  }
+
+  if (value instanceof Date) {
+    return new Date(value.getTime());
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneCacheValue(item));
+  }
+
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, cloneCacheValue(item)]),
+    );
+  }
+
+  return value;
 }
 
 function sanitizeLabelSegment(value: string) {
@@ -269,11 +304,12 @@ export async function runAnalyticsQuery<T>(
   params: Record<string, unknown> = {},
   options: AnalyticsQueryOptions = {},
 ) {
+  const context = getAnalyticsQueryContext();
   const location = options.location ?? env.BQ_LOCATION;
-  const queryName = options.queryName ?? "analytics_query";
+  const queryName = options.queryName ?? context?.queryNamePrefix ?? "analytics_query";
   const queryHash = hashText(query, 16);
   const startedAt = Date.now();
-  const ttlMs = options.ttlMs ?? env.BQ_QUERY_DEFAULT_TTL_MS;
+  const ttlMs = options.ttlMs ?? context?.ttlMs ?? env.BQ_QUERY_DEFAULT_TTL_MS;
   const cacheKey = buildAnalyticsQueryCacheKey(query, params, location, options.cacheKey);
   const shouldUseCache =
     env.BQ_QUERY_CACHE_ENABLED && !options.forceRefresh && ttlMs > 0 && isSelectStyleQuery(query);
@@ -295,19 +331,23 @@ export async function runAnalyticsQuery<T>(
     }
   }
 
-  const maxBytesBilled = options.maxBytesBilled ?? env.BQ_MAX_BYTES_BILLED;
-  const labels = sanitizeLabels(options.labels);
+  const maxBytesBilled = options.maxBytesBilled ?? context?.maxBytesBilled ?? env.BQ_MAX_BYTES_BILLED;
+  const labels = sanitizeLabels({
+    ...(context?.labels ?? {}),
+    ...(options.labels ?? {}),
+  });
+  const useQueryCache = options.useQueryCache ?? context?.useQueryCache;
   const queryOptions: Query = {
     query,
     params,
     location,
     ...(labels ? { labels } : {}),
     ...(maxBytesBilled > 0 ? { maximumBytesBilled: String(maxBytesBilled) } : {}),
-    ...(options.useQueryCache === undefined ? {} : { useQueryCache: options.useQueryCache }),
+    ...(useQueryCache === undefined ? {} : { useQueryCache }),
   };
 
   try {
-    const [rows] = await withTimeout(bigQueryClient.query(queryOptions), options.timeoutMs ?? env.BQ_QUERY_TIMEOUT_MS, queryName);
+    const [rows] = await withTimeout(bigQueryClient.query(queryOptions), options.timeoutMs ?? context?.timeoutMs ?? env.BQ_QUERY_TIMEOUT_MS, queryName);
     const resultRows = rows as T[];
 
     logQueryCompleted({

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { env } from "../../config/env.js";
+import { runWithAnalyticsQueryContext } from "../analytics-query-context.js";
 import { formatDateKeyInTimeZone, formatTimeKeyInTimeZone, normalizeTimeZone } from "../telegram/time.js";
 import { getPaymentReport } from "../reports/payment-report.service.js";
 import { getSalesReport } from "../reports/sales-report.service.js";
@@ -661,6 +662,7 @@ async function runClinicJobs(params: {
       results.push({ clinicId: params.clinicId, jobType, status: "skipped", rowCount: 0 });
       continue;
     }
+    const clinicCode = params.clinicCode;
 
     if (params.dryRun) {
       results.push({ clinicId: params.clinicId, jobType, status: "skipped", rowCount: 0 });
@@ -701,14 +703,26 @@ async function runClinicJobs(params: {
         continue;
       }
 
-      const outcome = await runJob({
-        clinicId: params.clinicId,
-        clinicCode: params.clinicCode,
-        jobType,
-        dateKey: params.dateKey,
-        bucket,
-        timezone: params.timezone,
-      });
+      const outcome = await runWithAnalyticsQueryContext(
+        {
+          queryNamePrefix: `learning.${jobType}`,
+          labels: {
+            app: "greattime",
+            feature: "agent_learning",
+            job: jobType,
+          },
+          ttlMs: env.BQ_QUERY_DEFAULT_TTL_MS,
+        },
+        () =>
+          runJob({
+            clinicId: params.clinicId,
+            clinicCode,
+            jobType,
+            dateKey: params.dateKey,
+            bucket,
+            timezone: params.timezone,
+          }),
+      );
       await saveAgentLearningWatermark({
         clinicId: params.clinicId,
         jobType,
@@ -717,7 +731,7 @@ async function runClinicJobs(params: {
       });
       await saveAgentLearningRun({
         clinicId: params.clinicId,
-        clinicCode: params.clinicCode,
+        clinicCode,
         jobType,
         bucket,
         status: "completed",
@@ -729,7 +743,7 @@ async function runClinicJobs(params: {
     } catch (error) {
       await saveAgentLearningRun({
         clinicId: params.clinicId,
-        clinicCode: params.clinicCode,
+        clinicCode,
         jobType,
         bucket,
         status: "failed",

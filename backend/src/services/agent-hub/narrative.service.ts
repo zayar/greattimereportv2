@@ -142,7 +142,6 @@ export async function enhanceAgentResponseNarrative(
       response: {
         ...response,
         assistantMessage: parsed.data.assistantMessage,
-        summary: parsed.data.assistantMessage,
       },
       fallbackUsed: false,
     };

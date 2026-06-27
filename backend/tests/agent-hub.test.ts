@@ -5,7 +5,7 @@ import { z } from "zod"
 process.env.APICORE_GRAPHQL_URL ??= "https://example.com/graphql"
 process.env.AGENT_LEARNING_SCHEDULER_SECRET ??= "scheduler-secret"
 
-const { parseEnv } = await import("../src/config/env.ts")
+const { parseEnv, env } = await import("../src/config/env.ts")
 const { bigQueryClient } = await import("../src/config/bigquery.ts")
 const {
   buildAnalyticsQueryCacheKey,
@@ -52,6 +52,78 @@ function delay(ms: number) {
   })
 }
 
+async function withMockedBigQuery(
+  query: (options: unknown) => Promise<[unknown[]]>,
+  callback: () => Promise<void>,
+) {
+  const client = bigQueryClient as typeof bigQueryClient & {
+    query: (options: unknown) => Promise<[unknown[]]>
+  }
+  const originalQuery = client.query
+  const originalInfo = console.info
+  const originalWarn = console.warn
+
+  console.info = () => undefined
+  console.warn = () => undefined
+  clearAnalyticsQueryCache()
+  client.query = query
+
+  try {
+    await callback()
+  } finally {
+    client.query = originalQuery
+    console.info = originalInfo
+    console.warn = originalWarn
+    clearAnalyticsQueryCache()
+  }
+}
+
+function buildDeterministicAgentResponseFixture() {
+  return {
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "finance",
+    resolvedAgent: "finance",
+    autoMode: false,
+    intent: "sales_summary",
+    period: {
+      fromDate: "2026-06-18",
+      toDate: "2026-06-18",
+      label: "today",
+    },
+    assistantMessage: "Deterministic sales summary.",
+    summary: "Deterministic summary must stay unchanged.",
+    metrics: [{ label: "Total sales", value: 1200 }],
+    tables: [
+      {
+        title: "Fixture table",
+        columns: [{ key: "amount", title: "Amount" }],
+        rows: [{ amount: 1200 }],
+      },
+    ],
+    recommendations: [
+      {
+        title: "Fixture recommendation",
+        message: "Use sourced numbers only.",
+        sourceTools: ["get_sales_summary"],
+      },
+    ],
+    followUpQuestions: [],
+    sources: [
+      {
+        tool: "get_sales_summary",
+        sourceName: "fixture",
+        checkedAt: "2026-06-18T00:00:00.000Z",
+        dataStatus: "ok",
+        live: false,
+      },
+    ],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  } as const
+}
+
 test("env defaults parse Agent Hub and BigQuery performance knobs", () => {
   const parsed = parseEnv({
     APICORE_GRAPHQL_URL: "https://example.com/graphql",
@@ -61,8 +133,9 @@ test("env defaults parse Agent Hub and BigQuery performance knobs", () => {
   assert.equal(parsed.BQ_QUERY_DEFAULT_TTL_MS, 60_000)
   assert.equal(parsed.BQ_QUERY_CACHE_MAX_ENTRIES, 500)
   assert.equal(parsed.BQ_QUERY_SLOW_MS, 2_500)
-  assert.equal(parsed.BQ_QUERY_TIMEOUT_MS, 8_000)
+  assert.equal(parsed.BQ_QUERY_TIMEOUT_MS, 30_000)
   assert.equal(parsed.BQ_MAX_BYTES_BILLED, 0)
+  assert.equal(parsed.AGENT_BIGQUERY_TIMEOUT_MS, 8_000)
   assert.equal(parsed.AGENT_TOOL_MAX_CONCURRENCY, 3)
   assert.equal(parsed.AGENT_NARRATIVE_ENABLED, true)
   assert.equal(parsed.AGENT_FAST_MODE_ENABLED, true)
@@ -79,6 +152,14 @@ test("BigQuery cache key is stable for equivalent query params", () => {
   assert.notEqual(
     buildAnalyticsQueryCacheKey(query, { clinicCode: "ABC", limit: 10 }, "US"),
     buildAnalyticsQueryCacheKey(query, { clinicCode: "ABC", limit: 10 }, "asia-southeast1"),
+  )
+  assert.notEqual(
+    buildAnalyticsQueryCacheKey(query, { clinicCode: "ABC", limit: 10 }, "US", "explicit-key"),
+    buildAnalyticsQueryCacheKey(query, { clinicCode: "ABC", limit: 11 }, "US", "explicit-key"),
+  )
+  assert.notEqual(
+    buildAnalyticsQueryCacheKey(query, { clinicCode: "ABC", limit: 10 }, "US", "explicit-key"),
+    buildAnalyticsQueryCacheKey(query, { clinicCode: "ABC", limit: 10 }, "EU", "explicit-key"),
   )
 })
 
@@ -125,6 +206,118 @@ test("BigQuery cache stats record hit, miss, and set", async () => {
     console.warn = originalWarn
     clearAnalyticsQueryCache()
   }
+})
+
+test("BigQuery forceRefresh bypasses cache", async () => {
+  let queryCalls = 0
+
+  await withMockedBigQuery(
+    async () => {
+      queryCalls += 1
+      return [[{ value: queryCalls }]]
+    },
+    async () => {
+      const firstRows = await runAnalyticsQuery<{ value: number }>(
+        "SELECT @value AS value",
+        { value: 42 },
+        { queryName: "test_force_refresh", ttlMs: 1_000 },
+      )
+      const secondRows = await runAnalyticsQuery<{ value: number }>(
+        "SELECT @value AS value",
+        { value: 42 },
+        { queryName: "test_force_refresh", ttlMs: 1_000, forceRefresh: true },
+      )
+
+      assert.deepEqual(firstRows, [{ value: 1 }])
+      assert.deepEqual(secondRows, [{ value: 2 }])
+      assert.equal(queryCalls, 2)
+      assert.equal(getAnalyticsQueryCacheStats().hits, 0)
+    },
+  )
+})
+
+test("BigQuery non-SELECT query is not cached", async () => {
+  let queryCalls = 0
+
+  await withMockedBigQuery(
+    async () => {
+      queryCalls += 1
+      return [[{ value: queryCalls }]]
+    },
+    async () => {
+      await runAnalyticsQuery<{ value: number }>("DELETE FROM fixture WHERE id = @id", { id: "one" }, { queryName: "test_no_cache_delete" })
+      await runAnalyticsQuery<{ value: number }>("DELETE FROM fixture WHERE id = @id", { id: "one" }, { queryName: "test_no_cache_delete" })
+
+      assert.equal(queryCalls, 2)
+      assert.equal(getAnalyticsQueryCacheStats().entries, 0)
+      assert.equal(getAnalyticsQueryCacheStats().hits, 0)
+    },
+  )
+})
+
+test("BigQuery expired cache entry is not returned", async () => {
+  let queryCalls = 0
+
+  await withMockedBigQuery(
+    async () => {
+      queryCalls += 1
+      return [[{ value: queryCalls }]]
+    },
+    async () => {
+      const firstRows = await runAnalyticsQuery<{ value: number }>(
+        "SELECT @value AS value",
+        { value: 42 },
+        { queryName: "test_expired_cache", ttlMs: 1 },
+      )
+      await delay(5)
+      const secondRows = await runAnalyticsQuery<{ value: number }>(
+        "SELECT @value AS value",
+        { value: 42 },
+        { queryName: "test_expired_cache", ttlMs: 1 },
+      )
+
+      assert.deepEqual(firstRows, [{ value: 1 }])
+      assert.deepEqual(secondRows, [{ value: 2 }])
+      assert.equal(queryCalls, 2)
+      assert.equal(getAnalyticsQueryCacheStats().misses, 2)
+    },
+  )
+})
+
+test("BigQuery cache returns cloned rows to avoid mutation leakage", async () => {
+  let queryCalls = 0
+
+  await withMockedBigQuery(
+    async () => {
+      queryCalls += 1
+      return [[{ nested: { value: 42 } }]]
+    },
+    async () => {
+      const firstRows = await runAnalyticsQuery<{ nested: { value: number } }>(
+        "SELECT @value AS value",
+        { value: 42 },
+        { queryName: "test_cache_clones", ttlMs: 1_000 },
+      )
+      firstRows[0].nested.value = 99
+
+      const secondRows = await runAnalyticsQuery<{ nested: { value: number } }>(
+        "SELECT @value AS value",
+        { value: 42 },
+        { queryName: "test_cache_clones", ttlMs: 1_000 },
+      )
+      assert.deepEqual(secondRows, [{ nested: { value: 42 } }])
+      secondRows[0].nested.value = 77
+
+      const thirdRows = await runAnalyticsQuery<{ nested: { value: number } }>(
+        "SELECT @value AS value",
+        { value: 42 },
+        { queryName: "test_cache_clones", ttlMs: 1_000 },
+      )
+
+      assert.equal(queryCalls, 1)
+      assert.deepEqual(thirdRows, [{ nested: { value: 42 } }])
+    },
+  )
 })
 
 test("supervisor routes four agent domains and respects explicit override", () => {
@@ -1102,6 +1295,77 @@ test("executeToolPlan preserves order while running independent tools concurrent
   assert.ok(Date.now() - startedAt < 190)
 })
 
+test("executeToolPlan with maxConcurrency 1 runs tools sequentially", async () => {
+  let activeExecutions = 0
+  let maxActiveExecutions = 0
+  const executionOrder: string[] = []
+  const makeTool = (name: string) => ({
+    name,
+    agentId: "finance" as const,
+    description: name,
+    inputSchema: z.object({}),
+    sourceName: "fixture",
+    live: false,
+    maxRows: 10,
+    timeoutMs: 1_000,
+    async execute(input: { period: { label: string } }) {
+      activeExecutions += 1
+      maxActiveExecutions = Math.max(maxActiveExecutions, activeExecutions)
+      executionOrder.push(name)
+      await delay(20)
+      activeExecutions -= 1
+
+      return {
+        toolName: name,
+        sourceName: "fixture",
+        checkedAt: "2026-06-18T00:00:00.000Z",
+        period: input.period.label,
+        dataStatus: "ok" as const,
+        live: false,
+      }
+    },
+  })
+  const registry = new Map([
+    ["tool_a", makeTool("tool_a")],
+    ["tool_b", makeTool("tool_b")],
+  ])
+
+  const results = await executeToolPlan({
+    toolNames: ["tool_a", "tool_b"],
+    agentId: "finance",
+    input: {
+      request: {
+        clinicId: "clinic-1",
+        clinicCode: "ABC",
+        agent: "finance",
+        message: "test",
+      },
+      clinic: {
+        clinicId: "clinic-1",
+        clinicCode: "ABC",
+      },
+      period: {
+        fromDate: "2026-06-18",
+        toDate: "2026-06-18",
+        label: "today",
+      },
+      intent: "test",
+      requestContext: {
+        userId: "user-1",
+      },
+    },
+    registry,
+    maxConcurrency: 1,
+  })
+
+  assert.deepEqual(
+    results.map((result) => result.toolName),
+    ["tool_a", "tool_b"],
+  )
+  assert.deepEqual(executionOrder, ["tool_a", "tool_b"])
+  assert.equal(maxActiveExecutions, 1)
+})
+
 test("executeToolPlan returns unavailable for one failing tool without failing the plan", async () => {
   const makeTool = (name: string, shouldFail = false) => ({
     name,
@@ -1232,6 +1496,55 @@ test("narrative timeout returns deterministic response", async () => {
   assert.equal(result.response, deterministicResponse)
   assert.equal(result.fallbackUsed, true)
   assert.ok(Date.now() - startedAt < 90)
+})
+
+test("AGENT_NARRATIVE_ENABLED false returns deterministic response", async () => {
+  const originalEnabled = env.AGENT_NARRATIVE_ENABLED
+  const deterministicResponse = buildDeterministicAgentResponseFixture()
+  let providerCalled = false
+
+  env.AGENT_NARRATIVE_ENABLED = false
+
+  try {
+    const result = await enhanceAgentResponseNarrative(deterministicResponse, {
+      memories: [],
+      provider: {
+        modelName: "fixture",
+        async generateJson() {
+          providerCalled = true
+          return JSON.stringify({ assistantMessage: "AI narrative." })
+        },
+      },
+    })
+
+    assert.equal(result.response, deterministicResponse)
+    assert.equal(result.fallbackUsed, true)
+    assert.equal(providerCalled, false)
+  } finally {
+    env.AGENT_NARRATIVE_ENABLED = originalEnabled
+  }
+})
+
+test("successful narrative updates assistant message only", async () => {
+  const deterministicResponse = buildDeterministicAgentResponseFixture()
+
+  const result = await enhanceAgentResponseNarrative(deterministicResponse, {
+    memories: [],
+    provider: {
+      modelName: "fixture",
+      async generateJson() {
+        return JSON.stringify({ assistantMessage: "AI narrative." })
+      },
+    },
+  })
+
+  assert.equal(result.fallbackUsed, false)
+  assert.equal(result.response.assistantMessage, "AI narrative.")
+  assert.equal(result.response.summary, deterministicResponse.summary)
+  assert.equal(result.response.metrics, deterministicResponse.metrics)
+  assert.equal(result.response.tables, deterministicResponse.tables)
+  assert.equal(result.response.recommendations, deterministicResponse.recommendations)
+  assert.equal(result.response.sources, deterministicResponse.sources)
 })
 
 test("response builder keeps tool metrics and source metadata grounded", () => {
