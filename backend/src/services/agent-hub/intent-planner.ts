@@ -4,7 +4,7 @@ import { formatDateKeyInTimeZone, normalizeTimeZone } from "../telegram/time.js"
 import { hasCustomerEntityReference, hasExplicitCustomerSearchIntent, isCustomer360Question } from "./customer-query.js";
 import { buildReadOnlyRefusalMessage, isDangerousBusinessMutationRequest } from "./read-only-guard.js";
 import { isService360Question } from "./service-query.js";
-import { resolveAgent } from "./supervisor.js";
+import { isAppointmentLedgerQuestion, resolveAgent } from "./supervisor.js";
 import type {
   AgentPeriod,
   GreatTimeAgentChatRequest,
@@ -242,7 +242,7 @@ function detectBusinessIntent(message: string) {
 }
 
 function detectAppointmentIntent(message: string) {
-  const asksAppointmentLedger = /appointment|appointments|booking|bookings|schedule|ချိန်း|ဘိုကင်/i.test(message);
+  const asksAppointmentLedger = /appointment|appointments|booking|bookings|schedule|ချိန်း|ဘိုကင်/i.test(message) || isAppointmentLedgerQuestion(message);
   if (/waiting|not\s+(?:have\s+)?started|have\s+not\s+started|has\s+not\s+started|haven't\s+started|hasn't\s+started|မစ/i.test(message)) {
     return "waiting_customers";
   }
@@ -267,7 +267,7 @@ function detectAppointmentIntent(message: string) {
   if (/check[- ]?in|checked[- ]?in|checked in|arrived|ရောက်/i.test(message)) {
     return "checked_in_customers";
   }
-  if (/live|right now|currently|now|ယခု|အခု/i.test(message) && asksAppointmentLedger) {
+  if (/live|right now|currently|\bnow\b|ယခု|အခု/i.test(message) && asksAppointmentLedger) {
     return "live_appointment_counts";
   }
   if (

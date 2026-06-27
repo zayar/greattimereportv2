@@ -1222,6 +1222,16 @@ test("supervisor routes appointment questions with customer or service words to 
     resolveAgent({ requestedAgent: "auto", message: "What service are appointments today?" }).resolvedAgent,
     "appointment",
   )
+  assert.equal(
+    resolveAgent({ requestedAgent: "auto", message: "I want to know which customers doing witch service today?" }).resolvedAgent,
+    "appointment",
+  )
+  assert.equal(
+    resolveAgent({ requestedAgent: "auto", message: "Which customers are doing which service with which therapist today?" }).resolvedAgent,
+    "appointment",
+  )
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "ဘယ်သူတွေဒီနေ့လာလဲ?" }).resolvedAgent, "appointment")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "ဒီနေ့ ဘယ်သူတွေ ဘာ service လုပ်လဲ" }).resolvedAgent, "appointment")
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "appointment sales" }).resolvedAgent, "finance")
 })
 
@@ -1988,6 +1998,30 @@ test("planner maps appointment count questions to the live count tool and lists 
   assert.equal(servicesTodayPlan.resolvedAgent, "appointment")
   assert.equal(servicesTodayPlan.intent, "appointment_list")
   assert.deepEqual(servicesTodayPlan.toolNames, ["get_appointment_ledger"])
+
+  const customerServiceTodayPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "I want to know which customers doing witch service today?",
+    },
+  })
+  assert.equal(customerServiceTodayPlan.resolvedAgent, "appointment")
+  assert.equal(customerServiceTodayPlan.intent, "appointment_list")
+  assert.deepEqual(customerServiceTodayPlan.toolNames, ["get_appointment_ledger"])
+
+  const myanmarWhoComingPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "ဘယ်သူတွေဒီနေ့လာလဲ?",
+    },
+  })
+  assert.equal(myanmarWhoComingPlan.resolvedAgent, "appointment")
+  assert.equal(myanmarWhoComingPlan.intent, "appointment_list")
+  assert.deepEqual(myanmarWhoComingPlan.toolNames, ["get_appointment_ledger"])
 })
 
 test("source error sanitizer hides APICORE Prisma pool details", () => {

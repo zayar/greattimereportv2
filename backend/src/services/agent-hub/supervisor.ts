@@ -27,15 +27,25 @@ function scoreAgent(message: string, agentId: GreatTimeAgentId) {
   return KEYWORDS[agentId].reduce((score, keyword) => score + (keyword.test(message) ? 1 : 0), 0);
 }
 
-function isAppointmentLedgerQuestion(message: string) {
+export function isAppointmentLedgerQuestion(message: string) {
   const mentionsAppointment = /appointment|appointments|booking|bookings|schedule|ချိန်း|ဘိုကင်/i.test(message);
+  const mentionsToday = /today|\bnow\b|right now|this\s+(?:morning|afternoon|evening)|ဒီနေ့|ယနေ့|အခု|ယခု/i.test(message);
+  const asksWhoIsComingToday =
+    /(?:who|which\s+customers?|customers?|members?)[\s\S]{0,80}(?:coming|come|arriv(?:e|ing)|visit(?:ing)?)[\s\S]{0,80}today|today[\s\S]{0,80}(?:who|which\s+customers?|customers?|members?)[\s\S]{0,80}(?:coming|come|arriv(?:e|ing)|visit(?:ing)?)|ဘယ်သူ[\s\S]{0,80}(?:ဒီနေ့|ယနေ့)[\s\S]{0,80}လာ|(?:ဒီနေ့|ယနေ့)[\s\S]{0,80}ဘယ်သူ[\s\S]{0,80}လာ/i.test(
+      message,
+    );
+  const asksCustomerServiceRoster =
+    mentionsToday &&
+    /customer|customers|member|members|who|which|ဘယ်သူ|ဖောက်သည်/i.test(message) &&
+    /service|services|therapist|therapists|practitioner|practitioners|doctor|ဝန်ဆောင်မှု|ဆရာဝန်|ကုသ/i.test(message) &&
+    /doing|do|getting|taking|with|for|handle|handled|assigned|လုပ်|ကုသ|လာ/i.test(message);
   const asksLedgerDetail =
     /today|ဒီနေ့|who|what|which|list|show|all|customer|customers|member|members|service|services|therapist|therapists|practitioner|practitioners|ဘယ်သူ|ဝန်ဆောင်မှု|ဖောက်သည်/i.test(
       message,
     );
-  const asksFinance = /sales?|revenue|payment|collection|collected|invoice|ငွေ|ရောင်း|ဝင်ငွေ/i.test(message);
+  const asksFinance = /sales?|revenue|payment|collection|collected|invoice|purchase|purchased|bought|buy|ငွေ|ရောင်း|ဝင်ငွေ|ဝယ်/i.test(message);
 
-  return mentionsAppointment && asksLedgerDetail && !asksFinance;
+  return ((mentionsAppointment && asksLedgerDetail) || asksWhoIsComingToday || asksCustomerServiceRoster) && !asksFinance;
 }
 
 function isNamedCustomerPurchaseQuestion(message: string) {
