@@ -12,7 +12,7 @@ export type AgentDataStatus =
   | "not_ready"
   | "stale";
 
-export type AgentSourceScope = "live" | "historical" | "learned";
+export type AgentSourceScope = "live" | "historical" | "learned" | "cache";
 
 export type GreatTimeAgentEntityType = "customer" | "appointment" | "service" | "practitioner" | "invoice";
 
@@ -78,6 +78,11 @@ export type GreatTimeAgentSource = {
   freshnessSeconds?: number;
   live?: boolean;
   scope?: AgentSourceScope;
+  dateRange?: {
+    fromDate: string;
+    toDate: string;
+    timezone?: string;
+  };
 };
 
 export type GreatTimeAgentWarning = {
@@ -306,11 +311,13 @@ export type AgentToolResult = {
   period?: string;
   dataStatus: AgentDataStatus;
   live?: boolean;
+  freshnessSeconds?: number;
   metrics?: GreatTimeAgentMetric[];
   tables?: GreatTimeAgentTable[];
   recommendations?: GreatTimeAgentRecommendation[];
   warnings?: GreatTimeAgentWarning[];
   summary?: string;
+  data?: Record<string, unknown>;
   entityRefs?: GreatTimeAgentEntityContext[];
   sources?: GreatTimeAgentSource[];
   customer360?: Customer360FactPack;

@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import { combineStatuses, newId, nowIso } from "./safety.js";
 import type {
+  AgentSourceScope,
   AgentToolResult,
   Customer360FactPack,
+  GreatTimeAgentSource,
   GreatTimeAgentChatRequest,
   GreatTimeAgentChatResponse,
   GreatTimeAgentIntentPlan,
@@ -242,6 +244,170 @@ function stableRecommendationId(params: {
   return `rec_${hash}`;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function recordsFrom(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+function stringFrom(value: unknown) {
+  return typeof value === "string" && value.trim().length ? value.trim() : undefined;
+}
+
+function sourceScopeFrom(value: unknown): AgentSourceScope | undefined {
+  return value === "live" || value === "historical" || value === "learned" || value === "cache" ? value : undefined;
+}
+
+function formatOwnerBriefMetric(metric: Record<string, unknown>) {
+  const label = stringFrom(metric.label);
+  const value = metric.value;
+
+  if (!label || value == null) {
+    return null;
+  }
+
+  const formattedValue = typeof value === "number" ? value.toLocaleString("en-US") : String(value);
+  return `${label}: ${formattedValue}`;
+}
+
+function numberedLines(items: string[], fallback: string) {
+  const lines = items.filter(Boolean).slice(0, 5);
+  const body = lines.length ? lines : [fallback];
+
+  return body.map((item, index) => `${index + 1}. ${item}`).join("\n");
+}
+
+function formatOwnerBriefItems(items: Record<string, unknown>[], emptyMessage: string) {
+  const lines = items.map((item) => {
+    const title = stringFrom(item.title);
+    const reason = stringFrom(item.reason);
+    const severity = stringFrom(item.severity);
+    const priority = typeof item.priority === "number" ? `Priority ${item.priority}` : undefined;
+    const qualifier = severity ?? priority;
+
+    if (!title && !reason) {
+      return "";
+    }
+
+    const titleText = title ?? reason ?? "";
+    const suffix = reason && title ? ` - ${reason}` : "";
+    return `${titleText}${qualifier ? ` (${qualifier})` : ""}${suffix}`;
+  });
+
+  return numberedLines(lines, emptyMessage);
+}
+
+function ownerBriefSourcesFrom(result: AgentToolResult): GreatTimeAgentSource[] {
+  if (result.sources?.length) {
+    return result.sources;
+  }
+
+  const dataSources = recordsFrom(result.data?.sources);
+  return dataSources
+    .map((source) => ({
+      tool: stringFrom(source.tool) ?? result.toolName,
+      sourceName: stringFrom(source.sourceName) ?? result.sourceName,
+      checkedAt: stringFrom(source.checkedAt) ?? result.checkedAt,
+      period: stringFrom(source.period),
+      dataStatus: stringFrom(source.dataStatus) === "partial" ? "partial" : result.dataStatus,
+      freshnessSeconds: typeof source.freshnessSeconds === "number" ? source.freshnessSeconds : undefined,
+      live: typeof source.live === "boolean" ? source.live : result.live,
+      scope: sourceScopeFrom(source.scope),
+    }))
+    .slice(0, 6);
+}
+
+function hasOwnerBriefSnapshotSource(params: {
+  sources: GreatTimeAgentSource[];
+  metrics: Record<string, unknown>[];
+  snapshotType: string;
+  sourceNamePattern: RegExp;
+}) {
+  return (
+    params.metrics.some((metric) => metric.sourceSnapshotType === params.snapshotType) ||
+    params.sources.some((source) => params.sourceNamePattern.test(source.sourceName))
+  );
+}
+
+function missingOwnerBriefSourceNames(result: AgentToolResult) {
+  const sources = ownerBriefSourcesFrom(result);
+  const metrics = recordsFrom(result.data?.metrics);
+  const missing: string[] = [];
+
+  if (!hasOwnerBriefSnapshotSource({ sources, metrics, snapshotType: "finance_daily_snapshot", sourceNamePattern: /finance daily/i })) {
+    missing.push("finance daily snapshot");
+  }
+
+  if (
+    !hasOwnerBriefSnapshotSource({
+      sources,
+      metrics,
+      snapshotType: "appointment_daily_profile",
+      sourceNamePattern: /appointment daily/i,
+    })
+  ) {
+    missing.push("appointment daily profile");
+  }
+
+  return missing;
+}
+
+function formatOwnerBriefFreshness(result: AgentToolResult) {
+  const sources = ownerBriefSourcesFrom(result);
+
+  if (!sources.length) {
+    return "Data source: no useful owner brief snapshots were available.";
+  }
+
+  const sourceNotes = sources.slice(0, 4).map((source) => {
+    const freshness =
+      typeof source.freshnessSeconds === "number" ? ` (${Math.max(0, Math.round(source.freshnessSeconds))}s fresh)` : "";
+    return `${source.sourceName} checked at ${source.checkedAt}${freshness}`;
+  });
+
+  return `Data source: ${sourceNotes.join("; ")}.`;
+}
+
+function buildOwnerDailyBriefMessage(result: AgentToolResult) {
+  if (result.dataStatus === "not_ready") {
+    return [
+      "Owner daily brief is not ready yet.",
+      "",
+      "No source-backed owner brief snapshots were available. Run the Agent learning/snapshot job, or ask the normal finance, appointment, and business report tools for a live/source-backed view.",
+      "",
+      formatOwnerBriefFreshness(result),
+    ].join("\n");
+  }
+
+  const data = isRecord(result.data) ? result.data : {};
+  const headline = stringFrom(data.headline) ?? result.summary ?? "Here is today's owner brief.";
+  const metrics = recordsFrom(data.metrics).map(formatOwnerBriefMetric).filter((line): line is string => Boolean(line));
+  const risks = recordsFrom(data.risks);
+  const actions = recordsFrom(data.recommendedActions);
+  const missingSources = result.dataStatus === "partial" ? missingOwnerBriefSourceNames(result) : [];
+  const partialNote = missingSources.length ? `This brief is partial: missing ${missingSources.join(" and ")}.` : undefined;
+
+  return [
+    "Here is today's owner brief.",
+    "",
+    headline,
+    ...(partialNote ? ["", partialNote] : []),
+    "",
+    "Key metrics:",
+    numberedLines(metrics, "No source-backed key metrics were available yet."),
+    "",
+    "What needs attention:",
+    formatOwnerBriefItems(risks, "No high-priority risk cards were available from snapshots."),
+    "",
+    "Recommended next actions:",
+    formatOwnerBriefItems(actions, "No recommended action cards were available yet."),
+    "",
+    formatOwnerBriefFreshness(result),
+  ].join("\n");
+}
+
 export function buildAgentResponse(params: {
   request: GreatTimeAgentChatRequest;
   plan: GreatTimeAgentIntentPlan;
@@ -279,7 +445,10 @@ export function buildAgentResponse(params: {
   const customer360 = params.toolResults.find((result) => result.customer360)?.customer360;
   const service360 = params.toolResults.find((result) => result.service360)?.service360;
   const entityContext = params.toolResults.flatMap((result) => result.entityRefs ?? [])[0] ?? params.request.entityContext;
-  const summary = params.unsupportedReason ?? defaultSummary(params.plan, params.toolResults);
+  const ownerDailyBriefResult = params.toolResults.find((result) => result.toolName === "get_owner_daily_brief");
+  const summary =
+    params.unsupportedReason ??
+    (ownerDailyBriefResult ? buildOwnerDailyBriefMessage(ownerDailyBriefResult) : defaultSummary(params.plan, params.toolResults));
   const sources = params.toolResults.flatMap((result) =>
     result.sources?.length
       ? result.sources

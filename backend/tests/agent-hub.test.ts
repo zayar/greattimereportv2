@@ -13,20 +13,35 @@ const {
   getAnalyticsQueryCacheStats,
   runAnalyticsQuery,
 } = await import("../src/services/bigquery.service.ts")
+const { runWithAnalyticsQueryContext } = await import("../src/services/analytics-query-context.ts")
 const { normalizeAppointmentLifecycle } = await import("../src/services/agent-hub/appointment-lifecycle.ts")
 const { isActiveCheckedInAppointment, isCountableTodayAppointment } = await import("../src/services/agent-hub/appointment-live.service.ts")
 const { composeCustomer360Summary } = await import("../src/services/agent-hub/customer-360.service.ts")
 const { resolveEntityReference } = await import("../src/services/agent-hub/entity-context.ts")
-const { extractAgentPeriod, planAgentRequest } = await import("../src/services/agent-hub/intent-planner.ts")
+const {
+  extractAgentPeriod,
+  isOwnerDailyBriefIntentMessage,
+  planAgentRequest,
+  toolsForBusinessOwnerDailyBrief,
+} = await import("../src/services/agent-hub/intent-planner.ts")
 const { buildAgentResponse } = await import("../src/services/agent-hub/response-builder.ts")
 const { sanitizeError } = await import("../src/services/agent-hub/safety.ts")
 const { resolveAgent } = await import("../src/services/agent-hub/supervisor.ts")
 const { assertToolAllowed, executeToolPlan } = await import("../src/services/agent-hub/tool-executor.ts")
 const { createAgentToolRegistry, getAgentToolAllowlist } = await import("../src/services/agent-hub/tool-registry.ts")
 const { extractInvoiceSearch } = await import("../src/services/agent-hub/tools/finance.tools.ts")
+const { buildFinanceSnapshotSummaryResult, createFinanceTools } = await import("../src/services/agent-hub/tools/finance.tools.ts")
+const { buildAppointmentCountResultFromSnapshot, createAppointmentTools } = await import("../src/services/agent-hub/tools/appointment.tools.ts")
+const { buildOwnerDailyBriefFromSnapshots, selectOwnerDailyBriefDate } = await import("../src/services/agent-hub/tools/business.tools.ts")
 const { extractLikelyCustomerSearchText } = await import("../src/services/agent-hub/customer-query.ts")
 const { extractExplicitServiceSearchText } = await import("../src/services/agent-hub/service-query.ts")
 const { enhanceAgentResponseNarrative } = await import("../src/services/agent-hub/narrative.service.ts")
+const {
+  buildSnapshotUnavailableWarning,
+  evaluateFactSnapshotForRequest,
+  factSnapshotToAgentSource,
+  isCompletedHistoricalDay,
+} = await import("../src/services/agent-hub/snapshot-cache.service.ts")
 const {
   askAgentHub,
   buildLockedAgentHubResponse,
@@ -124,6 +139,197 @@ function buildDeterministicAgentResponseFixture() {
   } as const
 }
 
+function buildAgentToolInputFixture(overrides?: Partial<{
+  fromDate: string
+  toDate: string
+  label: string
+  timezone: string
+  intent: string
+}>) {
+  return {
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      message: "daily brief",
+      timezone: overrides?.timezone ?? "Asia/Yangon",
+    },
+    clinic: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+    },
+    period: {
+      fromDate: overrides?.fromDate ?? "2026-06-26",
+      toDate: overrides?.toDate ?? "2026-06-26",
+      label: overrides?.label ?? "yesterday",
+    },
+    intent: overrides?.intent ?? "owner_daily_brief",
+    requestContext: {
+      userId: "user-1",
+    },
+  } as const
+}
+
+function buildFactSnapshotFixture(overrides?: Partial<{
+  snapshotType: string
+  checkedAt: string
+  expiresAt: string | null
+  fromDate: string
+  toDate: string
+  summary: Record<string, unknown>
+}>) {
+  return {
+    id: `fact-${overrides?.snapshotType ?? "finance_daily_snapshot"}`,
+    clinicId: "clinic-1",
+    clinicCode: "ABC",
+    snapshotType: overrides?.snapshotType ?? "finance_daily_snapshot",
+    bucket: "2026-06-26+Asia/Yangon",
+    source: "GreatTime source-backed snapshot",
+    checkedAt: overrides?.checkedAt ?? "2026-06-27T01:00:00.000Z",
+    dataStatus: "ok",
+    expiresAt: overrides?.expiresAt ?? null,
+    dateRange: {
+      fromDate: overrides?.fromDate ?? "2026-06-26",
+      toDate: overrides?.toDate ?? "2026-06-26",
+      timezone: "Asia/Yangon",
+    },
+    summary:
+      overrides?.summary ??
+      {
+        sales: {
+          totalRevenue: 1200,
+          invoiceCount: 3,
+          customerCount: 2,
+          averageInvoice: 400,
+        },
+        payments: {
+          totalAmount: 1100,
+          invoiceCount: 3,
+          methodsCount: 2,
+          averageInvoice: 366.67,
+        },
+      },
+  } as const
+}
+
+function buildInsightCardFixture(overrides?: Partial<{
+  id: string
+  type: "unused_package_recovery" | "inactive_high_value_customer" | "rising_cancellations_no_shows" | "collections_below_sales"
+  title: string
+  summary: string
+  score: number
+}>) {
+  const id = overrides?.id ?? "card-1"
+  const type = overrides?.type ?? "unused_package_recovery"
+
+  return {
+    id,
+    clinicId: "clinic-1",
+    dedupeKey: `${type}:fixture`,
+    type,
+    impactArea: "owner_brief",
+    title: overrides?.title ?? "Fixture insight",
+    summary: overrides?.summary ?? "Fixture source-backed insight.",
+    basePriorityScore: overrides?.score ?? 70,
+    personalizedPriorityScore: overrides?.score ?? 70,
+    evidenceRefs: ["fixture:evidence"],
+    sourceTools: ["fixture_tool"],
+    checkedAt: "2026-06-27T01:00:00.000Z",
+    expiresAt: "2026-07-04T01:00:00.000Z",
+    status: "new",
+    verificationNeeded: true,
+    createdAt: "2026-06-27T01:00:00.000Z",
+    updatedAt: "2026-06-27T01:00:00.000Z",
+  } as const
+}
+
+function requireTool(tools: ReturnType<typeof createFinanceTools> | ReturnType<typeof createAppointmentTools>, name: string) {
+  const tool = tools.find((item) => item.name === name)
+  assert.ok(tool, `Expected tool ${name} to be registered`)
+  return tool
+}
+
+function buildSalesReportFixture(overrides?: Partial<{
+  totalRevenue: number
+  invoiceCount: number
+}>) {
+  const totalRevenue = overrides?.totalRevenue ?? 990
+  const invoiceCount = overrides?.invoiceCount ?? 2
+
+  return {
+    summary: {
+      totalRevenue,
+      invoiceCount,
+      customerCount: 2,
+      averageInvoice: invoiceCount ? totalRevenue / invoiceCount : 0,
+    },
+    trend: [],
+    topServices: [
+      {
+        serviceName: "Fixture service",
+        totalRevenue,
+        invoiceCount,
+      },
+    ],
+    rows: [],
+    totalCount: invoiceCount,
+  }
+}
+
+function buildPaymentReportFixture(overrides?: Partial<{
+  totalAmount: number
+  invoiceCount: number
+}>) {
+  const totalAmount = overrides?.totalAmount ?? 880
+  const invoiceCount = overrides?.invoiceCount ?? 2
+
+  return {
+    summary: {
+      totalAmount,
+      invoiceCount,
+      methodsCount: 1,
+      averageInvoice: invoiceCount ? totalAmount / invoiceCount : 0,
+    },
+    methods: [],
+    rows: [],
+    totalCount: invoiceCount,
+  }
+}
+
+function buildLiveAppointmentSnapshotFixture() {
+  return {
+    checkedAt: "2026-06-27T02:00:00.000Z",
+    dataStatus: "ok" as const,
+    rows: [
+      {
+        appointmentId: "appt-1",
+        customerName: "Fixture Customer",
+        customerPhoneMasked: "********1234",
+        customerPhone: "0912341234",
+        serviceName: "Fixture service",
+        practitionerName: "Fixture practitioner",
+        scheduledFrom: "2026-06-27T04:00:00.000Z",
+        scheduledTo: "2026-06-27T05:00:00.000Z",
+        checkInTime: null,
+        checkOutTime: null,
+        rawStatus: "BOOKED",
+        lifecycleState: "booked" as const,
+        stateConfidence: "confirmed" as const,
+        sourceType: "booking" as const,
+      },
+    ],
+    countsByLifecycle: {
+      booked: 1,
+    },
+    countsByService: {
+      "Fixture service": 1,
+    },
+    countsByPractitioner: {
+      "Fixture practitioner": 1,
+    },
+    warnings: [],
+  }
+}
+
 test("env defaults parse Agent Hub and BigQuery performance knobs", () => {
   const parsed = parseEnv({
     APICORE_GRAPHQL_URL: "https://example.com/graphql",
@@ -140,6 +346,595 @@ test("env defaults parse Agent Hub and BigQuery performance knobs", () => {
   assert.equal(parsed.AGENT_NARRATIVE_ENABLED, true)
   assert.equal(parsed.AGENT_FAST_MODE_ENABLED, true)
   assert.equal(parsed.AGENT_NARRATIVE_TIMEOUT_MS, 1_500)
+  assert.equal(parsed.AGENT_SNAPSHOT_CACHE_ENABLED, true)
+  assert.equal(parsed.AGENT_SNAPSHOT_MAX_AGE_MINUTES, 1_440)
+  assert.equal(parsed.AGENT_OPERATIONAL_SNAPSHOT_MAX_AGE_MINUTES, 20)
+  assert.equal(parsed.AGENT_COMPLETED_DAY_SNAPSHOT_ENABLED, true)
+  assert.equal(parsed.AGENT_OWNER_DAILY_BRIEF_ENABLED, true)
+})
+
+test("completed historical day helper accepts yesterday and rejects today or tomorrow", () => {
+  const now = new Date("2026-06-27T14:00:00.000Z")
+
+  assert.equal(
+    isCompletedHistoricalDay({
+      fromDate: "2026-06-26",
+      toDate: "2026-06-26",
+      timezone: "Asia/Yangon",
+      now,
+    }),
+    true,
+  )
+  assert.equal(
+    isCompletedHistoricalDay({
+      fromDate: "2026-06-27",
+      toDate: "2026-06-27",
+      timezone: "Asia/Yangon",
+      now,
+    }),
+    false,
+  )
+  assert.equal(
+    isCompletedHistoricalDay({
+      fromDate: "2026-06-25",
+      toDate: "2026-06-26",
+      timezone: "Asia/Yangon",
+      now,
+    }),
+    false,
+  )
+  assert.equal(
+    isCompletedHistoricalDay({
+      fromDate: "2026-06-28",
+      toDate: "2026-06-28",
+      timezone: "Asia/Yangon",
+      now,
+    }),
+    false,
+  )
+  assert.equal(
+    isCompletedHistoricalDay({
+      fromDate: "2026-06-26",
+      toDate: "2026-06-26",
+      timezone: "Asia/Yangon",
+      now: new Date("2026-06-26T18:00:00.000Z"),
+    }),
+    true,
+  )
+  assert.equal(
+    isCompletedHistoricalDay({
+      fromDate: "2026-06-27",
+      toDate: "2026-06-27",
+      timezone: "Asia/Yangon",
+      now: new Date("2026-06-26T18:00:00.000Z"),
+    }),
+    false,
+  )
+})
+
+test("snapshot freshness accepts fresh matching snapshots and rejects expired snapshots", () => {
+  const freshSnapshot = buildFactSnapshotFixture({
+    checkedAt: "2026-06-27T00:59:30.000Z",
+    expiresAt: "2026-06-27T02:00:00.000Z",
+  })
+  const expiredSnapshot = buildFactSnapshotFixture({
+    checkedAt: "2026-06-27T00:59:30.000Z",
+    expiresAt: "2026-06-27T00:59:59.000Z",
+  })
+  const request = {
+    clinicId: "clinic-1",
+    snapshotType: "finance_daily_snapshot",
+    expectedFromDate: "2026-06-26",
+    expectedToDate: "2026-06-26",
+    maxAgeMs: 60_000,
+    now: new Date("2026-06-27T01:00:00.000Z"),
+  }
+
+  const accepted = evaluateFactSnapshotForRequest(freshSnapshot, request)
+  const expired = evaluateFactSnapshotForRequest(expiredSnapshot, request)
+
+  assert.equal(accepted?.id, freshSnapshot.id)
+  assert.equal(accepted?.freshnessSeconds, 30)
+  assert.equal(expired, null)
+})
+
+test("snapshot freshness rejects stale snapshots unless stale is allowed", () => {
+  const snapshot = buildFactSnapshotFixture({
+    checkedAt: "2026-06-25T00:00:00.000Z",
+  })
+  const fresh = evaluateFactSnapshotForRequest(snapshot, {
+    clinicId: "clinic-1",
+    snapshotType: "finance_daily_snapshot",
+    expectedFromDate: "2026-06-26",
+    expectedToDate: "2026-06-26",
+    maxAgeMs: 60_000,
+    now: new Date("2026-06-27T00:00:00.000Z"),
+  })
+  const staleAllowed = evaluateFactSnapshotForRequest(snapshot, {
+    clinicId: "clinic-1",
+    snapshotType: "finance_daily_snapshot",
+    expectedFromDate: "2026-06-26",
+    expectedToDate: "2026-06-26",
+    maxAgeMs: 60_000,
+    allowStale: true,
+    now: new Date("2026-06-27T00:00:00.000Z"),
+  })
+
+  assert.equal(fresh, null)
+  assert.equal(staleAllowed?.id, snapshot.id)
+})
+
+test("snapshot freshness rejects date range mismatch", () => {
+  const snapshot = buildFactSnapshotFixture({
+    fromDate: "2026-06-25",
+    toDate: "2026-06-25",
+  })
+  const result = evaluateFactSnapshotForRequest(snapshot, {
+    clinicId: "clinic-1",
+    snapshotType: "finance_daily_snapshot",
+    expectedFromDate: "2026-06-26",
+    expectedToDate: "2026-06-26",
+    maxAgeMs: 24 * 60 * 60_000,
+    now: new Date("2026-06-27T00:00:00.000Z"),
+  })
+
+  assert.equal(result, null)
+})
+
+test("missing snapshot evaluates to null so callers can use live fallback", () => {
+  const result = evaluateFactSnapshotForRequest(null, {
+    clinicId: "clinic-1",
+    snapshotType: "finance_daily_snapshot",
+    expectedFromDate: "2026-06-26",
+    expectedToDate: "2026-06-26",
+    maxAgeMs: 24 * 60 * 60_000,
+    now: new Date("2026-06-27T00:00:00.000Z"),
+  })
+
+  assert.equal(result, null)
+})
+
+test("finance snapshot source metadata includes checkedAt and freshness", () => {
+  const snapshot = evaluateFactSnapshotForRequest(buildFactSnapshotFixture(), {
+    clinicId: "clinic-1",
+    snapshotType: "finance_daily_snapshot",
+    expectedFromDate: "2026-06-26",
+    expectedToDate: "2026-06-26",
+    maxAgeMs: 24 * 60 * 60_000,
+    now: new Date("2026-06-27T01:00:30.000Z"),
+  })
+  assert.ok(snapshot)
+
+  const source = factSnapshotToAgentSource({
+    snapshot,
+    toolName: "get_sales_summary",
+    sourceName: "GreatTime learned finance daily snapshot",
+  })
+  const result = buildFinanceSnapshotSummaryResult({
+    input: buildAgentToolInputFixture(),
+    snapshot,
+    kind: "sales",
+  })
+
+  assert.equal(source.checkedAt, "2026-06-27T01:00:00.000Z")
+  assert.equal(source.freshnessSeconds, 30)
+  assert.equal(source.scope, "historical")
+  assert.deepEqual(source.dateRange, {
+    fromDate: "2026-06-26",
+    toDate: "2026-06-26",
+    timezone: "Asia/Yangon",
+  })
+  assert.equal(result.freshnessSeconds, 30)
+  assert.equal(result.sources?.[0]?.sourceName, "GreatTime learned finance daily snapshot")
+  assert.equal(result.sources?.[0]?.freshnessSeconds, 30)
+})
+
+test("finance snapshot result does not invent zeros for missing fields", () => {
+  const snapshot = buildFactSnapshotFixture({
+    summary: {
+      sales: {
+        totalRevenue: 1200,
+      },
+      payments: {},
+    },
+  })
+  const result = buildFinanceSnapshotSummaryResult({
+    input: buildAgentToolInputFixture(),
+    snapshot,
+    kind: "sales",
+  })
+
+  assert.deepEqual(result.metrics, [{ label: "Total sales", value: 1200, unit: "amount" }])
+  assert.equal(result.dataStatus, "ok")
+  assert.match(result.summary ?? "", /not available invoices/)
+  assert.equal(result.warnings?.[0]?.type, "finance_snapshot_partial")
+})
+
+test("finance summary uses completed-day finance snapshot without BigQuery fallback", async () => {
+  let fallbackCalls = 0
+  const salesTool = requireTool(
+    createFinanceTools({
+      getCompletedDayFinanceSnapshot: async () => buildFactSnapshotFixture(),
+      getSalesReport: async () => {
+        fallbackCalls += 1
+        return buildSalesReportFixture()
+      },
+      getPaymentReport: async () => buildPaymentReportFixture(),
+    }),
+    "get_sales_summary",
+  )
+
+  const result = await salesTool.execute(buildAgentToolInputFixture())
+
+  assert.equal(fallbackCalls, 0)
+  assert.equal(result.sourceName, "GreatTime learned finance daily snapshot")
+  assert.equal(result.live, false)
+  assert.equal(result.metrics?.find((metric) => metric.label === "Total sales")?.value, 1200)
+  assert.equal(result.sources?.[0]?.checkedAt, "2026-06-27T01:00:00.000Z")
+})
+
+test("finance summary falls back to existing report behavior when snapshot is missing", async () => {
+  let fallbackCalls = 0
+  const salesTool = requireTool(
+    createFinanceTools({
+      getCompletedDayFinanceSnapshot: async () => null,
+      getSalesReport: async () => {
+        fallbackCalls += 1
+        return buildSalesReportFixture({ totalRevenue: 990, invoiceCount: 2 })
+      },
+      getPaymentReport: async () => buildPaymentReportFixture(),
+    }),
+    "get_sales_summary",
+  )
+
+  const result = await salesTool.execute(buildAgentToolInputFixture())
+
+  assert.equal(fallbackCalls, 1)
+  assert.equal(result.sourceName, "BigQuery sales report")
+  assert.equal(result.metrics?.find((metric) => metric.label === "Total sales")?.value, 990)
+  assert.equal(result.dataStatus, "ok")
+})
+
+test("appointment snapshot count result labels operational and daily profile sources", () => {
+  const input = buildAgentToolInputFixture({
+    fromDate: "2026-06-26",
+    toDate: "2026-06-26",
+    label: "yesterday",
+    intent: "appointment_summary",
+  })
+  const operationalSnapshot = evaluateFactSnapshotForRequest(
+    buildFactSnapshotFixture({
+      snapshotType: "appointment_operational_snapshot",
+      summary: {
+        bookingAppointmentCount: 7,
+        lifecycleCounts: {
+          booked: 2,
+          checked_out: 4,
+          cancelled: 1,
+        },
+      },
+    }),
+    {
+      clinicId: "clinic-1",
+      snapshotType: "appointment_operational_snapshot",
+      expectedFromDate: "2026-06-26",
+      expectedToDate: "2026-06-26",
+      maxAgeMs: 24 * 60 * 60_000,
+      now: new Date("2026-06-27T01:00:30.000Z"),
+    },
+  )
+  const dailySnapshot = evaluateFactSnapshotForRequest(
+    buildFactSnapshotFixture({
+      snapshotType: "appointment_daily_profile",
+      summary: {
+        bookingAppointmentCount: 9,
+        lifecycleCounts: {
+          booked: 1,
+          checked_out: 8,
+        },
+      },
+    }),
+    {
+      clinicId: "clinic-1",
+      snapshotType: "appointment_daily_profile",
+      expectedFromDate: "2026-06-26",
+      expectedToDate: "2026-06-26",
+      maxAgeMs: 24 * 60 * 60_000,
+      now: new Date("2026-06-27T01:00:30.000Z"),
+    },
+  )
+  assert.ok(operationalSnapshot)
+  assert.ok(dailySnapshot)
+
+  const operationalResult = buildAppointmentCountResultFromSnapshot({
+    input,
+    snapshot: operationalSnapshot,
+    snapshotKind: "operational",
+  })
+  const dailyResult = buildAppointmentCountResultFromSnapshot({
+    input,
+    snapshot: dailySnapshot,
+    snapshotKind: "daily_profile",
+  })
+
+  assert.equal(operationalResult.sourceName, "GreatTime learned appointment operational snapshot")
+  assert.equal(operationalResult.freshnessSeconds, 30)
+  assert.equal(operationalResult.sources?.[0]?.scope, "learned")
+  assert.equal(dailyResult.sourceName, "GreatTime learned appointment daily profile")
+  assert.equal(dailyResult.sources?.[0]?.scope, "historical")
+  assert.equal(dailyResult.metrics?.[0]?.label, "Total appointments")
+})
+
+test("appointment count uses fresh operational snapshot without live fallback", async () => {
+  let liveCalls = 0
+  const countTool = requireTool(
+    createAppointmentTools({
+      getCompletedDayAppointmentProfileSnapshot: async () => null,
+      getOperationalAppointmentSnapshot: async () =>
+        buildFactSnapshotFixture({
+          snapshotType: "appointment_operational_snapshot",
+          summary: {
+            bookingAppointmentCount: 4,
+            lifecycleCounts: {
+              booked: 3,
+              treatment_in_progress: 1,
+            },
+          },
+        }),
+      fetchLiveSnapshot: async () => {
+        liveCalls += 1
+        return buildLiveAppointmentSnapshotFixture()
+      },
+    }),
+    "get_live_appointment_counts",
+  )
+
+  const result = await countTool.execute(buildAgentToolInputFixture({ fromDate: "2026-06-27", toDate: "2026-06-27", label: "today" }))
+
+  assert.equal(liveCalls, 0)
+  assert.equal(result.sourceName, "GreatTime learned appointment operational snapshot")
+  assert.equal(result.metrics?.find((metric) => metric.label === "Total appointments today")?.value, 4)
+  assert.equal(result.sources?.[0]?.scope, "learned")
+})
+
+test("appointment count falls back to live source when operational snapshot is stale or missing", async () => {
+  let liveCalls = 0
+  const countTool = requireTool(
+    createAppointmentTools({
+      getCompletedDayAppointmentProfileSnapshot: async () => null,
+      getOperationalAppointmentSnapshot: async () => null,
+      fetchLiveSnapshot: async () => {
+        liveCalls += 1
+        return buildLiveAppointmentSnapshotFixture()
+      },
+    }),
+    "get_live_appointment_counts",
+  )
+
+  const result = await countTool.execute(buildAgentToolInputFixture({ fromDate: "2026-06-27", toDate: "2026-06-27", label: "today" }))
+
+  assert.equal(liveCalls, 1)
+  assert.equal(result.sourceName, "APICORE live bookings and check-ins")
+  assert.equal(result.live, true)
+  assert.equal(result.metrics?.find((metric) => metric.label === "Total appointments today")?.value, 1)
+})
+
+test("appointment count uses completed historical day appointment daily profile", async () => {
+  let liveCalls = 0
+  const countTool = requireTool(
+    createAppointmentTools({
+      getCompletedDayAppointmentProfileSnapshot: async () =>
+        buildFactSnapshotFixture({
+          snapshotType: "appointment_daily_profile",
+          summary: {
+            bookingAppointmentCount: 6,
+            lifecycleCounts: {
+              checked_out: 5,
+              no_show: 1,
+            },
+          },
+        }),
+      getOperationalAppointmentSnapshot: async () => {
+        throw new Error("Operational snapshot should not be loaded when daily profile is available.")
+      },
+      fetchLiveSnapshot: async () => {
+        liveCalls += 1
+        return buildLiveAppointmentSnapshotFixture()
+      },
+    }),
+    "get_live_appointment_counts",
+  )
+
+  const result = await countTool.execute(buildAgentToolInputFixture({ intent: "appointment_summary" }))
+
+  assert.equal(liveCalls, 0)
+  assert.equal(result.sourceName, "GreatTime learned appointment daily profile")
+  assert.equal(result.metrics?.find((metric) => metric.label === "Total appointments")?.value, 6)
+  assert.equal(result.sources?.[0]?.scope, "historical")
+})
+
+test("snapshot unavailable warnings include reason-compatible types", () => {
+  const stale = buildSnapshotUnavailableWarning({
+    snapshotType: "finance_daily_snapshot",
+    reason: "stale",
+    checkedAt: "2026-06-25T00:00:00.000Z",
+  })
+  const mismatch = buildSnapshotUnavailableWarning({
+    snapshotType: "finance_daily_snapshot",
+    reason: "date_range_mismatch",
+    expectedFromDate: "2026-06-26",
+    expectedToDate: "2026-06-26",
+  })
+
+  assert.equal(stale.type, "snapshot_stale")
+  assert.match(stale.message, /2026-06-25/)
+  assert.equal(mismatch.type, "snapshot_date_range_mismatch")
+  assert.match(mismatch.message, /2026-06-26/)
+})
+
+test("owner daily brief returns partial when only one snapshot exists", () => {
+  const result = buildOwnerDailyBriefFromSnapshots({
+    input: buildAgentToolInputFixture(),
+    briefDate: "2026-06-26",
+    financeSnapshot: buildFactSnapshotFixture(),
+    appointmentSnapshot: null,
+    serviceSnapshot: null,
+    practitionerSnapshot: null,
+    insightCards: [],
+  })
+
+  assert.equal(result.dataStatus, "partial")
+  assert.equal(result.sourceName, "GreatTime owner daily brief snapshots")
+  assert.match(result.summary ?? "", /revenue 1,200/)
+  assert.equal(result.sources?.[0]?.sourceName, "GreatTime learned finance daily snapshot")
+  assert.equal(result.warnings?.[0]?.type, "owner_daily_brief_partial")
+  assert.equal((result.data as { headline?: string }).headline, result.summary)
+})
+
+test("owner daily brief returns ok with major snapshots and includes source freshness", () => {
+  const now = new Date("2026-06-27T01:00:30.000Z")
+  const financeSnapshot = evaluateFactSnapshotForRequest(buildFactSnapshotFixture(), {
+    clinicId: "clinic-1",
+    snapshotType: "finance_daily_snapshot",
+    expectedFromDate: "2026-06-26",
+    expectedToDate: "2026-06-26",
+    maxAgeMs: 60_000,
+    now,
+  })
+  const appointmentSnapshot = evaluateFactSnapshotForRequest(
+    buildFactSnapshotFixture({
+      snapshotType: "appointment_daily_profile",
+      summary: {
+        bookingAppointmentCount: 8,
+        lifecycleCounts: {
+          checked_out: 8,
+        },
+      },
+    }),
+    {
+      clinicId: "clinic-1",
+      snapshotType: "appointment_daily_profile",
+      expectedFromDate: "2026-06-26",
+      expectedToDate: "2026-06-26",
+      maxAgeMs: 60_000,
+      now,
+    },
+  )
+  assert.ok(financeSnapshot)
+  assert.ok(appointmentSnapshot)
+
+  const result = buildOwnerDailyBriefFromSnapshots({
+    input: buildAgentToolInputFixture(),
+    briefDate: "2026-06-26",
+    financeSnapshot,
+    appointmentSnapshot,
+    serviceSnapshot: null,
+    practitionerSnapshot: null,
+    insightCards: [],
+  })
+
+  assert.equal(result.dataStatus, "ok")
+  assert.equal(result.sources?.some((source) => source.sourceName === "GreatTime learned finance daily snapshot"), true)
+  assert.equal(result.sources?.some((source) => source.sourceName === "GreatTime learned appointment daily profile"), true)
+  assert.equal(result.sources?.[0]?.checkedAt, "2026-06-27T01:00:00.000Z")
+  assert.equal(result.sources?.[0]?.freshnessSeconds, 30)
+  assert.equal(result.metrics?.find((metric) => metric.label === "Revenue")?.value, 1200)
+  assert.equal(result.metrics?.find((metric) => metric.label === "Appointments")?.value, 8)
+})
+
+test("owner daily brief returns not_ready when no useful snapshots exist", () => {
+  const result = buildOwnerDailyBriefFromSnapshots({
+    input: buildAgentToolInputFixture(),
+    briefDate: "2026-06-26",
+    financeSnapshot: null,
+    appointmentSnapshot: null,
+    operationalSnapshot: null,
+    serviceSnapshot: null,
+    practitionerSnapshot: null,
+    insightCards: [],
+  })
+
+  assert.equal(result.dataStatus, "not_ready")
+  assert.equal(result.sources?.length ?? 0, 0)
+  assert.match(result.summary ?? "", /not ready/)
+})
+
+test("owner daily brief builds structured risks opportunities actions and operational metrics", () => {
+  const result = buildOwnerDailyBriefFromSnapshots({
+    input: buildAgentToolInputFixture(),
+    briefDate: "2026-06-26",
+    period: {
+      fromDate: "2026-06-26",
+      toDate: "2026-06-26",
+      timezone: "Asia/Yangon",
+    },
+    financeSnapshot: buildFactSnapshotFixture(),
+    appointmentSnapshot: buildFactSnapshotFixture({
+      snapshotType: "appointment_daily_profile",
+      summary: {
+        bookingAppointmentCount: 8,
+        lifecycleCounts: {
+          checked_out: 7,
+        },
+      },
+    }),
+    operationalSnapshot: buildFactSnapshotFixture({
+      snapshotType: "appointment_operational_snapshot",
+      fromDate: "2026-06-27",
+      toDate: "2026-06-27",
+      summary: {
+        bookingAppointmentCount: 5,
+        lifecycleCounts: {
+          treatment_in_progress: 2,
+        },
+      },
+    }),
+    serviceSnapshot: null,
+    practitionerSnapshot: null,
+    insightCards: [
+      buildInsightCardFixture({
+        id: "risk-card",
+        type: "rising_cancellations_no_shows",
+        title: "Cancellation risk",
+        summary: "Cancelled and no-show rows increased.",
+        score: 88,
+      }),
+      buildInsightCardFixture({
+        id: "opportunity-card",
+        type: "unused_package_recovery",
+        title: "Recover unused packages",
+        summary: "Customers have unused sessions.",
+        score: 82,
+      }),
+    ],
+  })
+  const data = result.data as {
+    period: { fromDate: string; toDate: string; timezone: string }
+    metrics: Array<{ label: string; value: string | number; sourceSnapshotType?: string }>
+    risks: Array<{ title: string; severity?: string; sourceInsightCardId?: string }>
+    opportunities: Array<{ title: string; sourceInsightCardId?: string }>
+    recommendedActions: Array<{ title: string; actionKind?: string; priority?: number }>
+  }
+
+  assert.equal(result.dataStatus, "ok")
+  assert.equal(data.period.timezone, "Asia/Yangon")
+  assert.equal(data.metrics.find((metric) => metric.label === "Today appointments")?.sourceSnapshotType, "appointment_operational_snapshot")
+  assert.equal(data.risks[0].sourceInsightCardId, "risk-card")
+  assert.equal(data.risks[0].severity, "high")
+  assert.equal(data.opportunities[0].sourceInsightCardId, "opportunity-card")
+  assert.equal(data.recommendedActions[0].actionKind, "rising_cancellations_no_shows")
+  assert.equal(result.tables?.[0]?.title, "Top risks")
+  assert.equal(result.recommendations?.length, 2)
+})
+
+test("owner daily brief selects yesterday when request period is not a completed day", () => {
+  const input = buildAgentToolInputFixture({
+    fromDate: "2026-06-01",
+    toDate: "2026-06-27",
+    label: "this month",
+  })
+
+  assert.equal(selectOwnerDailyBriefDate(input, new Date("2026-06-27T14:00:00.000Z")), "2026-06-26")
 })
 
 test("BigQuery cache key is stable for equivalent query params", () => {
@@ -232,6 +1027,46 @@ test("BigQuery forceRefresh bypasses cache", async () => {
       assert.deepEqual(secondRows, [{ value: 2 }])
       assert.equal(queryCalls, 2)
       assert.equal(getAnalyticsQueryCacheStats().hits, 0)
+    },
+  )
+})
+
+test("BigQuery analytics query context can bypass in-memory and BigQuery cache for learning jobs", async () => {
+  let queryCalls = 0
+  const queryOptions: unknown[] = []
+
+  await withMockedBigQuery(
+    async (options) => {
+      queryOptions.push(options)
+      queryCalls += 1
+      return [[{ value: queryCalls }]]
+    },
+    async () => {
+      const firstRows = await runAnalyticsQuery<{ value: number }>(
+        "SELECT @value AS value",
+        { value: 42 },
+        { queryName: "test_learning_context_cache", ttlMs: 1_000 },
+      )
+      const cachedRows = await runAnalyticsQuery<{ value: number }>(
+        "SELECT @value AS value",
+        { value: 42 },
+        { queryName: "test_learning_context_cache", ttlMs: 1_000 },
+      )
+      const freshRows = await runWithAnalyticsQueryContext(
+        {
+          queryNamePrefix: "learning.fixture",
+          ttlMs: 0,
+          forceRefresh: true,
+          useQueryCache: false,
+        },
+        () => runAnalyticsQuery<{ value: number }>("SELECT @value AS value", { value: 42 }),
+      )
+
+      assert.deepEqual(firstRows, [{ value: 1 }])
+      assert.deepEqual(cachedRows, [{ value: 1 }])
+      assert.deepEqual(freshRows, [{ value: 2 }])
+      assert.equal(queryCalls, 2)
+      assert.equal((queryOptions[1] as { useQueryCache?: boolean }).useQueryCache, false)
     },
   )
 })
@@ -432,6 +1267,49 @@ test("planner does not block read-only questions that mention collected or cance
   })
   assert.equal(appointmentPlan.intent, "cancelled_no_show")
   assert.deepEqual(appointmentPlan.toolNames, ["get_cancelled_no_show_customers"])
+})
+
+test("planner routes owner daily brief questions to the fast brief tool", () => {
+  const messages = [
+    "daily brief",
+    "morning brief",
+    "owner brief",
+    "what should I focus today",
+    "what should I focus on today",
+    "what needs attention",
+    "what should we do next",
+    "what are the risks today?",
+    "what are the opportunities today?",
+    "what should the owner know",
+    "business brief",
+    "ဒီနေ့ ဘာလုပ်ရမလဲ",
+    "ဘာကို focus လုပ်ရမလဲ",
+    "ဒီနေ့ အရေးကြီးတာ",
+    "daily summary",
+  ]
+
+  for (const message of messages) {
+    const plan = planAgentRequest({
+      request: {
+        clinicId: "clinic-1",
+        clinicCode: "ABC",
+        agent: "auto",
+        message,
+        timezone: "Asia/Yangon",
+      },
+      now: new Date("2026-06-27T14:00:00.000Z"),
+    })
+
+    assert.equal(plan.resolvedAgent, "business", message)
+    assert.equal(plan.intent, "owner_daily_brief", message)
+    assert.deepEqual(plan.toolNames, ["get_owner_daily_brief"], message)
+    assert.equal(isOwnerDailyBriefIntentMessage(message), true, message)
+  }
+})
+
+test("owner daily brief disabled tool selection falls back to business health", () => {
+  assert.deepEqual(toolsForBusinessOwnerDailyBrief(true), ["get_owner_daily_brief"])
+  assert.deepEqual(toolsForBusinessOwnerDailyBrief(false), ["get_business_health_snapshot"])
 })
 
 test("Agent Hub does not run appointment detail for export-only follow-ups", async () => {
@@ -1223,7 +2101,14 @@ test("appointment lifecycle does not claim treatment state from CHECKIN alone", 
 test("tool registry enforces per-agent allowlists", () => {
   const registry = createAgentToolRegistry()
   assert.ok(getAgentToolAllowlist("finance", registry).includes("get_sales_summary"))
+  assert.ok(getAgentToolAllowlist("business", registry).includes("get_owner_daily_brief"))
+  assert.equal(registry.get("get_owner_daily_brief")?.agentId, "business")
+  assert.equal(registry.get("get_owner_daily_brief")?.live, false)
   assert.equal(assertToolAllowed({ requestedToolName: "get_sales_summary", agentId: "finance", registry }).name, "get_sales_summary")
+  assert.equal(
+    assertToolAllowed({ requestedToolName: "get_owner_daily_brief", agentId: "business", registry }).name,
+    "get_owner_daily_brief",
+  )
   assert.throws(() => assertToolAllowed({ requestedToolName: "get_sales_summary", agentId: "appointment", registry }))
 })
 
@@ -1625,6 +2510,116 @@ test("response builder keeps tool metrics and source metadata grounded", () => {
   assert.equal(response.sources[0]?.tool, "get_sales_summary")
   assert.equal(response.dataStatus, "ok")
   assert.equal(response.actions[0]?.type, "read_only_agent_response")
+})
+
+test("response builder formats owner daily brief with grounded sections", () => {
+  const response = buildAgentResponse({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "business",
+      message: "daily brief",
+    },
+    sessionId: "session-1",
+    requestId: "request-1",
+    plan: {
+      requestedAgent: "business",
+      resolvedAgent: "business",
+      autoMode: false,
+      intent: "owner_daily_brief",
+      toolNames: ["get_owner_daily_brief"],
+      period: { fromDate: "2026-06-26", toDate: "2026-06-26", label: "yesterday" },
+    },
+    toolResults: [
+      {
+        toolName: "get_owner_daily_brief",
+        sourceName: "GreatTime owner daily brief snapshots",
+        checkedAt: "2026-06-27T01:00:00.000Z",
+        period: "2026-06-26",
+        dataStatus: "partial",
+        live: false,
+        summary: "Owner daily brief for 2026-06-26: revenue 1,200, appointments not ready.",
+        metrics: [{ label: "Revenue", value: 1200, unit: "amount" }],
+        sources: [
+          {
+            tool: "get_owner_daily_brief",
+            sourceName: "GreatTime learned finance daily snapshot",
+            checkedAt: "2026-06-27T01:00:00.000Z",
+            dataStatus: "ok",
+            live: false,
+            scope: "historical",
+            freshnessSeconds: 120,
+          },
+        ],
+        data: {
+          headline: "Owner daily brief for 2026-06-26: revenue 1,200, appointments not ready.",
+          metrics: [{ label: "Revenue", value: 1200, unit: "amount", sourceSnapshotType: "finance_daily_snapshot" }],
+          risks: [{ title: "Recover unused packages", reason: "Customers have unused sessions.", severity: "high" }],
+          recommendedActions: [{ title: "Call priority package customers", reason: "Start with high-priority unused package cards.", priority: 88 }],
+          sources: [],
+        },
+      },
+    ],
+  })
+
+  assert.match(response.assistantMessage, /Here is today's owner brief/)
+  assert.match(response.assistantMessage, /Key metrics:/)
+  assert.match(response.assistantMessage, /Revenue: 1,200/)
+  assert.match(response.assistantMessage, /What needs attention:/)
+  assert.match(response.assistantMessage, /Recover unused packages/)
+  assert.match(response.assistantMessage, /Recommended next actions:/)
+  assert.match(response.assistantMessage, /Call priority package customers/)
+  assert.match(response.assistantMessage, /missing appointment daily profile/)
+  assert.match(response.assistantMessage, /Data source: GreatTime learned finance daily snapshot checked at 2026-06-27T01:00:00.000Z/)
+  assert.equal(response.summary, response.assistantMessage)
+  assert.equal(response.metrics?.[0]?.value, 1200)
+  assert.equal(response.dataStatus, "partial")
+})
+
+test("response builder formats owner daily brief not_ready when no snapshots exist", () => {
+  const response = buildAgentResponse({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "business",
+      message: "owner brief",
+    },
+    sessionId: "session-1",
+    requestId: "request-1",
+    plan: {
+      requestedAgent: "business",
+      resolvedAgent: "business",
+      autoMode: false,
+      intent: "owner_daily_brief",
+      toolNames: ["get_owner_daily_brief"],
+      period: { fromDate: "2026-06-26", toDate: "2026-06-26", label: "yesterday" },
+    },
+    toolResults: [
+      {
+        toolName: "get_owner_daily_brief",
+        sourceName: "GreatTime owner daily brief snapshots",
+        checkedAt: "2026-06-27T01:00:00.000Z",
+        period: "2026-06-26",
+        dataStatus: "not_ready",
+        live: false,
+        summary: "Owner daily brief for 2026-06-26 is not ready because no source-backed snapshots were available.",
+        data: {
+          headline: "Owner daily brief for 2026-06-26 is not ready because no source-backed snapshots were available.",
+          metrics: [],
+          risks: [],
+          opportunities: [],
+          recommendedActions: [],
+          sources: [],
+        },
+      },
+    ],
+  })
+
+  assert.equal(response.dataStatus, "not_ready")
+  assert.match(response.assistantMessage, /Owner daily brief is not ready yet/)
+  assert.match(response.assistantMessage, /Run the Agent learning\/snapshot job/)
+  assert.match(response.assistantMessage, /normal finance, appointment, and business report tools/)
+  assert.match(response.assistantMessage, /Data source: no useful owner brief snapshots were available/)
 })
 
 test("response builder suggests useful appointment next actions without repeating the same list", () => {

@@ -51,6 +51,12 @@ function isCustomerRelationshipOpportunityQuestion(message: string) {
   );
 }
 
+function isOwnerDailyBriefQuestion(message: string) {
+  return /daily\s+brief|daily\s+summary|morning\s+brief|owner\s+brief|business\s+brief|what\s+should\s+(?:i|we)\s+focus(?:\s+on)?\s+today|what\s+needs\s+attention|needs?\s+attention|focus\s+today|risks?\s+today|what\s+are\s+the\s+risks\s+today|opportunities\s+today|what\s+are\s+the\s+opportunities\s+today|what\s+should\s+we\s+do\s+next|what\s+to\s+do\s+next|next\s+actions?|what\s+should\s+the\s+owner\s+know|ဒီနေ့\s*ဘာလုပ်ရမလဲ|ဘာကို\s*focus\s*လုပ်ရမလဲ|ဒီနေ့\s*အရေးကြီးတာ/i.test(
+    message,
+  );
+}
+
 export function resolveAgent(params: {
   requestedAgent: GreatTimeRequestedAgentId | undefined;
   message: string;
@@ -86,6 +92,10 @@ export function resolveAgent(params: {
 
   if (isAppointmentLedgerQuestion(params.message)) {
     scores.appointment += 4;
+  }
+
+  if (isOwnerDailyBriefQuestion(params.message)) {
+    scores.business += 4;
   }
 
   if (

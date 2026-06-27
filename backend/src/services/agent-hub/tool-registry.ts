@@ -5,10 +5,11 @@ import { createFinanceTools } from "./tools/finance.tools.js";
 import type { AgentToolDefinition, GreatTimeAgentId } from "./types.js";
 
 export function createAgentToolRegistry() {
+  const businessTools = createBusinessTools();
   const tools = [
     ...createFinanceTools(),
     ...createCustomerTools(),
-    ...createBusinessTools(),
+    ...businessTools,
     ...createAppointmentTools(),
   ];
 

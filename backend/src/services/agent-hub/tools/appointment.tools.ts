@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { env } from "../../../config/env.js";
+import { runWithAnalyticsQueryContext } from "../../analytics-query-context.js";
 import { fetchApicoreBookingDetails, type ApicoreBookingDetailsRow } from "../../apicore.service.js";
 import { getServiceBehaviorReport } from "../../reports/service-behavior.service.js";
 import { normalizeAppointmentLifecycle } from "../appointment-lifecycle.js";
@@ -10,8 +12,15 @@ import {
   type LiveAppointmentRow,
 } from "../appointment-live.service.js";
 import { buildUtcDayRangeForDateKey } from "../../telegram/time.js";
-import { getLatestFactSnapshot } from "../memory/memory.repository.js";
 import { limitRows, maskPhone, nowIso, sanitizeError } from "../safety.js";
+import {
+  buildSnapshotStaleWarning,
+  factSnapshotToAgentSource,
+  getFactSnapshotForPeriod,
+  getFreshFactSnapshot,
+  isCompletedHistoricalDay,
+} from "../snapshot-cache.service.js";
+import type { GtAgentFactSnapshot } from "../memory/memory-types.js";
 import type { AgentDataStatus, AgentToolDefinition, AgentToolInput, AgentToolResult } from "../types.js";
 
 const toolInputSchema = z.custom<AgentToolInput>(() => true);
@@ -20,6 +29,34 @@ const LEDGER_MAX_FETCH_ROWS = 1_000;
 const LEDGER_TABLE_ROWS = 30;
 const OPEN_TREATMENT_STATUSES = new Set(["REQUEST", "REQUESTED", "BOOKED", "BOOKING", "CHECKIN", "CHECK_IN"]);
 const CHECKED_IN_LEDGER_STATUSES = new Set(["CHECKIN", "CHECK_IN"]);
+
+type AppointmentToolDeps = {
+  getCompletedDayAppointmentProfileSnapshot: typeof getCompletedDayAppointmentProfileSnapshot;
+  getOperationalAppointmentSnapshot: typeof getOperationalAppointmentSnapshot;
+  fetchLiveSnapshot: typeof snapshot;
+};
+
+function runAppointmentBigQueryOperation<T>(params: {
+  toolName: string;
+  operationName: string;
+  callback: () => Promise<T>;
+}) {
+  return runWithAnalyticsQueryContext(
+    {
+      queryNamePrefix: `agent.appointment.${params.toolName}.${params.operationName}`,
+      labels: {
+        app: "greattime",
+        feature: "agent_hub",
+        agent: "appointment",
+        tool: params.toolName,
+        operation: params.operationName,
+      },
+      timeoutMs: env.AGENT_BIGQUERY_TIMEOUT_MS,
+      ttlMs: env.BQ_QUERY_DEFAULT_TTL_MS,
+    },
+    params.callback,
+  );
+}
 
 function tableRows(rows: LiveAppointmentRow[]) {
   return rows.map((row) => ({
@@ -315,22 +352,64 @@ function countFromRecord(record: Record<string, unknown>, keys: string[]) {
   return keys.reduce((total, key) => total + (numberFrom(record[key]) ?? 0), 0);
 }
 
-async function buildCachedAppointmentCountResult(input: AgentToolInput, liveUnavailableMessage: string): Promise<AgentToolResult | null> {
-  const cached = await getLatestFactSnapshot({
-    clinicId: input.clinic.clinicId,
-    snapshotType: "appointment_operational_snapshot",
-  }).catch(() => null);
-
-  if (!cached) {
+async function getOperationalAppointmentSnapshot(input: AgentToolInput, options?: { allowStale?: boolean }) {
+  if (!env.AGENT_SNAPSHOT_CACHE_ENABLED) {
     return null;
   }
 
-  const snapshotDate = cached.dateRange?.toDate ?? cached.dateRange?.fromDate;
+  const snapshot = await getFreshFactSnapshot({
+    clinicId: input.clinic.clinicId,
+    snapshotType: "appointment_operational_snapshot",
+    expectedFromDate: input.period.toDate,
+    expectedToDate: input.period.toDate,
+    maxAgeMs: env.AGENT_OPERATIONAL_SNAPSHOT_MAX_AGE_MINUTES * 60_000,
+    allowStale: options?.allowStale,
+  }).catch(() => null);
+
+  if (!snapshot) {
+    return null;
+  }
+
+  const snapshotDate = snapshot.dateRange?.toDate ?? snapshot.dateRange?.fromDate;
   if (snapshotDate !== input.period.toDate) {
     return null;
   }
 
-  const summary = cached.summary;
+  return snapshot;
+}
+
+async function getCompletedDayAppointmentProfileSnapshot(input: AgentToolInput) {
+  if (!env.AGENT_SNAPSHOT_CACHE_ENABLED || !env.AGENT_COMPLETED_DAY_SNAPSHOT_ENABLED) {
+    return null;
+  }
+
+  if (
+    !isCompletedHistoricalDay({
+      fromDate: input.period.fromDate,
+      toDate: input.period.toDate,
+      timezone: input.request.timezone,
+    })
+  ) {
+    return null;
+  }
+
+  return getFactSnapshotForPeriod({
+    clinicId: input.clinic.clinicId,
+    snapshotType: "appointment_daily_profile",
+    fromDate: input.period.fromDate,
+    toDate: input.period.toDate,
+    maxAgeMs: env.AGENT_SNAPSHOT_MAX_AGE_MINUTES * 60_000,
+  }).catch(() => null);
+}
+
+export function buildAppointmentCountResultFromSnapshot(params: {
+  input: AgentToolInput;
+  snapshot: GtAgentFactSnapshot;
+  snapshotKind: "operational" | "daily_profile";
+  liveUnavailableMessage?: string;
+  staleFallback?: boolean;
+}): AgentToolResult {
+  const summary = params.snapshot.summary;
   const lifecycleCounts = isRecord(summary.lifecycleCounts) ? summary.lifecycleCounts : {};
   const totalAppointments =
     numberFrom(summary.bookingAppointmentCount) ??
@@ -342,36 +421,81 @@ async function buildCachedAppointmentCountResult(input: AgentToolInput, liveUnav
   const checkedOut = countFromRecord(lifecycleCounts, ["checked_out"]);
   const cancelled = countFromRecord(lifecycleCounts, ["cancelled"]);
   const noShow = countFromRecord(lifecycleCounts, ["no_show"]);
+  const warnings: NonNullable<AgentToolResult["warnings"]> = [];
+
+  if (params.liveUnavailableMessage) {
+    warnings.push({
+      type: "live_appointment_source_unavailable",
+      title: "Live source unavailable",
+      message: params.liveUnavailableMessage,
+    });
+  }
+
+  if (params.staleFallback) {
+    warnings.push(buildSnapshotStaleWarning({
+      snapshotType: params.snapshot.snapshotType,
+      checkedAt: params.snapshot.checkedAt,
+    }));
+  }
+  const sourceName =
+    params.snapshotKind === "daily_profile"
+      ? "GreatTime learned appointment daily profile"
+      : "GreatTime learned appointment operational snapshot";
+  const source = factSnapshotToAgentSource({
+    snapshot: params.snapshot,
+    toolName: "get_live_appointment_counts",
+    sourceName,
+    scope: params.snapshotKind === "daily_profile" ? "historical" : "learned",
+    live: false,
+  });
+  const totalLabel = params.snapshotKind === "daily_profile" ? "Total appointments" : "Total appointments today";
+  const summaryPrefix = params.snapshotKind === "daily_profile" ? "Saved appointment daily profile" : "Latest saved appointment snapshot";
 
   return {
     toolName: "get_live_appointment_counts",
-    sourceName: "Cached appointment snapshot",
-    checkedAt: cached.checkedAt,
-    period: input.period.toDate,
-    dataStatus: totalAppointments > 0 ? "stale" : "no_activity",
+    sourceName,
+    checkedAt: params.snapshot.checkedAt,
+    period: periodLabel(params.input),
+    dataStatus: params.staleFallback ? "stale" : totalAppointments > 0 ? params.snapshot.dataStatus : "no_activity",
     live: false,
-    summary: `Latest saved appointment snapshot has ${totalAppointments.toLocaleString("en-US")} scheduled appointment${totalAppointments === 1 ? "" : "s"} for ${input.period.toDate}.`,
+    freshnessSeconds: source.freshnessSeconds,
+    summary: `${summaryPrefix} has ${totalAppointments.toLocaleString("en-US")} scheduled appointment${totalAppointments === 1 ? "" : "s"} for ${periodLabel(params.input)}.`,
     metrics: [
-      { label: "Total appointments today", value: totalAppointments, helperText: "From the latest saved APICORE appointment snapshot." },
+      { label: totalLabel, value: totalAppointments, helperText: "From a source-backed APICORE appointment snapshot." },
       { label: "Booked", value: booked },
       { label: "Checked in at snapshot time", value: checkedIn },
       { label: "Checked out", value: checkedOut },
       { label: "Cancelled", value: cancelled },
       { label: "No-show", value: noShow },
     ],
-    warnings: [
-      {
-        type: "live_appointment_source_unavailable",
-        title: "Live source unavailable",
-        message: liveUnavailableMessage,
-      },
-      {
-        type: "cached_snapshot_fallback",
-        title: "Using recent appointment snapshot",
-        message: `The latest saved appointment snapshot was checked at ${cached.checkedAt}.`,
-      },
-    ],
+    warnings: warnings.length ? warnings : undefined,
+    sources: [source],
   };
+}
+
+const defaultAppointmentToolDeps: AppointmentToolDeps = {
+  getCompletedDayAppointmentProfileSnapshot,
+  getOperationalAppointmentSnapshot,
+  fetchLiveSnapshot: snapshot,
+};
+
+async function buildCachedAppointmentCountResultWithDeps(
+  input: AgentToolInput,
+  liveUnavailableMessage: string,
+  deps: AppointmentToolDeps,
+): Promise<AgentToolResult | null> {
+  const snapshot = await deps.getOperationalAppointmentSnapshot(input, { allowStale: true });
+  if (!snapshot) {
+    return null;
+  }
+
+  return buildAppointmentCountResultFromSnapshot({
+    input,
+    snapshot,
+    snapshotKind: "operational",
+    liveUnavailableMessage,
+    staleFallback: true,
+  });
 }
 
 async function getAppointmentLedger(input: AgentToolInput): Promise<AgentToolResult> {
@@ -437,14 +561,35 @@ async function getTreatmentStartProxy(input: AgentToolInput): Promise<AgentToolR
   };
 }
 
-async function getLiveAppointmentCounts(input: AgentToolInput): Promise<AgentToolResult> {
+async function getLiveAppointmentCounts(
+  input: AgentToolInput,
+  deps: AppointmentToolDeps = defaultAppointmentToolDeps,
+): Promise<AgentToolResult> {
+  const dailyProfileSnapshot = await deps.getCompletedDayAppointmentProfileSnapshot(input);
+  if (dailyProfileSnapshot) {
+    return buildAppointmentCountResultFromSnapshot({
+      input,
+      snapshot: dailyProfileSnapshot,
+      snapshotKind: "daily_profile",
+    });
+  }
+
+  const cachedSnapshot = await deps.getOperationalAppointmentSnapshot(input);
+  if (cachedSnapshot) {
+    return buildAppointmentCountResultFromSnapshot({
+      input,
+      snapshot: cachedSnapshot,
+      snapshotKind: "operational",
+    });
+  }
+
   let data: Awaited<ReturnType<typeof snapshot>>;
   const includeCheckIns = input.intent !== "appointment_summary";
 
   try {
-    data = await snapshot(input, { includeCheckIns });
+    data = await deps.fetchLiveSnapshot(input, { includeCheckIns });
   } catch (error) {
-    const fallback = await buildCachedAppointmentCountResult(input, sanitizeError(error));
+    const fallback = await buildCachedAppointmentCountResultWithDeps(input, sanitizeError(error), deps);
     if (fallback) {
       return fallback;
     }
@@ -453,7 +598,7 @@ async function getLiveAppointmentCounts(input: AgentToolInput): Promise<AgentToo
 
   const bookingSourceUnavailable = data.warnings.some((warning) => warning.type === "booking_source_unavailable");
   if (bookingSourceUnavailable) {
-    const fallback = await buildCachedAppointmentCountResult(input, "Live appointment bookings could not be loaded.");
+    const fallback = await buildCachedAppointmentCountResultWithDeps(input, "Live appointment bookings could not be loaded.", deps);
     if (fallback) {
       return fallback;
     }
@@ -600,11 +745,16 @@ async function getAppointmentDetail(input: AgentToolInput): Promise<AgentToolRes
 }
 
 async function getAppointmentTrends(input: AgentToolInput): Promise<AgentToolResult> {
-  const data = await getServiceBehaviorReport({
-    clinicCode: input.clinic.clinicCode,
-    fromDate: input.period.fromDate,
-    toDate: input.period.toDate,
-    granularity: "month",
+  const data = await runAppointmentBigQueryOperation({
+    toolName: "get_appointment_trends",
+    operationName: "report",
+    callback: () =>
+      getServiceBehaviorReport({
+        clinicCode: input.clinic.clinicCode,
+        fromDate: input.period.fromDate,
+        toDate: input.period.toDate,
+        granularity: "month",
+      }),
   });
 
   return {
@@ -631,7 +781,9 @@ async function getAppointmentTrends(input: AgentToolInput): Promise<AgentToolRes
   };
 }
 
-export function createAppointmentTools(): AgentToolDefinition[] {
+export function createAppointmentTools(overrides: Partial<AppointmentToolDeps> = {}): AgentToolDefinition[] {
+  const deps = { ...defaultAppointmentToolDeps, ...overrides };
+
   return [
     {
       name: "get_appointment_ledger",
@@ -664,7 +816,7 @@ export function createAppointmentTools(): AgentToolDefinition[] {
       live: true,
       maxRows: 50,
       timeoutMs: 20_000,
-      execute: getLiveAppointmentCounts,
+      execute: (input) => getLiveAppointmentCounts(input, deps),
     },
     {
       name: "list_live_appointments",

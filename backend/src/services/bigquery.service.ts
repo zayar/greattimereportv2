@@ -310,9 +310,10 @@ export async function runAnalyticsQuery<T>(
   const queryHash = hashText(query, 16);
   const startedAt = Date.now();
   const ttlMs = options.ttlMs ?? context?.ttlMs ?? env.BQ_QUERY_DEFAULT_TTL_MS;
+  const forceRefresh = options.forceRefresh ?? context?.forceRefresh ?? false;
   const cacheKey = buildAnalyticsQueryCacheKey(query, params, location, options.cacheKey);
   const shouldUseCache =
-    env.BQ_QUERY_CACHE_ENABLED && !options.forceRefresh && ttlMs > 0 && isSelectStyleQuery(query);
+    env.BQ_QUERY_CACHE_ENABLED && !forceRefresh && ttlMs > 0 && isSelectStyleQuery(query);
 
   if (shouldUseCache) {
     const cachedRows = getCachedRows<T>(cacheKey, startedAt);

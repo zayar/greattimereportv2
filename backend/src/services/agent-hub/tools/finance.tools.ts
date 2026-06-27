@@ -1,15 +1,221 @@
 import { z } from "zod";
+import { env } from "../../../config/env.js";
 import { shiftRange } from "../../../utils/date-range.js";
+import { runWithAnalyticsQueryContext } from "../../analytics-query-context.js";
 import { getCustomerPortalPayments } from "../../reports/customer-portal.service.js";
 import { getPaymentReport } from "../../reports/payment-report.service.js";
 import { getSalesReport } from "../../reports/sales-report.service.js";
+import type { GtAgentFactSnapshot } from "../memory/memory-types.js";
 import { limitRows, nowIso } from "../safety.js";
+import {
+  factSnapshotToAgentSource,
+  getFactSnapshotForPeriod,
+  isCompletedHistoricalDay,
+} from "../snapshot-cache.service.js";
 import type { AgentToolDefinition, AgentToolInput, AgentToolResult } from "../types.js";
 
 const toolInputSchema = z.custom<AgentToolInput>(() => true);
 
+type FinanceToolDeps = {
+  getCompletedDayFinanceSnapshot: typeof getCompletedDayFinanceSnapshot;
+  getSalesReport: typeof getSalesReport;
+  getPaymentReport: typeof getPaymentReport;
+};
+
+function runFinanceBigQueryOperation<T>(params: {
+  toolName: string;
+  operationName: string;
+  callback: () => Promise<T>;
+}) {
+  return runWithAnalyticsQueryContext(
+    {
+      queryNamePrefix: `agent.finance.${params.toolName}.${params.operationName}`,
+      labels: {
+        app: "greattime",
+        feature: "agent_hub",
+        agent: "finance",
+        tool: params.toolName,
+        operation: params.operationName,
+      },
+      timeoutMs: env.AGENT_BIGQUERY_TIMEOUT_MS,
+      ttlMs: env.BQ_QUERY_DEFAULT_TTL_MS,
+    },
+    params.callback,
+  );
+}
+
 function periodLabel(input: AgentToolInput) {
   return `${input.period.fromDate} to ${input.period.toDate}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function nestedRecord(value: unknown, key: string) {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  const child = value[key];
+  if (!isRecord(child)) {
+    return {};
+  }
+
+  return isRecord(child.summary) ? child.summary : child;
+}
+
+function numberFromRecord(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  if (typeof value === "number") {
+    return value;
+  }
+  if (typeof value === "bigint") {
+    return Number(value);
+  }
+  if (value && typeof value === "object" && "value" in value) {
+    return Number((value as { value: unknown }).value);
+  }
+
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function metric(label: string, value: number | null, unit?: string): NonNullable<AgentToolResult["metrics"]>[number] | null {
+  return value == null ? null : { label, value, unit };
+}
+
+function compactMetrics(metrics: Array<NonNullable<AgentToolResult["metrics"]>[number] | null>) {
+  return metrics.filter((item): item is NonNullable<AgentToolResult["metrics"]>[number] => Boolean(item));
+}
+
+function formatSnapshotAmount(value: number | null) {
+  return value == null ? "not available" : value.toLocaleString("en-US");
+}
+
+function snapshotStatus(snapshot: GtAgentFactSnapshot, knownMetricCount: number) {
+  if (knownMetricCount === 0) {
+    return "partial" as const;
+  }
+
+  return snapshot.dataStatus ?? "ok";
+}
+
+function missingSnapshotFieldWarning(kind: "sales" | "payments") {
+  return {
+    type: "finance_snapshot_partial",
+    title: "Finance snapshot is partial",
+    message: `The finance daily snapshot did not include every ${kind} summary field expected by the Agent Hub response.`,
+  };
+}
+
+function hasFinanceSnapshotSummary(snapshot: GtAgentFactSnapshot, kind: "sales" | "payments") {
+  const summary = nestedRecord(snapshot.summary, kind);
+  const primaryKeys = kind === "sales" ? ["totalRevenue", "invoiceCount"] : ["totalAmount", "invoiceCount"];
+  return primaryKeys.some((key) => numberFromRecord(summary, key) != null);
+}
+
+async function getCompletedDayFinanceSnapshot(input: AgentToolInput) {
+  if (!env.AGENT_SNAPSHOT_CACHE_ENABLED || !env.AGENT_COMPLETED_DAY_SNAPSHOT_ENABLED) {
+    return null;
+  }
+
+  if (
+    !isCompletedHistoricalDay({
+      fromDate: input.period.fromDate,
+      toDate: input.period.toDate,
+      timezone: input.request.timezone,
+    })
+  ) {
+    return null;
+  }
+
+  return getFactSnapshotForPeriod({
+    clinicId: input.clinic.clinicId,
+    snapshotType: "finance_daily_snapshot",
+    fromDate: input.period.fromDate,
+    toDate: input.period.toDate,
+    maxAgeMs: env.AGENT_SNAPSHOT_MAX_AGE_MINUTES * 60_000,
+  }).catch(() => null);
+}
+
+const defaultFinanceToolDeps: FinanceToolDeps = {
+  getCompletedDayFinanceSnapshot,
+  getSalesReport,
+  getPaymentReport,
+};
+
+export function buildFinanceSnapshotSummaryResult(params: {
+  input: AgentToolInput;
+  snapshot: GtAgentFactSnapshot;
+  kind: "sales" | "payments";
+}): AgentToolResult {
+  const source = factSnapshotToAgentSource({
+    snapshot: params.snapshot,
+    toolName: params.kind === "sales" ? "get_sales_summary" : "get_payment_summary",
+    sourceName: "GreatTime learned finance daily snapshot",
+    scope: "historical",
+    live: false,
+  });
+  const summary = params.snapshot.summary;
+  const sales = nestedRecord(summary, "sales");
+  const payments = nestedRecord(summary, "payments");
+
+  if (params.kind === "sales") {
+    const totalRevenue = numberFromRecord(sales, "totalRevenue");
+    const invoiceCount = numberFromRecord(sales, "invoiceCount");
+    const customerCount = numberFromRecord(sales, "customerCount");
+    const averageInvoice = numberFromRecord(sales, "averageInvoice");
+    const metrics = compactMetrics([
+      metric("Total sales", totalRevenue, "amount"),
+      metric("Invoices", invoiceCount),
+      metric("Customers", customerCount),
+      metric("Average invoice", averageInvoice, "amount"),
+    ]);
+
+    return {
+      toolName: "get_sales_summary",
+      sourceName: "GreatTime learned finance daily snapshot",
+      checkedAt: params.snapshot.checkedAt,
+      period: periodLabel(params.input),
+      dataStatus: snapshotStatus(params.snapshot, metrics.length),
+      live: false,
+      freshnessSeconds: source.freshnessSeconds,
+      summary: `Sales for ${params.input.period.label}: ${formatSnapshotAmount(totalRevenue)} from ${formatSnapshotAmount(invoiceCount)} invoices.`,
+      metrics,
+      sources: [source],
+      warnings: metrics.length < 4 ? [missingSnapshotFieldWarning("sales")] : undefined,
+    };
+  }
+
+  const totalAmount = numberFromRecord(payments, "totalAmount");
+  const invoiceCount = numberFromRecord(payments, "invoiceCount");
+  const methodsCount = numberFromRecord(payments, "methodsCount") ?? numberFromRecord(summary, "paymentMethodCount");
+  const averageInvoice = numberFromRecord(payments, "averageInvoice");
+  const metrics = compactMetrics([
+    metric("Collected", totalAmount, "amount"),
+    metric("Paid invoices", invoiceCount),
+    metric("Payment methods", methodsCount),
+    metric("Average invoice", averageInvoice, "amount"),
+  ]);
+
+  return {
+    toolName: "get_payment_summary",
+    sourceName: "GreatTime learned finance daily snapshot",
+    checkedAt: params.snapshot.checkedAt,
+    period: periodLabel(params.input),
+    dataStatus: snapshotStatus(params.snapshot, metrics.length),
+    live: false,
+    freshnessSeconds: source.freshnessSeconds,
+    summary: `Collections for ${params.input.period.label}: ${formatSnapshotAmount(totalAmount)} across ${formatSnapshotAmount(invoiceCount)} invoices.`,
+    metrics,
+    sources: [source],
+    warnings: metrics.length < 4 ? [missingSnapshotFieldWarning("payments")] : undefined,
+  };
 }
 
 function paymentReportParams(input: AgentToolInput, search = "") {
@@ -45,14 +251,24 @@ export function extractInvoiceSearch(message: string) {
   return cleaned.length >= 2 ? cleaned.slice(0, 80) : "";
 }
 
-async function getSalesSummary(input: AgentToolInput): Promise<AgentToolResult> {
-  const report = await getSalesReport({
-    clinicCode: input.clinic.clinicCode,
-    fromDate: input.period.fromDate,
-    toDate: input.period.toDate,
-    search: "",
-    limit: 10,
-    offset: 0,
+async function getSalesSummary(input: AgentToolInput, deps: FinanceToolDeps = defaultFinanceToolDeps): Promise<AgentToolResult> {
+  const snapshot = await deps.getCompletedDayFinanceSnapshot(input);
+  if (snapshot && hasFinanceSnapshotSummary(snapshot, "sales")) {
+    return buildFinanceSnapshotSummaryResult({ input, snapshot, kind: "sales" });
+  }
+
+  const report = await runFinanceBigQueryOperation({
+    toolName: "get_sales_summary",
+    operationName: "snapshot_fallback",
+    callback: () =>
+      deps.getSalesReport({
+        clinicCode: input.clinic.clinicCode,
+        fromDate: input.period.fromDate,
+        toDate: input.period.toDate,
+        search: "",
+        limit: 10,
+        offset: 0,
+      }),
   });
 
   return {
@@ -83,8 +299,17 @@ async function getSalesSummary(input: AgentToolInput): Promise<AgentToolResult> 
   };
 }
 
-async function getPaymentSummary(input: AgentToolInput): Promise<AgentToolResult> {
-  const report = await getPaymentReport(paymentReportParams(input));
+async function getPaymentSummary(input: AgentToolInput, deps: FinanceToolDeps = defaultFinanceToolDeps): Promise<AgentToolResult> {
+  const snapshot = await deps.getCompletedDayFinanceSnapshot(input);
+  if (snapshot && hasFinanceSnapshotSummary(snapshot, "payments")) {
+    return buildFinanceSnapshotSummaryResult({ input, snapshot, kind: "payments" });
+  }
+
+  const report = await runFinanceBigQueryOperation({
+    toolName: "get_payment_summary",
+    operationName: "snapshot_fallback",
+    callback: () => deps.getPaymentReport(paymentReportParams(input)),
+  });
 
   return {
     toolName: "get_payment_summary",
@@ -306,7 +531,9 @@ async function getInvoiceDetail(input: AgentToolInput): Promise<AgentToolResult>
   };
 }
 
-export function createFinanceTools(): AgentToolDefinition[] {
+export function createFinanceTools(overrides: Partial<FinanceToolDeps> = {}): AgentToolDefinition[] {
+  const deps = { ...defaultFinanceToolDeps, ...overrides };
+
   return [
     {
       name: "get_sales_summary",
@@ -317,7 +544,7 @@ export function createFinanceTools(): AgentToolDefinition[] {
       live: false,
       maxRows: 25,
       timeoutMs: 15_000,
-      execute: getSalesSummary,
+      execute: (input) => getSalesSummary(input, deps),
     },
     {
       name: "get_payment_summary",
@@ -328,7 +555,7 @@ export function createFinanceTools(): AgentToolDefinition[] {
       live: false,
       maxRows: 25,
       timeoutMs: 15_000,
-      execute: getPaymentSummary,
+      execute: (input) => getPaymentSummary(input, deps),
     },
     {
       name: "get_payment_method_breakdown",

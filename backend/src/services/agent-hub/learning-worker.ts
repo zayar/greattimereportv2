@@ -705,13 +705,17 @@ async function runClinicJobs(params: {
 
       const outcome = await runWithAnalyticsQueryContext(
         {
-          queryNamePrefix: `learning.${jobType}`,
+          queryNamePrefix: `learning.${jobType}.generate`,
           labels: {
             app: "greattime",
             feature: "agent_learning",
             job: jobType,
+            operation: "generate",
           },
-          ttlMs: env.BQ_QUERY_DEFAULT_TTL_MS,
+          // Learning jobs write durable snapshots, so they should stay close to source truth.
+          ttlMs: 0,
+          forceRefresh: true,
+          useQueryCache: false,
         },
         () =>
           runJob({

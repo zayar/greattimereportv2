@@ -6,6 +6,7 @@ export type AnalyticsQueryContext = {
   timeoutMs?: number;
   labels?: Record<string, string>;
   useQueryCache?: boolean;
+  forceRefresh?: boolean;
   maxBytesBilled?: number;
 };
 

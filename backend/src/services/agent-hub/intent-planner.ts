@@ -230,7 +230,21 @@ function detectCustomerIntent(message: string) {
   return "customer_search";
 }
 
+const OWNER_DAILY_BRIEF_PATTERN =
+  /daily\s+brief|daily\s+summary|morning\s+brief|owner\s+brief|business\s+brief|what\s+should\s+(?:i|we)\s+focus(?:\s+on)?\s+today|what\s+needs\s+attention|needs?\s+attention|focus\s+today|risks?\s+today|what\s+are\s+the\s+risks\s+today|opportunities\s+today|what\s+are\s+the\s+opportunities\s+today|what\s+should\s+we\s+do\s+next|what\s+to\s+do\s+next|next\s+actions?|what\s+should\s+the\s+owner\s+know|ဒီနေ့\s*ဘာလုပ်ရမလဲ|ဘာကို\s*focus\s*လုပ်ရမလဲ|ဒီနေ့\s*အရေးကြီးတာ|ဒီနေ့.*(?:အာရုံစိုက်|သတိထား)|မနက်.*brief/i;
+
+export function isOwnerDailyBriefIntentMessage(message: string) {
+  return OWNER_DAILY_BRIEF_PATTERN.test(message);
+}
+
+export function toolsForBusinessOwnerDailyBrief(enabled = env.AGENT_OWNER_DAILY_BRIEF_ENABLED) {
+  return enabled ? ["get_owner_daily_brief"] : ["get_business_health_snapshot"];
+}
+
 function detectBusinessIntent(message: string) {
+  if (env.AGENT_OWNER_DAILY_BRIEF_ENABLED && isOwnerDailyBriefIntentMessage(message)) {
+    return "owner_daily_brief";
+  }
   if (isService360Question(message)) {
     return "service_360";
   }
@@ -350,6 +364,8 @@ function toolsForIntent(agentId: GreatTimeAgentId, intent: string) {
 
   if (agentId === "business") {
     switch (intent) {
+      case "owner_daily_brief":
+        return toolsForBusinessOwnerDailyBrief();
       case "service_360":
         return ["get_service_360"];
       case "service_performance":

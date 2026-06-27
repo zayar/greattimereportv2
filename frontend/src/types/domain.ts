@@ -803,7 +803,7 @@ export type AgentDataStatus =
   | "not_ready"
   | "stale";
 
-export type AgentSourceScope = "live" | "historical" | "learned";
+export type AgentSourceScope = "live" | "historical" | "learned" | "cache";
 
 export interface GreatTimeAgentEntityContext {
   entityType: "customer" | "appointment" | "service" | "practitioner" | "invoice";
@@ -843,6 +843,11 @@ export interface GreatTimeAgentSource {
   freshnessSeconds?: number;
   live?: boolean;
   scope?: AgentSourceScope;
+  dateRange?: {
+    fromDate: string;
+    toDate: string;
+    timezone?: string;
+  };
 }
 
 export interface GreatTimeAgentWarning {

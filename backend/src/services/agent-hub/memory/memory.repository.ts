@@ -10,6 +10,8 @@ import {
   GT_AGENT_USER_PREFERENCES_COLLECTION,
   type GtAgentFactSnapshot,
   type GtAgentInsightCard,
+  type GtAgentInsightCardStatus,
+  type GtAgentInsightCardType,
   type GtAgentMemoryRecord,
   type GtAgentRecommendationOutcome,
   type GtAgentSessionSummaryV2,
@@ -38,6 +40,26 @@ function insightCardCollection() {
 function factSnapshotCollection() {
   return firestoreDb().collection(GT_AGENT_FACT_SNAPSHOTS_COLLECTION);
 }
+
+const OPEN_INSIGHT_CARD_STATUSES = new Set<GtAgentInsightCardStatus>(["new", "viewed", "accepted", "remind_later"]);
+const VALID_INSIGHT_CARD_STATUSES = new Set<GtAgentInsightCardStatus>([
+  "new",
+  "viewed",
+  "dismissed",
+  "accepted",
+  "done",
+  "remind_later",
+]);
+const VALID_INSIGHT_CARD_TYPES = new Set<GtAgentInsightCardType>([
+  "unused_package_recovery",
+  "inactive_high_value_customer",
+  "treatment_due",
+  "rising_cancellations_no_shows",
+  "service_sales_high_usage_low",
+  "declining_service_usage",
+  "practitioner_capacity_gap",
+  "collections_below_sales",
+]);
 
 function stableFactSnapshotId(prefix: string, parts: string[]) {
   return `${prefix}_${createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 24)}`;
@@ -304,6 +326,7 @@ export async function saveLatestFactSnapshot(snapshot: GtAgentFactSnapshot) {
 export async function getLatestFactSnapshot(params: {
   clinicId: string;
   snapshotType: string;
+  includeExpired?: boolean;
 }) {
   const snapshot = await factSnapshotCollection().doc(latestFactSnapshotId(params)).get();
   const data = snapshot.data() as GtAgentFactSnapshot | undefined;
@@ -312,11 +335,102 @@ export async function getLatestFactSnapshot(params: {
     return null;
   }
 
-  if (data.expiresAt && new Date(data.expiresAt).getTime() <= Date.now()) {
+  if (!params.includeExpired && data.expiresAt && new Date(data.expiresAt).getTime() <= Date.now()) {
     return null;
   }
 
   return data;
+}
+
+export async function getFactSnapshotForPeriod(params: {
+  clinicId: string;
+  snapshotType: string;
+  fromDate: string;
+  toDate: string;
+  includeExpired?: boolean;
+  limit?: number;
+}) {
+  const limit = Math.min(Math.max(params.limit ?? 5, 1), 20);
+  const snapshot = await factSnapshotCollection()
+    .where("clinicId", "==", params.clinicId)
+    .where("snapshotType", "==", params.snapshotType)
+    .where("dateRange.fromDate", "==", params.fromDate)
+    .where("dateRange.toDate", "==", params.toDate)
+    .limit(limit)
+    .get();
+  const now = Date.now();
+
+  return snapshot.docs
+    .map((doc) => doc.data() as GtAgentFactSnapshot)
+    .filter((data) => data.clinicId === params.clinicId && data.snapshotType === params.snapshotType)
+    .filter((data) => params.includeExpired || !data.expiresAt || new Date(data.expiresAt).getTime() > now)
+    .sort((left, right) => new Date(right.checkedAt).getTime() - new Date(left.checkedAt).getTime())[0] ?? null;
+}
+
+export async function listInsightCards(params: {
+  clinicId: string;
+  status?: string;
+  type?: string;
+  limit?: number;
+}) {
+  const limit = Math.min(Math.max(params.limit ?? 10, 1), 100);
+  const status = params.status && VALID_INSIGHT_CARD_STATUSES.has(params.status as GtAgentInsightCardStatus)
+    ? (params.status as GtAgentInsightCardStatus)
+    : null;
+  const type = params.type && VALID_INSIGHT_CARD_TYPES.has(params.type as GtAgentInsightCardType)
+    ? (params.type as GtAgentInsightCardType)
+    : null;
+  let query: FirebaseFirestore.Query<FirebaseFirestore.DocumentData> = insightCardCollection()
+    .where("clinicId", "==", params.clinicId)
+    .limit(limit);
+
+  if (status) {
+    query = query.where("status", "==", status);
+  }
+
+  if (type) {
+    query = query.where("type", "==", type);
+  }
+
+  const snapshot = await query.get();
+  const now = Date.now();
+
+  return snapshot.docs
+    .map((doc) => doc.data() as GtAgentInsightCard)
+    .filter((card) => card.clinicId === params.clinicId)
+    .filter((card) => status || OPEN_INSIGHT_CARD_STATUSES.has(card.status))
+    .filter((card) => !type || card.type === type)
+    .filter((card) => !card.expiresAt || new Date(card.expiresAt).getTime() > now)
+    .sort((left, right) => {
+      if (right.personalizedPriorityScore !== left.personalizedPriorityScore) {
+        return right.personalizedPriorityScore - left.personalizedPriorityScore;
+      }
+
+      return new Date(right.checkedAt).getTime() - new Date(left.checkedAt).getTime();
+    })
+    .slice(0, limit);
+}
+
+export async function updateInsightCardStatus(params: {
+  clinicId: string;
+  cardId: string;
+  status: GtAgentInsightCardStatus;
+  updatedAt?: string;
+}) {
+  const existing = await getInsightCardById(params.cardId);
+  if (!existing || existing.clinicId !== params.clinicId) {
+    return null;
+  }
+
+  const updatedAt = params.updatedAt ?? new Date().toISOString();
+  const updated = {
+    ...existing,
+    status: params.status,
+    updatedAt,
+  };
+
+  await insightCardCollection().doc(params.cardId).set(updated, { merge: true });
+  return updated;
 }
 
 export async function countActiveMemories(params: { clinicId: string }) {
