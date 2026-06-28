@@ -3,8 +3,9 @@ import { isAxiosError } from "axios";
 import { PageHeader } from "../../../components/PageHeader";
 import { Panel } from "../../../components/Panel";
 import { EmptyState, ErrorState } from "../../../components/StatusViews";
+import { fetchGreatTimeAgentStatus } from "../../../api/ai";
 import { fetchGtGrowthAiFeatureAccess, saveGtGrowthAiFeatureAccess } from "../../../api/features";
-import type { Clinic, ClinicFeatureAccessStatus } from "../../../types/domain";
+import type { AgentStatusHealth, Clinic, ClinicFeatureAccessStatus, GreatTimeAgentStatusReport } from "../../../types/domain";
 import { useAccess } from "../../access/AccessProvider";
 import { useSession } from "../../auth/SessionProvider";
 import { canAccessAiControlPanel } from "../../ai/adminAccess";
@@ -55,6 +56,33 @@ function getStatusBadgeClass(status: ClinicFeatureAccessStatus | null | undefine
   return `ai-control-panel__badge ai-control-panel__badge--${status.enabled ? "enabled" : "disabled"}`;
 }
 
+function getHealthBadgeClass(health: AgentStatusHealth | undefined) {
+  return `ai-control-panel__badge ai-control-panel__badge--health-${health ?? "unknown"}`;
+}
+
+function formatNumber(value: number | null | undefined) {
+  return (value ?? 0).toLocaleString("en-US");
+}
+
+function formatLatency(value: number | null | undefined) {
+  return `${Math.round(value ?? 0).toLocaleString("en-US")} ms`;
+}
+
+function formatPercent(value: number | null | undefined) {
+  return `${Math.round((value ?? 0) * 100)}%`;
+}
+
+function formatLearningRun(status: GreatTimeAgentStatusReport | null) {
+  const runs = Object.values(status?.learning.latestRunByJobType ?? {});
+  const latest = runs.sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())[0];
+
+  if (!latest) {
+    return "No learning run";
+  }
+
+  return `${latest.jobType.replace(/_/g, " ")} - ${latest.status}`;
+}
+
 function getRowSummary(clinic: Clinic, status: ClinicFeatureAccessStatus | null | undefined) {
   if (!status) {
     return `${clinic.name} access status has not loaded yet.`;
@@ -74,6 +102,9 @@ export function AiControlPanelPage() {
   const [accessByClinicId, setAccessByClinicId] = useState<Record<string, ClinicFeatureAccessStatus | null>>({});
   const [errorsByClinicId, setErrorsByClinicId] = useState<Record<string, string | null>>({});
   const [busyByClinicId, setBusyByClinicId] = useState<Record<string, BusyState | null>>({});
+  const [agentStatus, setAgentStatus] = useState<GreatTimeAgentStatusReport | null>(null);
+  const [agentStatusBusy, setAgentStatusBusy] = useState(false);
+  const [agentStatusError, setAgentStatusError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
 
@@ -101,6 +132,24 @@ export function AiControlPanelPage() {
       [clinicId]: state,
     }));
   }, []);
+
+  const loadAgentStatus = useCallback(async () => {
+    if (!canUsePanel) {
+      return;
+    }
+
+    setAgentStatusBusy(true);
+    setAgentStatusError(null);
+
+    try {
+      const data = await fetchGreatTimeAgentStatus({ range: "24h" });
+      setAgentStatus(data);
+    } catch (error) {
+      setAgentStatusError(getApiErrorMessage(error, "AI health status could not be loaded."));
+    } finally {
+      setAgentStatusBusy(false);
+    }
+  }, [canUsePanel]);
 
   const loadClinicAccess = useCallback(
     async (clinicId: string) => {
@@ -151,7 +200,8 @@ export function AiControlPanelPage() {
 
   useEffect(() => {
     void loadAllAccess(false);
-  }, [loadAllAccess]);
+    void loadAgentStatus();
+  }, [loadAgentStatus, loadAllAccess]);
 
   async function handleToggle(clinic: Clinic, enabled: boolean) {
     setClinicBusy(clinic.id, "save");
@@ -204,8 +254,8 @@ export function AiControlPanelPage() {
           <div className="ai-control-panel__actions">
             <button
               className="button ai-control-panel__button ai-control-panel__button--secondary"
-              onClick={() => void loadAllAccess(true)}
-              disabled={Object.values(busyByClinicId).some(Boolean)}
+              onClick={() => void Promise.all([loadAllAccess(true), loadAgentStatus()])}
+              disabled={Object.values(busyByClinicId).some(Boolean) || agentStatusBusy}
             >
               Refresh status
             </button>
@@ -223,6 +273,62 @@ export function AiControlPanelPage() {
         {notice ? <span className="ai-control-panel__notice ai-control-panel__notice--success">{notice}</span> : null}
         {!notice && pageError ? <span className="ai-control-panel__notice ai-control-panel__notice--danger">{pageError}</span> : null}
       </div>
+
+      <Panel
+        className="ai-control-panel__panel"
+        title="AI health"
+        subtitle={`Last 24 hours${agentStatus?.generatedAt ? ` - generated ${formatDateTime(agentStatus.generatedAt)}` : ""}`}
+        action={<span className={getHealthBadgeClass(agentStatus?.health)}>{agentStatus?.health ?? "Unknown"}</span>}
+      >
+        {agentStatusError ? (
+          <ErrorState label="AI health unavailable" detail={agentStatusError} />
+        ) : (
+          <div className="ai-control-panel__health-grid" aria-busy={agentStatusBusy}>
+            <div className="ai-control-panel__health-card">
+              <strong>Overall AI health</strong>
+              <span className={getHealthBadgeClass(agentStatus?.health)}>{agentStatus?.health ?? "Unknown"}</span>
+            </div>
+            <div className="ai-control-panel__health-card">
+              <strong>Last 24h questions</strong>
+              <span>{formatNumber(agentStatus?.summary.totalAgentQuestions)}</span>
+            </div>
+            <div className="ai-control-panel__health-card">
+              <strong>Average latency</strong>
+              <span>{formatLatency(agentStatus?.performance.averageLatencyMs)}</span>
+            </div>
+            <div className="ai-control-panel__health-card">
+              <strong>Timeout count</strong>
+              <span>{formatNumber(agentStatus?.performance.timeoutCount)}</span>
+            </div>
+            <div className="ai-control-panel__health-card">
+              <strong>Tool failure rate</strong>
+              <span>{formatPercent(agentStatus?.performance.toolFailureRate)}</span>
+            </div>
+            <div className="ai-control-panel__health-card">
+              <strong>Latest learning run</strong>
+              <span>{formatLearningRun(agentStatus)}</span>
+            </div>
+            <div className="ai-control-panel__health-card">
+              <strong>Stale snapshots</strong>
+              <span>{formatNumber(agentStatus?.snapshots.staleSnapshots.length)}</span>
+            </div>
+            <div className="ai-control-panel__health-card">
+              <strong>Wrong-data feedback</strong>
+              <span>{formatNumber(agentStatus?.feedback.wrongDataFeedbackCount)}</span>
+            </div>
+          </div>
+        )}
+
+        {agentStatus?.alerts.length ? (
+          <div className="ai-control-panel__alert-list">
+            {agentStatus.alerts.slice(0, 4).map((alert) => (
+              <span key={alert.code} className={`ai-control-panel__alert ai-control-panel__alert--${alert.severity}`}>
+                {alert.message}
+              </span>
+            ))}
+          </div>
+        ) : null}
+      </Panel>
 
       <Panel
         className="ai-control-panel__panel"

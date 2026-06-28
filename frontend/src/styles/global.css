@@ -4835,6 +4835,95 @@ a {
   background: rgba(31, 41, 55, 0.08);
 }
 
+.ai-control-panel__badge--health-healthy {
+  color: var(--success);
+  background: rgba(13, 122, 82, 0.12);
+}
+
+.ai-control-panel__badge--health-degraded {
+  color: #8a5b13;
+  background: rgba(250, 205, 118, 0.18);
+}
+
+.ai-control-panel__badge--health-critical {
+  color: var(--danger);
+  background: rgba(178, 71, 45, 0.12);
+}
+
+.ai-control-panel__badge--health-unknown {
+  color: var(--ink-muted);
+  background: rgba(31, 41, 55, 0.08);
+}
+
+.ai-control-panel__health-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ai-control-panel__health-card {
+  display: grid;
+  align-content: space-between;
+  gap: 12px;
+  min-height: 104px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.ai-control-panel__health-card strong {
+  color: var(--ink-muted);
+  font-size: 0.78rem;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.ai-control-panel__health-card span {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.ai-control-panel__health-card .ai-control-panel__badge {
+  justify-self: start;
+}
+
+.ai-control-panel__alert-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.ai-control-panel__alert {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 7px 11px;
+  border-radius: 8px;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.ai-control-panel__alert--info {
+  color: #32506b;
+  background: rgba(79, 126, 162, 0.12);
+}
+
+.ai-control-panel__alert--warning {
+  color: #8a5b13;
+  background: rgba(250, 205, 118, 0.18);
+}
+
+.ai-control-panel__alert--critical {
+  color: var(--danger);
+  background: rgba(178, 71, 45, 0.12);
+}
+
 .ai-control-panel__meta-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -5416,6 +5505,10 @@ a {
   .telegram-settings__checkbox-grid,
   .telegram-settings__two-up {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ai-control-panel__health-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .telegram-settings__status-strip {
@@ -12738,6 +12831,7 @@ a {
 
   .sales-document-settings__layout,
   .ai-control-panel__clinic-row,
+  .ai-control-panel__health-grid,
   .ai-control-panel__meta-grid,
   .sales-paper__body {
     grid-template-columns: 1fr;

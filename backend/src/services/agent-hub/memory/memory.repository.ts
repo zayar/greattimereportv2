@@ -297,8 +297,98 @@ export async function saveRecommendationOutcome(outcome: GtAgentRecommendationOu
   });
 }
 
+function isRecommendationOutcome(data: FirebaseFirestore.DocumentData | undefined): data is GtAgentRecommendationOutcome {
+  return Boolean(data?.id && data?.recommendationId && data?.clinicId && data?.state && data?.updatedAt);
+}
+
+export async function listRecentRecommendationOutcomes(params: {
+  clinicId?: string;
+  since: Date;
+  limit?: number;
+}) {
+  const limit = Math.min(Math.max(params.limit ?? 500, 1), 2_000);
+  const sinceMs = params.since.getTime();
+  const collection = recommendationOutcomeCollection();
+  const queries: Array<() => Promise<FirebaseFirestore.QuerySnapshot<FirebaseFirestore.DocumentData>>> = [];
+
+  if (params.clinicId) {
+    queries.push(() =>
+      collection
+        .where("clinicId", "==", params.clinicId)
+        .orderBy("updatedAt", "desc")
+        .limit(limit)
+        .get(),
+    );
+    queries.push(() => collection.where("clinicId", "==", params.clinicId).limit(limit).get());
+  } else {
+    queries.push(() => collection.orderBy("updatedAt", "desc").limit(limit).get());
+    queries.push(() => collection.limit(limit).get());
+  }
+
+  for (const query of queries) {
+    try {
+      const snapshot = await query();
+      return snapshot.docs
+        .map((doc) => doc.data())
+        .filter(isRecommendationOutcome)
+        .filter((outcome) => new Date(outcome.updatedAt).getTime() >= sinceMs)
+        .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())
+        .slice(0, limit);
+    } catch {
+      // Try the less index-sensitive fallback query.
+    }
+  }
+
+  return [];
+}
+
 export async function saveInsightCard(card: GtAgentInsightCard) {
   await insightCardCollection().doc(card.id).set(card, { merge: true });
+}
+
+function isInsightCard(data: FirebaseFirestore.DocumentData | undefined): data is GtAgentInsightCard {
+  return Boolean(data?.id && data?.clinicId && data?.type && data?.status && data?.checkedAt);
+}
+
+export async function listRecentInsightCards(params: {
+  clinicId?: string;
+  since: Date;
+  limit?: number;
+}) {
+  const limit = Math.min(Math.max(params.limit ?? 500, 1), 2_000);
+  const sinceMs = params.since.getTime();
+  const collection = insightCardCollection();
+  const queries: Array<() => Promise<FirebaseFirestore.QuerySnapshot<FirebaseFirestore.DocumentData>>> = [];
+
+  if (params.clinicId) {
+    queries.push(() =>
+      collection
+        .where("clinicId", "==", params.clinicId)
+        .orderBy("checkedAt", "desc")
+        .limit(limit)
+        .get(),
+    );
+    queries.push(() => collection.where("clinicId", "==", params.clinicId).limit(limit).get());
+  } else {
+    queries.push(() => collection.orderBy("checkedAt", "desc").limit(limit).get());
+    queries.push(() => collection.limit(limit).get());
+  }
+
+  for (const query of queries) {
+    try {
+      const snapshot = await query();
+      return snapshot.docs
+        .map((doc) => doc.data())
+        .filter(isInsightCard)
+        .filter((card) => new Date(card.checkedAt).getTime() >= sinceMs)
+        .sort((left, right) => new Date(right.checkedAt).getTime() - new Date(left.checkedAt).getTime())
+        .slice(0, limit);
+    } catch {
+      // Try the less index-sensitive fallback query.
+    }
+  }
+
+  return [];
 }
 
 export async function getInsightCardById(cardId: string) {
@@ -308,6 +398,51 @@ export async function getInsightCardById(cardId: string) {
 
 export async function saveFactSnapshot(snapshot: GtAgentFactSnapshot) {
   await factSnapshotCollection().doc(snapshot.id).set(snapshot, { merge: true });
+}
+
+function isFactSnapshot(data: FirebaseFirestore.DocumentData | undefined): data is GtAgentFactSnapshot {
+  return Boolean(data?.id && data?.clinicId && data?.snapshotType && data?.checkedAt);
+}
+
+export async function listRecentFactSnapshots(params: {
+  clinicId?: string;
+  since: Date;
+  limit?: number;
+}) {
+  const limit = Math.min(Math.max(params.limit ?? 500, 1), 2_000);
+  const sinceMs = params.since.getTime();
+  const collection = factSnapshotCollection();
+  const queries: Array<() => Promise<FirebaseFirestore.QuerySnapshot<FirebaseFirestore.DocumentData>>> = [];
+
+  if (params.clinicId) {
+    queries.push(() =>
+      collection
+        .where("clinicId", "==", params.clinicId)
+        .orderBy("checkedAt", "desc")
+        .limit(limit)
+        .get(),
+    );
+    queries.push(() => collection.where("clinicId", "==", params.clinicId).limit(limit).get());
+  } else {
+    queries.push(() => collection.orderBy("checkedAt", "desc").limit(limit).get());
+    queries.push(() => collection.limit(limit).get());
+  }
+
+  for (const query of queries) {
+    try {
+      const snapshot = await query();
+      return snapshot.docs
+        .map((doc) => doc.data())
+        .filter(isFactSnapshot)
+        .filter((factSnapshot) => new Date(factSnapshot.checkedAt).getTime() >= sinceMs)
+        .sort((left, right) => new Date(right.checkedAt).getTime() - new Date(left.checkedAt).getTime())
+        .slice(0, limit);
+    } catch {
+      // Try the less index-sensitive fallback query.
+    }
+  }
+
+  return [];
 }
 
 export async function saveLatestFactSnapshot(snapshot: GtAgentFactSnapshot) {

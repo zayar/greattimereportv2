@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { env } from "../../config/env.js";
 import { createAiProvider } from "../ai/provider.js";
@@ -9,8 +10,126 @@ const narrativeSchema = z.object({
   assistantMessage: z.string().min(1).max(900),
 });
 
+const NARRATIVE_CACHE_TTL_MS = 5 * 60_000;
+const FAST_DETERMINISTIC_INTENTS = new Set(["owner_daily_brief", "appointment_summary", "payment_summary"]);
+
+type NarrativeCacheEntry = {
+  response: GreatTimeAgentChatResponse;
+  expiresAt: number;
+};
+
+const narrativeCache = new Map<string, NarrativeCacheEntry>();
+
 function stripJsonFences(payload: string) {
   return payload.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+}
+
+function hashText(value: string, length = 32) {
+  return createHash("sha256").update(value).digest("hex").slice(0, length);
+}
+
+function stableStringify(value: unknown): string {
+  if (value === undefined) {
+    return '"__undefined__"';
+  }
+  if (value === null || typeof value === "number" || typeof value === "boolean" || typeof value === "string") {
+    return JSON.stringify(value);
+  }
+  if (typeof value === "bigint") {
+    return JSON.stringify(value.toString());
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+      .join(",")}}`;
+  }
+
+  return JSON.stringify(String(value));
+}
+
+function isSimpleTableResponse(response: GreatTimeAgentChatResponse) {
+  const tables = response.tables ?? [];
+  if (tables.length === 0 || tables.length > 2) {
+    return false;
+  }
+
+  const rowCount = tables.reduce((sum, table) => sum + table.rows.length, 0);
+  return rowCount > 0 && rowCount <= 50 && (response.recommendations?.length ?? 0) === 0;
+}
+
+function hasHighConfidenceDeterministicResponse(response: GreatTimeAgentChatResponse) {
+  if (!["ok", "partial", "no_activity"].includes(response.dataStatus)) {
+    return false;
+  }
+
+  return response.sources.length > 0 && Boolean(response.summary ?? response.assistantMessage);
+}
+
+export function shouldSkipNarrativeForFastIntent(response: GreatTimeAgentChatResponse) {
+  if (!env.AGENT_NARRATIVE_SKIP_FAST_INTENTS) {
+    return false;
+  }
+
+  if (!hasHighConfidenceDeterministicResponse(response)) {
+    return false;
+  }
+
+  return FAST_DETERMINISTIC_INTENTS.has(response.intent) || isSimpleTableResponse(response);
+}
+
+function buildNarrativeCacheKey(response: GreatTimeAgentChatResponse, clinicId?: string) {
+  const sourceCheckedAt = response.sources
+    .map((source) => `${source.tool}:${source.checkedAt}:${source.dataStatus}`)
+    .sort();
+  const summaryHash = hashText(response.summary ?? response.assistantMessage ?? "");
+
+  return hashText(
+    stableStringify({
+      clinicId: clinicId ?? "unknown",
+      intent: response.intent,
+      period: response.period,
+      sourceCheckedAt,
+      summaryHash,
+    }),
+    48,
+  );
+}
+
+function getCachedNarrative(cacheKey: string, now = Date.now()) {
+  const cached = narrativeCache.get(cacheKey);
+  if (!cached) {
+    return null;
+  }
+
+  if (cached.expiresAt <= now) {
+    narrativeCache.delete(cacheKey);
+    return null;
+  }
+
+  return cached.response;
+}
+
+function setCachedNarrative(cacheKey: string, response: GreatTimeAgentChatResponse, now = Date.now()) {
+  narrativeCache.set(cacheKey, {
+    response,
+    expiresAt: now + NARRATIVE_CACHE_TTL_MS,
+  });
+
+  if (narrativeCache.size > 500) {
+    const oldestKey = narrativeCache.keys().next().value as string | undefined;
+    if (oldestKey) {
+      narrativeCache.delete(oldestKey);
+    }
+  }
+}
+
+export function clearAgentNarrativeCache() {
+  narrativeCache.clear();
 }
 
 function buildMemoryDirectives(memories: GtAgentRelevantMemory[]) {
@@ -116,15 +235,27 @@ function generateNarrativeJsonWithTimeout(provider: AiJsonProvider, prompt: stri
 
 export async function enhanceAgentResponseNarrative(
   response: GreatTimeAgentChatResponse,
-  options?: { memories?: GtAgentRelevantMemory[]; provider?: AiJsonProvider | null; timeoutMs?: number },
+  options?: { memories?: GtAgentRelevantMemory[]; provider?: AiJsonProvider | null; timeoutMs?: number; clinicId?: string },
 ) {
   if (!env.AGENT_NARRATIVE_ENABLED) {
-    return { response, fallbackUsed: true };
+    return { response, fallbackUsed: true, narrativeSkipped: false, cacheHit: false };
+  }
+
+  if (shouldSkipNarrativeForFastIntent(response)) {
+    return { response, fallbackUsed: false, narrativeSkipped: true, cacheHit: false };
+  }
+
+  const cacheKey = buildNarrativeCacheKey(response, options?.clinicId);
+  if (env.AGENT_NARRATIVE_CACHE_ENABLED) {
+    const cachedResponse = getCachedNarrative(cacheKey);
+    if (cachedResponse) {
+      return { response: cachedResponse, fallbackUsed: false, narrativeSkipped: false, cacheHit: true };
+    }
   }
 
   const provider = options?.provider === undefined ? createAiProvider() : options.provider;
   if (!provider) {
-    return { response, fallbackUsed: true };
+    return { response, fallbackUsed: true, narrativeSkipped: false, cacheHit: false };
   }
 
   try {
@@ -135,23 +266,31 @@ export async function enhanceAgentResponseNarrative(
       : await provider.generateJson(prompt);
 
     if (!raw.trim()) {
-      return { response, fallbackUsed: true };
+      return { response, fallbackUsed: true, narrativeSkipped: false, cacheHit: false };
     }
 
     const parsed = narrativeSchema.safeParse(JSON.parse(stripJsonFences(raw)));
 
     if (!parsed.success) {
-      return { response, fallbackUsed: true };
+      return { response, fallbackUsed: true, narrativeSkipped: false, cacheHit: false };
+    }
+
+    const narrativeResponse = {
+      ...response,
+      assistantMessage: parsed.data.assistantMessage,
+    };
+
+    if (env.AGENT_NARRATIVE_CACHE_ENABLED) {
+      setCachedNarrative(cacheKey, narrativeResponse);
     }
 
     return {
-      response: {
-        ...response,
-        assistantMessage: parsed.data.assistantMessage,
-      },
+      response: narrativeResponse,
       fallbackUsed: false,
+      narrativeSkipped: false,
+      cacheHit: false,
     };
   } catch {
-    return { response, fallbackUsed: true };
+    return { response, fallbackUsed: true, narrativeSkipped: false, cacheHit: false };
   }
 }

@@ -75,6 +75,8 @@ const envSchema = z.object({
   AGENT_NARRATIVE_ENABLED: booleanEnv(true),
   AGENT_FAST_MODE_ENABLED: booleanEnv(true),
   AGENT_NARRATIVE_TIMEOUT_MS: z.coerce.number().int().positive().default(1_500),
+  AGENT_NARRATIVE_CACHE_ENABLED: booleanEnv(true),
+  AGENT_NARRATIVE_SKIP_FAST_INTENTS: booleanEnv(true),
   AGENT_SNAPSHOT_CACHE_ENABLED: booleanEnv(true),
   AGENT_SNAPSHOT_MAX_AGE_MINUTES: z.coerce.number().int().positive().default(1_440),
   AGENT_OPERATIONAL_SNAPSHOT_MAX_AGE_MINUTES: z.coerce.number().int().positive().default(20),

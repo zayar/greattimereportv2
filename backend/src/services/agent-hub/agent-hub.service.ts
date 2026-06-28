@@ -24,6 +24,7 @@ import { getAnalyticsQueryCacheStats } from "../bigquery.service.js";
 import type {
   AgentClinicContext,
   AgentRequestContext,
+  AgentToolResult,
   GreatTimeAgentChatRequest,
   GreatTimeAgentChatResponse,
   GreatTimeAgentEntityContext,
@@ -183,6 +184,32 @@ async function registerShownRecommendations(params: {
         }),
       ),
   );
+}
+
+function buildToolTraceMetadata(toolResults: AgentToolResult[], totalToolLatencyMs: number) {
+  const fallbackLatencyMs = toolResults.length ? Math.max(0, Math.round(totalToolLatencyMs / toolResults.length)) : 0;
+  const toolExecutionResults = toolResults.map((result) => ({
+    toolName: result.toolName,
+    latencyMs: result.latencyMs ?? fallbackLatencyMs,
+    timedOut: result.timedOut === true,
+    dataStatus: result.dataStatus,
+    ...(result.errorCategory ? { errorCategory: result.errorCategory } : {}),
+  }));
+
+  return {
+    sourceDurations: toolExecutionResults.map((result) => ({
+      toolName: result.toolName,
+      durationMs: result.latencyMs,
+      dataStatus: result.dataStatus,
+      timedOut: result.timedOut,
+      ...(result.errorCategory ? { errorCategory: result.errorCategory } : {}),
+    })),
+    toolExecutionResults,
+    timedOutTools: toolExecutionResults.filter((result) => result.timedOut).map((result) => result.toolName),
+    unavailableTools: toolExecutionResults
+      .filter((result) => result.dataStatus === "unavailable")
+      .map((result) => result.toolName),
+  };
 }
 
 export function shouldIgnoreExplicitEntityContext(params: {
@@ -394,10 +421,12 @@ export async function askAgentHub(params: {
   const narrativeStartedAt = Date.now();
   const narrativeResult = await enhanceAgentResponseNarrative(deterministicResponse, {
     memories: memoryContext.memories,
+    clinicId: params.clinic.clinicId,
   });
   const narrativeLatencyMs = Date.now() - narrativeStartedAt;
   const narrativeResponse = narrativeResult.response;
   const response = applyMemoryPreferencesToResponse(narrativeResponse, memoryContext.memories);
+  const toolTraceMetadata = buildToolTraceMetadata(toolResults, toolLatencyMs);
   const entityRefs = toolResults.flatMap((result) => result.entityRefs ?? []).map((ref) => ({
     ...ref,
     sourceResponseId: response.responseId,
@@ -426,6 +455,10 @@ export async function askAgentHub(params: {
       sourceStatuses: response.sources.map((source) => source.dataStatus),
       dataStatus: response.dataStatus,
       fallbackUsed: narrativeResult.fallbackUsed,
+      narrativeFallbackUsed: narrativeResult.fallbackUsed,
+      narrativeSkipped: narrativeResult.narrativeSkipped,
+      narrativeCacheHit: narrativeResult.cacheHit,
+      deterministicResponseUsed: narrativeResult.fallbackUsed || narrativeResult.narrativeSkipped,
       usedMemoryIds: memoryContext.usedMemoryIds,
       totalLatencyMs: Date.now() - totalStartedAt,
       planningLatencyMs,
@@ -436,6 +469,7 @@ export async function askAgentHub(params: {
         bigQueryHits: cacheStatsAfter.hits - cacheStatsBefore.hits,
         bigQueryMisses: cacheStatsAfter.misses - cacheStatsBefore.misses,
       },
+      ...toolTraceMetadata,
       createdAt: nowIso(),
     }).catch((error) =>
       saveAgentRunTrace({
@@ -451,6 +485,10 @@ export async function askAgentHub(params: {
         sourceStatuses: response.sources.map((source) => source.dataStatus),
         dataStatus: response.dataStatus,
         fallbackUsed: narrativeResult.fallbackUsed,
+        narrativeFallbackUsed: narrativeResult.fallbackUsed,
+        narrativeSkipped: narrativeResult.narrativeSkipped,
+        narrativeCacheHit: narrativeResult.cacheHit,
+        deterministicResponseUsed: narrativeResult.fallbackUsed || narrativeResult.narrativeSkipped,
         usedMemoryIds: memoryContext.usedMemoryIds,
         totalLatencyMs: Date.now() - totalStartedAt,
         planningLatencyMs,
@@ -461,6 +499,7 @@ export async function askAgentHub(params: {
           bigQueryHits: cacheStatsAfter.hits - cacheStatsBefore.hits,
           bigQueryMisses: cacheStatsAfter.misses - cacheStatsBefore.misses,
         },
+        ...toolTraceMetadata,
         createdAt: nowIso(),
         sanitizedError: sanitizeError(error),
       }),

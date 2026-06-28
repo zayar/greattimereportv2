@@ -218,6 +218,33 @@ export async function getClinicGtGrowthAiAccess(clinicId: string): Promise<Clini
   });
 }
 
+export async function listKnownGtGrowthAiEnabledClinicIds() {
+  const enabledClinicIds = new Set<string>();
+  parseClinicIdList(env.GT_GROWTH_AI_ENABLED_CLINIC_IDS).forEach((clinicId) => enabledClinicIds.add(clinicId));
+
+  if (!env.GT_GROWTH_AI_FEATURE_STORE_ENABLED) {
+    return [...enabledClinicIds];
+  }
+
+  try {
+    const snapshot = await firestoreDb().collection(FEATURE_ACCESS_COLLECTION).limit(1_000).get();
+    snapshot.docs.forEach((doc) => {
+      const data = doc.data() as Record<string, unknown> | undefined;
+      const clinicId = typeof data?.clinicId === "string" ? data.clinicId : doc.id;
+      const features = data?.features && typeof data.features === "object" ? (data.features as Record<string, unknown>) : {};
+      const stored = parseStoredFeatureAccess(features[GT_GROWTH_AI_FEATURE_GATE]);
+
+      if (stored?.enabled === true && clinicId) {
+        enabledClinicIds.add(clinicId);
+      }
+    });
+  } catch {
+    // Feature-store data is optional for monitoring. Env-enabled clinics are still useful.
+  }
+
+  return [...enabledClinicIds];
+}
+
 export async function updateClinicGtGrowthAiAccess(input: {
   clinicId: string;
   enabled: boolean;

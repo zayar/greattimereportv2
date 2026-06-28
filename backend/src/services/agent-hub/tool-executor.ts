@@ -36,6 +36,8 @@ async function executeWithTimeout(tool: AgentToolDefinition, input: AgentToolInp
           period: input.period.label,
           dataStatus: "unavailable",
           live: tool.live,
+          timedOut: true,
+          errorCategory: "timeout",
           warnings: [
             {
               type: "timeout",
@@ -51,6 +53,46 @@ async function executeWithTimeout(tool: AgentToolDefinition, input: AgentToolInp
       clearTimeout(timeoutHandle);
     }
   });
+}
+
+function categorizeToolError(error: unknown) {
+  if (error instanceof z.ZodError) {
+    return "invalid_tool_input";
+  }
+
+  const message = sanitizeError(error).toLowerCase();
+  if (message.includes("read-only")) {
+    return "read_only_blocked";
+  }
+  if (message.includes("timed out") || message.includes("timeout")) {
+    return "timeout";
+  }
+
+  return "tool_unavailable";
+}
+
+function addToolMetadata(result: AgentToolResult, startedAt: number): AgentToolResult {
+  const latencyMs = Date.now() - startedAt;
+  const warningTypes = new Set((result.warnings ?? []).map((warning) => warning.type));
+  const timedOut = result.timedOut === true || warningTypes.has("timeout");
+  const errorCategory =
+    result.errorCategory ??
+    (timedOut
+      ? "timeout"
+      : result.dataStatus === "unavailable"
+        ? warningTypes.has("invalid_tool_input")
+          ? "invalid_tool_input"
+          : warningTypes.has("tool_unavailable")
+            ? "tool_unavailable"
+            : "source_unavailable"
+        : undefined);
+
+  return {
+    ...result,
+    latencyMs,
+    timedOut,
+    ...(errorCategory ? { errorCategory } : {}),
+  };
 }
 
 export async function mapWithConcurrency<T, R>(
@@ -85,6 +127,8 @@ async function executeSingleTool(params: {
   input: AgentToolInput;
   registry: Map<string, AgentToolDefinition>;
 }) {
+  const startedAt = Date.now();
+
   try {
     const tool = assertToolAllowed({
       requestedToolName: params.toolName,
@@ -92,7 +136,7 @@ async function executeSingleTool(params: {
       registry: params.registry,
     });
     tool.inputSchema.parse(params.input);
-    return await runWithAnalyticsQueryContext(
+    const result = await runWithAnalyticsQueryContext(
       {
         queryNamePrefix: `agent.${params.agentId}.${tool.name}`,
         labels: {
@@ -107,14 +151,19 @@ async function executeSingleTool(params: {
       },
       () => executeWithTimeout(tool, params.input),
     );
+
+    return addToolMetadata(result, startedAt);
   } catch (error) {
-    return {
+    const errorCategory = categorizeToolError(error);
+    return addToolMetadata({
       toolName: params.toolName,
       sourceName: params.registry.get(params.toolName)?.sourceName ?? "GreatTime source",
       checkedAt: nowIso(),
       period: params.input.period.label,
       dataStatus: "unavailable",
       live: params.registry.get(params.toolName)?.live,
+      timedOut: errorCategory === "timeout",
+      errorCategory,
       warnings: [
         {
           type: error instanceof z.ZodError ? "invalid_tool_input" : "tool_unavailable",
@@ -122,7 +171,7 @@ async function executeSingleTool(params: {
           message: sanitizeError(error),
         },
       ],
-    } satisfies AgentToolResult;
+    } satisfies AgentToolResult, startedAt);
   }
 }
 

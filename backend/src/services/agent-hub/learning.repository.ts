@@ -30,6 +30,20 @@ export type AgentLearningRunCounts = {
   failed: number;
 };
 
+export type AgentLearningRunRecord = {
+  clinicId: string;
+  clinicCode?: string | null;
+  jobType: AgentLearningJobType;
+  bucket: string;
+  status: "started" | "completed" | "skipped" | "failed";
+  rowCount: number;
+  counts: AgentLearningRunCounts;
+  sourceWatermark?: string | null;
+  nextExpectedRunAt?: string | null;
+  error?: string | null;
+  createdAt: string;
+};
+
 export type AgentLearningScheduleRecord = {
   id: string;
   clinicId: string;
@@ -121,6 +135,52 @@ export async function saveAgentLearningRun(params: {
     error: params.error ? sanitizeError(params.error) : null,
     createdAt: nowIso(),
   });
+}
+
+function isAgentLearningRunRecord(data: FirebaseFirestore.DocumentData | undefined): data is AgentLearningRunRecord {
+  return Boolean(data?.clinicId && data?.jobType && data?.status && data?.createdAt);
+}
+
+export async function listRecentAgentLearningRuns(params: {
+  clinicId?: string;
+  since: Date;
+  limit?: number;
+}) {
+  const db = firestoreDb();
+  const limit = Math.min(Math.max(params.limit ?? 500, 1), 2_000);
+  const sinceMs = params.since.getTime();
+  const collection = db.collection(LEARNING_RUNS_COLLECTION);
+  const queries: Array<() => Promise<FirebaseFirestore.QuerySnapshot<FirebaseFirestore.DocumentData>>> = [];
+
+  if (params.clinicId) {
+    queries.push(() =>
+      collection
+        .where("clinicId", "==", params.clinicId)
+        .orderBy("createdAt", "desc")
+        .limit(limit)
+        .get(),
+    );
+    queries.push(() => collection.where("clinicId", "==", params.clinicId).limit(limit).get());
+  } else {
+    queries.push(() => collection.orderBy("createdAt", "desc").limit(limit).get());
+    queries.push(() => collection.limit(limit).get());
+  }
+
+  for (const query of queries) {
+    try {
+      const snapshot = await query();
+      return snapshot.docs
+        .map((doc) => doc.data())
+        .filter(isAgentLearningRunRecord)
+        .filter((run) => new Date(run.createdAt).getTime() >= sinceMs)
+        .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+        .slice(0, limit);
+    } catch {
+      // Try the less index-sensitive fallback query.
+    }
+  }
+
+  return [];
 }
 
 function watermarkId(params: { clinicId: string; jobType: AgentLearningJobType }) {

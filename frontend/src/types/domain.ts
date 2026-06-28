@@ -1058,6 +1058,107 @@ export interface GreatTimeAgentChatResponse {
   actions: Array<{ type: "read_only_agent_response"; detail?: string }>;
 }
 
+export type AgentStatusHealth = "healthy" | "degraded" | "critical" | "unknown";
+export type AgentStatusRange = "24h" | "7d" | "30d";
+
+export interface GreatTimeAgentStatusReport {
+  health: AgentStatusHealth;
+  range: AgentStatusRange;
+  summary: {
+    totalAgentQuestions: number;
+    timeoutCount: number;
+    fallbackCount: number;
+    narrativeFallbackCount: number;
+    toolFailureCount: number;
+    wrongDataFeedbackCount: number;
+    alertCount: number;
+  };
+  performance: {
+    averageLatencyMs: number;
+    p95LatencyMs: number;
+    timeoutCount: number;
+    fallbackCount: number;
+    narrativeFallbackCount: number;
+    toolFailureCount: number;
+    toolFailureRate: number;
+    slowestTools: Array<{
+      toolName: string;
+      count: number;
+      averageLatencyMs: number;
+      p95LatencyMs: number;
+      maxLatencyMs: number;
+      timeoutCount: number;
+      failureCount: number;
+    }>;
+    bigQueryCache: {
+      hits: number;
+      misses: number;
+      hitRate: number;
+    };
+  };
+  learning: {
+    totalRuns: number;
+    failedRuns: number;
+    latestRunByJobType: Record<
+      string,
+      {
+        clinicId: string;
+        jobType: string;
+        status: "started" | "completed" | "skipped" | "failed";
+        rowCount: number;
+        createdAt: string;
+        nextExpectedRunAt?: string | null;
+        error?: string | null;
+      }
+    >;
+    staleJobs: Array<{
+      clinicId: string;
+      jobType: string;
+      status: "started" | "completed" | "skipped" | "failed";
+      latestRunAt: string;
+      ageHours: number;
+      reason: string;
+    }>;
+  };
+  snapshots: {
+    totalSnapshots: number;
+    latestByType: Record<
+      string,
+      {
+        clinicId: string;
+        snapshotType: string;
+        checkedAt: string;
+        dataStatus: AgentDataStatus;
+        ageSeconds: number;
+        maxAgeSeconds: number;
+        expired: boolean;
+      }
+    >;
+    staleSnapshots: Array<{
+      clinicId: string;
+      snapshotType: string;
+      checkedAt: string;
+      dataStatus: AgentDataStatus;
+      ageSeconds: number;
+      maxAgeSeconds: number;
+      expired: boolean;
+      reason: string;
+    }>;
+  };
+  feedback: {
+    totalFeedbackEvents: number;
+    wrongDataFeedbackCount: number;
+    recommendationOutcomesCount: number;
+    activeInsightCardsCount: number;
+  };
+  alerts: Array<{
+    severity: "info" | "warning" | "critical";
+    code: string;
+    message: string;
+  }>;
+  generatedAt: string;
+}
+
 export interface AppointmentRow {
   bookingid: string;
   FromTime: string;

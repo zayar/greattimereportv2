@@ -113,6 +113,19 @@ function latestCheckedAt(sources: GreatTimeAgentSource[]) {
     .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] ?? nowIso();
 }
 
+function secondsSince(value: string | null | undefined, now = new Date()) {
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = new Date(value).getTime();
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+
+  return Math.max(0, Math.floor((now.getTime() - parsed) / 1_000));
+}
+
 async function getCompletedDayFinanceSnapshot(input: AgentToolInput) {
   if (!env.AGENT_SNAPSHOT_CACHE_ENABLED || !env.AGENT_COMPLETED_DAY_SNAPSHOT_ENABLED) {
     return null;
@@ -589,6 +602,7 @@ export function buildOwnerDailyBriefFromSnapshots(params: {
       checkedAt: insightCards[0].checkedAt,
       period: params.briefDate,
       dataStatus: "ok",
+      freshnessSeconds: secondsSince(insightCards[0].checkedAt),
       live: false,
       scope: "learned",
     });
@@ -596,12 +610,21 @@ export function buildOwnerDailyBriefFromSnapshots(params: {
 
   const hasFinance = Boolean(params.financeSnapshot);
   const hasAppointments = Boolean(params.appointmentSnapshot);
+  const missingSnapshotLabels = [
+    ...(hasFinance ? [] : ["finance daily snapshot"]),
+    ...(hasAppointments ? [] : ["appointment daily profile"]),
+    ...(params.operationalSnapshot ? [] : ["appointment operational snapshot"]),
+    ...(params.serviceSnapshot ? [] : ["service profiles"]),
+    ...(params.practitionerSnapshot ? [] : ["practitioner profiles"]),
+  ];
   const dataStatus: AgentDataStatus = hasFinance && hasAppointments ? "ok" : sources.length ? "partial" : "not_ready";
-  if (dataStatus === "partial") {
+  if (dataStatus !== "ok") {
     warnings.push({
       type: "owner_daily_brief_partial",
-      title: "Daily brief is partial",
-      message: "Some daily brief snapshots are not ready yet, so this answer includes only available source-backed snapshots.",
+      title: dataStatus === "not_ready" ? "Daily brief snapshots are not ready" : "Daily brief is partial",
+      message: missingSnapshotLabels.length
+        ? `This answer uses available source-backed snapshots only. Missing: ${missingSnapshotLabels.join(", ")}.`
+        : "Some daily brief snapshots are not ready yet, so this answer includes only available source-backed snapshots.",
     });
   }
 

@@ -312,6 +312,9 @@ export type AgentToolResult = {
   dataStatus: AgentDataStatus;
   live?: boolean;
   freshnessSeconds?: number;
+  latencyMs?: number;
+  timedOut?: boolean;
+  errorCategory?: string;
   metrics?: GreatTimeAgentMetric[];
   tables?: GreatTimeAgentTable[];
   recommendations?: GreatTimeAgentRecommendation[];
@@ -350,6 +353,10 @@ export type AgentRunTrace = {
   sourceStatuses: AgentDataStatus[];
   dataStatus: AgentDataStatus;
   fallbackUsed: boolean;
+  narrativeFallbackUsed?: boolean;
+  narrativeSkipped?: boolean;
+  narrativeCacheHit?: boolean;
+  deterministicResponseUsed?: boolean;
   usedMemoryIds?: string[];
   totalLatencyMs?: number;
   planningLatencyMs?: number;
@@ -365,7 +372,18 @@ export type AgentRunTrace = {
     toolName: string;
     durationMs: number;
     dataStatus: AgentDataStatus;
+    timedOut?: boolean;
+    errorCategory?: string;
   }>;
+  toolExecutionResults?: Array<{
+    toolName: string;
+    latencyMs: number;
+    timedOut: boolean;
+    dataStatus: AgentDataStatus;
+    errorCategory?: string;
+  }>;
+  timedOutTools?: string[];
+  unavailableTools?: string[];
   createdAt: string;
   sanitizedError?: string;
 };

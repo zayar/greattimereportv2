@@ -3,6 +3,7 @@ import { z } from "zod";
 import { env } from "../config/env.js";
 import { verifyFirebaseToken } from "../middleware/auth.js";
 import { requireClinicAccess } from "../middleware/clinic-access.js";
+import { isAiControlPanelAdminEmail } from "../services/ai-control-panel-access.service.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { HttpError } from "../utils/http-error.js";
 import { resolveAiLanguage } from "../services/ai/language.js";
@@ -37,6 +38,10 @@ import {
 } from "../services/agent-hub/agent-hub.service.js";
 import { resolveAgentClinicContext } from "../services/agent-hub/clinic-context.service.js";
 import { saveAgentFeedback } from "../services/agent-hub/feedback.repository.js";
+import {
+  getAgentStatusReport,
+  normalizeAgentStatusRange,
+} from "../services/agent-hub/monitoring/agent-status-monitoring.js";
 import {
   agentChatRequestSchema,
   agentFeedbackSchema,
@@ -152,7 +157,51 @@ const customerRelationshipFeedbackSchema = customerRelationshipBaseSchema.extend
   note: z.string().max(500).nullable().optional(),
 });
 
+const agentStatusQuerySchema = z.object({
+  clinicId: z.string().min(1).optional(),
+  range: z.preprocess((value) => normalizeAgentStatusRange(value), z.enum(["24h", "7d", "30d"]).default("24h")),
+  includeDetails: z
+    .preprocess((value) => {
+      if (typeof value !== "string") {
+        return value;
+      }
+
+      return value.trim().toLowerCase() === "true";
+    }, z.boolean())
+    .default(false),
+});
+
 router.use(verifyFirebaseToken);
+
+export function canAccessAgentStatus(params: {
+  user?: Express.Request["user"];
+  clinicId?: string;
+}) {
+  if (!params.user) {
+    return false;
+  }
+
+  if (params.clinicId) {
+    return params.user.clinicIds.includes(params.clinicId);
+  }
+
+  return isAiControlPanelAdminEmail(params.user.email) || params.user.roles.includes("admin");
+}
+
+function requireAgentStatusAccess(req: Express.Request, clinicId?: string) {
+  if (!req.user) {
+    throw new HttpError(401, "User session is required.");
+  }
+
+  if (canAccessAgentStatus({ user: req.user, clinicId })) {
+    return;
+  }
+
+  throw new HttpError(
+    403,
+    clinicId ? "You do not have access to this clinic." : "Cross-clinic AI status is restricted to admins.",
+  );
+}
 
 async function requireGtGrowthAi(clinicId: string) {
   const access = await hasFeatureAccess({
@@ -202,6 +251,21 @@ router.post(
         userEmail: req.user?.email,
         authorizationHeader: req.headers.authorization,
       },
+    });
+
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/agent/status",
+  asyncHandler(async (req, res) => {
+    const params = agentStatusQuerySchema.parse(req.query);
+    requireAgentStatusAccess(req, params.clinicId);
+    const data = await getAgentStatusReport({
+      clinicId: params.clinicId,
+      range: params.range,
+      includeDetails: params.includeDetails,
     });
 
     res.json({ success: true, data });

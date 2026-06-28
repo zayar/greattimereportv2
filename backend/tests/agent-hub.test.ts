@@ -45,6 +45,7 @@ const { buildOwnerDailyBriefFromSnapshots, selectOwnerDailyBriefDate } = await i
 const { extractLikelyCustomerSearchText } = await import("../src/services/agent-hub/customer-query.ts")
 const { extractExplicitServiceSearchText } = await import("../src/services/agent-hub/service-query.ts")
 const { enhanceAgentResponseNarrative } = await import("../src/services/agent-hub/narrative.service.ts")
+const { buildAgentStatusReport } = await import("../src/services/agent-hub/monitoring/agent-status-monitoring.ts")
 const {
   buildSnapshotUnavailableWarning,
   evaluateFactSnapshotForRequest,
@@ -63,6 +64,7 @@ const { buildMemoryRecordsFromFeedbackEvents } = await import("../src/services/a
 const { buildSessionSummaryFromTurn, isSessionSummaryFresh } = await import("../src/services/agent-hub/session.repository.ts")
 const { buildLearningBucket, isScheduleDueForJob } = await import("../src/services/agent-hub/learning-worker.ts")
 const { isAgentLearningSchedulerSecretValid } = await import("../src/routes/agent-learning.routes.ts")
+const { canAccessAgentStatus } = await import("../src/routes/ai.routes.ts")
 const {
   buildAgentHubTelegramReplyMarkup,
   canTelegramUserChatWithAgent,
@@ -391,6 +393,8 @@ test("env defaults parse Agent Hub and BigQuery performance knobs", () => {
   assert.equal(parsed.AGENT_NARRATIVE_ENABLED, true)
   assert.equal(parsed.AGENT_FAST_MODE_ENABLED, true)
   assert.equal(parsed.AGENT_NARRATIVE_TIMEOUT_MS, 1_500)
+  assert.equal(parsed.AGENT_NARRATIVE_CACHE_ENABLED, true)
+  assert.equal(parsed.AGENT_NARRATIVE_SKIP_FAST_INTENTS, true)
   assert.equal(parsed.AGENT_SNAPSHOT_CACHE_ENABLED, true)
   assert.equal(parsed.AGENT_SNAPSHOT_MAX_AGE_MINUTES, 1_440)
   assert.equal(parsed.AGENT_OPERATIONAL_SNAPSHOT_MAX_AGE_MINUTES, 20)
@@ -902,6 +906,158 @@ test("owner daily brief returns not_ready when no useful snapshots exist", () =>
   assert.equal(result.dataStatus, "not_ready")
   assert.equal(result.sources?.length ?? 0, 0)
   assert.match(result.summary ?? "", /not ready/)
+  assert.equal(result.warnings?.[0]?.type, "owner_daily_brief_partial")
+})
+
+test("AI status aggregation summarizes fake traces and feedback", () => {
+  const now = new Date("2026-06-28T04:00:00.000Z")
+  const traces = [
+    {
+      clinicId: "clinic-1",
+      userId: "user-1",
+      sessionId: "session-1",
+      requestId: "request-1",
+      responseId: "response-1",
+      requestedAgent: "business",
+      resolvedAgent: "business",
+      intent: "owner_daily_brief",
+      toolNames: ["get_owner_daily_brief"],
+      sourceStatuses: ["ok"],
+      dataStatus: "ok",
+      fallbackUsed: false,
+      narrativeFallbackUsed: false,
+      totalLatencyMs: 900,
+      cacheStats: { bigQueryHits: 2, bigQueryMisses: 1 },
+      toolExecutionResults: [
+        {
+          toolName: "get_owner_daily_brief",
+          latencyMs: 120,
+          timedOut: false,
+          dataStatus: "ok",
+        },
+      ],
+      createdAt: "2026-06-28T03:50:00.000Z",
+    },
+    {
+      clinicId: "clinic-1",
+      userId: "user-1",
+      sessionId: "session-1",
+      requestId: "request-2",
+      responseId: "response-2",
+      requestedAgent: "appointment",
+      resolvedAgent: "appointment",
+      intent: "appointment_summary",
+      toolNames: ["get_live_appointment_counts"],
+      sourceStatuses: ["unavailable"],
+      dataStatus: "partial",
+      fallbackUsed: true,
+      narrativeFallbackUsed: true,
+      totalLatencyMs: 5_200,
+      cacheStats: { bigQueryHits: 0, bigQueryMisses: 1 },
+      toolExecutionResults: [
+        {
+          toolName: "get_live_appointment_counts",
+          latencyMs: 3_000,
+          timedOut: true,
+          dataStatus: "unavailable",
+          errorCategory: "timeout",
+        },
+      ],
+      timedOutTools: ["get_live_appointment_counts"],
+      unavailableTools: ["get_live_appointment_counts"],
+      createdAt: "2026-06-28T03:55:00.000Z",
+    },
+  ] as any
+
+  const report = buildAgentStatusReport({
+    range: "24h",
+    traces,
+    learningRuns: [],
+    feedbackEvents: [
+      {
+        id: "feedback-1",
+        clinicId: "clinic-1",
+        sessionId: "session-1",
+        responseId: "response-2",
+        feedbackType: "wrong_data",
+        rating: "not_helpful",
+        userId: "user-1",
+        createdAt: "2026-06-28T03:56:00.000Z",
+      },
+    ] as any,
+    recommendationOutcomes: [],
+    insightCards: [],
+    factSnapshots: [],
+    now,
+  })
+
+  assert.equal(report.health, "critical")
+  assert.equal(report.summary.totalAgentQuestions, 2)
+  assert.equal(report.performance.averageLatencyMs, 3050)
+  assert.equal(report.performance.timeoutCount, 1)
+  assert.equal(report.performance.narrativeFallbackCount, 1)
+  assert.equal(report.performance.toolFailureCount, 1)
+  assert.equal(report.performance.slowestTools[0]?.toolName, "get_live_appointment_counts")
+  assert.equal(report.performance.bigQueryCache.hits, 2)
+  assert.equal(report.performance.bigQueryCache.misses, 2)
+  assert.equal(report.feedback.wrongDataFeedbackCount, 1)
+  assert.equal(report.alerts.some((alert) => alert.code === "wrong_data_feedback"), true)
+})
+
+test("AI status detects stale learning jobs", () => {
+  const report = buildAgentStatusReport({
+    range: "24h",
+    traces: [],
+    learningRuns: [
+      {
+        clinicId: "clinic-1",
+        clinicCode: "ABC",
+        jobType: "appointment_operational_snapshot",
+        bucket: "2026-06-28T03:00+Asia/Yangon",
+        status: "completed",
+        rowCount: 10,
+        counts: { scanned: 10, created: 1, updated: 1, skipped: 0, failed: 0 },
+        nextExpectedRunAt: "2026-06-28T03:15:00.000Z",
+        createdAt: "2026-06-28T03:00:00.000Z",
+      },
+    ],
+    feedbackEvents: [],
+    recommendationOutcomes: [],
+    insightCards: [],
+    factSnapshots: [],
+    now: new Date("2026-06-28T05:00:00.000Z"),
+  })
+
+  assert.equal(report.learning.staleJobs.length, 1)
+  assert.equal(report.learning.staleJobs[0]?.jobType, "appointment_operational_snapshot")
+  assert.equal(report.alerts.some((alert) => alert.code === "stale_learning_jobs"), true)
+})
+
+test("AI status detects stale fact snapshots", () => {
+  const report = buildAgentStatusReport({
+    range: "24h",
+    traces: [],
+    learningRuns: [],
+    feedbackEvents: [],
+    recommendationOutcomes: [],
+    insightCards: [],
+    factSnapshots: [
+      {
+        ...buildFactSnapshotFixture({
+          snapshotType: "appointment_operational_snapshot",
+          checkedAt: "2026-06-28T03:00:00.000Z",
+          fromDate: "2026-06-28",
+          toDate: "2026-06-28",
+        }),
+        expiresAt: "2026-06-28T03:30:00.000Z",
+      },
+    ],
+    now: new Date("2026-06-28T04:00:00.000Z"),
+  })
+
+  assert.equal(report.snapshots.staleSnapshots.length, 1)
+  assert.equal(report.snapshots.staleSnapshots[0]?.snapshotType, "appointment_operational_snapshot")
+  assert.equal(report.alerts.some((alert) => alert.code === "stale_snapshots"), true)
 })
 
 test("owner daily brief builds structured risks opportunities actions and operational metrics", () => {
@@ -1656,6 +1812,34 @@ test("planner routes owner daily brief questions to the fast brief tool", () => 
 test("owner daily brief disabled tool selection falls back to business health", () => {
   assert.deepEqual(toolsForBusinessOwnerDailyBrief(true), ["get_owner_daily_brief"])
   assert.deepEqual(toolsForBusinessOwnerDailyBrief(false), ["get_business_health_snapshot"])
+})
+
+test("AI status route access requires clinic claim or admin cross-clinic view", () => {
+  const clinicUser = {
+    uid: "uid-1",
+    email: "clinic@example.com",
+    roles: [],
+    clinicIds: ["clinic-1"],
+  }
+  const adminUser = {
+    uid: "uid-admin",
+    email: "zayar@datafocus.cloud",
+    roles: [],
+    clinicIds: [],
+  }
+  const roleAdminUser = {
+    uid: "uid-role-admin",
+    email: "admin@example.com",
+    roles: ["admin"],
+    clinicIds: [],
+  }
+
+  assert.equal(canAccessAgentStatus({ user: clinicUser, clinicId: "clinic-1" }), true)
+  assert.equal(canAccessAgentStatus({ user: clinicUser, clinicId: "clinic-2" }), false)
+  assert.equal(canAccessAgentStatus({ user: clinicUser }), false)
+  assert.equal(canAccessAgentStatus({ user: adminUser }), true)
+  assert.equal(canAccessAgentStatus({ user: roleAdminUser }), true)
+  assert.equal(canAccessAgentStatus({ user: undefined, clinicId: "clinic-1" }), false)
 })
 
 test("Agent Hub does not run appointment detail for export-only follow-ups", async () => {
@@ -2779,6 +2963,72 @@ test("executeToolPlan returns unavailable for one failing tool without failing t
   assert.equal(results[1]?.warnings?.[0]?.type, "tool_unavailable")
 })
 
+test("executeToolPlan annotates timed out tools with metadata", async () => {
+  const registry = new Map([
+    [
+      "slow_tool",
+      {
+        name: "slow_tool",
+        agentId: "finance" as const,
+        description: "slow fixture tool",
+        inputSchema: z.object({}),
+        sourceName: "fixture",
+        capability: "read_only" as const,
+        live: false,
+        maxRows: 10,
+        timeoutMs: 10,
+        async execute(input: { period: { label: string } }) {
+          await delay(80)
+          return {
+            toolName: "slow_tool",
+            sourceName: "fixture",
+            checkedAt: "2026-06-18T00:00:00.000Z",
+            period: input.period.label,
+            dataStatus: "ok" as const,
+            live: false,
+          }
+        },
+      },
+    ],
+  ])
+  const startedAt = Date.now()
+
+  const results = await executeToolPlan({
+    toolNames: ["slow_tool"],
+    agentId: "finance",
+    input: {
+      request: {
+        clinicId: "clinic-1",
+        clinicCode: "ABC",
+        agent: "finance",
+        message: "test",
+      },
+      clinic: {
+        clinicId: "clinic-1",
+        clinicCode: "ABC",
+      },
+      period: {
+        fromDate: "2026-06-18",
+        toDate: "2026-06-18",
+        label: "today",
+      },
+      intent: "test",
+      requestContext: {
+        userId: "user-1",
+      },
+    },
+    registry,
+    maxConcurrency: 1,
+  })
+
+  assert.ok(Date.now() - startedAt < 70)
+  assert.equal(results[0]?.toolName, "slow_tool")
+  assert.equal(results[0]?.dataStatus, "unavailable")
+  assert.equal(results[0]?.timedOut, true)
+  assert.equal(results[0]?.errorCategory, "timeout")
+  assert.ok((results[0]?.latencyMs ?? 0) >= 8)
+})
+
 test("executeToolPlan blocks non-read-only tools in read-only Agent Hub mode", async () => {
   let readOnlyExecuted = false
   let draftExecuted = false
@@ -2990,6 +3240,41 @@ test("AGENT_NARRATIVE_ENABLED false returns deterministic response", async () =>
     assert.equal(providerCalled, false)
   } finally {
     env.AGENT_NARRATIVE_ENABLED = originalEnabled
+  }
+})
+
+test("fast deterministic intents skip narrative provider", async () => {
+  const originalSkip = env.AGENT_NARRATIVE_SKIP_FAST_INTENTS
+  const deterministicResponse = {
+    ...buildDeterministicAgentResponseFixture(),
+    requestedAgent: "business",
+    resolvedAgent: "business",
+    intent: "owner_daily_brief",
+    assistantMessage: "Source-backed owner daily brief.",
+    summary: "Source-backed owner daily brief.",
+  } as Parameters<typeof enhanceAgentResponseNarrative>[0]
+  let providerCalled = false
+
+  env.AGENT_NARRATIVE_SKIP_FAST_INTENTS = true
+
+  try {
+    const result = await enhanceAgentResponseNarrative(deterministicResponse, {
+      memories: [],
+      provider: {
+        modelName: "fixture",
+        async generateJson() {
+          providerCalled = true
+          return JSON.stringify({ assistantMessage: "AI narrative." })
+        },
+      },
+    })
+
+    assert.equal(result.response, deterministicResponse)
+    assert.equal(result.fallbackUsed, false)
+    assert.equal(result.narrativeSkipped, true)
+    assert.equal(providerCalled, false)
+  } finally {
+    env.AGENT_NARRATIVE_SKIP_FAST_INTENTS = originalSkip
   }
 })
 

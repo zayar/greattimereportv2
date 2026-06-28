@@ -6,6 +6,15 @@ import type { GtAgentRecommendationState } from "./memory/memory-types.js";
 
 const FEEDBACK_COLLECTION = "gtAgentFeedbackEventsV1";
 
+export type AgentFeedbackEventRecord = AgentFeedbackInput & {
+  id: string;
+  userId: string;
+  userEmail?: string | null;
+  feedbackType: NonNullable<AgentFeedbackInput["feedbackType"]>;
+  createdAt: string;
+  processedAt?: string | null;
+};
+
 function mapOutcomeState(outcome: AgentFeedbackInput["outcome"]): GtAgentRecommendationState | null {
   if (!outcome) {
     return null;
@@ -99,6 +108,52 @@ export async function listUnprocessedAgentFeedback(params: {
       createdAt: string;
     }),
   }));
+}
+
+function isAgentFeedbackEventRecord(data: FirebaseFirestore.DocumentData | undefined): data is AgentFeedbackEventRecord {
+  return Boolean(data?.id && data?.clinicId && data?.responseId && data?.feedbackType && data?.createdAt);
+}
+
+export async function listRecentAgentFeedbackEvents(params: {
+  clinicId?: string;
+  since: Date;
+  limit?: number;
+}) {
+  const db = firestoreDb();
+  const limit = Math.min(Math.max(params.limit ?? 500, 1), 2_000);
+  const sinceMs = params.since.getTime();
+  const collection = db.collection(FEEDBACK_COLLECTION);
+  const queries: Array<() => Promise<FirebaseFirestore.QuerySnapshot<FirebaseFirestore.DocumentData>>> = [];
+
+  if (params.clinicId) {
+    queries.push(() =>
+      collection
+        .where("clinicId", "==", params.clinicId)
+        .orderBy("createdAt", "desc")
+        .limit(limit)
+        .get(),
+    );
+    queries.push(() => collection.where("clinicId", "==", params.clinicId).limit(limit).get());
+  } else {
+    queries.push(() => collection.orderBy("createdAt", "desc").limit(limit).get());
+    queries.push(() => collection.limit(limit).get());
+  }
+
+  for (const query of queries) {
+    try {
+      const snapshot = await query();
+      return snapshot.docs
+        .map((doc) => ({ id: doc.id, ...doc.data() }))
+        .filter(isAgentFeedbackEventRecord)
+        .filter((event) => new Date(event.createdAt).getTime() >= sinceMs)
+        .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+        .slice(0, limit);
+    } catch {
+      // Try the less index-sensitive fallback query.
+    }
+  }
+
+  return [];
 }
 
 export async function markAgentFeedbackProcessed(params: {

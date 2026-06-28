@@ -18,6 +18,8 @@ import type {
   GreatTimeAgentChatRequest,
   GreatTimeAgentChatResponse,
   GreatTimeAgentId,
+  GreatTimeAgentStatusReport,
+  AgentStatusRange,
 } from "../types/domain";
 
 type BaseAiRequest = {
@@ -174,6 +176,19 @@ export async function askGreatTimeAgentHub(params: GreatTimeAgentChatRequest) {
   const response = await apiClient.post<{ success: true; data: GreatTimeAgentChatResponse }>(
     "/ai/agent/chat",
     params,
+  );
+
+  return response.data.data;
+}
+
+export async function fetchGreatTimeAgentStatus(params?: {
+  clinicId?: string;
+  range?: AgentStatusRange;
+  includeDetails?: boolean;
+}) {
+  const response = await apiClient.get<{ success: true; data: GreatTimeAgentStatusReport }>(
+    "/ai/agent/status",
+    { params },
   );
 
   return response.data.data;
