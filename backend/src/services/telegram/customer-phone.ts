@@ -17,35 +17,52 @@ export type CustomerPhoneValue = {
   customerPhoneMasked?: string | null;
 };
 
+export type CustomerPhoneFormatOptions = {
+  logContext?: string;
+};
+
 export function canViewFullCustomerPhone(viewerContext?: CustomerPhoneViewerContext) {
   if (typeof viewerContext?.canViewFullCustomerPhone === "boolean") {
     return viewerContext.canViewFullCustomerPhone;
   }
 
-  if (!env.SHOW_FULL_CUSTOMER_PHONE || viewerContext?.chatType !== "private") {
+  if (!env.SHOW_FULL_CUSTOMER_PHONE) {
     return false;
   }
 
-  const target = viewerContext.target;
+  if (viewerContext?.chatType !== "private" && env.MASK_PHONE_IN_GROUP_CHAT) {
+    return false;
+  }
+
+  const target = viewerContext?.target;
   if (!target?.isAgentChatEnabled) {
     return false;
   }
 
   if (target.agentChatAccessMode === "all_members") {
-    return Boolean(viewerContext.telegramUserId);
+    return Boolean(viewerContext?.telegramUserId);
   }
 
   return Boolean(
-    viewerContext.telegramUserId &&
+    viewerContext?.telegramUserId &&
       target.agentChatAllowedUserIds.includes(viewerContext.telegramUserId),
   );
 }
 
-export function formatCustomerPhone(customer: CustomerPhoneValue, viewerContext?: CustomerPhoneViewerContext) {
+export function formatCustomerPhone(
+  customer: CustomerPhoneValue,
+  viewerContext?: CustomerPhoneViewerContext,
+  options?: CustomerPhoneFormatOptions,
+) {
   const fullPhone = customer.fullPhone ?? customer.phone ?? customer.customerPhone ?? "";
   const maskedPhone = customer.maskedPhone ?? customer.customerPhoneMasked ?? maskPhone(fullPhone);
 
   if (canViewFullCustomerPhone(viewerContext) && fullPhone.trim()) {
+    console.info("[telegram] displayed full customer phone", {
+      context: options?.logContext ?? "customer_phone",
+      chatType: viewerContext?.chatType,
+      telegramUserId: viewerContext?.telegramUserId ?? null,
+    });
     return fullPhone.trim();
   }
 

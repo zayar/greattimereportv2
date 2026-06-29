@@ -219,7 +219,7 @@ export function resolveRecentAppointmentReference(params: {
   const exactMatches = uniqueByCustomerId(
     params.context.appointments.filter((item) => {
       const name = normalizeCustomerNameKey(item.customerName);
-      const fullPhoneDigits = normalizePhoneDigits(item.fullPhone);
+      const fullPhoneDigits = normalizePhoneDigits(item.resolutionPhone ?? item.fullPhone);
       const maskedPhoneDigits = normalizePhoneDigits(item.maskedPhone);
       const memberId = normalizeCustomerNameKey(item.memberId);
 

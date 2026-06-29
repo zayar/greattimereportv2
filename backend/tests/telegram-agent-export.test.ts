@@ -176,9 +176,9 @@ test("Telegram Agent reply markup prepends Download CSV without breaking suggest
   } as const
 
   const markup = buildAgentHubTelegramReplyMarkup(response, { exportCallbackData: "gtcsv:export-1" })
-  assert.equal(markup?.inline_keyboard[0]?.[0]?.text, "⬇️ Download CSV")
+  assert.equal(markup?.inline_keyboard[0]?.[0]?.text, "Download CSV")
   assert.equal(markup?.inline_keyboard[0]?.[0]?.callback_data, "gtcsv:export-1")
-  assert.match(markup?.inline_keyboard[1]?.[0]?.callback_data ?? "", /^gtask:/)
+  assert.equal(markup?.inline_keyboard.length, 1)
 
   const noTableMarkup = buildAgentHubTelegramReplyMarkup({
     ...response,

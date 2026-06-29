@@ -142,7 +142,15 @@ function buildMemoryDirectives(memories: GtAgentRelevantMemory[]) {
 function buildNarrativePrompt(response: GreatTimeAgentChatResponse, memories: GtAgentRelevantMemory[]) {
   return JSON.stringify({
     instruction:
-      "Write one concise GreatTime owner-facing answer from these fixed facts. Do not add, remove, recalculate, or change any number. Return JSON only: {\"assistantMessage\":\"...\"}.",
+      [
+        "Write one concise GreatTime owner-facing answer from these fixed facts.",
+        "Do not add, remove, recalculate, or change any number.",
+        "For appointment lists, use clear customer-friendly rows with customer name, phone, service, staff, time, and status when present.",
+        "Ask the staff to choose by tapping the customer name; do not invent generic Details/History or Next Question button labels.",
+        "For customer relationship answers, use recent appointment context first when present and never expose internal matching/debug terms.",
+        "Use short Burmese + English mixed wording that is useful for salon/front-desk staff.",
+        "Return JSON only: {\"assistantMessage\":\"...\"}.",
+      ].join(" "),
     language: response.requestedAgent === "auto" ? "match user preference if obvious" : "concise",
     memoryDirectives: buildMemoryDirectives(memories),
     agent: response.resolvedAgent,

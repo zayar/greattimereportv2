@@ -90,6 +90,12 @@ Optional GitHub repository variables for Telegram reliability tuning:
 - `APICORE_REQUEST_TIMEOUT_MS`
 - `FIREBASE_AUTH_REQUEST_TIMEOUT_MS`
 
+Optional GitHub repository variables for Telegram appointment/customer UX:
+- `SHOW_FULL_CUSTOMER_PHONE` enables full phone display for authorized staff when set to `true`
+- `MASK_PHONE_IN_GROUP_CHAT` keeps group chats masked by default; set to `false` only when group full-phone display is approved
+- `APPOINTMENT_BUTTON_PHONE_SUFFIX_DIGITS` controls duplicate-name button suffix length; default is `3`
+- `MAX_APPOINTMENT_BUTTONS_PER_PAGE` controls appointment-name button pagination; default is `8`
+
 Optional GitHub repository variables for Agent Hub scheduled learning:
 - `AGENT_MEMORY_V2_ENABLED` (defaults to `false`)
 - `AGENT_LEARNING_ENABLED` (defaults to `false`)

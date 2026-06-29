@@ -31,6 +31,7 @@ import {
   getRecentAppointmentContext,
   resolveRecentAppointmentReference,
   saveRecentAppointmentContext,
+  type RecentAppointmentContext,
   type RecentAppointmentContextItem,
 } from "./appointment-context.js";
 import {
@@ -104,6 +105,19 @@ const suggestedQuestionCallbacks = new Map<string, { question: string; createdAt
 const SUGGESTED_QUESTION_TTL_MS = 60 * 60_000;
 const customerActionCallbacks = new Map<string, { entityContext: GreatTimeAgentEntityContext; createdAt: number }>();
 const CUSTOMER_ACTION_TTL_MS = 15 * 60_000;
+type AppointmentCallbackToken = {
+  action: "select" | "page";
+  clinicId?: string;
+  telegramChatId?: string;
+  telegramUserId?: string | null;
+  appointmentId?: string;
+  customerId?: string;
+  page?: number;
+  createdAt: number;
+  expiresAt: number;
+};
+const appointmentActionCallbacks = new Map<string, AppointmentCallbackToken>();
+const APPOINTMENT_ACTION_TTL_MS = 15 * 60_000;
 
 function getTelegramApiUrl(method: string) {
   if (!env.TELEGRAM_BOT_TOKEN) {
@@ -566,7 +580,6 @@ function sanitizeOwnerFacingText(text: string) {
 }
 
 function formatAppointmentConversation(response: GreatTimeAgentChatResponse, viewerContext?: CustomerPhoneViewerContext, clinicCode = "") {
-  const serviceTable = response.tables?.find((table) => table.title === "Appointment services");
   const appointmentTable = appointmentTableFromResponse(response);
   const appointmentContextItems = buildRecentAppointmentContextItemsFromResponse({
     response,
@@ -577,31 +590,16 @@ function formatAppointmentConversation(response: GreatTimeAgentChatResponse, vie
     response.metrics?.find((metric) => metric.label.toLowerCase() === "appointments")?.value ??
     appointmentTable?.rows.length ??
     0;
-  const serviceCount =
-    response.metrics?.find((metric) => metric.label.toLowerCase() === "services")?.value ??
-    serviceTable?.rows.length ??
-    0;
-  const lines = [
-    `ဒီနေ့ appointment စာရင်းကို စစ်ပြီးပါပြီ။ Appointment ${formatMetricValue(totalAppointments, undefined)} ခုရှိပြီး service အမျိုးအစား ${formatMetricValue(serviceCount, undefined)} ခု ပါပါတယ်။`,
-  ];
-
-  if (serviceTable?.rows.length) {
-    lines.push("", "ဒီနေ့ appointment ထဲက service များ:");
-    serviceTable.rows.slice(0, 25).forEach((row, index) => {
-      const serviceName = stringValue(row, "serviceName", "Unknown service");
-      const appointments = numberValue(row, "appointmentCount") ?? 0;
-      const customers = numberValue(row, "customerCount") ?? 0;
-      lines.push(`${index + 1}. ${serviceName} — appointment ${appointments.toLocaleString("en-US")} ခု၊ customer ${customers.toLocaleString("en-US")} ယောက်`);
-    });
-
-    if (serviceTable.rows.length > 25) {
-      lines.push(`နောက်ထပ် service ${serviceTable.rows.length - 25} ခုရှိပါသေးတယ်။`);
-    }
-  }
+  const total = typeof totalAppointments === "number" ? totalAppointments : appointmentTable?.rows.length ?? appointmentContextItems.length;
+  const lines = [`ဒီနေ့ appointment ${formatMetricValue(totalAppointments, undefined)} ခုရှိပါတယ်။`];
 
   if (appointmentTable?.rows.length) {
-    lines.push("", "Customer + service appointment စာရင်း:");
-    appointmentTable.rows.slice(0, 15).forEach((row, index) => {
+    if (appointmentContextItems.length > appointmentPageSize()) {
+      const bounds = appointmentPageBounds(appointmentContextItems.length, 0);
+      lines.push(`Showing ${bounds.start + 1}-${bounds.end} of ${appointmentContextItems.length.toLocaleString("en-US")} appointments`);
+    }
+
+    appointmentTable.rows.slice(0, 30).forEach((row, index) => {
       const contextItem = appointmentContextItems[index];
       const time = contextItem?.appointmentTime ?? formatDateTimeForOwner(row.scheduledFrom);
       const customer = contextItem?.customerName ?? stringValue(row, "customerName", "Unknown customer");
@@ -609,18 +607,27 @@ function formatAppointmentConversation(response: GreatTimeAgentChatResponse, vie
       const practitioner = contextItem?.staffName ?? stringValue(row, "practitionerName", "");
       const status = contextItem?.appointmentStatus ?? translateStatus(stringValue(row, "rawStatus", ""));
       const phone = contextItem
-        ? formatCustomerPhone({ fullPhone: contextItem.fullPhone, maskedPhone: contextItem.maskedPhone }, viewerContext)
+        ? formatCustomerPhone(
+            { fullPhone: contextItem.fullPhone, maskedPhone: contextItem.maskedPhone },
+            viewerContext,
+            { logContext: "appointment_list" },
+          )
         : stringValue(row, "customerPhoneMasked", "");
-      const practitionerText = practitioner && practitioner !== "-" ? ` ${practitioner} က တာဝန်ယူထားပါတယ်။` : "";
-      const phoneText = phone && phone !== "-" ? ` Phone: ${phone}။` : "";
-      lines.push(`${index + 1}. ${time} — ${customer} အတွက် ${service} appointment ပါ။${phoneText}${practitionerText} အခြေအနေ: ${status}`);
+
+      lines.push("");
+      lines.push(`${index + 1}. ${time} — ${customer}`);
+      lines.push(`Phone: ${phone || "-"}`);
+      lines.push(`Service: ${service}`);
+      lines.push(`Staff: ${practitioner || "-"}`);
+      lines.push(`Status: ${status}`);
     });
 
-    if (appointmentTable.rows.length > 15) {
-      lines.push(`နောက်ထပ် appointment ${appointmentTable.rows.length - 15} ခုကို GreatTime report ထဲမှာ ဆက်ကြည့်နိုင်ပါတယ်။`);
+    if (appointmentTable.rows.length > 30 || total > 30) {
+      const remaining = Math.max(appointmentTable.rows.length, total) - 30;
+      lines.push("", `နောက်ထပ် appointment ${remaining.toLocaleString("en-US")} ခုကို CSV/report ထဲမှာ ဆက်ကြည့်နိုင်ပါတယ်။`);
     }
 
-    lines.push("", "ဘယ် customer ကိုကြည့်မလဲ?");
+    lines.push("", "Customer တစ်ယောက်ကိုရွေးပါ။");
   }
 
   return lines;
@@ -936,12 +943,66 @@ function formatCustomer360PackageLine(row: Customer360FactPack["packages"]["hold
   return `- ${row.serviceName}: ကျန် ${remaining.toLocaleString("en-US")}/${total.toLocaleString("en-US")}${latest}${therapist}`;
 }
 
-function formatCustomer360TreatmentLine(row: Record<string, unknown>) {
+function formatCustomer360VisitSummary(row: Record<string, unknown>) {
   const date = typeof row.checkInTime === "string" ? row.checkInTime.slice(0, 10) : "-";
-  const service = typeof row.serviceName === "string" ? row.serviceName : "Service";
-  const therapist = typeof row.therapistName === "string" ? ` | ${row.therapistName}` : "";
+  const service = typeof row.serviceName === "string" && row.serviceName ? row.serviceName : "Service";
+  const therapist = typeof row.therapistName === "string" && row.therapistName ? row.therapistName : "";
+  return [date, service, therapist].filter(Boolean).join(" — ");
+}
 
-  return `- ${date}: ${service}${therapist}`;
+function customer360LooksNew(factPack: Customer360FactPack) {
+  const totalVisits = factPack.value.totalVisits ?? 0;
+  const recentCompleted = factPack.appointments.recentCompleted?.length ?? 0;
+  const packageCount = factPack.packages.purchaseCount ?? factPack.packages.holdings.length ?? 0;
+  const invoiceCount = factPack.payments.invoiceCount ?? factPack.payments.recentInvoices.length ?? 0;
+
+  return totalVisits === 0 && recentCompleted === 0 && packageCount === 0 && invoiceCount === 0;
+}
+
+function formatCustomer360HistoryReply(
+  factPack: Customer360FactPack,
+  viewerContext?: CustomerPhoneViewerContext,
+) {
+  const lines = [`${factPack.identity.displayName} history`];
+  const displayPhone = formatCustomerPhone(
+    {
+      fullPhone: factPack.identity.phoneNumber,
+      maskedPhone: factPack.identity.maskedPhone,
+    },
+    viewerContext,
+    { logContext: "customer_history" },
+  );
+  if (displayPhone !== "-") {
+    lines.push("", `Phone: ${displayPhone}`);
+  }
+
+  const recentTreatments = (factPack.appointments.recentCompleted ?? []).slice(0, 8);
+  if (recentTreatments.length) {
+    lines.push("", "Recent treatments:");
+    recentTreatments.forEach((row, index) => {
+      lines.push(`${index + 1}. ${formatCustomer360VisitSummary(row)}`);
+    });
+  } else {
+    lines.push("", "No previous visit found yet.");
+  }
+
+  const topService = factPack.usage.topServices[0];
+  if (topService) {
+    const service = stringValue(topService, "serviceName", "Service");
+    const usage = numberValue(topService, "totalUsage");
+    lines.push("", "Most used service:");
+    lines.push(`${service}${usage != null ? ` — ${usage.toLocaleString("en-US")} times` : ""}`);
+  }
+
+  if (factPack.packages.holdings.length) {
+    lines.push("", "Package / balance:");
+    factPack.packages.holdings.slice(0, 5).forEach((row) => {
+      lines.push(formatCustomer360PackageLine(row));
+    });
+  }
+
+  const message = lines.join("\n").trim();
+  return message.length <= 3900 ? message : `${message.slice(0, 3890).trim()}\n...`;
 }
 
 function formatCustomer360TelegramReply(response: GreatTimeAgentChatResponse, viewerContext?: CustomerPhoneViewerContext) {
@@ -953,17 +1014,25 @@ function formatCustomer360TelegramReply(response: GreatTimeAgentChatResponse, vi
   const packageRows = factPack.packages.holdings.filter((row) => (row.remainingSessions ?? 0) > 0).slice(0, 6);
   const recentTreatments = (factPack.appointments.recentCompleted ?? []).slice(0, 3);
   const topServices = factPack.usage.topServices.slice(0, 3);
-  const lines = [...buildTelegramReplyHeader(response), "", sanitizeOwnerFacingText(response.summary || response.assistantMessage)];
+  if (isCustomerHistoryResponse(response)) {
+    return formatCustomer360HistoryReply(factPack, viewerContext);
+  }
+
+  const lines = [factPack.identity.displayName];
   const displayPhone = formatCustomerPhone(
     {
       fullPhone: factPack.identity.phoneNumber,
       maskedPhone: factPack.identity.maskedPhone,
     },
     viewerContext,
+    { logContext: "customer_card" },
   );
 
   if (displayPhone !== "-") {
     lines.push("", `Phone: ${displayPhone}`);
+  }
+  if (factPack.identity.memberId) {
+    lines.push(`Member ID: ${factPack.identity.memberId}`);
   }
 
   const todayAppointment = factPack.appointments.current?.[0];
@@ -977,39 +1046,46 @@ function formatCustomer360TelegramReply(response: GreatTimeAgentChatResponse, vi
         maskedPhone: stringValue(todayAppointment, "phoneMasked", factPack.identity.maskedPhone ?? ""),
       },
       viewerContext,
+      { logContext: "customer_card_today_appointment" },
     );
+    const status = stringValue(todayAppointment, "appointmentStatus", "-");
 
-    lines.push("", "Today’s appointment:");
+    lines.push("", `Today appointment: ${time}`);
     lines.push(`Service: ${service}`);
     lines.push(`Staff: ${staff}`);
-    lines.push(`Time: ${time}`);
-    lines.push(`Phone: ${phone}`);
+    lines.push(`Status: ${status}`);
+    if (phone !== "-" && phone !== displayPhone) {
+      lines.push(`Phone: ${phone}`);
+    }
+  }
+
+  if (recentTreatments.length > 0) {
+    lines.push("", "Last visit:");
+    lines.push(formatCustomer360VisitSummary(recentTreatments[0]!));
+  } else if (customer360LooksNew(factPack)) {
+    lines.push("", "This customer looks new.");
+    lines.push("No previous history found yet.");
+  }
+
+  if ((factPack.value.totalVisits ?? 0) > 0 || recentTreatments.length > 0) {
+    lines.push(`Total visits: ${(factPack.value.totalVisits ?? recentTreatments.length).toLocaleString("en-US")}`);
+  }
+
+  const topService = topServices[0];
+  if (topService) {
+    const service = typeof topService.serviceName === "string" ? topService.serviceName : "Service";
+    const usage = typeof topService.totalUsage === "number" ? ` — ${topService.totalUsage.toLocaleString("en-US")} times` : "";
+    lines.push(`Most used service: ${service}${usage}`);
   }
 
   if (packageRows.length > 0) {
-    lines.push("", "Package / service လက်ကျန်:");
+    lines.push("", "Package / balance:");
     packageRows.forEach((row) => {
       lines.push(formatCustomer360PackageLine(row));
     });
   }
 
-  if (recentTreatments.length > 0) {
-    lines.push("", "နောက်ဆုံး treatment များ:");
-    recentTreatments.forEach((row) => {
-      lines.push(formatCustomer360TreatmentLine(row));
-    });
-  }
-
-  if (topServices.length > 0) {
-    lines.push("", "အသုံးများတဲ့ service:");
-    topServices.forEach((row) => {
-      const service = typeof row.serviceName === "string" ? row.serviceName : "Service";
-      const usage = typeof row.totalUsage === "number" ? row.totalUsage.toLocaleString("en-US") : String(row.totalUsage ?? "-");
-      lines.push(`- ${service}: ${usage} ကြိမ်`);
-    });
-  }
-
-  if (factPack.recommendation) {
+  if (factPack.recommendation && !customer360LooksNew(factPack)) {
     lines.push("", `အကြံပြုချက်: ${sanitizeOwnerFacingText(factPack.recommendation.title)}`);
     factPack.recommendation.evidence.slice(0, 2).forEach((item) => {
       lines.push(`- ${sanitizeOwnerFacingText(item)}`);
@@ -1189,7 +1265,7 @@ function suggestionLabel(question: string, index: number) {
     return "Customer detail ကြည့်မယ်";
   }
 
-  return `ဆက်မေးခွန်း ${index + 1}`;
+  return `Action ${index + 1}`;
 }
 
 function registerSuggestedQuestion(question: string) {
@@ -1206,6 +1282,44 @@ function registerSuggestedQuestion(question: string) {
   return key;
 }
 
+function newCallbackToken(prefix: string) {
+  return createHash("sha256")
+    .update(`${prefix}|${Date.now()}|${Math.random()}`)
+    .digest("hex")
+    .slice(0, 12);
+}
+
+function cleanupAppointmentActionCallbacks(now = Date.now()) {
+  appointmentActionCallbacks.forEach((value, key) => {
+    if (value.expiresAt <= now) {
+      appointmentActionCallbacks.delete(key);
+    }
+  });
+}
+
+function registerAppointmentActionToken(params: Omit<AppointmentCallbackToken, "createdAt" | "expiresAt">) {
+  cleanupAppointmentActionCallbacks();
+  const createdAt = Date.now();
+  const key = newCallbackToken("appt");
+  appointmentActionCallbacks.set(key, {
+    ...params,
+    createdAt,
+    expiresAt: createdAt + APPOINTMENT_ACTION_TTL_MS,
+  });
+  return key;
+}
+
+function getAppointmentActionToken(key: string, now = Date.now()) {
+  cleanupAppointmentActionCallbacks(now);
+  const token = appointmentActionCallbacks.get(key);
+  if (!token || token.expiresAt <= now) {
+    appointmentActionCallbacks.delete(key);
+    return null;
+  }
+
+  return token;
+}
+
 function cleanupCustomerActionCallbacks() {
   const cutoff = Date.now() - CUSTOMER_ACTION_TTL_MS;
   customerActionCallbacks.forEach((value, key) => {
@@ -1217,11 +1331,11 @@ function cleanupCustomerActionCallbacks() {
 
 function registerCustomerActionRef(entityContext: GreatTimeAgentEntityContext) {
   cleanupCustomerActionCallbacks();
-  const key = entityContext.customerKey ?? entityContext.entityId;
-  if (!key) {
+  if (!entityContext.customerKey && !entityContext.entityId) {
     return "";
   }
 
+  const key = newCallbackToken("cust");
   customerActionCallbacks.set(key, {
     entityContext,
     createdAt: Date.now(),
@@ -1230,50 +1344,317 @@ function registerCustomerActionRef(entityContext: GreatTimeAgentEntityContext) {
   return key;
 }
 
+function getCustomerActionRef(key: string) {
+  cleanupCustomerActionCallbacks();
+  const cached = customerActionCallbacks.get(key);
+  if (cached) {
+    return cached;
+  }
+
+  for (const value of customerActionCallbacks.values()) {
+    if (value.entityContext.customerKey === key || value.entityContext.entityId === key) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function compactAppointmentButtonTime(value: string) {
+  const match = value.match(/\b([01]?\d|2[0-3]):([0-5]\d)\b/);
+  if (!match) {
+    return value.trim() || "-";
+  }
+
+  return `${match[1]!.padStart(2, "0")}:${match[2]}`;
+}
+
+function truncateButtonText(value: string, maxLength = 48) {
+  const clean = value.replace(/\s+/g, " ").trim();
+  if (clean.length <= maxLength) {
+    return clean;
+  }
+
+  return `${clean.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+function phoneSuffix(value: string | undefined, digits = env.APPOINTMENT_BUTTON_PHONE_SUFFIX_DIGITS) {
+  const phoneDigits = (value ?? "").replace(/\D/g, "");
+  return phoneDigits.length > 0 ? phoneDigits.slice(-digits) : "";
+}
+
+function appointmentDuplicateNameCounts(items: RecentAppointmentContextItem[]) {
+  const counts = new Map<string, number>();
+  items.forEach((item) => {
+    const key = item.customerName.trim().toLowerCase();
+    if (key) {
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  });
+  return counts;
+}
+
+function appointmentButtonLabel(item: RecentAppointmentContextItem, duplicateNameCounts: Map<string, number>) {
+  const time = compactAppointmentButtonTime(item.appointmentTime);
+  const name = item.customerName || "Customer";
+  const isDuplicate = (duplicateNameCounts.get(name.trim().toLowerCase()) ?? 0) > 1;
+  const suffix = isDuplicate ? phoneSuffix(item.resolutionPhone ?? item.fullPhone ?? item.maskedPhone) : "";
+  const disambiguator = suffix ? ` · ${suffix}` : "";
+
+  return truncateButtonText(`${time} ${name}${disambiguator}`);
+}
+
+function appointmentPageSize() {
+  return Math.max(1, env.MAX_APPOINTMENT_BUTTONS_PER_PAGE);
+}
+
+function appointmentPageBounds(total: number, page: number) {
+  const pageSize = appointmentPageSize();
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(Math.max(0, page), totalPages - 1);
+  const start = safePage * pageSize;
+  const end = Math.min(total, start + pageSize);
+  return { pageSize, totalPages, page: safePage, start, end };
+}
+
+function registerAppointmentPageToken(params: {
+  clinicId?: string;
+  telegramChatId?: string;
+  telegramUserId?: string | null;
+  page: number;
+}) {
+  return registerAppointmentActionToken({
+    action: "page",
+    clinicId: params.clinicId,
+    telegramChatId: params.telegramChatId,
+    telegramUserId: params.telegramUserId,
+    page: params.page,
+  });
+}
+
+function buildAppointmentSelectionReplyMarkup(params: {
+  appointments: RecentAppointmentContextItem[];
+  clinicId?: string;
+  telegramChatId?: string;
+  telegramUserId?: string | null;
+  page?: number;
+  exportCallbackData?: string;
+  includeBackToToday?: boolean;
+}) {
+  if (params.appointments.length === 0 && !params.exportCallbackData) {
+    return undefined;
+  }
+
+  const bounds = appointmentPageBounds(params.appointments.length, params.page ?? 0);
+  const pageItems = params.appointments.slice(bounds.start, bounds.end);
+  const duplicateNameCounts = appointmentDuplicateNameCounts(params.appointments);
+  const appointmentButtons = pageItems.map((item) => {
+    const token = registerAppointmentActionToken({
+      action: "select",
+      clinicId: params.clinicId,
+      telegramChatId: params.telegramChatId,
+      telegramUserId: params.telegramUserId,
+      appointmentId: item.appointmentId,
+      customerId: item.customerId,
+      page: bounds.page,
+    });
+
+    return [
+      {
+        text: appointmentButtonLabel(item, duplicateNameCounts),
+        callback_data: `apptsel:${token}`,
+      },
+    ];
+  });
+
+  const navButtons: Array<{ text: string; callback_data: string }> = [];
+  if (bounds.page > 0) {
+    navButtons.push({
+      text: "Previous",
+      callback_data: `apptpg:${registerAppointmentPageToken({ ...params, page: bounds.page - 1 })}`,
+    });
+  }
+  if (bounds.end < params.appointments.length) {
+    navButtons.push({
+      text: "Next",
+      callback_data: `apptpg:${registerAppointmentPageToken({ ...params, page: bounds.page + 1 })}`,
+    });
+  }
+  if (params.includeBackToToday && bounds.page !== 0) {
+    navButtons.push({
+      text: "Back to Today",
+      callback_data: `apptpg:${registerAppointmentPageToken({ ...params, page: 0 })}`,
+    });
+  }
+
+  const keyboard = [
+    ...appointmentButtons,
+    ...(navButtons.length ? [navButtons] : []),
+    ...(params.exportCallbackData
+      ? [
+          [
+            {
+              text: "Download CSV",
+              callback_data: params.exportCallbackData,
+            },
+          ],
+        ]
+      : []),
+  ];
+
+  return keyboard.length > 0 ? { inline_keyboard: keyboard } : undefined;
+}
+
+function buildAppointmentPageMessage(params: {
+  context: RecentAppointmentContext;
+  page: number;
+  viewerContext: CustomerPhoneViewerContext;
+}) {
+  const bounds = appointmentPageBounds(params.context.appointments.length, params.page);
+  const lines = [
+    `Showing ${bounds.start + 1}-${bounds.end} of ${params.context.appointments.length.toLocaleString("en-US")} appointments`,
+    "",
+  ];
+
+  params.context.appointments.slice(bounds.start, bounds.end).forEach((item) => {
+    const phone = formatCustomerPhone(
+      { fullPhone: item.fullPhone, maskedPhone: item.maskedPhone },
+      params.viewerContext,
+      { logContext: "appointment_page" },
+    );
+    lines.push(`${item.displayIndex}. ${item.appointmentTime} — ${item.customerName}`);
+    lines.push(`Phone: ${phone}`);
+    lines.push(`Service: ${item.serviceName}`);
+    lines.push(`Staff: ${item.staffName || "-"}`);
+    lines.push(`Status: ${item.appointmentStatus}`);
+    lines.push("");
+  });
+
+  lines.push("Customer တစ်ယောက်ကိုရွေးပါ။");
+  return lines.join("\n").trim();
+}
+
+function findAppointmentContextForCustomer(
+  context: RecentAppointmentContext | null | undefined,
+  response: GreatTimeAgentChatResponse,
+) {
+  if (!context?.appointments.length) {
+    return null;
+  }
+
+  const customerKey = response.customer360?.identity.customerKey ?? response.entityContext?.customerKey ?? response.entityContext?.entityId;
+  const appointmentId = response.entityContext?.appointmentId;
+  return (
+    context.appointments.find((item) => appointmentId && item.appointmentId === appointmentId) ??
+    context.appointments.find((item) => customerKey && item.customerId === customerKey) ??
+    null
+  );
+}
+
+function customerEntityContextFromResponse(response: GreatTimeAgentChatResponse) {
+  if (response.entityContext?.entityType === "customer") {
+    return response.entityContext;
+  }
+
+  return response.entityRefs?.find((ref) => ref.entityType === "customer");
+}
+
+function isCustomerHistoryResponse(response: GreatTimeAgentChatResponse) {
+  return response.intent === "customer_purchase_history";
+}
+
+function buildCustomerCardReplyMarkup(params: {
+  response: GreatTimeAgentChatResponse;
+  recentAppointmentContext?: RecentAppointmentContext | null;
+  clinicId?: string;
+  telegramChatId?: string;
+  telegramUserId?: string | null;
+}) {
+  if (!params.response.customer360) {
+    return undefined;
+  }
+
+  const rows: Array<Array<{ text: string; callback_data: string }>> = [];
+  const entityContext = customerEntityContextFromResponse(params.response);
+  const selectedAppointment = findAppointmentContextForCustomer(params.recentAppointmentContext, params.response);
+  const actionContext = selectedAppointment ? appointmentContextItemToCustomerEntityContext(selectedAppointment) : entityContext;
+  const customerToken = actionContext ? registerCustomerActionRef(actionContext) : "";
+  const isHistory = isCustomerHistoryResponse(params.response);
+
+  if (customerToken) {
+    if (isHistory) {
+      rows.push([{ text: "Back to Customer", callback_data: `customer_details:${customerToken}` }]);
+    } else if (!customer360LooksNew(params.response.customer360)) {
+      rows.push([{ text: "Full History", callback_data: `customer_history:${customerToken}` }]);
+      const hasPackageBalance =
+        (params.response.customer360.packages.holdings?.length ?? 0) > 0 ||
+        (params.response.customer360.packages.totalRemainingSessions ?? 0) > 0;
+      if (hasPackageBalance) {
+        rows.push([{ text: "Package / Balance", callback_data: `customer_package:${customerToken}` }]);
+      }
+    }
+  }
+
+  if (params.recentAppointmentContext?.appointments.length) {
+    rows.push([
+      {
+        text: "Back to Today Appointments",
+        callback_data: `apptpg:${registerAppointmentPageToken({
+          clinicId: params.clinicId,
+          telegramChatId: params.telegramChatId,
+          telegramUserId: params.telegramUserId,
+          page: selectedAppointment
+            ? appointmentPageBounds(params.recentAppointmentContext.appointments.length, Math.floor((selectedAppointment.displayIndex - 1) / appointmentPageSize())).page
+            : 0,
+        })}`,
+      },
+    ]);
+  }
+
+  return rows.length > 0 ? { inline_keyboard: rows } : undefined;
+}
+
 export function buildAgentHubTelegramReplyMarkup(
   response: GreatTimeAgentChatResponse,
   options?: {
     exportCallbackData?: string;
     appointmentContextItems?: RecentAppointmentContextItem[];
+    recentAppointmentContext?: RecentAppointmentContext | null;
+    clinicId?: string;
+    telegramChatId?: string;
+    telegramUserId?: string | null;
+    appointmentPage?: number;
   },
 ) {
-  const seenCategories = new Set<string>();
-  const seenLabels = new Set<string>();
-  const questions = (response.followUpQuestions ?? []).filter(Boolean).reduce<string[]>((selected, question) => {
-    if (selected.length >= 3) {
-      return selected;
-    }
-
-    const category = suggestionCategory(question);
-    const label = suggestionLabel(question, selected.length);
-    if (isRedundantSuggestion(response, category) || seenCategories.has(category) || seenLabels.has(label)) {
-      return selected;
-    }
-
-    seenCategories.add(category);
-    seenLabels.add(label);
-    selected.push(question);
-    return selected;
-  }, []);
-
   const appointmentRows = options?.appointmentContextItems ?? [];
-  const appointmentButtons = appointmentRows.slice(0, 10).flatMap((item) => [
-    [
-      {
-        text: `${item.displayIndex} Details`,
-        callback_data: `customer_details:${item.customerId}`,
-      },
-      {
-        text: `${item.displayIndex} History`,
-        callback_data: `customer_history:${item.customerId}`,
-      },
-    ],
-  ]);
+  const appointmentMarkup = appointmentRows.length
+    ? buildAppointmentSelectionReplyMarkup({
+        appointments: appointmentRows,
+        clinicId: options?.clinicId,
+        telegramChatId: options?.telegramChatId,
+        telegramUserId: options?.telegramUserId,
+        page: options?.appointmentPage ?? 0,
+        exportCallbackData: options?.exportCallbackData,
+      })
+    : undefined;
+  if (appointmentMarkup) {
+    return appointmentMarkup;
+  }
+
+  const customerCardMarkup = buildCustomerCardReplyMarkup({
+    response,
+    recentAppointmentContext: options?.recentAppointmentContext,
+    clinicId: options?.clinicId,
+    telegramChatId: options?.telegramChatId,
+    telegramUserId: options?.telegramUserId,
+  });
+  if (customerCardMarkup) {
+    return customerCardMarkup;
+  }
+
   const shouldShowCustomerChoices = response.tables?.some((table) => /possible customer matches|suggested customer matches/i.test(table.title)) ?? false;
   const customerChoiceButtons =
-    appointmentButtons.length > 0
-      ? []
-      : shouldShowCustomerChoices
+    shouldShowCustomerChoices
         ? (response.entityRefs ?? [])
           .filter((ref) => ref.entityType === "customer")
           .slice(0, 10)
@@ -1291,30 +1672,23 @@ export function buildAgentHubTelegramReplyMarkup(
           .filter((row) => row.length > 0)
         : [];
 
-  if (appointmentButtons.length === 0 && customerChoiceButtons.length === 0 && questions.length === 0 && !options?.exportCallbackData) {
+  if (customerChoiceButtons.length === 0 && !options?.exportCallbackData) {
     return undefined;
   }
 
   return {
     inline_keyboard: [
-      ...appointmentButtons,
       ...customerChoiceButtons,
       ...(options?.exportCallbackData
         ? [
             [
               {
-                text: "⬇️ Download CSV",
+                text: "Download CSV",
                 callback_data: options.exportCallbackData,
               },
             ],
           ]
         : []),
-      ...questions.map((question, index) => [
-        {
-          text: suggestionLabel(question, index),
-          callback_data: `gtask:${registerSuggestedQuestion(question)}`,
-        },
-      ]),
     ],
   };
 }
@@ -1378,7 +1752,11 @@ function buildAppointmentContextSuggestionMessage(params: {
   item: RecentAppointmentContextItem;
   viewerContext: CustomerPhoneViewerContext;
 }) {
-  const phone = formatCustomerPhone({ fullPhone: params.item.fullPhone, maskedPhone: params.item.maskedPhone }, params.viewerContext);
+  const phone = formatCustomerPhone(
+    { fullPhone: params.item.fullPhone, maskedPhone: params.item.maskedPhone },
+    params.viewerContext,
+    { logContext: "appointment_context_suggestion" },
+  );
   return [
     `I couldn’t find "${params.query}". Did you mean ${params.item.customerName} from today’s appointment?`,
     "",
@@ -1396,21 +1774,28 @@ function buildAppointmentContextChoiceMessage(params: {
 }) {
   const lines = [`${params.query} ဆိုတဲ့ customer ${params.items.length.toLocaleString("en-US")} ယောက်တွေ့ပါတယ်။ ဘယ်သူကိုကြည့်မလဲ?`];
   params.items.forEach((item, index) => {
-    const phone = formatCustomerPhone({ fullPhone: item.fullPhone, maskedPhone: item.maskedPhone }, params.viewerContext);
+    const phone = formatCustomerPhone(
+      { fullPhone: item.fullPhone, maskedPhone: item.maskedPhone },
+      params.viewerContext,
+      { logContext: "appointment_context_choice" },
+    );
     lines.push(`${index + 1}. ${item.customerName} — ${phone} — ${item.serviceName} ${item.appointmentTime}`);
   });
   return lines.join("\n");
 }
 
-function appointmentContextReplyMarkup(items: RecentAppointmentContextItem[]) {
-  return {
-    inline_keyboard: items.slice(0, 10).map((item, index) => [
-      {
-        text: `Open ${index + 1}`,
-        callback_data: `customer_details:${item.customerId}`,
-      },
-    ]),
-  };
+function appointmentContextReplyMarkup(params: {
+  items: RecentAppointmentContextItem[];
+  clinicId?: string;
+  telegramChatId?: string;
+  telegramUserId?: string | null;
+}) {
+  return buildAppointmentSelectionReplyMarkup({
+    appointments: params.items,
+    clinicId: params.clinicId,
+    telegramChatId: params.telegramChatId,
+    telegramUserId: params.telegramUserId,
+  });
 }
 
 async function handleAgentQuestion(params: {
@@ -1506,7 +1891,11 @@ async function handleAgentQuestion(params: {
     if (recentResolution.status === "resolved") {
       const item = recentResolution.item;
       if (recentResolution.action === "phone") {
-        const phone = formatCustomerPhone({ fullPhone: item.fullPhone, maskedPhone: item.maskedPhone }, viewerContext);
+        const phone = formatCustomerPhone(
+          { fullPhone: item.fullPhone, maskedPhone: item.maskedPhone },
+          viewerContext,
+          { logContext: "appointment_context_phone" },
+        );
         await sendTelegramMessage(
           params.chatId,
           [
@@ -1517,7 +1906,12 @@ async function handleAgentQuestion(params: {
             `Time: ${item.appointmentTime}`,
           ].join("\n"),
           {
-            replyMarkup: appointmentContextReplyMarkup([item]),
+            replyMarkup: appointmentContextReplyMarkup({
+              items: [item],
+              clinicId: target.clinicId,
+              telegramChatId: params.chatId,
+              telegramUserId: params.telegramUserId,
+            }),
           },
         );
         return;
@@ -1538,7 +1932,12 @@ async function handleAgentQuestion(params: {
           viewerContext,
         }),
         {
-          replyMarkup: appointmentContextReplyMarkup([recentResolution.item]),
+          replyMarkup: appointmentContextReplyMarkup({
+            items: [recentResolution.item],
+            clinicId: target.clinicId,
+            telegramChatId: params.chatId,
+            telegramUserId: params.telegramUserId,
+          }),
         },
       );
       return;
@@ -1551,7 +1950,12 @@ async function handleAgentQuestion(params: {
           viewerContext,
         }),
         {
-          replyMarkup: appointmentContextReplyMarkup(recentResolution.items),
+          replyMarkup: appointmentContextReplyMarkup({
+            items: recentResolution.items,
+            clinicId: target.clinicId,
+            telegramChatId: params.chatId,
+            telegramUserId: params.telegramUserId,
+          }),
         },
       );
       return;
@@ -1574,15 +1978,19 @@ async function handleAgentQuestion(params: {
         })
       : [];
 
-  if (appointmentContextItems.length > 0) {
-    saveRecentAppointmentContext({
+  const recentAppointmentContext = appointmentContextItems.length > 0
+    ? saveRecentAppointmentContext({
       clinicId: target.clinicId,
       clinicCode: target.clinicCode,
       telegramChatId: params.chatId,
       telegramUserId: params.telegramUserId,
       appointments: appointmentContextItems,
-    });
-  }
+    })
+    : getRecentAppointmentContext({
+        clinicId: target.clinicId,
+        telegramChatId: params.chatId,
+        telegramUserId: params.telegramUserId,
+      });
 
   const cacheEntry =
     response.intent !== "unsupported_write_request" && hasExportableAgentTables(response)
@@ -1602,6 +2010,10 @@ async function handleAgentQuestion(params: {
   await sendTelegramMessage(params.chatId, formatAgentHubTelegramReply(response, { viewerContext, clinicCode: target.clinicCode }), {
     replyMarkup: buildAgentHubTelegramReplyMarkup(response, {
       appointmentContextItems,
+      recentAppointmentContext,
+      clinicId: target.clinicId,
+      telegramChatId: params.chatId,
+      telegramUserId: params.telegramUserId,
       exportCallbackData: cacheEntry ? `gtcsv:${cacheEntry.exportId}` : undefined,
     }),
   });
@@ -1797,13 +2209,140 @@ async function handleCsvExportCallback(callback: TelegramCallbackQuery) {
   });
 }
 
-async function handleCustomerActionCallback(callback: TelegramCallbackQuery) {
-  const match = callback.data?.match(/^(customer_details|customer_history|appointment_details):([A-Za-z0-9_-]+)$/);
-  const action = match?.[1];
-  const customerId = match?.[2];
+function callbackTokenMatchesRequest(params: {
+  token: AppointmentCallbackToken;
+  target: TelegramTargetStatus;
+  chatId: string;
+  telegramUserId: string | null;
+}) {
+  return (
+    (!params.token.clinicId || params.token.clinicId === params.target.clinicId) &&
+    (!params.token.telegramChatId || params.token.telegramChatId === params.chatId) &&
+    (!params.token.telegramUserId || params.token.telegramUserId === params.telegramUserId)
+  );
+}
+
+function appointmentFromToken(
+  token: AppointmentCallbackToken,
+  context: RecentAppointmentContext | null,
+) {
+  if (!context?.appointments.length) {
+    return null;
+  }
+
+  return (
+    context.appointments.find((item) => token.appointmentId && item.appointmentId === token.appointmentId) ??
+    context.appointments.find((item) => token.customerId && item.customerId === token.customerId) ??
+    null
+  );
+}
+
+async function handleAppointmentSelectCallback(callback: TelegramCallbackQuery) {
+  const key = callback.data?.match(/^apptsel:([A-Za-z0-9]+)$/)?.[1];
   const chat = callback.message?.chat;
 
-  if (!action || !customerId || !chat) {
+  if (!key || !chat) {
+    await answerTelegramCallback(callback.id, "Customer button expired.");
+    return;
+  }
+
+  const token = getAppointmentActionToken(key);
+  const chatId = String(chat.id);
+  const telegramUserId = callback.from?.id == null ? null : String(callback.from.id);
+  const target = await getTelegramTargetByChatId(chatId);
+  if (!target || !token || !callbackTokenMatchesRequest({ token, target, chatId, telegramUserId })) {
+    await answerTelegramCallback(callback.id, "This customer button expired.");
+    return;
+  }
+
+  if (!canTelegramUserChatWithAgent({ target, telegramUserId })) {
+    await answerTelegramCallback(callback.id, "Customer action unavailable.");
+    return;
+  }
+
+  const recentContext = getRecentAppointmentContext({
+    clinicId: target.clinicId,
+    telegramChatId: chatId,
+    telegramUserId,
+  });
+  const appointmentItem = appointmentFromToken(token, recentContext);
+  if (!appointmentItem) {
+    await answerTelegramCallback(callback.id, "This customer button expired.");
+    await sendTelegramMessage(chatId, "ဒီ appointment button သက်တမ်းကုန်သွားပါပြီ။ Today appointment ကို ပြန်မေးပေးပါ။");
+    return;
+  }
+
+  await answerTelegramCallback(callback.id, `Opening ${appointmentItem.customerName}...`);
+  await handleAgentQuestion({
+    chatId,
+    chatType: chat.type,
+    question: "Tell me about this customer",
+    telegramUserId,
+    entityContext: appointmentContextItemToCustomerEntityContext(appointmentItem),
+    agent: "customer_relationship",
+  });
+}
+
+async function handleAppointmentPageCallback(callback: TelegramCallbackQuery) {
+  const key = callback.data?.match(/^apptpg:([A-Za-z0-9]+)$/)?.[1];
+  const chat = callback.message?.chat;
+
+  if (!key || !chat) {
+    await answerTelegramCallback(callback.id, "Appointment page expired.");
+    return;
+  }
+
+  const token = getAppointmentActionToken(key);
+  const chatId = String(chat.id);
+  const telegramUserId = callback.from?.id == null ? null : String(callback.from.id);
+  const target = await getTelegramTargetByChatId(chatId);
+  if (!target || !token || !callbackTokenMatchesRequest({ token, target, chatId, telegramUserId })) {
+    await answerTelegramCallback(callback.id, "Appointment page expired.");
+    return;
+  }
+
+  if (!canTelegramUserChatWithAgent({ target, telegramUserId })) {
+    await answerTelegramCallback(callback.id, "Appointment page unavailable.");
+    return;
+  }
+
+  const recentContext = getRecentAppointmentContext({
+    clinicId: target.clinicId,
+    telegramChatId: chatId,
+    telegramUserId,
+  });
+  if (!recentContext?.appointments.length) {
+    await answerTelegramCallback(callback.id, "Appointment page expired.");
+    await sendTelegramMessage(chatId, "ဒီ appointment list သက်တမ်းကုန်သွားပါပြီ။ Today appointment ကို ပြန်မေးပေးပါ။");
+    return;
+  }
+
+  const viewerContext: CustomerPhoneViewerContext = {
+    chatType: chat.type,
+    telegramUserId,
+    target,
+  };
+  const page = token.page ?? 0;
+  await answerTelegramCallback(callback.id, "Opening appointment page...");
+  await sendTelegramMessage(chatId, buildAppointmentPageMessage({ context: recentContext, page, viewerContext }), {
+    replyMarkup: buildAppointmentSelectionReplyMarkup({
+      appointments: recentContext.appointments,
+      clinicId: target.clinicId,
+      telegramChatId: chatId,
+      telegramUserId,
+      page,
+      includeBackToToday: true,
+    }),
+  });
+}
+
+async function handleCustomerActionCallback(callback: TelegramCallbackQuery) {
+  const match = callback.data?.match(/^(customer_details|customer_history|customer_package|appointment_details):([A-Za-z0-9_-]+)$/);
+  const action = match?.[1];
+  const actionKey = match?.[2];
+  const chat = callback.message?.chat;
+
+  if (!action || !actionKey || !chat) {
     await answerTelegramCallback(callback.id, "Customer action expired.");
     return;
   }
@@ -1822,10 +2361,9 @@ async function handleCustomerActionCallback(callback: TelegramCallbackQuery) {
     telegramUserId,
   });
   const appointmentItem =
-    recentContext?.appointments.find((item) => item.customerId === customerId) ??
-    recentContext?.appointments.find((item) => item.appointmentId === customerId);
-  cleanupCustomerActionCallbacks();
-  const cachedCustomer = customerActionCallbacks.get(customerId);
+    recentContext?.appointments.find((item) => item.customerId === actionKey) ??
+    recentContext?.appointments.find((item) => item.appointmentId === actionKey);
+  const cachedCustomer = getCustomerActionRef(actionKey);
   const entityContext =
     action === "appointment_details" && appointmentItem
       ? {
@@ -1860,6 +2398,8 @@ async function handleCustomerActionCallback(callback: TelegramCallbackQuery) {
     question:
       action === "appointment_details"
         ? "Show appointment details"
+        : action === "customer_package"
+        ? "Show this customer's package balance"
         : action === "customer_history"
         ? "Show this customer's treatment and purchase history"
         : "Tell me about this customer",
@@ -1870,9 +2410,20 @@ async function handleCustomerActionCallback(callback: TelegramCallbackQuery) {
 }
 
 export async function handleTelegramUpdate(update: TelegramUpdate) {
+  if (update.callback_query?.data?.startsWith("apptsel:")) {
+    await handleAppointmentSelectCallback(update.callback_query);
+    return;
+  }
+
+  if (update.callback_query?.data?.startsWith("apptpg:")) {
+    await handleAppointmentPageCallback(update.callback_query);
+    return;
+  }
+
   if (
     update.callback_query?.data?.startsWith("customer_details:") ||
     update.callback_query?.data?.startsWith("customer_history:") ||
+    update.callback_query?.data?.startsWith("customer_package:") ||
     update.callback_query?.data?.startsWith("appointment_details:")
   ) {
     await handleCustomerActionCallback(update.callback_query);
@@ -1974,6 +2525,21 @@ export async function handleTelegramWebhook(update: TelegramUpdate, secretToken:
 
   await handleTelegramUpdate(update);
 }
+
+export const __test = {
+  clearAppointmentActionCallbacks() {
+    appointmentActionCallbacks.clear();
+  },
+  getAppointmentActionToken(key: string) {
+    return getAppointmentActionToken(key);
+  },
+  clearCustomerActionCallbacks() {
+    customerActionCallbacks.clear();
+  },
+  getCustomerActionRef(key: string) {
+    return getCustomerActionRef(key);
+  },
+};
 
 export async function ensureTelegramWebhook() {
   if (!env.TELEGRAM_WEBHOOK_ENABLED || !env.TELEGRAM_BOT_TOKEN || !env.APP_BASE_URL) {

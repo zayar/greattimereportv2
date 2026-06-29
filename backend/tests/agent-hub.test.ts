@@ -2325,9 +2325,7 @@ test("Telegram Agent reply formatter uses Myanmar conversational text and button
   assert.doesNotMatch(message, /BigQuery payment report: ok/)
   assert.doesNotMatch(message, /Sources:/)
   assert.doesNotMatch(message, /\/ask Show payment methods by amount/)
-  assert.equal(markup?.inline_keyboard.length, 1)
-  assert.match(markup?.inline_keyboard[0]?.[0]?.text ?? "", /Payment method/)
-  assert.match(markup?.inline_keyboard[0]?.[0]?.callback_data ?? "", /^gtask:/)
+  assert.equal(markup, undefined)
 })
 
 test("Telegram Customer 360 formatter uses owner-friendly Myanmar package context", () => {
@@ -2399,9 +2397,8 @@ test("Telegram Customer 360 formatter uses owner-friendly Myanmar package contex
     actions: [{ type: "read_only_agent_response" }],
   })
 
-  assert.match(message, /GT Brain/)
-  assert.match(message, /ဖြေဆိုသူ: GT Brain → Customer Relationship Agent/)
-  assert.match(message, /Package \/ service လက်ကျန်/)
+  assert.match(message, /^Soe Moe Thu/)
+  assert.match(message, /Package \/ balance/)
   assert.match(message, /ExoMicro: ကျန် 14\/59/)
   assert.match(message, /အကြံပြုချက်/)
   assert.doesNotMatch(message, /Sources:/)
@@ -2475,16 +2472,13 @@ test("Telegram formatter explains appointment services and practitioner rows wit
   const appointmentMessage = formatAgentHubTelegramReply(appointmentResponse)
   const appointmentMarkup = buildAgentHubTelegramReplyMarkup(appointmentResponse)
 
-  assert.match(appointmentMessage, /ဒီနေ့ appointment စာရင်း/)
-  assert.match(appointmentMessage, /Whitening Laser — appointment 1 ခု/)
-  assert.match(appointmentMessage, /Ma Aye အတွက် Whitening Laser appointment ပါ/)
-  assert.match(appointmentMessage, /Wai Phoo က တာဝန်ယူထားပါတယ်/)
+  assert.match(appointmentMessage, /ဒီနေ့ appointment 2 ခုရှိပါတယ်/)
+  assert.match(appointmentMessage, /1\. .* — Ma Aye/)
+  assert.match(appointmentMessage, /Service: Whitening Laser/)
+  assert.match(appointmentMessage, /Staff: Wai Phoo/)
   assert.doesNotMatch(appointmentMessage, /APICORE/)
   assert.doesNotMatch(appointmentMessage, /Whitening Laser \|/)
-  assert.deepEqual(
-    appointmentMarkup?.inline_keyboard.map((row) => row[0]?.text),
-    ["ပြီးဆုံးသူ ကြည့်မယ်", "ဖျက်/မလာ ကြည့်မယ်"],
-  )
+  assert.equal(appointmentMarkup, undefined)
 
   const practitionerMessage = formatAgentHubTelegramReply({
     sessionId: "session-1",
