@@ -382,8 +382,8 @@ export async function buildService360ToolResult(input: AgentToolInput): Promise<
       warnings: [
         {
           type: "ambiguous_service_identity",
-          title: "Service match is ambiguous",
-          message: "Multiple services matched this name. The agent will not silently choose between them.",
+          title: "Please choose a service",
+          message: "I found more than one service with that name. Please choose one.",
         },
       ],
       entityRefs: rows.map((row) => ({

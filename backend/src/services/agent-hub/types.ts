@@ -23,8 +23,11 @@ export type GreatTimeAgentEntityContext = {
   customerKey?: string;
   customerName?: string;
   customerPhone?: string;
+  customerPhoneMasked?: string;
   memberId?: string;
   appointmentId?: string;
+  appointmentTime?: string;
+  appointmentStatus?: string;
   serviceName?: string;
   practitionerName?: string;
   invoiceNumber?: string;
@@ -262,6 +265,7 @@ export type GreatTimeAgentChatResponse = {
   dataStatus: AgentDataStatus;
   warnings?: GreatTimeAgentWarning[];
   entityContext?: GreatTimeAgentEntityContext;
+  entityRefs?: GreatTimeAgentEntityContext[];
   actions: Array<{ type: "read_only_agent_response"; detail?: string }>;
 };
 

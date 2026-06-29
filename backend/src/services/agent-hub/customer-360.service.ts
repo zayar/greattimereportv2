@@ -1,12 +1,7 @@
 import {
   getCustomerPortalAgentVisitSnapshot,
-  resolveCustomerPortalCandidates,
 } from "../reports/customer-portal.service.js";
-import {
-  searchCustomerRelationshipProfilesBounded,
-  type CustomerRelationshipProfileSearchInput,
-} from "../reports/customer-relationship-profile.repository.js";
-import { extractExplicitCustomerSearchText } from "./customer-query.js";
+import { candidateRows, resolveCustomerIdentity } from "./customer-resolver.js";
 import { limitRows, maskPhone, nowIso, sanitizeError } from "./safety.js";
 import type {
   AgentDataStatus,
@@ -21,33 +16,6 @@ import type {
 
 type Customer360Language = AgentToolInput["request"]["aiLanguage"];
 
-type ResolvedCustomerIdentity = {
-  customerKey: string;
-  customerName: string;
-  customerPhone: string;
-  phoneMasked: string;
-  memberId?: string;
-  joinedDate?: string | null;
-  sourceScope: AgentSourceScope;
-};
-
-type CandidateRow = {
-  customerKey: string;
-  customerName: string;
-  phoneNumber?: string;
-  phoneMasked?: string;
-  memberId?: string | null;
-  joinedDate?: string | null;
-  lastVisitDate?: string | null;
-  totalVisits?: number;
-  lifetimeSpend?: number;
-};
-
-type IdentityResolution =
-  | { status: "resolved"; identity: ResolvedCustomerIdentity; sources: GreatTimeAgentSource[] }
-  | { status: "ambiguous"; searchText: string; candidates: CandidateRow[]; sources: GreatTimeAgentSource[] }
-  | { status: "not_found" | "not_ready" | "unavailable"; searchText: string; sources: GreatTimeAgentSource[]; warnings: GreatTimeAgentWarning[] };
-
 function withSectionTimeout<T>(promise: Promise<T>, sectionName: string, timeoutMs: number) {
   return Promise.race([
     promise,
@@ -57,14 +25,6 @@ function withSectionTimeout<T>(promise: Promise<T>, sectionName: string, timeout
       }, timeoutMs);
     }),
   ]);
-}
-
-function normalizeText(value: string | null | undefined) {
-  return (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
-}
-
-function normalizeDigits(value: string | null | undefined) {
-  return (value ?? "").replace(/\D/g, "");
 }
 
 function parseNumber(value: unknown) {
@@ -147,198 +107,6 @@ function customerDetailPath(params: {
   });
 
   return `/analytics/customers/${slug}?${search.toString()}`;
-}
-
-function isExactCandidate(searchText: string, candidate: CandidateRow) {
-  const search = normalizeText(searchText);
-  const searchDigits = normalizeDigits(searchText);
-  const phoneDigits = normalizeDigits(candidate.phoneNumber);
-
-  return (
-    (search && normalizeText(candidate.customerName) === search) ||
-    (search && normalizeText(candidate.memberId ?? "") === search) ||
-    (searchDigits && phoneDigits && searchDigits === phoneDigits)
-  );
-}
-
-function candidateRows(candidates: CandidateRow[]) {
-  return limitRows(candidates, 10).map((candidate, index) => ({
-    rank: index + 1,
-    customerKey: candidate.customerKey,
-    customerName: candidate.customerName,
-    customerPhoneMasked: candidate.phoneMasked ?? maskPhone(candidate.phoneNumber),
-    memberId: candidate.memberId ?? "",
-    lastVisitDate: candidate.lastVisitDate ?? "",
-    totalVisits: candidate.totalVisits ?? "",
-  }));
-}
-
-async function searchLearnedProfiles(input: CustomerRelationshipProfileSearchInput) {
-  return searchCustomerRelationshipProfilesBounded({
-    ...input,
-    limit: Math.min(Math.max(input.limit ?? 25, 1), 50),
-    offset: 0,
-    sortBy: input.sortBy ?? "lastVisitDate",
-    sortDirection: input.sortDirection ?? "desc",
-  });
-}
-
-async function resolveCustomerIdentity(input: AgentToolInput): Promise<IdentityResolution> {
-  const checkedAt = nowIso();
-  const explicit = input.entityContext?.entityType === "customer" ? input.entityContext : undefined;
-  const searchText =
-    explicit?.memberId ??
-    explicit?.customerPhone ??
-    explicit?.customerName ??
-    explicit?.displayName ??
-    extractExplicitCustomerSearchText(input.request.message);
-  const sources: GreatTimeAgentSource[] = [];
-
-  if (!searchText) {
-    return {
-      status: "not_ready",
-      searchText: "",
-      sources,
-      warnings: [
-        {
-          type: "missing_customer_name",
-          title: "Customer name needed",
-          message: "Ask about a named customer or choose a customer row first.",
-        },
-      ],
-    };
-  }
-
-  try {
-    const candidates = await resolveCustomerPortalCandidates({
-      clinicCode: input.clinic.clinicCode,
-      search: searchText,
-      limit: 10,
-    });
-    sources.push(
-      source({
-        tool: "resolve_customer_identity",
-        sourceName: "BigQuery customer identity candidates",
-        checkedAt,
-        dataStatus: candidates.length ? "ok" : "not_found",
-        scope: "historical",
-      }),
-    );
-
-    const exactCandidates = candidates.filter((candidate) => isExactCandidate(searchText, candidate));
-    const selected = exactCandidates.length === 1 ? exactCandidates[0] : candidates.length === 1 ? candidates[0] : null;
-
-    if (exactCandidates.length > 1 || (!selected && candidates.length > 1)) {
-      return {
-        status: "ambiguous",
-        searchText,
-        candidates,
-        sources,
-      };
-    }
-
-    if (selected) {
-      return {
-        status: "resolved",
-        identity: {
-          customerKey: selected.customerKey,
-          customerName: selected.customerName,
-          customerPhone: selected.phoneNumber ?? "",
-          phoneMasked: selected.phoneMasked ?? maskPhone(selected.phoneNumber),
-          memberId: selected.memberId ?? undefined,
-          joinedDate: selected.joinedDate,
-          sourceScope: "historical",
-        },
-        sources,
-      };
-    }
-  } catch (error) {
-    sources.push(
-      source({
-        tool: "resolve_customer_identity",
-        sourceName: "BigQuery customer identity candidates",
-        checkedAt,
-        dataStatus: "unavailable",
-        scope: "historical",
-      }),
-    );
-  }
-
-  try {
-    const learned = await searchLearnedProfiles({
-      clinicId: input.clinic.clinicId,
-      search: searchText,
-      limit: 25,
-    });
-    const candidates = learned.rows.map((profile) => ({
-      customerKey: profile.customerKey,
-      customerName: profile.customerName,
-      phoneMasked: profile.customerPhoneMasked,
-      memberId: profile.memberId,
-      joinedDate: profile.firstSeenDate,
-      lastVisitDate: profile.lastVisitDate,
-      totalVisits: profile.totalVisits,
-      lifetimeSpend: profile.lifetimeSpend,
-    }));
-    sources.push(
-      source({
-        tool: "resolve_customer_identity_from_learned_profile",
-        sourceName: "Firestore customer relationship profiles",
-        dataStatus: candidates.length ? "ok" : "not_found",
-        scope: "learned",
-      }),
-    );
-
-    const exactCandidates = candidates.filter((candidate) => isExactCandidate(searchText, candidate));
-    const selected = exactCandidates.length === 1 ? exactCandidates[0] : candidates.length === 1 ? candidates[0] : null;
-
-    if (exactCandidates.length > 1 || (!selected && candidates.length > 1)) {
-      return {
-        status: "ambiguous",
-        searchText,
-        candidates,
-        sources,
-      };
-    }
-
-    if (selected) {
-      return {
-        status: "resolved",
-        identity: {
-          customerKey: selected.customerKey,
-          customerName: selected.customerName,
-          customerPhone: "",
-          phoneMasked: selected.phoneMasked ?? "",
-          memberId: selected.memberId ?? undefined,
-          joinedDate: selected.joinedDate,
-          sourceScope: "learned",
-        },
-        sources,
-      };
-    }
-  } catch (error) {
-    sources.push(
-      source({
-        tool: "resolve_customer_identity_from_learned_profile",
-        sourceName: "Firestore customer relationship profiles",
-        dataStatus: "unavailable",
-        scope: "learned",
-      }),
-    );
-  }
-
-  return {
-    status: "not_found",
-    searchText,
-    sources,
-    warnings: [
-      {
-        type: "customer_not_found",
-        title: "Customer not found",
-        message: `No bounded customer match was found for "${searchText}".`,
-      },
-    ],
-  };
 }
 
 function momentum(recent?: number, previous?: number): Customer360FactPack["visitPattern"]["momentum"] {
@@ -455,8 +223,22 @@ function packageHoldingSummary(row: Customer360FactPack["packages"]["holdings"][
   })`;
 }
 
+function customerLooksNew(factPack: Customer360FactPack) {
+  const visits = factPack.value.totalVisits ?? 0;
+  const recentCompleted = factPack.appointments.recentCompleted?.length ?? 0;
+  const currentAppointments = factPack.appointments.current?.length ?? 0;
+  const packageCount = factPack.packages.purchaseCount ?? factPack.packages.holdings.length;
+  const invoiceCount = factPack.payments.invoiceCount ?? factPack.payments.recentInvoices.length;
+
+  return currentAppointments > 0 && visits === 0 && recentCompleted === 0 && packageCount === 0 && invoiceCount === 0;
+}
+
 function composeCustomer360MyanmarSummary(factPack: Customer360FactPack) {
   const name = factPack.identity.displayName;
+  if (customerLooksNew(factPack)) {
+    return `${name} looks like a new customer.\nNo previous appointments or purchase history found yet.`;
+  }
+
   const year = factPack.usage.selectedYear;
   const visits = factPack.value.totalVisits;
   const lastVisit = formatDate(factPack.latestActivity.lastVisitAt);
@@ -515,6 +297,10 @@ export function composeCustomer360Summary(factPack: Customer360FactPack, languag
   }
 
   const name = factPack.identity.displayName;
+  if (customerLooksNew(factPack)) {
+    return `${name} looks like a new customer.\nNo previous appointments or purchase history found yet.`;
+  }
+
   const sentences: string[] = [];
   const joined = formatDate(factPack.identity.joinedDate);
   const visits = factPack.value.totalVisits;
@@ -629,6 +415,7 @@ export async function buildCustomer360ToolResult(input: AgentToolInput): Promise
   const resolved = await resolveCustomerIdentity(input);
 
   if (resolved.status === "ambiguous") {
+    const rows = candidateRows(resolved.candidates);
     return {
       toolName: "get_customer_360",
       sourceName: "Customer 360 identity resolver",
@@ -637,7 +424,7 @@ export async function buildCustomer360ToolResult(input: AgentToolInput): Promise
       dataStatus: "not_ready",
       live: false,
       sources: resolved.sources,
-      summary: `I found multiple possible matches for "${resolved.searchText}". Choose one before I build a Customer 360 briefing.`,
+      summary: `I found ${rows.length.toLocaleString("en-US")} customers named ${resolved.searchText}. Please choose one.`,
       tables: [
         {
           title: "Possible customer matches",
@@ -648,25 +435,77 @@ export async function buildCustomer360ToolResult(input: AgentToolInput): Promise
             { key: "memberId", title: "Member ID" },
             { key: "lastVisitDate", title: "Last visit" },
           ],
-          rows: candidateRows(resolved.candidates),
+          rows,
         },
       ],
       warnings: [
         {
           type: "ambiguous_customer_identity",
-          title: "Customer match is ambiguous",
-          message: "Multiple customers matched this name. The agent will not silently choose between them.",
+          title: "Please choose a customer",
+          message: `${resolved.searchText} ဆိုတဲ့ customer ${rows.length.toLocaleString("en-US")} ယောက်တွေ့ပါတယ်။ ဘယ်သူကိုကြည့်မလဲ?`,
         },
       ],
-      entityRefs: candidateRows(resolved.candidates).map((candidate) => ({
+      entityRefs: rows.map((candidate) => {
+        const sourceCandidate = resolved.candidates.find((item) => item.customerKey === String(candidate.customerKey));
+        return {
         entityType: "customer",
         entityId: String(candidate.customerKey),
         customerKey: String(candidate.customerKey),
         displayName: String(candidate.customerName),
         customerName: String(candidate.customerName),
+        customerPhone: sourceCandidate?.phoneNumber,
+        customerPhoneMasked: String(candidate.customerPhoneMasked || ""),
         memberId: String(candidate.memberId || "") || undefined,
         rank: Number(candidate.rank),
-      })),
+        };
+      }),
+    };
+  }
+
+  if (resolved.status === "suggestions") {
+    const rows = candidateRows(resolved.candidates);
+    const firstName = rows[0]?.customerName ? String(rows[0].customerName) : null;
+    return {
+      toolName: "get_customer_360",
+      sourceName: "Customer 360 identity resolver",
+      checkedAt: nowIso(),
+      period: input.period.label,
+      dataStatus: "not_found",
+      live: false,
+      sources: resolved.sources,
+      summary: firstName
+        ? `I couldn’t find "${resolved.searchText}". Did you mean ${firstName}?`
+        : `I couldn’t find a customer named "${resolved.searchText}".`,
+      tables: rows.length
+        ? [
+            {
+              title: "Suggested customer matches",
+              columns: [
+                { key: "rank", title: "#" },
+                { key: "customerName", title: "Customer" },
+                { key: "customerPhoneMasked", title: "Phone" },
+                { key: "memberId", title: "Member ID" },
+                { key: "lastVisitDate", title: "Last visit" },
+              ],
+              rows,
+            },
+          ]
+        : undefined,
+      warnings: resolved.warnings,
+      entityRefs: rows.map((candidate) => {
+        const sourceCandidate = resolved.candidates.find((item) => item.customerKey === String(candidate.customerKey));
+        return {
+          entityType: "customer",
+          entityId: String(candidate.customerKey),
+          customerKey: String(candidate.customerKey),
+          displayName: String(candidate.customerName),
+          customerName: String(candidate.customerName),
+          customerPhone: sourceCandidate?.phoneNumber,
+          customerPhoneMasked: String(candidate.customerPhoneMasked || ""),
+          memberId: String(candidate.memberId || "") || undefined,
+          rank: Number(candidate.rank),
+        };
+      }),
     };
   }
 
@@ -676,7 +515,7 @@ export async function buildCustomer360ToolResult(input: AgentToolInput): Promise
       sourceName: "Customer 360 identity resolver",
       checkedAt: nowIso(),
       period: input.period.label,
-      dataStatus: resolved.status,
+      dataStatus: resolved.status === "no_history" ? "no_activity" : resolved.status,
       live: false,
       sources: resolved.sources,
       summary: resolved.warnings[0]?.message ?? "Customer identity could not be resolved.",
@@ -766,6 +605,17 @@ export async function buildCustomer360ToolResult(input: AgentToolInput): Promise
   const preferredTherapist = snapshotCustomer?.preferredTherapist ?? null;
   const phoneNumber = snapshotCustomer?.phoneNumber || identity.customerPhone;
   const customerName = snapshotCustomer?.customerName || identity.customerName;
+  const contextAppointment = input.entityContext?.appointmentId
+    ? {
+        appointmentId: input.entityContext.appointmentId,
+        serviceName: input.entityContext.serviceName ?? "",
+        staffName: input.entityContext.practitionerName ?? "",
+        appointmentTime: input.entityContext.appointmentTime ?? "",
+        appointmentStatus: input.entityContext.appointmentStatus ?? "",
+        phoneNumber: phoneNumber || identity.customerPhone,
+        phoneMasked: phoneNumber ? maskPhone(phoneNumber) : identity.phoneMasked,
+      }
+    : null;
   const factPack: Customer360FactPack = {
     identity: {
       customerKey: identity.customerKey,
@@ -810,7 +660,7 @@ export async function buildCustomer360ToolResult(input: AgentToolInput): Promise
       holdings: packageHoldings,
     },
     appointments: {
-      current: [],
+      current: contextAppointment ? [contextAppointment] : [],
       upcoming: [],
       recentCompleted: limitRows(recentCompleted, 8),
     },
@@ -826,7 +676,9 @@ export async function buildCustomer360ToolResult(input: AgentToolInput): Promise
     dataQuality,
     sources,
   };
-  factPack.recommendation = buildRecommendation(factPack, input.request.aiLanguage);
+  if (!customerLooksNew(factPack)) {
+    factPack.recommendation = buildRecommendation(factPack, input.request.aiLanguage);
+  }
 
   for (const note of dataQuality.filter((item) => item.severity !== "info")) {
     warnings.push({

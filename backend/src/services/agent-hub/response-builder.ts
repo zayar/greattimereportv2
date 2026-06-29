@@ -454,7 +454,8 @@ export function buildAgentResponse(params: {
   ];
   const customer360 = params.toolResults.find((result) => result.customer360)?.customer360;
   const service360 = params.toolResults.find((result) => result.service360)?.service360;
-  const entityContext = params.toolResults.flatMap((result) => result.entityRefs ?? [])[0] ?? params.request.entityContext;
+  const entityRefs = params.toolResults.flatMap((result) => result.entityRefs ?? []);
+  const entityContext = entityRefs[0] ?? params.request.entityContext;
   const ownerDailyBriefResult = params.toolResults.find((result) => result.toolName === "get_owner_daily_brief");
   const summary =
     isUnsupportedWriteRequest ? buildUnsupportedWriteSummary() :
@@ -497,6 +498,7 @@ export function buildAgentResponse(params: {
     dataStatus,
     warnings: warnings.length ? warnings : undefined,
     entityContext,
+    entityRefs: entityRefs.length ? entityRefs : params.request.entityContext ? [params.request.entityContext] : undefined,
     actions: [
       {
         type: "read_only_agent_response",

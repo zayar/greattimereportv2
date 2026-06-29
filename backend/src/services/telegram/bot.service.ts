@@ -4,7 +4,15 @@ import { HttpError } from "../../utils/http-error.js";
 import { hasFeatureAccess } from "../feature-access.service.js";
 import { askAgentHub, buildLockedAgentHubResponse } from "../agent-hub/agent-hub.service.js";
 import { isAgentCsvExportRequested, isExportOnlyFollowUp } from "../agent-hub/export-intent.js";
-import type { Customer360FactPack, GreatTimeAgentChatResponse, GreatTimeAgentId, GreatTimeAgentMetric } from "../agent-hub/types.js";
+import { buildCustomerKey } from "../agent-hub/customer-identity.js";
+import { maskPhone } from "../agent-hub/safety.js";
+import type {
+  Customer360FactPack,
+  GreatTimeAgentChatResponse,
+  GreatTimeAgentEntityContext,
+  GreatTimeAgentId,
+  GreatTimeAgentMetric,
+} from "../agent-hub/types.js";
 import { buildTelegramSalesAssistantReply } from "../gt-growth-ai/sales-assistant.service.js";
 import { GT_GROWTH_AI_FEATURE_GATE } from "../../types/report-ai.js";
 import {
@@ -18,6 +26,18 @@ import {
 } from "./agent-export-cache.js";
 import { getTelegramTargetByChatId, redeemTelegramLinkCode } from "./storage.service.js";
 import type { TelegramChatTarget, TelegramTargetStatus } from "./types.js";
+import {
+  appointmentContextItemToCustomerEntityContext,
+  getRecentAppointmentContext,
+  resolveRecentAppointmentReference,
+  saveRecentAppointmentContext,
+  type RecentAppointmentContextItem,
+} from "./appointment-context.js";
+import {
+  canViewFullCustomerPhone,
+  formatCustomerPhone,
+  type CustomerPhoneViewerContext,
+} from "./customer-phone.js";
 
 type TelegramChat = {
   id: number;
@@ -82,6 +102,8 @@ let cachedBotUsername: string | null | undefined;
 let pollingStarted = false;
 const suggestedQuestionCallbacks = new Map<string, { question: string; createdAt: number }>();
 const SUGGESTED_QUESTION_TTL_MS = 60 * 60_000;
+const customerActionCallbacks = new Map<string, { entityContext: GreatTimeAgentEntityContext; createdAt: number }>();
+const CUSTOMER_ACTION_TTL_MS = 15 * 60_000;
 
 function getTelegramApiUrl(method: string) {
   if (!env.TELEGRAM_BOT_TOKEN) {
@@ -455,6 +477,72 @@ function translateMetricLabel(label: string) {
   return map[normalized] ?? label;
 }
 
+function appointmentTableFromResponse(response: GreatTimeAgentChatResponse) {
+  return (
+    response.tables?.find((table) => table.title === "Appointments") ??
+    response.tables?.find((table) => /appointment/i.test(table.title) && table.title !== "Appointment services")
+  );
+}
+
+function appointmentRefForRow(
+  response: GreatTimeAgentChatResponse,
+  row: Record<string, unknown>,
+  index: number,
+) {
+  const appointmentId = stringValue(row, "appointmentId", "");
+  const refs = response.entityRefs ?? [];
+
+  return (
+    refs.find((ref) => ref.entityType === "appointment" && appointmentId && ref.appointmentId === appointmentId) ??
+    refs.find((ref) => ref.entityType === "appointment" && ref.rank === index + 1) ??
+    refs.filter((ref) => ref.entityType === "appointment")[index]
+  );
+}
+
+export function buildRecentAppointmentContextItemsFromResponse(params: {
+  response: GreatTimeAgentChatResponse;
+  viewerContext?: CustomerPhoneViewerContext;
+  clinicCode: string;
+}) {
+  const appointmentTable = appointmentTableFromResponse(params.response);
+  const rows = appointmentTable?.rows ?? [];
+  const canStoreFullPhone = canViewFullCustomerPhone(params.viewerContext);
+
+  return rows.slice(0, 30).map<RecentAppointmentContextItem>((row, index) => {
+    const ref = appointmentRefForRow(params.response, row, index);
+    const appointmentId = ref?.appointmentId ?? stringValue(row, "appointmentId", `appointment-${index + 1}`);
+    const customerName = ref?.customerName ?? ref?.displayName ?? stringValue(row, "customerName", "Unknown customer");
+    const rawFullPhone = ref?.customerPhone ?? stringValue(row, "customerPhone", "");
+    const maskedPhone = ref?.customerPhoneMasked ?? stringValue(row, "customerPhoneMasked", maskPhone(rawFullPhone));
+    const serviceName = ref?.serviceName ?? stringValue(row, "serviceName", "Unknown service");
+    const staffName = ref?.practitionerName ?? stringValue(row, "practitionerName", stringValue(row, "therapistName", ""));
+    const rawTime = ref?.appointmentTime ?? stringValue(row, "scheduledFrom", stringValue(row, "checkInTime", ""));
+    const rawStatus = ref?.appointmentStatus ?? stringValue(row, "rawStatus", stringValue(row, "lifecycleState", ""));
+    const customerId =
+      ref?.customerKey ??
+      buildCustomerKey({
+        clinicCode: params.clinicCode,
+        phoneNumber: rawFullPhone,
+        customerName,
+      });
+
+    return {
+      displayIndex: index + 1,
+      appointmentId,
+      customerId,
+      customerName,
+      fullPhone: rawFullPhone && canStoreFullPhone ? rawFullPhone : undefined,
+      resolutionPhone: rawFullPhone || undefined,
+      maskedPhone: maskedPhone || maskPhone(rawFullPhone),
+      memberId: ref?.memberId,
+      serviceName,
+      staffName,
+      appointmentTime: formatDateTimeForOwner(rawTime),
+      appointmentStatus: translateStatus(rawStatus),
+    };
+  });
+}
+
 function sanitizeOwnerFacingText(text: string) {
   return text
     .replace(
@@ -466,14 +554,25 @@ function sanitizeOwnerFacingText(text: string) {
     .replace(/\bAPICORE\b/gi, "appointment စာရင်း")
     .replace(/BigQuery payment report/gi, "payment report")
     .replace(/BigQuery customer portal/gi, "customer report")
+    .replace(/No bounded customer match was found for\s+"([^"]+)"/gi, "I couldn’t find a customer named \"$1\".")
+    .replace(/Customer match is ambiguous/gi, "Please choose a customer")
+    .replace(/Multiple customers matched this name\. The agent will not silently choose between them\./gi, "I found more than one customer with that name. Please choose one.")
+    .replace(/agent will not silently choose/gi, "please choose one")
+    .replace(/bounded customer match/gi, "customer match")
+    .replace(/\bresolver\b/gi, "lookup")
+    .replace(/\bdatabase\b/gi, "records")
+    .replace(/\bambiguous match\b/gi, "multiple matches")
     .replace(/\bBigQuery\b/gi, "report data");
 }
 
-function formatAppointmentConversation(response: GreatTimeAgentChatResponse) {
+function formatAppointmentConversation(response: GreatTimeAgentChatResponse, viewerContext?: CustomerPhoneViewerContext, clinicCode = "") {
   const serviceTable = response.tables?.find((table) => table.title === "Appointment services");
-  const appointmentTable =
-    response.tables?.find((table) => table.title === "Appointments") ??
-    response.tables?.find((table) => /appointment/i.test(table.title) && table.title !== "Appointment services");
+  const appointmentTable = appointmentTableFromResponse(response);
+  const appointmentContextItems = buildRecentAppointmentContextItemsFromResponse({
+    response,
+    viewerContext,
+    clinicCode,
+  });
   const totalAppointments =
     response.metrics?.find((metric) => metric.label.toLowerCase() === "appointments")?.value ??
     appointmentTable?.rows.length ??
@@ -503,18 +602,25 @@ function formatAppointmentConversation(response: GreatTimeAgentChatResponse) {
   if (appointmentTable?.rows.length) {
     lines.push("", "Customer + service appointment စာရင်း:");
     appointmentTable.rows.slice(0, 15).forEach((row, index) => {
-      const time = formatDateTimeForOwner(row.scheduledFrom);
-      const customer = stringValue(row, "customerName", "Unknown customer");
-      const service = stringValue(row, "serviceName", "Unknown service");
-      const practitioner = stringValue(row, "practitionerName", "");
-      const status = translateStatus(stringValue(row, "rawStatus", ""));
+      const contextItem = appointmentContextItems[index];
+      const time = contextItem?.appointmentTime ?? formatDateTimeForOwner(row.scheduledFrom);
+      const customer = contextItem?.customerName ?? stringValue(row, "customerName", "Unknown customer");
+      const service = contextItem?.serviceName ?? stringValue(row, "serviceName", "Unknown service");
+      const practitioner = contextItem?.staffName ?? stringValue(row, "practitionerName", "");
+      const status = contextItem?.appointmentStatus ?? translateStatus(stringValue(row, "rawStatus", ""));
+      const phone = contextItem
+        ? formatCustomerPhone({ fullPhone: contextItem.fullPhone, maskedPhone: contextItem.maskedPhone }, viewerContext)
+        : stringValue(row, "customerPhoneMasked", "");
       const practitionerText = practitioner && practitioner !== "-" ? ` ${practitioner} က တာဝန်ယူထားပါတယ်။` : "";
-      lines.push(`${index + 1}. ${time} — ${customer} အတွက် ${service} appointment ပါ။${practitionerText} အခြေအနေ: ${status}`);
+      const phoneText = phone && phone !== "-" ? ` Phone: ${phone}။` : "";
+      lines.push(`${index + 1}. ${time} — ${customer} အတွက် ${service} appointment ပါ။${phoneText}${practitionerText} အခြေအနေ: ${status}`);
     });
 
     if (appointmentTable.rows.length > 15) {
       lines.push(`နောက်ထပ် appointment ${appointmentTable.rows.length - 15} ခုကို GreatTime report ထဲမှာ ဆက်ကြည့်နိုင်ပါတယ်။`);
     }
+
+    lines.push("", "ဘယ် customer ကိုကြည့်မလဲ?");
   }
 
   return lines;
@@ -729,6 +835,39 @@ function formatCustomerPurchaseConversation(response: GreatTimeAgentChatResponse
   return lines;
 }
 
+function formatCustomerChoiceConversation(response: GreatTimeAgentChatResponse, viewerContext?: CustomerPhoneViewerContext) {
+  const table = response.tables?.find((item) => /possible customer matches|suggested customer matches/i.test(item.title));
+  if (!table?.rows.length) {
+    return [];
+  }
+
+  const isSuggestion = /suggested/i.test(table.title);
+  const searchName = response.summary?.match(/named\s+([^".]+)|customers named\s+([^".]+)|find\s+"([^"]+)"/i);
+  const query = searchName?.[1] ?? searchName?.[2] ?? searchName?.[3] ?? "customer";
+  const lines = [
+    isSuggestion
+      ? sanitizeOwnerFacingText(response.summary ?? `I couldn’t find "${query}". Please choose the closest match.`)
+      : `${query} ဆိုတဲ့ customer ${table.rows.length.toLocaleString("en-US")} ယောက်တွေ့ပါတယ်။ ဘယ်သူကိုကြည့်မလဲ?`,
+  ];
+
+  table.rows.slice(0, 10).forEach((row, index) => {
+    const ref = response.entityRefs?.find((item) => item.entityType === "customer" && (item.rank === index + 1 || item.customerKey === stringValue(row, "customerKey", "")));
+    const name = ref?.customerName ?? ref?.displayName ?? stringValue(row, "customerName", "Customer");
+    const phone = formatCustomerPhone(
+      {
+        fullPhone: ref?.customerPhone,
+        maskedPhone: ref?.customerPhoneMasked ?? stringValue(row, "customerPhoneMasked", ""),
+      },
+      viewerContext,
+    );
+    const memberId = ref?.memberId ?? stringValue(row, "memberId", "");
+    const memberText = memberId && memberId !== "-" ? ` — member ${memberId}` : "";
+    lines.push(`${index + 1}. ${name} — ${phone}${memberText}`);
+  });
+
+  return lines;
+}
+
 function formatGenericTableConversation(response: GreatTimeAgentChatResponse) {
   const table = response.tables?.find((item) => item.rows.length > 0);
   if (!table) {
@@ -747,9 +886,12 @@ function formatGenericTableConversation(response: GreatTimeAgentChatResponse) {
   return lines;
 }
 
-function formatConversationTablePreview(response: GreatTimeAgentChatResponse) {
+function formatConversationTablePreview(
+  response: GreatTimeAgentChatResponse,
+  options?: { viewerContext?: CustomerPhoneViewerContext; clinicCode?: string },
+) {
   if (response.resolvedAgent === "appointment" || response.tables?.some((table) => table.title === "Appointment services")) {
-    return formatAppointmentConversation(response);
+    return formatAppointmentConversation(response, options?.viewerContext, options?.clinicCode);
   }
 
   const financeSales = formatFinanceSalesConversation(response);
@@ -770,6 +912,11 @@ function formatConversationTablePreview(response: GreatTimeAgentChatResponse) {
   const customers = formatCustomerMatchesConversation(response);
   if (customers.length) {
     return customers;
+  }
+
+  const customerChoices = formatCustomerChoiceConversation(response, options?.viewerContext);
+  if (customerChoices.length) {
+    return customerChoices;
   }
 
   const purchases = formatCustomerPurchaseConversation(response);
@@ -797,7 +944,7 @@ function formatCustomer360TreatmentLine(row: Record<string, unknown>) {
   return `- ${date}: ${service}${therapist}`;
 }
 
-function formatCustomer360TelegramReply(response: GreatTimeAgentChatResponse) {
+function formatCustomer360TelegramReply(response: GreatTimeAgentChatResponse, viewerContext?: CustomerPhoneViewerContext) {
   const factPack = response.customer360;
   if (!factPack) {
     return "";
@@ -807,6 +954,37 @@ function formatCustomer360TelegramReply(response: GreatTimeAgentChatResponse) {
   const recentTreatments = (factPack.appointments.recentCompleted ?? []).slice(0, 3);
   const topServices = factPack.usage.topServices.slice(0, 3);
   const lines = [...buildTelegramReplyHeader(response), "", sanitizeOwnerFacingText(response.summary || response.assistantMessage)];
+  const displayPhone = formatCustomerPhone(
+    {
+      fullPhone: factPack.identity.phoneNumber,
+      maskedPhone: factPack.identity.maskedPhone,
+    },
+    viewerContext,
+  );
+
+  if (displayPhone !== "-") {
+    lines.push("", `Phone: ${displayPhone}`);
+  }
+
+  const todayAppointment = factPack.appointments.current?.[0];
+  if (todayAppointment) {
+    const service = stringValue(todayAppointment, "serviceName", "-");
+    const staff = stringValue(todayAppointment, "staffName", stringValue(todayAppointment, "practitionerName", "-"));
+    const time = stringValue(todayAppointment, "appointmentTime", "-");
+    const phone = formatCustomerPhone(
+      {
+        fullPhone: stringValue(todayAppointment, "phoneNumber", factPack.identity.phoneNumber ?? ""),
+        maskedPhone: stringValue(todayAppointment, "phoneMasked", factPack.identity.maskedPhone ?? ""),
+      },
+      viewerContext,
+    );
+
+    lines.push("", "Today’s appointment:");
+    lines.push(`Service: ${service}`);
+    lines.push(`Staff: ${staff}`);
+    lines.push(`Time: ${time}`);
+    lines.push(`Phone: ${phone}`);
+  }
 
   if (packageRows.length > 0) {
     lines.push("", "Package / service လက်ကျန်:");
@@ -842,12 +1020,15 @@ function formatCustomer360TelegramReply(response: GreatTimeAgentChatResponse) {
   return message.length <= 3900 ? message : `${message.slice(0, 3890).trim()}\n...`;
 }
 
-export function formatAgentHubTelegramReply(response: GreatTimeAgentChatResponse) {
+export function formatAgentHubTelegramReply(
+  response: GreatTimeAgentChatResponse,
+  options?: { viewerContext?: CustomerPhoneViewerContext; clinicCode?: string },
+) {
   if (response.customer360) {
-    return formatCustomer360TelegramReply(response);
+    return formatCustomer360TelegramReply(response, options?.viewerContext);
   }
 
-  const tablePreview = formatConversationTablePreview(response);
+  const tablePreview = formatConversationTablePreview(response, options);
   const lines = [...buildTelegramReplyHeader(response)];
   const metrics = (response.metrics ?? []).slice(0, 5);
   const warnings = (response.warnings ?? []).slice(0, 2);
@@ -1025,10 +1206,35 @@ function registerSuggestedQuestion(question: string) {
   return key;
 }
 
+function cleanupCustomerActionCallbacks() {
+  const cutoff = Date.now() - CUSTOMER_ACTION_TTL_MS;
+  customerActionCallbacks.forEach((value, key) => {
+    if (value.createdAt < cutoff) {
+      customerActionCallbacks.delete(key);
+    }
+  });
+}
+
+function registerCustomerActionRef(entityContext: GreatTimeAgentEntityContext) {
+  cleanupCustomerActionCallbacks();
+  const key = entityContext.customerKey ?? entityContext.entityId;
+  if (!key) {
+    return "";
+  }
+
+  customerActionCallbacks.set(key, {
+    entityContext,
+    createdAt: Date.now(),
+  });
+
+  return key;
+}
+
 export function buildAgentHubTelegramReplyMarkup(
   response: GreatTimeAgentChatResponse,
   options?: {
     exportCallbackData?: string;
+    appointmentContextItems?: RecentAppointmentContextItem[];
   },
 ) {
   const seenCategories = new Set<string>();
@@ -1050,12 +1256,49 @@ export function buildAgentHubTelegramReplyMarkup(
     return selected;
   }, []);
 
-  if (questions.length === 0 && !options?.exportCallbackData) {
+  const appointmentRows = options?.appointmentContextItems ?? [];
+  const appointmentButtons = appointmentRows.slice(0, 10).flatMap((item) => [
+    [
+      {
+        text: `${item.displayIndex} Details`,
+        callback_data: `customer_details:${item.customerId}`,
+      },
+      {
+        text: `${item.displayIndex} History`,
+        callback_data: `customer_history:${item.customerId}`,
+      },
+    ],
+  ]);
+  const shouldShowCustomerChoices = response.tables?.some((table) => /possible customer matches|suggested customer matches/i.test(table.title)) ?? false;
+  const customerChoiceButtons =
+    appointmentButtons.length > 0
+      ? []
+      : shouldShowCustomerChoices
+        ? (response.entityRefs ?? [])
+          .filter((ref) => ref.entityType === "customer")
+          .slice(0, 10)
+          .map((ref, index) => {
+            const key = registerCustomerActionRef(ref);
+            return key
+              ? [
+                  {
+                    text: `Open ${ref.rank ?? index + 1}`,
+                    callback_data: `customer_details:${key}`,
+                  },
+                ]
+              : [];
+          })
+          .filter((row) => row.length > 0)
+        : [];
+
+  if (appointmentButtons.length === 0 && customerChoiceButtons.length === 0 && questions.length === 0 && !options?.exportCallbackData) {
     return undefined;
   }
 
   return {
     inline_keyboard: [
+      ...appointmentButtons,
+      ...customerChoiceButtons,
       ...(options?.exportCallbackData
         ? [
             [
@@ -1084,6 +1327,8 @@ async function buildAgentHubReply(params: {
   target: TelegramTargetStatus;
   question: string;
   telegramUserId: string | null;
+  entityContext?: GreatTimeAgentEntityContext;
+  agent?: GreatTimeAgentId | "auto";
 }) {
   const premium = await hasFeatureAccess({
     clinicId: params.target.clinicId,
@@ -1100,10 +1345,11 @@ async function buildAgentHubReply(params: {
     clinicId: params.target.clinicId,
     clinicCode: params.target.clinicCode,
     sessionId,
-    agent: "auto" as const,
+    agent: params.agent ?? ("auto" as const),
     message: params.question,
     aiLanguage: params.target.ownerAiLanguage,
     timezone: params.target.timezone,
+    entityContext: params.entityContext,
   };
 
   if (!premium.enabled) {
@@ -1127,11 +1373,53 @@ function hasExportableAgentTables(response: GreatTimeAgentChatResponse) {
   return response.tables?.some((table) => table.rows.length > 0) ?? false;
 }
 
+function buildAppointmentContextSuggestionMessage(params: {
+  query: string;
+  item: RecentAppointmentContextItem;
+  viewerContext: CustomerPhoneViewerContext;
+}) {
+  const phone = formatCustomerPhone({ fullPhone: params.item.fullPhone, maskedPhone: params.item.maskedPhone }, params.viewerContext);
+  return [
+    `I couldn’t find "${params.query}". Did you mean ${params.item.customerName} from today’s appointment?`,
+    "",
+    `${params.item.customerName}`,
+    `Phone: ${phone}`,
+    `Service: ${params.item.serviceName}`,
+    `Time: ${params.item.appointmentTime}`,
+  ].join("\n");
+}
+
+function buildAppointmentContextChoiceMessage(params: {
+  query: string;
+  items: RecentAppointmentContextItem[];
+  viewerContext: CustomerPhoneViewerContext;
+}) {
+  const lines = [`${params.query} ဆိုတဲ့ customer ${params.items.length.toLocaleString("en-US")} ယောက်တွေ့ပါတယ်။ ဘယ်သူကိုကြည့်မလဲ?`];
+  params.items.forEach((item, index) => {
+    const phone = formatCustomerPhone({ fullPhone: item.fullPhone, maskedPhone: item.maskedPhone }, params.viewerContext);
+    lines.push(`${index + 1}. ${item.customerName} — ${phone} — ${item.serviceName} ${item.appointmentTime}`);
+  });
+  return lines.join("\n");
+}
+
+function appointmentContextReplyMarkup(items: RecentAppointmentContextItem[]) {
+  return {
+    inline_keyboard: items.slice(0, 10).map((item, index) => [
+      {
+        text: `Open ${index + 1}`,
+        callback_data: `customer_details:${item.customerId}`,
+      },
+    ]),
+  };
+}
+
 async function handleAgentQuestion(params: {
   chatId: string;
   chatType: TelegramChat["type"];
   question: string;
   telegramUserId: string | null;
+  entityContext?: GreatTimeAgentEntityContext;
+  agent?: GreatTimeAgentId | "auto";
 }) {
   const target = await getTelegramTargetByChatId(params.chatId);
 
@@ -1160,6 +1448,11 @@ async function handleAgentQuestion(params: {
 
   const question = params.question.trim();
   const excelRequested = /\b(?:excel|xls|xlsx|spreadsheet|google\s+sheets?|sheets?\s+file)\b/i.test(question);
+  const viewerContext: CustomerPhoneViewerContext = {
+    chatType: params.chatType,
+    telegramUserId: params.telegramUserId,
+    target,
+  };
 
   if (isExportOnlyFollowUp(question)) {
     const cache = getLatestTelegramAgentExportCache({
@@ -1196,11 +1489,100 @@ async function handleAgentQuestion(params: {
     return;
   }
 
+  let effectiveQuestion = question;
+  let entityContext = params.entityContext;
+  let agent = params.agent;
+  if (!entityContext) {
+    const recentContext = getRecentAppointmentContext({
+      clinicId: target.clinicId,
+      telegramChatId: params.chatId,
+      telegramUserId: params.telegramUserId,
+    });
+    const recentResolution = resolveRecentAppointmentReference({
+      message: question,
+      context: recentContext,
+    });
+
+    if (recentResolution.status === "resolved") {
+      const item = recentResolution.item;
+      if (recentResolution.action === "phone") {
+        const phone = formatCustomerPhone({ fullPhone: item.fullPhone, maskedPhone: item.maskedPhone }, viewerContext);
+        await sendTelegramMessage(
+          params.chatId,
+          [
+            `${item.displayIndex}. ${item.customerName}`,
+            `Phone: ${phone}`,
+            `Service: ${item.serviceName}`,
+            `Staff: ${item.staffName || "-"}`,
+            `Time: ${item.appointmentTime}`,
+          ].join("\n"),
+          {
+            replyMarkup: appointmentContextReplyMarkup([item]),
+          },
+        );
+        return;
+      }
+
+      entityContext = appointmentContextItemToCustomerEntityContext(item);
+      agent = "customer_relationship";
+      effectiveQuestion =
+        recentResolution.action === "history"
+          ? "Show this customer's treatment and purchase history"
+          : "Tell me about this customer";
+    } else if (recentResolution.status === "suggestion") {
+      await sendTelegramMessage(
+        params.chatId,
+        buildAppointmentContextSuggestionMessage({
+          query: recentResolution.query,
+          item: recentResolution.item,
+          viewerContext,
+        }),
+        {
+          replyMarkup: appointmentContextReplyMarkup([recentResolution.item]),
+        },
+      );
+      return;
+    } else if (recentResolution.status === "ambiguous") {
+      await sendTelegramMessage(
+        params.chatId,
+        buildAppointmentContextChoiceMessage({
+          query: recentResolution.query,
+          items: recentResolution.items,
+          viewerContext,
+        }),
+        {
+          replyMarkup: appointmentContextReplyMarkup(recentResolution.items),
+        },
+      );
+      return;
+    }
+  }
+
   const response = await buildAgentHubReply({
     target,
-    question,
+    question: effectiveQuestion,
     telegramUserId: params.telegramUserId,
+    entityContext,
+    agent,
   });
+  const appointmentContextItems =
+    response.resolvedAgent === "appointment"
+      ? buildRecentAppointmentContextItemsFromResponse({
+          response,
+          viewerContext,
+          clinicCode: target.clinicCode,
+        })
+      : [];
+
+  if (appointmentContextItems.length > 0) {
+    saveRecentAppointmentContext({
+      clinicId: target.clinicId,
+      clinicCode: target.clinicCode,
+      telegramChatId: params.chatId,
+      telegramUserId: params.telegramUserId,
+      appointments: appointmentContextItems,
+    });
+  }
 
   const cacheEntry =
     response.intent !== "unsupported_write_request" && hasExportableAgentTables(response)
@@ -1211,14 +1593,15 @@ async function handleAgentQuestion(params: {
           telegramUserId: params.telegramUserId,
           resolvedAgent: response.resolvedAgent,
           intent: response.intent,
-          originalMessage: question,
+          originalMessage: effectiveQuestion,
           period: response.period,
           tables: response.tables,
         })
       : null;
 
-  await sendTelegramMessage(params.chatId, formatAgentHubTelegramReply(response), {
+  await sendTelegramMessage(params.chatId, formatAgentHubTelegramReply(response, { viewerContext, clinicCode: target.clinicCode }), {
     replyMarkup: buildAgentHubTelegramReplyMarkup(response, {
+      appointmentContextItems,
       exportCallbackData: cacheEntry ? `gtcsv:${cacheEntry.exportId}` : undefined,
     }),
   });
@@ -1414,7 +1797,88 @@ async function handleCsvExportCallback(callback: TelegramCallbackQuery) {
   });
 }
 
+async function handleCustomerActionCallback(callback: TelegramCallbackQuery) {
+  const match = callback.data?.match(/^(customer_details|customer_history|appointment_details):([A-Za-z0-9_-]+)$/);
+  const action = match?.[1];
+  const customerId = match?.[2];
+  const chat = callback.message?.chat;
+
+  if (!action || !customerId || !chat) {
+    await answerTelegramCallback(callback.id, "Customer action expired.");
+    return;
+  }
+
+  const chatId = String(chat.id);
+  const telegramUserId = callback.from?.id == null ? null : String(callback.from.id);
+  const target = await getTelegramTargetByChatId(chatId);
+  if (!target || !canTelegramUserChatWithAgent({ target, telegramUserId })) {
+    await answerTelegramCallback(callback.id, "Customer action unavailable.");
+    return;
+  }
+
+  const recentContext = getRecentAppointmentContext({
+    clinicId: target.clinicId,
+    telegramChatId: chatId,
+    telegramUserId,
+  });
+  const appointmentItem =
+    recentContext?.appointments.find((item) => item.customerId === customerId) ??
+    recentContext?.appointments.find((item) => item.appointmentId === customerId);
+  cleanupCustomerActionCallbacks();
+  const cachedCustomer = customerActionCallbacks.get(customerId);
+  const entityContext =
+    action === "appointment_details" && appointmentItem
+      ? {
+          entityType: "appointment" as const,
+          entityId: appointmentItem.appointmentId,
+          appointmentId: appointmentItem.appointmentId,
+          appointmentTime: appointmentItem.appointmentTime,
+          appointmentStatus: appointmentItem.appointmentStatus,
+          customerKey: appointmentItem.customerId,
+          displayName: appointmentItem.customerName,
+          customerName: appointmentItem.customerName,
+          customerPhone: appointmentItem.resolutionPhone ?? appointmentItem.fullPhone,
+          customerPhoneMasked: appointmentItem.maskedPhone,
+          serviceName: appointmentItem.serviceName,
+          practitionerName: appointmentItem.staffName,
+          rank: appointmentItem.displayIndex,
+        }
+      : appointmentItem
+        ? appointmentContextItemToCustomerEntityContext(appointmentItem)
+        : cachedCustomer?.entityContext;
+
+  if (!entityContext) {
+    await answerTelegramCallback(callback.id, "This customer button expired.");
+    await sendTelegramMessage(chatId, "ဒီ customer button သက်တမ်းကုန်သွားပါပြီ။ Customer name or phone နဲ့ ပြန်ရှာပေးပါ။");
+    return;
+  }
+
+  await answerTelegramCallback(callback.id, "Opening customer...");
+  await handleAgentQuestion({
+    chatId,
+    chatType: chat.type,
+    question:
+      action === "appointment_details"
+        ? "Show appointment details"
+        : action === "customer_history"
+        ? "Show this customer's treatment and purchase history"
+        : "Tell me about this customer",
+    telegramUserId,
+    entityContext,
+    agent: action === "appointment_details" ? "appointment" : "customer_relationship",
+  });
+}
+
 export async function handleTelegramUpdate(update: TelegramUpdate) {
+  if (
+    update.callback_query?.data?.startsWith("customer_details:") ||
+    update.callback_query?.data?.startsWith("customer_history:") ||
+    update.callback_query?.data?.startsWith("appointment_details:")
+  ) {
+    await handleCustomerActionCallback(update.callback_query);
+    return;
+  }
+
   if (update.callback_query?.data?.startsWith("gtcsv:")) {
     await handleCsvExportCallback(update.callback_query);
     return;

@@ -12,6 +12,7 @@ import {
   type LiveAppointmentRow,
 } from "../appointment-live.service.js";
 import { buildUtcDayRangeForDateKey } from "../../telegram/time.js";
+import { buildCustomerKey } from "../customer-identity.js";
 import { limitRows, maskPhone, nowIso, sanitizeError } from "../safety.js";
 import {
   buildSnapshotStaleWarning,
@@ -193,9 +194,17 @@ function appointmentLedgerEntityRef(row: ApicoreBookingDetailsRow, rank: number)
     entityType: "appointment" as const,
     entityId: row.bookingid,
     appointmentId: row.bookingid,
+    appointmentTime: row.FromTime,
+    appointmentStatus: row.status,
+    customerKey: buildCustomerKey({
+      clinicCode: row.ClinicCode,
+      phoneNumber: row.MemberPhoneNumber,
+      customerName: row.MemberName,
+    }),
     displayName: normalizeText(row.MemberName),
     customerName: normalizeText(row.MemberName),
     customerPhone: row.MemberPhoneNumber,
+    customerPhoneMasked: maskPhone(row.MemberPhoneNumber),
     serviceName: normalizeText(row.ServiceName),
     practitionerName: normalizeText(row.PractitionerName),
     rank,
@@ -641,7 +650,7 @@ async function getLiveAppointmentCounts(
     metrics,
     tables: [liveTable("Today's appointment rows", countableRows)],
     warnings: data.warnings,
-    entityRefs: countableRows.map((row, index) => liveAppointmentEntityRef(row, index + 1)),
+    entityRefs: countableRows.map((row, index) => liveAppointmentEntityRef(row, index + 1, input.clinic.clinicCode)),
   };
 }
 
@@ -657,7 +666,7 @@ async function listLiveAppointments(input: AgentToolInput): Promise<AgentToolRes
     live: true,
     tables: [liveTable("Live appointment rows", data.rows)],
     warnings: data.warnings,
-    entityRefs: data.rows.map((row, index) => liveAppointmentEntityRef(row, index + 1)),
+    entityRefs: data.rows.map((row, index) => liveAppointmentEntityRef(row, index + 1, input.clinic.clinicCode)),
   };
 }
 
@@ -683,7 +692,7 @@ async function getCheckedInCustomers(input: AgentToolInput): Promise<AgentToolRe
         message: "This count uses rows with check-in time and no check-out time.",
       },
     ],
-    entityRefs: rows.map((row, index) => liveAppointmentEntityRef(row, index + 1)),
+    entityRefs: rows.map((row, index) => liveAppointmentEntityRef(row, index + 1, input.clinic.clinicCode)),
   };
 }
 
@@ -701,7 +710,7 @@ async function getCheckedOutCustomers(input: AgentToolInput): Promise<AgentToolR
     metrics: [{ label: "Checked out", value: rows.length }],
     tables: [liveTable("Checked-out customers", rows)],
     warnings: data.warnings,
-    entityRefs: rows.map((row, index) => liveAppointmentEntityRef(row, index + 1)),
+    entityRefs: rows.map((row, index) => liveAppointmentEntityRef(row, index + 1, input.clinic.clinicCode)),
   };
 }
 
@@ -722,7 +731,7 @@ async function getCancelledNoShowCustomers(input: AgentToolInput): Promise<Agent
     ],
     tables: [liveTable("Cancelled and no-show customers", rows)],
     warnings: data.warnings,
-    entityRefs: rows.map((row, index) => liveAppointmentEntityRef(row, index + 1)),
+    entityRefs: rows.map((row, index) => liveAppointmentEntityRef(row, index + 1, input.clinic.clinicCode)),
   };
 }
 
@@ -742,7 +751,7 @@ async function getAppointmentDetail(input: AgentToolInput): Promise<AgentToolRes
     live: true,
     tables: [liveTable("Appointment detail", rows)],
     warnings: data.warnings,
-    entityRefs: rows.map((row, index) => liveAppointmentEntityRef(row, index + 1)),
+    entityRefs: rows.map((row, index) => liveAppointmentEntityRef(row, index + 1, input.clinic.clinicCode)),
   };
 }
 

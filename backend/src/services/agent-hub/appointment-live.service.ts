@@ -6,6 +6,7 @@ import {
 } from "../apicore.service.js";
 import { buildUtcDayRangeForDateKeyInTimeZone } from "../telegram/time.js";
 import { normalizeAppointmentLifecycle, type AppointmentLifecycleState } from "./appointment-lifecycle.js";
+import { buildCustomerKey } from "./customer-identity.js";
 import { maskPhone } from "./safety.js";
 import type { AgentDataStatus, GreatTimeAgentEntityContext } from "./types.js";
 
@@ -293,14 +294,24 @@ export async function fetchLiveAppointmentSnapshot(params: {
   return promise;
 }
 
-export function liveAppointmentEntityRef(row: LiveAppointmentRow, rank: number): GreatTimeAgentEntityContext {
+export function liveAppointmentEntityRef(row: LiveAppointmentRow, rank: number, clinicCode?: string): GreatTimeAgentEntityContext {
   return {
     entityType: "appointment",
     entityId: row.appointmentId,
     appointmentId: row.appointmentId,
+    appointmentTime: row.scheduledFrom ?? row.checkInTime ?? undefined,
+    appointmentStatus: row.rawStatus,
+    customerKey: clinicCode
+      ? buildCustomerKey({
+          clinicCode,
+          phoneNumber: row.customerPhone,
+          customerName: row.customerName,
+        })
+      : undefined,
     displayName: row.customerName,
     customerName: row.customerName,
     customerPhone: row.customerPhone,
+    customerPhoneMasked: row.customerPhoneMasked,
     serviceName: row.serviceName,
     practitionerName: row.practitionerName,
     rank,

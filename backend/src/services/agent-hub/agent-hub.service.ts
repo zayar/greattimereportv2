@@ -237,7 +237,7 @@ function forceFollowUpPlan(params: {
   }
 
   if (params.plan.resolvedAgent === "customer_relationship" && params.entityContext.entityType === "customer") {
-    if (params.plan.intent === "customer_purchase_history") {
+    if (params.plan.intent === "customer_purchase_history" || params.plan.intent === "customer_overview") {
       return params.plan;
     }
 

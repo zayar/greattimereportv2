@@ -65,6 +65,7 @@ const envSchema = z.object({
   TELEGRAM_WEBHOOK_WATCHDOG_INTERVAL_MS: z.coerce.number().int().positive().default(5 * 60_000),
   TELEGRAM_POLLING_ENABLED: booleanEnv(false),
   TELEGRAM_POLLING_INTERVAL_MS: z.coerce.number().int().positive().default(5_000),
+  SHOW_FULL_CUSTOMER_PHONE: booleanEnv(false),
   APICORE_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
   FIREBASE_AUTH_REQUEST_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
   AGENT_MEMORY_V2_ENABLED: booleanEnv(false),
