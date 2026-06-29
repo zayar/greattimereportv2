@@ -1059,7 +1059,7 @@ export interface GreatTimeAgentChatResponse {
 }
 
 export type AgentStatusHealth = "healthy" | "degraded" | "critical" | "unknown";
-export type AgentStatusRange = "24h" | "7d" | "30d";
+export type AgentStatusRange = "1h" | "24h" | "7d" | "30d";
 
 export interface GreatTimeAgentStatusReport {
   health: AgentStatusHealth;
@@ -1157,6 +1157,206 @@ export interface GreatTimeAgentStatusReport {
     message: string;
   }>;
   generatedAt: string;
+}
+
+export type AiAgentMonitoringRange = "1h" | "24h" | "7d" | "30d";
+export type AiAgentMonitoringStatus =
+  | "queued"
+  | "running"
+  | "planning"
+  | "calling_tools"
+  | "generating_response"
+  | "sending_response"
+  | "completed"
+  | "failed"
+  | "timeout"
+  | "cancelled"
+  | "stuck"
+  | "unknown";
+
+export interface AiAgentMonitoringFilters {
+  range?: AiAgentMonitoringRange;
+  clinicId?: string;
+  channel?: "web" | "telegram" | "system" | "unknown" | "";
+  agent?: string;
+  status?: string;
+  search?: string;
+}
+
+export interface AiAgentMonitoringRunRow {
+  runId: string;
+  status: AiAgentMonitoringStatus;
+  currentStep?: string | null;
+  clinicId?: string | null;
+  clinicCode?: string | null;
+  clinicName?: string | null;
+  channel: "web" | "telegram" | "system" | "unknown";
+  userEmail?: string | null;
+  requestedAgent?: string | null;
+  resolvedAgent?: string | null;
+  agentLabel: string;
+  intent?: string | null;
+  questionPreview?: string | null;
+  answerPreview?: string | null;
+  toolNames: string[];
+  dataStatus?: AgentDataStatus | null;
+  fallbackUsed?: boolean;
+  totalLatencyMs?: number | null;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string | null;
+  errorCategory?: string | null;
+  sanitizedError?: string | null;
+  telegramDeliveryStatus?: string | null;
+  telegramDeliveryLatencyMs?: number | null;
+  buttonCount?: number | null;
+  messageLength?: number | null;
+}
+
+export interface AiAgentMonitoringToolRow {
+  toolName: string;
+  status: "started" | "completed" | "failed" | "timeout";
+  startedAt?: string | null;
+  completedAt?: string | null;
+  latencyMs?: number | null;
+  dataStatus?: AgentDataStatus | null;
+  errorCategory?: string | null;
+  errorMessage?: string | null;
+}
+
+export interface AiAgentMonitoringSummary {
+  health: AgentStatusHealth;
+  generatedAt: string;
+  summary: {
+    activeNow: number;
+    stuckRuns: number;
+    completedRuns: number;
+    failedRuns: number;
+    timeoutRuns: number;
+    totalRuns: number;
+    totalQuestions: number;
+    averageLatencyMs: number;
+    p95LatencyMs: number;
+    toolFailureRate: number;
+    fallbackRate: number;
+    wrongDataFeedbackCount: number;
+    telegramDeliveryFailureCount: number;
+  };
+  byAgent: Array<{
+    agentId: string;
+    agentLabel: string;
+    totalRuns: number;
+    activeRuns: number;
+    failedRuns: number;
+    averageLatencyMs: number;
+    p95LatencyMs: number;
+  }>;
+  byChannel: Array<{
+    channel: string;
+    totalRuns: number;
+    failedRuns: number;
+    averageLatencyMs: number;
+  }>;
+  alerts: Array<{
+    severity: "info" | "warning" | "critical";
+    code: string;
+    message: string;
+  }>;
+  slowestTools: Array<{
+    toolName: string;
+    count: number;
+    averageLatencyMs: number;
+    p95LatencyMs: number;
+    maxLatencyMs: number;
+    timeoutCount: number;
+    failureCount: number;
+  }>;
+  failingTools: Array<{
+    toolName: string;
+    failureCount: number;
+    timeoutCount: number;
+    latestError?: string | null;
+  }>;
+  learning: {
+    totalRuns: number;
+    failedRuns: number;
+    rows: Array<{
+      clinicId: string;
+      clinicCode?: string | null;
+      jobType: string;
+      latestRunAt: string;
+      status: string;
+      rowCount: number;
+      nextExpectedRunAt?: string | null;
+      error?: string | null;
+    }>;
+  };
+  snapshots: Array<{
+    clinicId: string;
+    clinicCode: string;
+    snapshotType: string;
+    checkedAt: string;
+    dataStatus: AgentDataStatus;
+    freshnessSeconds?: number | null;
+    expiresAt?: string | null;
+  }>;
+  feedback: Array<{
+    id: string;
+    createdAt: string;
+    clinicId: string;
+    agent?: string | null;
+    feedbackType: string;
+    note?: string | null;
+    questionPreview?: string | null;
+  }>;
+}
+
+export interface AiAgentMonitoringRunsResponse {
+  rows: AiAgentMonitoringRunRow[];
+  nextCursor?: string | null;
+}
+
+export interface AiAgentMonitoringLiveResponse {
+  rows: AiAgentMonitoringRunRow[];
+  generatedAt: string;
+}
+
+export interface AiAgentMonitoringRunDetail {
+  run: AiAgentMonitoringRunRow & {
+    requestId: string;
+    responseId?: string | null;
+    sessionId?: string | null;
+    telegramChatIdHash?: string | null;
+    telegramUserIdHash?: string | null;
+    telegramMessageId?: string | null;
+    telegramCallbackDataType?: string | null;
+    callbackExpired?: boolean | null;
+    callbackResolved?: boolean | null;
+    tools: AiAgentMonitoringToolRow[];
+    warnings: string[];
+    cacheStats?: {
+      bigQueryHits?: number;
+      bigQueryMisses?: number;
+    };
+    model?: string | null;
+    provider?: string | null;
+    promptTokens?: number | null;
+    completionTokens?: number | null;
+    estimatedCostUsd?: number | null;
+  };
+  timeline: Array<{
+    label: string;
+    status: string;
+    at: string;
+    detail?: string | null;
+  }>;
+  feedback: Array<{
+    id: string;
+    createdAt: string;
+    feedbackType: string;
+    rating: string;
+    note?: string | null;
+  }>;
 }
 
 export interface AppointmentRow {

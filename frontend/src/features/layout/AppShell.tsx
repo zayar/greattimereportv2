@@ -4,7 +4,7 @@ import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { navigationSections, type NavigationIconName, type NavigationItem } from "./navigation";
 import { useAccess } from "../access/AccessProvider";
 import { useSession } from "../auth/SessionProvider";
-import { canAccessAiControlPanel } from "../ai/adminAccess";
+import { canAccessAiAgentMonitoring, canAccessAiControlPanel } from "../ai/adminAccess";
 import { EmptyState, ErrorState, ScreenLoader } from "../../components/StatusViews";
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "gt-v2report-sidebar-collapsed";
@@ -76,9 +76,16 @@ function collectActiveGroupKeys(items: NavigationItem[], pathname: string, secti
   return keys;
 }
 
-function filterNavigationItems(items: NavigationItem[], canUseAiControlPanel: boolean): NavigationItem[] {
+function filterNavigationItems(
+  items: NavigationItem[],
+  canUseAiControlPanel: boolean,
+  canUseAiAgentMonitoring: boolean,
+): NavigationItem[] {
   return items.flatMap((item) => {
     if (item.requiresAiControlPanelAdmin && !canUseAiControlPanel) {
+      return [];
+    }
+    if (item.requiresAiAgentMonitoringAdmin && !canUseAiAgentMonitoring) {
       return [];
     }
 
@@ -86,7 +93,7 @@ function filterNavigationItems(items: NavigationItem[], canUseAiControlPanel: bo
       return [item];
     }
 
-    const children = filterNavigationItems(item.children, canUseAiControlPanel);
+    const children = filterNavigationItems(item.children, canUseAiControlPanel, canUseAiAgentMonitoring);
     return children.length > 0 ? [{ ...item, children }] : [];
   });
 }
@@ -282,15 +289,16 @@ export function AppShell() {
   });
   const location = useLocation();
   const canUseAiControlPanel = canAccessAiControlPanel(gtUser?.email);
+  const canUseAiAgentMonitoring = canAccessAiAgentMonitoring(gtUser?.email);
   const visibleNavigationSections = useMemo(
     () =>
       navigationSections
         .map((section) => ({
           ...section,
-          items: filterNavigationItems(section.items, canUseAiControlPanel),
+          items: filterNavigationItems(section.items, canUseAiControlPanel, canUseAiAgentMonitoring),
         }))
         .filter((section) => section.items.length > 0),
-    [canUseAiControlPanel],
+    [canUseAiAgentMonitoring, canUseAiControlPanel],
   );
 
   const pageTrail = useMemo(() => {

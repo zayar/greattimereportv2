@@ -4,6 +4,7 @@ import { env } from "../config/env.js";
 import { verifyFirebaseToken } from "../middleware/auth.js";
 import { requireClinicAccess } from "../middleware/clinic-access.js";
 import { isAiControlPanelAdminEmail } from "../services/ai-control-panel-access.service.js";
+import { requireAiAgentMonitoringAdmin } from "../services/ai-agent-monitoring-access.service.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { HttpError } from "../utils/http-error.js";
 import { resolveAiLanguage } from "../services/ai/language.js";
@@ -42,6 +43,16 @@ import {
   getAgentStatusReport,
   normalizeAgentStatusRange,
 } from "../services/agent-hub/monitoring/agent-status-monitoring.js";
+import {
+  getAiAgentMonitoringLive,
+  getAiAgentMonitoringRunDetail,
+  getAiAgentMonitoringRuns,
+  getAiAgentMonitoringSummary,
+  normalizeAiAgentMonitoringRange,
+  redactMonitoringText,
+} from "../services/agent-hub/monitoring/agent-monitoring.service.js";
+import { saveAgentRunTrace } from "../services/agent-hub/trace.repository.js";
+import { nowIso } from "../services/agent-hub/safety.js";
 import {
   agentChatRequestSchema,
   agentFeedbackSchema,
@@ -159,7 +170,7 @@ const customerRelationshipFeedbackSchema = customerRelationshipBaseSchema.extend
 
 const agentStatusQuerySchema = z.object({
   clinicId: z.string().min(1).optional(),
-  range: z.preprocess((value) => normalizeAgentStatusRange(value), z.enum(["24h", "7d", "30d"]).default("24h")),
+  range: z.preprocess((value) => normalizeAgentStatusRange(value), z.enum(["1h", "24h", "7d", "30d"]).default("24h")),
   includeDetails: z
     .preprocess((value) => {
       if (typeof value !== "string") {
@@ -169,6 +180,26 @@ const agentStatusQuerySchema = z.object({
       return value.trim().toLowerCase() === "true";
     }, z.boolean())
     .default(false),
+});
+
+const monitoringChannelSchema = z.enum(["web", "telegram", "system", "unknown"]);
+
+const monitoringQuerySchema = z.object({
+  clinicId: z.string().min(1).optional(),
+  range: z.preprocess((value) => normalizeAiAgentMonitoringRange(value), z.enum(["1h", "24h", "7d", "30d"]).default("24h")),
+  channel: optionalEmptyString(monitoringChannelSchema),
+  agent: optionalEmptyString(z.string().min(1)),
+  status: optionalEmptyString(z.string().min(1)),
+  search: z.string().optional(),
+});
+
+const monitoringRunsQuerySchema = monitoringQuerySchema.extend({
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  cursor: optionalEmptyString(z.string().min(1)),
+});
+
+const monitoringRunParamsSchema = z.object({
+  runId: z.string().min(1),
 });
 
 router.use(verifyFirebaseToken);
@@ -228,12 +259,51 @@ router.post(
       feature: GT_GROWTH_AI_FEATURE_GATE,
     });
     if (!premium.enabled) {
+      const data = buildLockedAgentHubResponse({
+        request: params,
+        premium,
+      });
+      const createdAt = nowIso();
+      await saveAgentRunTrace({
+        runId: data.requestId,
+        clinicId: params.clinicId,
+        clinicCode: params.clinicCode ?? null,
+        clinicName: null,
+        userId: req.user?.userId ?? req.user?.uid ?? "unknown",
+        userEmail: req.user?.email ?? null,
+        sessionId: data.sessionId,
+        requestId: data.requestId,
+        responseId: data.responseId,
+        status: "completed",
+        currentStep: "Feature locked response",
+        channel: "web",
+        questionPreview: redactMonitoringText(params.message, 500),
+        answerPreview: redactMonitoringText(data.assistantMessage, 500),
+        requestedAgent: data.requestedAgent,
+        resolvedAgent: data.resolvedAgent,
+        intent: data.intent,
+        toolNames: [],
+        sourceStatuses: data.sources.map((source) => source.dataStatus),
+        dataStatus: data.dataStatus,
+        fallbackUsed: true,
+        deterministicResponseUsed: true,
+        totalLatencyMs: 0,
+        createdAt,
+        updatedAt: createdAt,
+        completedAt: createdAt,
+        timeline: [
+          {
+            label: "Feature locked response",
+            status: "completed",
+            at: createdAt,
+          },
+        ],
+      }).catch((error) => {
+        console.warn("[ai-routes] failed to write locked Agent Hub trace", error);
+      });
       res.json({
         success: true,
-        data: buildLockedAgentHubResponse({
-          request: params,
-          premium,
-        }),
+        data,
       });
       return;
     }
@@ -250,8 +320,87 @@ router.post(
         userId: req.user?.userId ?? req.user?.uid ?? "unknown",
         userEmail: req.user?.email,
         authorizationHeader: req.headers.authorization,
+        channel: "web",
       },
     });
+
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/agent/monitoring/summary",
+  asyncHandler(async (req, res) => {
+    await requireAiAgentMonitoringAdmin(req);
+    const params = monitoringQuerySchema.parse(req.query);
+    const data = await getAiAgentMonitoringSummary({
+      range: params.range,
+      filters: {
+        clinicId: params.clinicId,
+        channel: params.channel,
+        agent: params.agent,
+        status: params.status,
+        search: params.search,
+      },
+    });
+
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/agent/monitoring/runs",
+  asyncHandler(async (req, res) => {
+    await requireAiAgentMonitoringAdmin(req);
+    const params = monitoringRunsQuerySchema.parse(req.query);
+    const data = await getAiAgentMonitoringRuns({
+      range: params.range,
+      filters: {
+        clinicId: params.clinicId,
+        channel: params.channel,
+        agent: params.agent,
+        status: params.status,
+        search: params.search,
+      },
+      limit: params.limit,
+      cursor: params.cursor,
+    });
+
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/agent/monitoring/live",
+  asyncHandler(async (req, res) => {
+    await requireAiAgentMonitoringAdmin(req);
+    const params = monitoringQuerySchema.parse(req.query);
+    const data = await getAiAgentMonitoringLive({
+      filters: {
+        clinicId: params.clinicId,
+        channel: params.channel,
+        agent: params.agent,
+        status: params.status,
+        search: params.search,
+      },
+    });
+
+    res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/agent/monitoring/runs/:runId",
+  asyncHandler(async (req, res) => {
+    await requireAiAgentMonitoringAdmin(req);
+    const params = monitoringRunParamsSchema.parse(req.params);
+    const data = await getAiAgentMonitoringRunDetail({
+      runId: params.runId,
+    });
+
+    if (!data) {
+      throw new HttpError(404, "Agent run was not found.");
+    }
 
     res.json({ success: true, data });
   }),

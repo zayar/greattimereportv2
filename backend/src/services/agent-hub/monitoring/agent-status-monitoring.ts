@@ -20,7 +20,7 @@ import { listRecentAgentRunTraces } from "../trace.repository.js";
 import type { AgentDataStatus, AgentRunTrace } from "../types.js";
 
 export type AgentStatusHealth = "healthy" | "degraded" | "critical" | "unknown";
-export type AgentStatusRange = "24h" | "7d" | "30d";
+export type AgentStatusRange = "1h" | "24h" | "7d" | "30d";
 export type AgentStatusAlertSeverity = "info" | "warning" | "critical";
 
 export type AgentStatusAlert = {
@@ -150,6 +150,7 @@ const DEFAULT_DATA_SOURCE: AgentStatusDataSource = {
 };
 
 const RANGE_TO_MS: Record<AgentStatusRange, number> = {
+  "1h": 60 * 60_000,
   "24h": 24 * 60 * 60_000,
   "7d": 7 * 24 * 60 * 60_000,
   "30d": 30 * 24 * 60 * 60_000,
@@ -197,7 +198,7 @@ function rangeSince(range: AgentStatusRange, now: Date) {
 }
 
 export function normalizeAgentStatusRange(value: unknown): AgentStatusRange {
-  return value === "7d" || value === "30d" || value === "24h" ? value : "24h";
+  return value === "1h" || value === "7d" || value === "30d" || value === "24h" ? value : "24h";
 }
 
 function toolRowsFromTrace(trace: AgentRunTrace) {
@@ -277,7 +278,7 @@ function isFallbackTrace(trace: AgentRunTrace) {
     trace.dataStatus === "partial" ||
     trace.dataStatus === "not_ready" ||
     trace.dataStatus === "unavailable" ||
-    trace.sourceStatuses.includes("unavailable")
+    (trace.sourceStatuses ?? []).includes("unavailable")
   );
 }
 

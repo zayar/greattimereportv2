@@ -7,9 +7,23 @@ const RUN_TRACE_COLLECTIONS = [RUN_TRACES_COLLECTION, LEGACY_RUN_TRACES_COLLECTI
 
 export async function saveAgentRunTrace(trace: AgentRunTrace) {
   const db = firestoreDb();
+  const documentId = trace.runId || trace.responseId || trace.requestId;
   const writes = await Promise.allSettled(
     RUN_TRACE_COLLECTIONS.map((collectionName) =>
-      db.collection(collectionName).doc(trace.responseId).set(trace, { merge: true }),
+      db.collection(collectionName).doc(documentId).set(trace, { merge: true }),
+    ),
+  );
+
+  if (writes.every((result) => result.status === "rejected")) {
+    throw writes[0].reason;
+  }
+}
+
+export async function updateAgentRunTrace(runId: string, trace: Partial<AgentRunTrace>) {
+  const db = firestoreDb();
+  const writes = await Promise.allSettled(
+    RUN_TRACE_COLLECTIONS.map((collectionName) =>
+      db.collection(collectionName).doc(runId).set(trace, { merge: true }),
     ),
   );
 
@@ -19,7 +33,7 @@ export async function saveAgentRunTrace(trace: AgentRunTrace) {
 }
 
 function isAgentRunTrace(data: FirebaseFirestore.DocumentData | undefined): data is AgentRunTrace {
-  return Boolean(data?.clinicId && data?.requestId && data?.responseId && data?.intent && data?.createdAt);
+  return Boolean(data?.clinicId && data?.requestId && data?.createdAt);
 }
 
 async function listRecentAgentRunTracesFromCollection(params: {
@@ -78,13 +92,32 @@ export async function listRecentAgentRunTraces(params: {
       }),
     ),
   );
-  const byResponseId = new Map<string, AgentRunTrace>();
+  const byTraceId = new Map<string, AgentRunTrace>();
 
   rows.flat().forEach((trace) => {
-    byResponseId.set(trace.responseId, trace);
+    byTraceId.set(trace.runId || trace.responseId || trace.requestId, trace);
   });
 
-  return [...byResponseId.values()]
+  return [...byTraceId.values()]
     .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
     .slice(0, limit);
+}
+
+export async function getAgentRunTraceByRunId(runId: string) {
+  const db = firestoreDb();
+
+  for (const collectionName of RUN_TRACE_COLLECTIONS) {
+    const byId = await db.collection(collectionName).doc(runId).get().catch(() => null);
+    if (byId?.exists && isAgentRunTrace(byId.data())) {
+      return byId.data() as AgentRunTrace;
+    }
+
+    const snapshot = await db.collection(collectionName).where("runId", "==", runId).limit(1).get().catch(() => null);
+    const trace = snapshot?.docs.map((doc) => doc.data()).find(isAgentRunTrace);
+    if (trace) {
+      return trace;
+    }
+  }
+
+  return null;
 }

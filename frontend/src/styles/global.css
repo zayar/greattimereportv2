@@ -4974,6 +4974,398 @@ a {
   gap: 10px;
 }
 
+.ai-agent-monitoring {
+  gap: 20px;
+}
+
+.ai-agent-monitoring__actions,
+.ai-agent-monitoring__filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+}
+
+.ai-agent-monitoring__button {
+  min-width: 112px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.ai-agent-monitoring__toggle,
+.ai-agent-monitoring__filters label {
+  display: grid;
+  gap: 6px;
+  color: var(--ink-muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.ai-agent-monitoring__toggle {
+  grid-auto-flow: column;
+  align-items: center;
+  min-height: 40px;
+}
+
+.ai-agent-monitoring__toggle input {
+  width: 16px;
+  height: 16px;
+}
+
+.ai-agent-monitoring__filters select,
+.ai-agent-monitoring__filters input {
+  min-height: 40px;
+  min-width: 142px;
+  padding: 0 12px;
+  border: 1px solid rgba(19, 31, 46, 0.16);
+  border-radius: 8px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.86);
+  font: inherit;
+  letter-spacing: 0;
+}
+
+.ai-agent-monitoring__filters .ai-agent-monitoring__search input {
+  min-width: 260px;
+}
+
+.ai-agent-monitoring__status-strip {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--luxe-border);
+  border-radius: 8px;
+  background: var(--luxe-surface-soft);
+}
+
+.ai-agent-monitoring__status-strip strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.ai-agent-monitoring__status-strip span {
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+}
+
+.ai-agent-monitoring__metric-grid {
+  display: grid;
+  grid-template-columns: repeat(9, minmax(112px, 1fr));
+  gap: 10px;
+}
+
+.ai-agent-monitoring__metric {
+  display: grid;
+  gap: 10px;
+  min-height: 92px;
+  padding: 13px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.ai-agent-monitoring__metric span {
+  color: var(--ink-muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.ai-agent-monitoring__metric strong {
+  color: var(--ink);
+  font-size: 1.18rem;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.ai-agent-monitoring__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.ai-agent-monitoring__badge--success {
+  color: var(--success);
+  background: rgba(13, 122, 82, 0.12);
+}
+
+.ai-agent-monitoring__badge--danger {
+  color: var(--danger);
+  background: rgba(178, 71, 45, 0.12);
+}
+
+.ai-agent-monitoring__badge--warning {
+  color: #8a5b13;
+  background: rgba(250, 205, 118, 0.2);
+}
+
+.ai-agent-monitoring__badge--info {
+  color: #225a8f;
+  background: rgba(58, 132, 205, 0.13);
+}
+
+.ai-agent-monitoring__badge--muted {
+  color: var(--ink-muted);
+  background: rgba(31, 41, 55, 0.08);
+}
+
+.ai-agent-monitoring__two-column {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+
+.ai-agent-monitoring__table-wrap {
+  max-height: 520px;
+}
+
+.ai-agent-monitoring__table th,
+.ai-agent-monitoring__table td {
+  vertical-align: top;
+}
+
+.ai-agent-monitoring__preview {
+  max-width: 360px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.ai-agent-monitoring__alert-list {
+  display: grid;
+  gap: 10px;
+}
+
+.ai-agent-monitoring__alert {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+}
+
+.ai-agent-monitoring__alert strong {
+  color: var(--ink);
+  text-transform: capitalize;
+}
+
+.ai-agent-monitoring__alert span {
+  color: var(--ink-muted);
+}
+
+.ai-agent-monitoring__alert--info {
+  background: rgba(79, 126, 162, 0.1);
+  border-color: rgba(79, 126, 162, 0.16);
+}
+
+.ai-agent-monitoring__alert--warning {
+  background: rgba(250, 205, 118, 0.16);
+  border-color: rgba(178, 120, 31, 0.18);
+}
+
+.ai-agent-monitoring__alert--critical {
+  background: rgba(178, 71, 45, 0.1);
+  border-color: rgba(178, 71, 45, 0.18);
+}
+
+.ai-agent-monitoring__mini-table {
+  display: grid;
+  gap: 8px;
+}
+
+.ai-agent-monitoring__mini-table > div {
+  display: grid;
+  grid-template-columns: minmax(160px, 1.4fr) repeat(3, minmax(80px, 0.6fr));
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(24, 29, 37, 0.08);
+}
+
+.ai-agent-monitoring__mini-table strong,
+.ai-agent-monitoring__mini-table span,
+.ai-agent-monitoring__mini-table small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ai-agent-monitoring__mini-table small {
+  grid-column: 1 / -1;
+  color: var(--ink-muted);
+}
+
+.ai-agent-monitoring__drawer-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  justify-items: end;
+}
+
+.ai-agent-monitoring__drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(15, 23, 42, 0.28);
+}
+
+.ai-agent-monitoring__drawer {
+  position: relative;
+  z-index: 1;
+  width: min(760px, 94vw);
+  height: 100%;
+  padding: 22px;
+  overflow-y: auto;
+  background: var(--luxe-surface);
+  box-shadow: -24px 0 60px rgba(15, 23, 42, 0.18);
+}
+
+.ai-agent-monitoring__drawer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.ai-agent-monitoring__drawer-header h2 {
+  margin: 4px 0 0;
+}
+
+.ai-agent-monitoring__eyebrow {
+  color: var(--ink-muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.ai-agent-monitoring__drawer-body {
+  display: grid;
+  gap: 18px;
+}
+
+.ai-agent-monitoring__drawer-body h3 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+
+.ai-agent-monitoring__detail-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ai-agent-monitoring__detail-grid div {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.ai-agent-monitoring__detail-grid span {
+  color: var(--ink-muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.ai-agent-monitoring__detail-grid strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ai-agent-monitoring__copy {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  border-radius: 8px;
+  color: #334155;
+  background: rgba(255, 255, 255, 0.62);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ai-agent-monitoring__copy--danger {
+  color: var(--danger);
+  background: rgba(178, 71, 45, 0.08);
+}
+
+.ai-agent-monitoring__timeline {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-agent-monitoring__timeline li {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 4px 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(24, 29, 37, 0.08);
+}
+
+.ai-agent-monitoring__timeline span {
+  color: var(--ink-muted);
+  font-size: 0.84rem;
+}
+
+.ai-agent-monitoring__timeline strong,
+.ai-agent-monitoring__timeline small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ai-agent-monitoring__timeline small {
+  grid-column: 2;
+  color: var(--ink-muted);
+}
+
+@media (max-width: 1180px) {
+  .ai-agent-monitoring__metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .ai-agent-monitoring__metric-grid,
+  .ai-agent-monitoring__two-column,
+  .ai-agent-monitoring__detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-agent-monitoring__filters label,
+  .ai-agent-monitoring__filters select,
+  .ai-agent-monitoring__filters input,
+  .ai-agent-monitoring__filters .ai-agent-monitoring__search input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .ai-agent-monitoring__mini-table > div,
+  .ai-agent-monitoring__timeline li {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-agent-monitoring__timeline small {
+    grid-column: 1;
+  }
+}
+
 .telegram-settings__meta-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

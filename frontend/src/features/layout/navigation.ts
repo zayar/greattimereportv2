@@ -4,6 +4,7 @@ export type NavigationItem = {
   children?: NavigationItem[];
   icon?: NavigationIconName;
   requiresAiControlPanelAdmin?: boolean;
+  requiresAiAgentMonitoringAdmin?: boolean;
 };
 
 export type NavigationSection = {
@@ -145,6 +146,7 @@ export const navigationSections: NavigationSection[] = [
       { to: "/settings/commission", label: "Commission rules", icon: "clipboard" },
       { to: "/settings/telegram", label: "Telegram", icon: "telegram" },
       { to: "/settings/ai-control-panel", label: "AI control panel", icon: "settings", requiresAiControlPanelAdmin: true },
+      { to: "/settings/ai-agent-monitoring", label: "AI Agent Monitoring", icon: "activity", requiresAiAgentMonitoringAdmin: true },
       { to: "/settings/sales-document", label: "Sales document", icon: "document" },
     ],
   },

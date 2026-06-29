@@ -273,6 +273,11 @@ export type AgentRequestContext = {
   userId: string;
   userEmail?: string;
   authorizationHeader?: string;
+  channel?: "web" | "telegram" | "system" | "unknown";
+  telegramChatIdHash?: string | null;
+  telegramUserIdHash?: string | null;
+  telegramMessageId?: string | null;
+  telegramCallbackDataType?: string | null;
 };
 
 export type AgentClinicContext = {
@@ -345,18 +350,47 @@ export type AgentToolDefinition = {
 };
 
 export type AgentRunTrace = {
+  runId?: string;
   clinicId: string;
+  clinicCode?: string | null;
+  clinicName?: string | null;
   userId: string;
+  userEmail?: string | null;
   sessionId: string;
   requestId: string;
   responseId: string;
-  requestedAgent: GreatTimeRequestedAgentId;
-  resolvedAgent: GreatTimeAgentId;
-  intent: string;
-  toolNames: string[];
-  sourceStatuses: AgentDataStatus[];
-  dataStatus: AgentDataStatus;
-  fallbackUsed: boolean;
+  status?:
+    | "queued"
+    | "running"
+    | "planning"
+    | "calling_tools"
+    | "generating_response"
+    | "sending_response"
+    | "completed"
+    | "failed"
+    | "timeout"
+    | "cancelled";
+  currentStep?: string | null;
+  channel?: "web" | "telegram" | "system" | "unknown";
+  telegramChatIdHash?: string | null;
+  telegramUserIdHash?: string | null;
+  telegramMessageId?: string | null;
+  telegramCallbackDataType?: string | null;
+  telegramDeliveryStatus?: string | null;
+  telegramDeliveryLatencyMs?: number | null;
+  callbackExpired?: boolean;
+  callbackResolved?: boolean;
+  buttonCount?: number;
+  messageLength?: number;
+  questionPreview?: string | null;
+  answerPreview?: string | null;
+  requestedAgent?: GreatTimeRequestedAgentId;
+  resolvedAgent?: GreatTimeAgentId;
+  intent?: string;
+  toolNames?: string[];
+  sourceStatuses?: AgentDataStatus[];
+  dataStatus?: AgentDataStatus;
+  fallbackUsed?: boolean;
   narrativeFallbackUsed?: boolean;
   narrativeSkipped?: boolean;
   narrativeCacheHit?: boolean;
@@ -386,10 +420,35 @@ export type AgentRunTrace = {
     dataStatus: AgentDataStatus;
     errorCategory?: string;
   }>;
+  tools?: Array<{
+    toolName: string;
+    status: "started" | "completed" | "failed" | "timeout";
+    startedAt?: string | null;
+    completedAt?: string | null;
+    latencyMs?: number | null;
+    dataStatus?: AgentDataStatus | null;
+    errorCategory?: string | null;
+    errorMessage?: string | null;
+  }>;
   timedOutTools?: string[];
   unavailableTools?: string[];
+  model?: string | null;
+  provider?: string | null;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  estimatedCostUsd?: number | null;
   createdAt: string;
+  updatedAt?: string;
+  completedAt?: string | null;
+  errorCategory?: string | null;
   sanitizedError?: string;
+  warnings?: string[];
+  timeline?: Array<{
+    label: string;
+    status: string;
+    at: string;
+    detail?: string | null;
+  }>;
 };
 
 export type AgentFeedbackInput = {

@@ -5,7 +5,9 @@ import { hasFeatureAccess } from "../feature-access.service.js";
 import { askAgentHub, buildLockedAgentHubResponse } from "../agent-hub/agent-hub.service.js";
 import { isAgentCsvExportRequested, isExportOnlyFollowUp } from "../agent-hub/export-intent.js";
 import { buildCustomerKey } from "../agent-hub/customer-identity.js";
-import { maskPhone } from "../agent-hub/safety.js";
+import { maskPhone, nowIso, sanitizeError } from "../agent-hub/safety.js";
+import { updateAgentRunTrace, saveAgentRunTrace } from "../agent-hub/trace.repository.js";
+import { redactMonitoringText } from "../agent-hub/monitoring/agent-monitoring.service.js";
 import type {
   Customer360FactPack,
   GreatTimeAgentChatResponse,
@@ -1289,6 +1291,87 @@ function newCallbackToken(prefix: string) {
     .slice(0, 12);
 }
 
+function hashTelegramIdentifier(value?: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  return createHash("sha256").update(`telegram:${value}`).digest("hex").slice(0, 32);
+}
+
+function telegramCallbackDataType(value?: string | null) {
+  return value?.split(":")[0]?.slice(0, 64) || null;
+}
+
+function countInlineKeyboardButtons(replyMarkup?: Record<string, unknown>) {
+  const keyboard = replyMarkup?.inline_keyboard;
+  if (!Array.isArray(keyboard)) {
+    return 0;
+  }
+
+  return keyboard.reduce((sum, row) => (Array.isArray(row) ? sum + row.length : sum), 0);
+}
+
+async function recordTelegramCallbackIssue(params: {
+  callback: TelegramCallbackQuery;
+  chatId?: string | null;
+  target?: TelegramTargetStatus | null;
+  errorCategory:
+    | "telegram_callback_expired"
+    | "appointment_context_missing"
+    | "callback_data_invalid"
+    | "csv_export_failed";
+  currentStep: string;
+  callbackExpired?: boolean;
+  callbackResolved?: boolean;
+  sanitizedError?: string;
+}) {
+  const createdAt = nowIso();
+  const callbackHash = createHash("sha256")
+    .update(`telegram-callback:${params.callback.id}:${createdAt}`)
+    .digest("hex")
+    .slice(0, 16);
+  const runId = `tgcb_${callbackHash}`;
+  const chatId = params.chatId ?? (params.callback.message?.chat?.id == null ? null : String(params.callback.message.chat.id));
+  const userId = params.callback.from?.id == null ? null : String(params.callback.from.id);
+
+  await saveAgentRunTrace({
+    runId,
+    clinicId: params.target?.clinicId ?? "unknown",
+    clinicCode: params.target?.clinicCode ?? null,
+    clinicName: null,
+    userId: `telegram:${hashTelegramIdentifier(userId) ?? "unknown"}`,
+    userEmail: null,
+    sessionId: `telegram_callback_${callbackHash}`,
+    requestId: runId,
+    responseId: runId,
+    status: "failed",
+    currentStep: params.currentStep,
+    channel: "telegram",
+    telegramChatIdHash: hashTelegramIdentifier(chatId),
+    telegramUserIdHash: hashTelegramIdentifier(userId),
+    telegramMessageId: params.callback.message?.message_id == null ? null : String(params.callback.message.message_id),
+    telegramCallbackDataType: telegramCallbackDataType(params.callback.data),
+    callbackExpired: params.callbackExpired ?? false,
+    callbackResolved: params.callbackResolved ?? false,
+    errorCategory: params.errorCategory,
+    sanitizedError: params.sanitizedError ?? params.currentStep,
+    createdAt,
+    updatedAt: createdAt,
+    completedAt: createdAt,
+    timeline: [
+      {
+        label: "Telegram callback",
+        status: "failed",
+        at: createdAt,
+        detail: params.currentStep,
+      },
+    ],
+  }).catch((error) => {
+    console.warn("[telegram] failed to record callback issue trace", error);
+  });
+}
+
 function cleanupAppointmentActionCallbacks(now = Date.now()) {
   appointmentActionCallbacks.forEach((value, key) => {
     if (value.expiresAt <= now) {
@@ -1700,7 +1783,10 @@ function sanitizeSessionPart(value: string) {
 async function buildAgentHubReply(params: {
   target: TelegramTargetStatus;
   question: string;
+  telegramChatId: string;
   telegramUserId: string | null;
+  telegramMessageId?: string | null;
+  telegramCallbackDataType?: string | null;
   entityContext?: GreatTimeAgentEntityContext;
   agent?: GreatTimeAgentId | "auto";
 }) {
@@ -1727,7 +1813,50 @@ async function buildAgentHubReply(params: {
   };
 
   if (!premium.enabled) {
-    return buildLockedAgentHubResponse({ request, premium });
+    const response = buildLockedAgentHubResponse({ request, premium });
+    const createdAt = nowIso();
+    await saveAgentRunTrace({
+      runId: response.requestId,
+      clinicId: params.target.clinicId,
+      clinicCode: params.target.clinicCode,
+      clinicName: null,
+      userId: `telegram:${sessionActor}`,
+      userEmail: null,
+      sessionId,
+      requestId: response.requestId,
+      responseId: response.responseId,
+      status: "completed",
+      currentStep: "Feature locked response",
+      channel: "telegram",
+      telegramChatIdHash: hashTelegramIdentifier(params.telegramChatId),
+      telegramUserIdHash: hashTelegramIdentifier(params.telegramUserId),
+      telegramMessageId: params.telegramMessageId ?? null,
+      telegramCallbackDataType: params.telegramCallbackDataType ?? null,
+      questionPreview: redactMonitoringText(params.question, 500),
+      answerPreview: redactMonitoringText(response.assistantMessage, 500),
+      requestedAgent: response.requestedAgent,
+      resolvedAgent: response.resolvedAgent,
+      intent: response.intent,
+      toolNames: [],
+      sourceStatuses: response.sources.map((source) => source.dataStatus),
+      dataStatus: response.dataStatus,
+      fallbackUsed: true,
+      deterministicResponseUsed: true,
+      totalLatencyMs: 0,
+      createdAt,
+      updatedAt: createdAt,
+      completedAt: createdAt,
+      timeline: [
+        {
+          label: "Feature locked response",
+          status: "completed",
+          at: createdAt,
+        },
+      ],
+    }).catch((error) => {
+      console.warn("[telegram] failed to write locked AI trace", error);
+    });
+    return response;
   }
 
   return askAgentHub({
@@ -1739,6 +1868,11 @@ async function buildAgentHubReply(params: {
     requestContext: {
       userId: `telegram:${sessionActor}`,
       userEmail: undefined,
+      channel: "telegram",
+      telegramChatIdHash: hashTelegramIdentifier(params.telegramChatId),
+      telegramUserIdHash: hashTelegramIdentifier(params.telegramUserId),
+      telegramMessageId: params.telegramMessageId ?? null,
+      telegramCallbackDataType: params.telegramCallbackDataType ?? null,
     },
   });
 }
@@ -1803,6 +1937,8 @@ async function handleAgentQuestion(params: {
   chatType: TelegramChat["type"];
   question: string;
   telegramUserId: string | null;
+  telegramMessageId?: string | null;
+  telegramCallbackDataType?: string | null;
   entityContext?: GreatTimeAgentEntityContext;
   agent?: GreatTimeAgentId | "auto";
 }) {
@@ -1965,7 +2101,10 @@ async function handleAgentQuestion(params: {
   const response = await buildAgentHubReply({
     target,
     question: effectiveQuestion,
+    telegramChatId: params.chatId,
     telegramUserId: params.telegramUserId,
+    telegramMessageId: params.telegramMessageId,
+    telegramCallbackDataType: params.telegramCallbackDataType,
     entityContext,
     agent,
   });
@@ -2007,16 +2146,51 @@ async function handleAgentQuestion(params: {
         })
       : null;
 
-  await sendTelegramMessage(params.chatId, formatAgentHubTelegramReply(response, { viewerContext, clinicCode: target.clinicCode }), {
-    replyMarkup: buildAgentHubTelegramReplyMarkup(response, {
+  const replyText = formatAgentHubTelegramReply(response, { viewerContext, clinicCode: target.clinicCode });
+  const replyMarkup = buildAgentHubTelegramReplyMarkup(response, {
       appointmentContextItems,
       recentAppointmentContext,
       clinicId: target.clinicId,
       telegramChatId: params.chatId,
       telegramUserId: params.telegramUserId,
       exportCallbackData: cacheEntry ? `gtcsv:${cacheEntry.exportId}` : undefined,
-    }),
-  });
+    });
+  const deliveryStartedAt = Date.now();
+  const buttonCount = countInlineKeyboardButtons(replyMarkup);
+
+  try {
+    await sendTelegramMessage(params.chatId, replyText, {
+      replyMarkup,
+    });
+    await updateAgentRunTrace(response.requestId, {
+      status: "completed",
+      currentStep: "Telegram delivery completed",
+      telegramDeliveryStatus: "sent",
+      telegramDeliveryLatencyMs: Date.now() - deliveryStartedAt,
+      buttonCount,
+      messageLength: replyText.length,
+      updatedAt: nowIso(),
+      completedAt: nowIso(),
+    }).catch((error) => {
+      console.warn("[telegram] failed to update AI delivery trace", error);
+    });
+  } catch (error) {
+    await updateAgentRunTrace(response.requestId, {
+      status: "failed",
+      currentStep: "Telegram delivery failed",
+      telegramDeliveryStatus: "failed",
+      telegramDeliveryLatencyMs: Date.now() - deliveryStartedAt,
+      buttonCount,
+      messageLength: replyText.length,
+      errorCategory: "telegram_send_failed",
+      sanitizedError: sanitizeError(error),
+      updatedAt: nowIso(),
+      completedAt: nowIso(),
+    }).catch((traceError) => {
+      console.warn("[telegram] failed to update AI delivery failure trace", traceError);
+    });
+    throw error;
+  }
 
   if (!isAgentCsvExportRequested(question)) {
     return;
@@ -2145,6 +2319,11 @@ async function handleSuggestedQuestionCallback(callback: TelegramCallbackQuery) 
 
   if (!key || !chat) {
     await answerTelegramCallback(callback.id, "မေးခွန်းကို ပြန်မတွေ့ပါ။");
+    await recordTelegramCallbackIssue({
+      callback,
+      errorCategory: "callback_data_invalid",
+      currentStep: "Suggested question callback data was invalid",
+    });
     return;
   }
 
@@ -2152,6 +2331,13 @@ async function handleSuggestedQuestionCallback(callback: TelegramCallbackQuery) 
   const suggestion = suggestedQuestionCallbacks.get(key);
   if (!suggestion) {
     await answerTelegramCallback(callback.id, "ဒီ button သက်တမ်းကုန်သွားပါပြီ။ နောက်ဆုံး message က button ကို ပြန်နှိပ်ပါ။");
+    await recordTelegramCallbackIssue({
+      callback,
+      chatId: String(chat.id),
+      errorCategory: "telegram_callback_expired",
+      currentStep: "Suggested question callback expired",
+      callbackExpired: true,
+    });
     return;
   }
 
@@ -2161,6 +2347,8 @@ async function handleSuggestedQuestionCallback(callback: TelegramCallbackQuery) 
     chatType: chat.type,
     question: suggestion.question,
     telegramUserId: callback.from?.id == null ? null : String(callback.from.id),
+    telegramMessageId: callback.message?.message_id == null ? null : String(callback.message.message_id),
+    telegramCallbackDataType: telegramCallbackDataType(callback.data),
   });
 }
 
@@ -2170,6 +2358,11 @@ async function handleCsvExportCallback(callback: TelegramCallbackQuery) {
 
   if (!exportId || !chat) {
     await answerTelegramCallback(callback.id, "CSV export expired.");
+    await recordTelegramCallbackIssue({
+      callback,
+      errorCategory: "callback_data_invalid",
+      currentStep: "CSV callback data was invalid",
+    });
     return;
   }
 
@@ -2185,6 +2378,14 @@ async function handleCsvExportCallback(callback: TelegramCallbackQuery) {
   const cache = getTelegramAgentExportCacheById({ exportId });
   if (!cache || cache.clinicId !== target.clinicId || cache.telegramChatId !== chatId) {
     await answerTelegramCallback(callback.id, "CSV export expired.");
+    await recordTelegramCallbackIssue({
+      callback,
+      chatId,
+      target,
+      errorCategory: "telegram_callback_expired",
+      currentStep: "CSV export callback expired",
+      callbackExpired: true,
+    });
     await sendTelegramMessage(chatId, "This CSV export expired. Please ask for the report again.");
     return;
   }
@@ -2243,6 +2444,11 @@ async function handleAppointmentSelectCallback(callback: TelegramCallbackQuery) 
 
   if (!key || !chat) {
     await answerTelegramCallback(callback.id, "Customer button expired.");
+    await recordTelegramCallbackIssue({
+      callback,
+      errorCategory: "callback_data_invalid",
+      currentStep: "Appointment selection callback data was invalid",
+    });
     return;
   }
 
@@ -2252,6 +2458,14 @@ async function handleAppointmentSelectCallback(callback: TelegramCallbackQuery) 
   const target = await getTelegramTargetByChatId(chatId);
   if (!target || !token || !callbackTokenMatchesRequest({ token, target, chatId, telegramUserId })) {
     await answerTelegramCallback(callback.id, "This customer button expired.");
+    await recordTelegramCallbackIssue({
+      callback,
+      chatId,
+      target,
+      errorCategory: "telegram_callback_expired",
+      currentStep: "Appointment selection callback expired",
+      callbackExpired: true,
+    });
     return;
   }
 
@@ -2268,6 +2482,14 @@ async function handleAppointmentSelectCallback(callback: TelegramCallbackQuery) 
   const appointmentItem = appointmentFromToken(token, recentContext);
   if (!appointmentItem) {
     await answerTelegramCallback(callback.id, "This customer button expired.");
+    await recordTelegramCallbackIssue({
+      callback,
+      chatId,
+      target,
+      errorCategory: "appointment_context_missing",
+      currentStep: "Appointment context missing for selection callback",
+      callbackExpired: true,
+    });
     await sendTelegramMessage(chatId, "ဒီ appointment button သက်တမ်းကုန်သွားပါပြီ။ Today appointment ကို ပြန်မေးပေးပါ။");
     return;
   }
@@ -2278,6 +2500,8 @@ async function handleAppointmentSelectCallback(callback: TelegramCallbackQuery) 
     chatType: chat.type,
     question: "Tell me about this customer",
     telegramUserId,
+    telegramMessageId: callback.message?.message_id == null ? null : String(callback.message.message_id),
+    telegramCallbackDataType: telegramCallbackDataType(callback.data),
     entityContext: appointmentContextItemToCustomerEntityContext(appointmentItem),
     agent: "customer_relationship",
   });
@@ -2289,6 +2513,11 @@ async function handleAppointmentPageCallback(callback: TelegramCallbackQuery) {
 
   if (!key || !chat) {
     await answerTelegramCallback(callback.id, "Appointment page expired.");
+    await recordTelegramCallbackIssue({
+      callback,
+      errorCategory: "callback_data_invalid",
+      currentStep: "Appointment page callback data was invalid",
+    });
     return;
   }
 
@@ -2298,6 +2527,14 @@ async function handleAppointmentPageCallback(callback: TelegramCallbackQuery) {
   const target = await getTelegramTargetByChatId(chatId);
   if (!target || !token || !callbackTokenMatchesRequest({ token, target, chatId, telegramUserId })) {
     await answerTelegramCallback(callback.id, "Appointment page expired.");
+    await recordTelegramCallbackIssue({
+      callback,
+      chatId,
+      target,
+      errorCategory: "telegram_callback_expired",
+      currentStep: "Appointment page callback expired",
+      callbackExpired: true,
+    });
     return;
   }
 
@@ -2313,6 +2550,14 @@ async function handleAppointmentPageCallback(callback: TelegramCallbackQuery) {
   });
   if (!recentContext?.appointments.length) {
     await answerTelegramCallback(callback.id, "Appointment page expired.");
+    await recordTelegramCallbackIssue({
+      callback,
+      chatId,
+      target,
+      errorCategory: "appointment_context_missing",
+      currentStep: "Appointment context missing for page callback",
+      callbackExpired: true,
+    });
     await sendTelegramMessage(chatId, "ဒီ appointment list သက်တမ်းကုန်သွားပါပြီ။ Today appointment ကို ပြန်မေးပေးပါ။");
     return;
   }
@@ -2344,6 +2589,11 @@ async function handleCustomerActionCallback(callback: TelegramCallbackQuery) {
 
   if (!action || !actionKey || !chat) {
     await answerTelegramCallback(callback.id, "Customer action expired.");
+    await recordTelegramCallbackIssue({
+      callback,
+      errorCategory: "callback_data_invalid",
+      currentStep: "Customer action callback data was invalid",
+    });
     return;
   }
 
@@ -2387,6 +2637,14 @@ async function handleCustomerActionCallback(callback: TelegramCallbackQuery) {
 
   if (!entityContext) {
     await answerTelegramCallback(callback.id, "This customer button expired.");
+    await recordTelegramCallbackIssue({
+      callback,
+      chatId,
+      target,
+      errorCategory: "appointment_context_missing",
+      currentStep: "Customer action context missing",
+      callbackExpired: true,
+    });
     await sendTelegramMessage(chatId, "ဒီ customer button သက်တမ်းကုန်သွားပါပြီ။ Customer name or phone နဲ့ ပြန်ရှာပေးပါ။");
     return;
   }
@@ -2404,6 +2662,8 @@ async function handleCustomerActionCallback(callback: TelegramCallbackQuery) {
         ? "Show this customer's treatment and purchase history"
         : "Tell me about this customer",
     telegramUserId,
+    telegramMessageId: callback.message?.message_id == null ? null : String(callback.message.message_id),
+    telegramCallbackDataType: telegramCallbackDataType(callback.data),
     entityContext,
     agent: action === "appointment_details" ? "appointment" : "customer_relationship",
   });
@@ -2503,6 +2763,7 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
       chatType: message.chat.type,
       question: agentQuestion,
       telegramUserId: message.from?.id == null ? null : String(message.from.id),
+      telegramMessageId: message.message_id == null ? null : String(message.message_id),
     });
   }
 }

@@ -21,6 +21,10 @@ import {
 } from "./session.repository.js";
 import { saveAgentRunTrace } from "./trace.repository.js";
 import { getAnalyticsQueryCacheStats } from "../bigquery.service.js";
+import {
+  normalizeMonitoringErrorCategory,
+  redactMonitoringText,
+} from "./monitoring/agent-monitoring.service.js";
 import type {
   AgentClinicContext,
   AgentRequestContext,
@@ -212,6 +216,22 @@ function buildToolTraceMetadata(toolResults: AgentToolResult[], totalToolLatency
   };
 }
 
+function cleanTracePayload<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((item) => cleanTracePayload(item)) as T;
+  }
+
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, entry]) => entry !== undefined)
+        .map(([key, entry]) => [key, cleanTracePayload(entry)]),
+    ) as T;
+  }
+
+  return value;
+}
+
 export function shouldIgnoreExplicitEntityContext(params: {
   request: GreatTimeAgentChatRequest;
 }) {
@@ -325,13 +345,89 @@ export async function askAgentHub(params: {
   const totalStartedAt = Date.now();
   const sessionId = params.request.sessionId ?? newId("session");
   const requestId = params.request.requestId ?? newId("req");
+  const runId = requestId;
+  const traceCreatedAt = nowIso();
+  const traceTimeline: Array<{ label: string; status: string; at: string; detail?: string | null }> = [];
+  const buildBaseTrace = () => ({
+    runId,
+    clinicId: params.clinic.clinicId,
+    clinicCode: params.clinic.clinicCode,
+    clinicName: null,
+    userId: params.requestContext.userId,
+    userEmail: params.requestContext.userEmail ?? null,
+    sessionId,
+    requestId,
+    responseId: requestId,
+    channel: params.requestContext.channel ?? "web",
+    telegramChatIdHash: params.requestContext.telegramChatIdHash ?? null,
+    telegramUserIdHash: params.requestContext.telegramUserIdHash ?? null,
+    telegramMessageId: params.requestContext.telegramMessageId ?? null,
+    telegramCallbackDataType: params.requestContext.telegramCallbackDataType ?? null,
+    questionPreview: redactMonitoringText(params.request.message, 500),
+    createdAt: traceCreatedAt,
+  });
+  const recordTrace = async (
+    update: Partial<Parameters<typeof saveAgentRunTrace>[0]> & {
+      timelineLabel?: string;
+      timelineStatus?: string;
+      timelineDetail?: string | null;
+    },
+  ) => {
+    const at = nowIso();
+    if (update.timelineLabel) {
+      traceTimeline.push({
+        label: update.timelineLabel,
+        status: update.timelineStatus ?? update.status ?? "completed",
+        at,
+        detail: redactMonitoringText(update.timelineDetail, 300),
+      });
+    }
+
+    const { timelineLabel, timelineStatus, timelineDetail, ...traceUpdate } = update;
+    try {
+      await saveAgentRunTrace(cleanTracePayload({
+        ...buildBaseTrace(),
+        ...traceUpdate,
+        updatedAt: at,
+        timeline: [...traceTimeline],
+      }));
+    } catch (error) {
+      console.warn("[agent-hub] failed to write monitoring trace", error);
+    }
+  };
+
+  await recordTrace({
+    status: "running",
+    currentStep: "Request received",
+    timelineLabel: "Request received",
+    timelineStatus: "running",
+  });
 
   if (isExportOnlyFollowUp(params.request.message)) {
-    return buildExportOnlyFollowUpResponse({
+    const response = buildExportOnlyFollowUpResponse({
       request: params.request,
       sessionId,
       requestId,
     });
+    await recordTrace({
+      status: "completed",
+      currentStep: "Export follow-up completed",
+      responseId: response.responseId,
+      requestedAgent: response.requestedAgent,
+      resolvedAgent: response.resolvedAgent,
+      intent: response.intent,
+      toolNames: [],
+      sourceStatuses: [],
+      dataStatus: response.dataStatus,
+      fallbackUsed: true,
+      deterministicResponseUsed: true,
+      totalLatencyMs: Date.now() - totalStartedAt,
+      answerPreview: redactMonitoringText(response.assistantMessage, 500),
+      completedAt: nowIso(),
+      timelineLabel: "Response generated",
+      timelineStatus: "completed",
+    });
+    return response;
   }
 
   const registry = createAgentToolRegistry();
@@ -381,6 +477,18 @@ export async function askAgentHub(params: {
     request,
   });
   const planningLatencyMs = Date.now() - planningStartedAt;
+  await recordTrace({
+    status: "planning",
+    currentStep: "Intent planned",
+    requestedAgent: plan.requestedAgent,
+    resolvedAgent: plan.resolvedAgent,
+    intent: plan.intent,
+    toolNames: plan.toolNames,
+    planningLatencyMs,
+    timelineLabel: "Intent planned",
+    timelineStatus: "completed",
+    timelineDetail: `${plan.resolvedAgent} · ${plan.intent}`,
+  });
   const memoryStartedAt = Date.now();
   const memoryContext = await retrieveMemoryContext({
     clinicId: params.clinic.clinicId,
@@ -389,9 +497,26 @@ export async function askAgentHub(params: {
     plan,
   }).catch(() => ({ memories: [], usedMemoryIds: [] }));
   const memoryLatencyMs = Date.now() - memoryStartedAt;
+  await recordTrace({
+    status: "planning",
+    currentStep: "Memory loaded",
+    memoryLatencyMs,
+    usedMemoryIds: memoryContext.usedMemoryIds,
+    timelineLabel: "Memory loaded",
+    timelineStatus: "completed",
+    timelineDetail: `${memoryContext.usedMemoryIds.length} memories`,
+  });
 
   const cacheStatsBefore = getAnalyticsQueryCacheStats();
   const toolStartedAt = Date.now();
+  await recordTrace({
+    status: "calling_tools",
+    currentStep: plan.unsupportedReason ? "No tools needed" : "Calling tools",
+    toolNames: plan.toolNames,
+    timelineLabel: plan.unsupportedReason ? "Tool execution skipped" : "Tool execution started",
+    timelineStatus: plan.unsupportedReason ? "completed" : "started",
+    timelineDetail: plan.unsupportedReason ?? plan.toolNames.join(", "),
+  });
   const toolResults = plan.unsupportedReason
     ? []
     : await executeToolPlan({
@@ -409,6 +534,18 @@ export async function askAgentHub(params: {
       });
   const toolLatencyMs = Date.now() - toolStartedAt;
   const cacheStatsAfter = getAnalyticsQueryCacheStats();
+  const earlyToolTraceMetadata = buildToolTraceMetadata(toolResults, toolLatencyMs);
+  await recordTrace({
+    status: "generating_response",
+    currentStep: "Tools completed",
+    toolLatencyMs,
+    sourceStatuses: toolResults.map((result) => result.dataStatus),
+    dataStatus: toolResults.some((result) => result.dataStatus === "unavailable") ? "partial" : undefined,
+    ...earlyToolTraceMetadata,
+    timelineLabel: "Tools completed",
+    timelineStatus: toolResults.some((result) => result.timedOut || result.errorCategory) ? "failed" : "completed",
+    timelineDetail: `${toolResults.length} tools`,
+  });
 
   const deterministicResponse = buildAgentResponse({
     request,
@@ -426,6 +563,26 @@ export async function askAgentHub(params: {
   const narrativeLatencyMs = Date.now() - narrativeStartedAt;
   const narrativeResponse = narrativeResult.response;
   const response = applyMemoryPreferencesToResponse(narrativeResponse, memoryContext.memories);
+  await recordTrace({
+    status: "sending_response",
+    currentStep: "Response generated",
+    responseId: response.responseId,
+    requestedAgent: response.requestedAgent,
+    resolvedAgent: response.resolvedAgent,
+    intent: response.intent,
+    sourceStatuses: response.sources.map((source) => source.dataStatus),
+    dataStatus: response.dataStatus,
+    fallbackUsed: narrativeResult.fallbackUsed,
+    narrativeFallbackUsed: narrativeResult.fallbackUsed,
+    narrativeSkipped: narrativeResult.narrativeSkipped,
+    narrativeCacheHit: narrativeResult.cacheHit,
+    deterministicResponseUsed: narrativeResult.fallbackUsed || narrativeResult.narrativeSkipped,
+    narrativeLatencyMs,
+    answerPreview: redactMonitoringText(response.assistantMessage, 500),
+    warnings: response.warnings?.map((warning) => `${warning.title}: ${warning.message}`),
+    timelineLabel: "Response generated",
+    timelineStatus: "completed",
+  });
   const toolTraceMetadata = buildToolTraceMetadata(toolResults, toolLatencyMs);
   const entityRefs = toolResults.flatMap((result) => result.entityRefs ?? []).map((ref) => ({
     ...ref,
@@ -442,12 +599,25 @@ export async function askAgentHub(params: {
       entityRefs,
       usedMemories: memoryContext.memories,
     }),
-    saveAgentRunTrace({
+    saveAgentRunTrace(cleanTracePayload({
+      ...buildBaseTrace(),
       clinicId: params.clinic.clinicId,
       userId: params.requestContext.userId,
       sessionId,
       requestId,
+      runId,
       responseId: response.responseId,
+      status: "completed",
+      currentStep: "Completed",
+      channel: params.requestContext.channel ?? "web",
+      userEmail: params.requestContext.userEmail ?? null,
+      clinicCode: params.clinic.clinicCode,
+      telegramChatIdHash: params.requestContext.telegramChatIdHash ?? null,
+      telegramUserIdHash: params.requestContext.telegramUserIdHash ?? null,
+      telegramMessageId: params.requestContext.telegramMessageId ?? null,
+      telegramCallbackDataType: params.requestContext.telegramCallbackDataType ?? null,
+      questionPreview: redactMonitoringText(request.message, 500),
+      answerPreview: redactMonitoringText(response.assistantMessage, 500),
       requestedAgent: response.requestedAgent,
       resolvedAgent: response.resolvedAgent,
       intent: response.intent,
@@ -470,14 +640,38 @@ export async function askAgentHub(params: {
         bigQueryMisses: cacheStatsAfter.misses - cacheStatsBefore.misses,
       },
       ...toolTraceMetadata,
-      createdAt: nowIso(),
-    }).catch((error) =>
-      saveAgentRunTrace({
+      warnings: response.warnings?.map((warning) => `${warning.title}: ${warning.message}`),
+      createdAt: traceCreatedAt,
+      updatedAt: nowIso(),
+      completedAt: nowIso(),
+      timeline: [
+        ...traceTimeline,
+        {
+          label: "Completed",
+          status: "completed",
+          at: nowIso(),
+        },
+      ],
+    })).catch((error) =>
+      saveAgentRunTrace(cleanTracePayload({
+        ...buildBaseTrace(),
         clinicId: params.clinic.clinicId,
         userId: params.requestContext.userId,
         sessionId,
         requestId,
+        runId,
         responseId: response.responseId,
+        status: "completed",
+        currentStep: "Completed with trace warning",
+        channel: params.requestContext.channel ?? "web",
+        userEmail: params.requestContext.userEmail ?? null,
+        clinicCode: params.clinic.clinicCode,
+        telegramChatIdHash: params.requestContext.telegramChatIdHash ?? null,
+        telegramUserIdHash: params.requestContext.telegramUserIdHash ?? null,
+        telegramMessageId: params.requestContext.telegramMessageId ?? null,
+        telegramCallbackDataType: params.requestContext.telegramCallbackDataType ?? null,
+        questionPreview: redactMonitoringText(request.message, 500),
+        answerPreview: redactMonitoringText(response.assistantMessage, 500),
         requestedAgent: response.requestedAgent,
         resolvedAgent: response.resolvedAgent,
         intent: response.intent,
@@ -500,9 +694,13 @@ export async function askAgentHub(params: {
           bigQueryMisses: cacheStatsAfter.misses - cacheStatsBefore.misses,
         },
         ...toolTraceMetadata,
-        createdAt: nowIso(),
+        createdAt: traceCreatedAt,
+        updatedAt: nowIso(),
+        completedAt: nowIso(),
+        timeline: traceTimeline,
+        errorCategory: normalizeMonitoringErrorCategory(sanitizeError(error)),
         sanitizedError: sanitizeError(error),
-      }),
+      })),
     ),
     registerShownRecommendations({
       clinicId: params.clinic.clinicId,

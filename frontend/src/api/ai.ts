@@ -20,6 +20,11 @@ import type {
   GreatTimeAgentId,
   GreatTimeAgentStatusReport,
   AgentStatusRange,
+  AiAgentMonitoringFilters,
+  AiAgentMonitoringLiveResponse,
+  AiAgentMonitoringRunDetail,
+  AiAgentMonitoringRunsResponse,
+  AiAgentMonitoringSummary,
 } from "../types/domain";
 
 type BaseAiRequest = {
@@ -189,6 +194,54 @@ export async function fetchGreatTimeAgentStatus(params?: {
   const response = await apiClient.get<{ success: true; data: GreatTimeAgentStatusReport }>(
     "/ai/agent/status",
     { params },
+  );
+
+  return response.data.data;
+}
+
+function cleanMonitoringParams(params?: AiAgentMonitoringFilters & { limit?: number; cursor?: string | null }) {
+  if (!params) {
+    return undefined;
+  }
+
+  return Object.fromEntries(
+    Object.entries(params).filter(([, value]) => value !== undefined && value !== null && value !== ""),
+  );
+}
+
+export async function fetchAiAgentMonitoringSummary(params?: AiAgentMonitoringFilters) {
+  const response = await apiClient.get<{ success: true; data: AiAgentMonitoringSummary }>(
+    "/ai/agent/monitoring/summary",
+    { params: cleanMonitoringParams(params) },
+  );
+
+  return response.data.data;
+}
+
+export async function fetchAiAgentMonitoringRuns(params?: AiAgentMonitoringFilters & {
+  limit?: number;
+  cursor?: string | null;
+}) {
+  const response = await apiClient.get<{ success: true; data: AiAgentMonitoringRunsResponse }>(
+    "/ai/agent/monitoring/runs",
+    { params: cleanMonitoringParams(params) },
+  );
+
+  return response.data.data;
+}
+
+export async function fetchAiAgentMonitoringRunDetail(runId: string) {
+  const response = await apiClient.get<{ success: true; data: AiAgentMonitoringRunDetail }>(
+    `/ai/agent/monitoring/runs/${encodeURIComponent(runId)}`,
+  );
+
+  return response.data.data;
+}
+
+export async function fetchAiAgentMonitoringLive(params?: AiAgentMonitoringFilters) {
+  const response = await apiClient.get<{ success: true; data: AiAgentMonitoringLiveResponse }>(
+    "/ai/agent/monitoring/live",
+    { params: cleanMonitoringParams(params) },
   );
 
   return response.data.data;

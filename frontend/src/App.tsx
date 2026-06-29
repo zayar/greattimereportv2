@@ -51,6 +51,7 @@ import { TelegramSettingsPage } from "./features/settings/telegram/TelegramSetti
 import { CommissionSettingsPage } from "./features/settings/commission/CommissionSettingsPage";
 import { CommissionRuleEditorPage } from "./features/settings/commission/CommissionRuleEditorPage";
 import { AiControlPanelPage } from "./features/settings/ai-control-panel/AiControlPanelPage";
+import { AiAgentMonitoringPage } from "./features/settings/ai-agent-monitoring/AiAgentMonitoringPage";
 import { AgentHubPage } from "./features/ai/agent-hub/AgentHubPage";
 
 export default function App() {
@@ -119,6 +120,7 @@ export default function App() {
                     <Route path="settings/commission/rules/new" element={<CommissionRuleEditorPage />} />
                     <Route path="settings/commission/rules/:ruleId" element={<CommissionRuleEditorPage />} />
                     <Route path="settings/ai-control-panel" element={<AiControlPanelPage />} />
+                    <Route path="settings/ai-agent-monitoring" element={<AiAgentMonitoringPage />} />
                     <Route path="settings/telegram" element={<TelegramSettingsPage />} />
                   </Route>
                 </Routes>
