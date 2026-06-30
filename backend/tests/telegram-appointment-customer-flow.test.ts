@@ -261,6 +261,25 @@ test("today appointment list with 13 appointments uses named paginated customer 
   assert.equal(token?.customerId, "cust-13")
 })
 
+test("Telegram appointment list preserves local APICORE times without Yangon double shift", () => {
+  const response = appointmentResponse(2, [
+    ["2026-06-30T09:59:00.000", "May Thu Khine", "95900000543", "959xxxx543", "Booking deposit", "Dr Zun Ko Lwin"],
+    ["2026-06-30 09:32 AM", "Nan Eaindray Moe", "95900000998", "959xxxx998", "Hair Removal Underarm", "Zin Mar"],
+  ])
+  const message = formatAgentHubTelegramReply(response, { viewerContext: authorizedViewer, clinicCode: "ABC" })
+  const items = buildRecentAppointmentContextItemsFromResponse({
+    response,
+    viewerContext: authorizedViewer,
+    clinicCode: "ABC",
+  })
+
+  assert.match(message, /1\. 09:32 — Nan Eaindray Moe/)
+  assert.match(message, /2\. 09:59 — May Thu Khine/)
+  assert.doesNotMatch(message, /16:02|16:29/)
+  assert.equal(items[0]?.appointmentTime, "09:32")
+  assert.equal(items[1]?.appointmentTime, "09:59")
+})
+
 test("customer-name button token resolves exact appointment and customer card actions", () => {
   botTest.clearAppointmentActionCallbacks()
   const items = buildRecentAppointmentContextItemsFromResponse({

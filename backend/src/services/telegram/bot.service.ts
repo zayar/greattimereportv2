@@ -423,9 +423,44 @@ function numberValue(row: Record<string, unknown>, key: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function hasExplicitTimeZone(value: string) {
+  return /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value.trim());
+}
+
+function localDateTimeParts(value: string) {
+  const match = value
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2})[T\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:\s*(AM|PM))?$/i);
+  if (!match || hasExplicitTimeZone(value)) {
+    return null;
+  }
+
+  let hour = Number(match[4]);
+  const meridiem = match[7]?.toUpperCase();
+  if (meridiem === "AM") {
+    hour = hour === 12 ? 0 : hour;
+  } else if (meridiem === "PM") {
+    hour = hour === 12 ? 12 : hour + 12;
+  }
+
+  return {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3]),
+    hour,
+    minute: Number(match[5]),
+    second: Number(match[6] ?? "0"),
+  };
+}
+
 function formatDateTimeForOwner(value: unknown) {
   if (typeof value !== "string" || !value.trim()) {
     return "-";
+  }
+
+  const localParts = localDateTimeParts(value);
+  if (localParts) {
+    return `${String(localParts.hour).padStart(2, "0")}:${String(localParts.minute).padStart(2, "0")}`;
   }
 
   const date = new Date(value);
@@ -506,6 +541,18 @@ function appointmentSortValue(value: unknown) {
   }
 
   const text = value.trim();
+  const localParts = localDateTimeParts(text);
+  if (localParts) {
+    return Date.UTC(
+      localParts.year,
+      localParts.month - 1,
+      localParts.day,
+      localParts.hour,
+      localParts.minute,
+      localParts.second,
+    );
+  }
+
   const date = new Date(text);
   if (!Number.isNaN(date.getTime())) {
     const parts = new Intl.DateTimeFormat("en-CA", {
