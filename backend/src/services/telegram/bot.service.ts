@@ -305,6 +305,24 @@ function formatMetricValue(value: string | number, unit: string | undefined) {
   return unit ? `${formatted} ${unit}` : formatted;
 }
 
+function formatTelegramNumber(value: unknown) {
+  const num = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(num)) {
+    return value == null || value === "" ? "-" : String(value);
+  }
+
+  return Math.round(num).toLocaleString("en-US");
+}
+
+function formatTelegramMoney(value: unknown) {
+  const num = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(num)) {
+    return value == null || value === "" ? "-" : String(value);
+  }
+
+  return `${Math.round(num).toLocaleString("en-US")} ကျပ်`;
+}
+
 function formatAgentLabel(agentId: GreatTimeAgentId) {
   switch (agentId) {
     case "finance":
@@ -442,6 +460,17 @@ function numberValue(row: Record<string, unknown>, key: string) {
   }
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isNumericLike(value: unknown) {
+  if (typeof value === "number") {
+    return Number.isFinite(value);
+  }
+  if (typeof value === "string" && value.trim()) {
+    return Number.isFinite(Number(value));
+  }
+
+  return false;
 }
 
 function apicoreAppointmentWallClockParts(value: string) {
@@ -1027,6 +1056,33 @@ function formatFinanceSalesConversation(response: GreatTimeAgentChatResponse) {
   return lines;
 }
 
+function formatPaymentMethodsConversation(response: GreatTimeAgentChatResponse) {
+  const table = response.tables?.find((item) => /payment methods/i.test(item.title));
+  if (!table?.rows.length) {
+    return [];
+  }
+
+  const periodLabel = translatePeriodLabel(response.period.label);
+  const lines = [`${periodLabel} payment method / bank transaction summary:`];
+
+  table.rows.slice(0, 10).forEach((row, index) => {
+    const method = stringValue(row, "paymentMethod", stringValue(row, "method", "Method"));
+    const amount = numberValue(row, "totalAmount") ?? numberValue(row, "amount");
+    const transactions =
+      numberValue(row, "transactionCount") ??
+      numberValue(row, "transactions") ??
+      numberValue(row, "count");
+
+    lines.push("");
+    lines.push(`${index + 1}. ${method} — ${amount != null ? formatTelegramMoney(amount) : "-"}`);
+    if (transactions != null) {
+      lines.push(`Transactions: ${formatTelegramNumber(transactions)}`);
+    }
+  });
+
+  return lines;
+}
+
 function formatServicePerformanceConversation(response: GreatTimeAgentChatResponse) {
   const table = response.tables?.find((item) => /top services|service performance/i.test(item.title));
   if (!table?.rows.length) {
@@ -1180,6 +1236,59 @@ function formatCustomerChoiceConversation(response: GreatTimeAgentChatResponse, 
   return lines;
 }
 
+function isProtectedNumericColumn(column: { key: string; title: string }) {
+  const key = column.key.toLowerCase();
+  const title = column.title.toLowerCase();
+  const combined = `${key} ${title}`;
+
+  return (
+    key === "id" ||
+    key.endsWith("id") ||
+    /phone|phone\s*number|invoice\s*number|invoicenumber|appointment\s*id|member\s*id|customer\s*id|\bid\b/.test(combined)
+  );
+}
+
+function isMoneyColumn(column: { key: string; title: string }) {
+  const text = `${column.key} ${column.title}`.toLowerCase();
+  return (
+    text.includes("amount") ||
+    text.includes("revenue") ||
+    text.includes("sales") ||
+    text.includes("collected") ||
+    text.includes("payment") ||
+    text.includes("invoice value") ||
+    text.includes("average invoice") ||
+    text.includes("net")
+  );
+}
+
+function isCountColumn(column: { key: string; title: string }) {
+  const text = `${column.key} ${column.title}`.toLowerCase();
+  return (
+    text.includes("count") ||
+    text.includes("transactions") ||
+    text.includes("invoice") ||
+    text.includes("customers") ||
+    text.includes("bookings") ||
+    text.includes("treatments")
+  );
+}
+
+function formatTableCellForTelegram(row: Record<string, unknown>, column: { key: string; title: string }) {
+  const raw = row[column.key];
+  if (isProtectedNumericColumn(column)) {
+    return stringValue(row, column.key);
+  }
+  if (isMoneyColumn(column)) {
+    return formatTelegramMoney(raw);
+  }
+  if (isNumericLike(raw) && isCountColumn(column)) {
+    return formatTelegramNumber(raw);
+  }
+
+  return stringValue(row, column.key);
+}
+
 function formatGenericTableConversation(response: GreatTimeAgentChatResponse) {
   const table = response.tables?.find((item) => item.rows.length > 0);
   if (!table) {
@@ -1190,7 +1299,7 @@ function formatGenericTableConversation(response: GreatTimeAgentChatResponse) {
   const lines = [`${table.title} ကို ဖတ်ရလွယ်အောင် ပြထားပါတယ်:`];
   table.rows.slice(0, 6).forEach((row, index) => {
     const values = columns
-      .map((column) => `${column.title}: ${stringValue(row, column.key)}`)
+      .map((column) => `${column.title}: ${formatTableCellForTelegram(row, column)}`)
       .join("၊ ");
     lines.push(`${index + 1}. ${values}။`);
   });
@@ -1214,6 +1323,11 @@ function formatConversationTablePreview(
   const financeSales = formatFinanceSalesConversation(response);
   if (financeSales.length) {
     return financeSales;
+  }
+
+  const paymentMethods = formatPaymentMethodsConversation(response);
+  if (paymentMethods.length) {
+    return paymentMethods;
   }
 
   const treatmentRoster = formatDailyTreatmentRosterConversation(response, options?.viewerContext);

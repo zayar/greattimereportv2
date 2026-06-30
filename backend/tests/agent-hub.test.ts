@@ -2802,11 +2802,109 @@ test("Telegram Agent reply formatter uses Myanmar conversational text and button
   assert.match(message, /ဖြေဆိုသူ: GT Brain → ငွေကြေး Agent/)
   assert.match(message, /ကာလ: ဒီလ/)
   assert.match(message, /စုဆောင်းငွေ: 10,000 ကျပ်/)
-  assert.match(message, /Payment methods ကို ဖတ်ရလွယ်အောင်/)
+  assert.match(message, /ဒီလ payment method \/ bank transaction summary/)
+  assert.match(message, /CASH — 10,000 ကျပ်/)
   assert.doesNotMatch(message, /BigQuery payment report: ok/)
   assert.doesNotMatch(message, /Sources:/)
   assert.doesNotMatch(message, /\/ask Show payment methods by amount/)
   assert.equal(markup, undefined)
+})
+
+test("Telegram finance payment methods formatter adds money separators and transaction counts", () => {
+  const message = formatAgentHubTelegramReply({
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "finance",
+    autoMode: true,
+    intent: "payment_method_breakdown",
+    period: {
+      fromDate: "2026-06-01",
+      toDate: "2026-06-23",
+      label: "this month",
+    },
+    assistantMessage: "Payment methods.",
+    summary: "Payment methods.",
+    metrics: [],
+    tables: [
+      {
+        title: "Payment methods",
+        columns: [
+          { key: "paymentMethod", title: "Method" },
+          { key: "totalAmount", title: "Amount" },
+          { key: "transactionCount", title: "Transactions" },
+        ],
+        rows: [
+          { paymentMethod: "VISA", totalAmount: 58550000, transactionCount: 18 },
+          { paymentMethod: "CASH", totalAmount: 34952000, transactionCount: 108 },
+          { paymentMethod: "KPAY", totalAmount: 29363000, transactionCount: 54 },
+          { paymentMethod: "WAVE", totalAmount: 1202500, transactionCount: 1234 },
+        ],
+      },
+    ],
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  })
+
+  assert.match(message, /VISA — 58,550,000 ကျပ်/)
+  assert.match(message, /CASH — 34,952,000 ကျပ်/)
+  assert.match(message, /KPAY — 29,363,000 ကျပ်/)
+  assert.match(message, /WAVE — 1,202,500 ကျပ်/)
+  assert.match(message, /Transactions: 1,234/)
+  assert.doesNotMatch(message, /58550000/)
+  assert.doesNotMatch(message, /34952000/)
+  assert.doesNotMatch(message, /29363000/)
+})
+
+test("Telegram generic table formatter formats money and counts but preserves phone and id values", () => {
+  const message = formatAgentHubTelegramReply({
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "finance",
+    autoMode: true,
+    intent: "invoice_detail",
+    period: {
+      fromDate: "2026-06-01",
+      toDate: "2026-06-23",
+      label: "this month",
+    },
+    assistantMessage: "Generic finance table.",
+    summary: "Generic finance table.",
+    metrics: [],
+    tables: [
+      {
+        title: "Finance detail rows",
+        columns: [
+          { key: "amount", title: "Amount" },
+          { key: "transactionCount", title: "Transactions" },
+          { key: "customerPhone", title: "Phone" },
+          { key: "invoiceNumber", title: "Invoice Number" },
+        ],
+        rows: [
+          {
+            amount: 1202500,
+            transactionCount: 1234,
+            customerPhone: "0959423664860",
+            invoiceNumber: "0001234567",
+          },
+        ],
+      },
+    ],
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  })
+
+  assert.match(message, /Amount: 1,202,500 ကျပ်/)
+  assert.match(message, /Transactions: 1,234/)
+  assert.match(message, /Phone: 0959423664860/)
+  assert.match(message, /Invoice Number: 0001234567/)
+  assert.doesNotMatch(message, /Phone: 959,423,664,860/)
+  assert.doesNotMatch(message, /Invoice Number: 1,234,567/)
 })
 
 test("Telegram Customer 360 formatter uses owner-friendly Myanmar package context", () => {
