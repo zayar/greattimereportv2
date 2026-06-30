@@ -17,7 +17,15 @@ const {
 } = await import("../src/services/bigquery.service.ts")
 const { runWithAnalyticsQueryContext } = await import("../src/services/analytics-query-context.ts")
 const { normalizeAppointmentLifecycle } = await import("../src/services/agent-hub/appointment-lifecycle.ts")
-const { isActiveCheckedInAppointment, isCountableTodayAppointment } = await import("../src/services/agent-hub/appointment-live.service.ts")
+const {
+  __test: liveAppointmentTest,
+  isActiveCheckedInAppointment,
+  isCountableTodayAppointment,
+} = await import("../src/services/agent-hub/appointment-live.service.ts")
+const {
+  apicoreBookingWallClockDateKey,
+  buildApicoreBookingDetailsDateRange,
+} = await import("../src/services/apicore-booking-details-range.ts")
 const { composeCustomer360Summary } = await import("../src/services/agent-hub/customer-360.service.ts")
 const { resolveEntityReference } = await import("../src/services/agent-hub/entity-context.ts")
 const {
@@ -373,6 +381,35 @@ function buildLiveAppointmentSnapshotFixture() {
       "Fixture practitioner": 1,
     },
     warnings: [],
+  }
+}
+
+function buildApicoreBookingDetailsRowFixture(overrides?: Partial<{
+  bookingid: string
+  FromTime: string
+  ToTime: string
+  MemberName: string
+  MemberPhoneNumber: string
+  ServiceName: string
+  PractitionerName: string
+  ClinicCode: string
+  ClinicID: string
+  status: string
+}>) {
+  return {
+    bookingid: overrides?.bookingid ?? "booking-1",
+    FromTime: overrides?.FromTime ?? "2026-06-30T09:32:00.000Z",
+    ToTime: overrides?.ToTime ?? "2026-06-30T10:00:00.000Z",
+    ServiceName: overrides?.ServiceName ?? "Hair Removal Underarm",
+    MemberName: overrides?.MemberName ?? "Fixture Customer",
+    MemberPhoneNumber: overrides?.MemberPhoneNumber ?? "95900000001",
+    PractitionerName: overrides?.PractitionerName ?? "Fixture Practitioner",
+    ClinicName: "Fixture Clinic",
+    ClinicCode: overrides?.ClinicCode ?? "ABC",
+    ClinicID: overrides?.ClinicID ?? "clinic-1",
+    HelperName: null,
+    status: overrides?.status ?? "BOOKED",
+    member_note: null,
   }
 }
 
@@ -2231,6 +2268,134 @@ test("appointment ledger query matches APICORE app date boundaries", () => {
   assert.equal(defaultRange.timezone, "Asia/Yangon")
   assert.equal(defaultRange.startIso, range.startIso)
   assert.equal(defaultRange.endIso, range.endIso)
+})
+
+test("APICORE booking details range uses appointment wall-clock date boundaries", () => {
+  const range = buildApicoreBookingDetailsDateRange({
+    fromDate: "2026-06-30",
+    toDate: "2026-06-30",
+    timezone: "Asia/Yangon",
+  })
+
+  assert.equal(range.startIso, "2026-06-30T00:00:00.000Z")
+  assert.equal(range.endIso, "2026-06-30T23:59:59.999Z")
+  assert.equal(apicoreBookingWallClockDateKey("2026-06-30T09:32:00.000Z"), "2026-06-30")
+  assert.equal(apicoreBookingWallClockDateKey("2026-06-30T09:32:00+06:30"), "2026-06-30")
+})
+
+test("live appointment snapshot uses APICORE wall-clock booking dates and filters over-returned rows", async () => {
+  const bookingCalls: Array<{ startDate: string; endDate: string }> = []
+  const checkInCalls: Array<{ startDate: string; endDate: string }> = []
+  const snapshot = await liveAppointmentTest.loadLiveAppointmentSnapshot(
+    {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      dateKey: "2026-06-30",
+      timezone: "Asia/Yangon",
+      rowLimit: 20,
+    },
+    {
+      fetchBookingDetails: async (params) => {
+        bookingCalls.push({ startDate: params.startDate, endDate: params.endDate })
+        return {
+          totalCount: 3,
+          data: [
+            buildApicoreBookingDetailsRowFixture({
+              bookingid: "booking-a",
+              FromTime: "2026-06-29T17:39:00.000Z",
+              MemberName: "Previous Day Customer",
+            }),
+            buildApicoreBookingDetailsRowFixture({
+              bookingid: "booking-b",
+              FromTime: "2026-06-30T09:32:00.000Z",
+              MemberName: "Nan Eaindray Moe",
+            }),
+            buildApicoreBookingDetailsRowFixture({
+              bookingid: "booking-c",
+              FromTime: "2026-06-30T11:53:00.000Z",
+              MemberName: "Su Sandy Htun J",
+            }),
+          ],
+        }
+      },
+      fetchCheckIns: async (params) => {
+        checkInCalls.push({ startDate: params.startDate, endDate: params.endDate })
+        return { totalCount: 0, data: [] }
+      },
+    },
+  )
+
+  assert.deepEqual(bookingCalls, [
+    {
+      startDate: "2026-06-30T00:00:00.000Z",
+      endDate: "2026-06-30T23:59:59.999Z",
+    },
+  ])
+  assert.deepEqual(checkInCalls, [
+    {
+      startDate: "2026-06-29T17:30:00.000Z",
+      endDate: "2026-06-30T17:29:59.999Z",
+    },
+  ])
+  assert.deepEqual(snapshot.rows.map((row) => row.appointmentId), ["booking-b", "booking-c"])
+  assert.equal(snapshot.countsByLifecycle.booked, 2)
+})
+
+test("live appointment count result uses filtered booking rows for totals tables and entity refs", async () => {
+  const snapshot = await liveAppointmentTest.loadLiveAppointmentSnapshot(
+    {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      dateKey: "2026-06-30",
+      timezone: "Asia/Yangon",
+      rowLimit: 20,
+      includeCheckIns: false,
+    },
+    {
+      fetchBookingDetails: async () => ({
+        totalCount: 3,
+        data: [
+          buildApicoreBookingDetailsRowFixture({
+            bookingid: "booking-a",
+            FromTime: "2026-06-29T17:39:00.000Z",
+            MemberName: "Previous Day Customer",
+          }),
+          buildApicoreBookingDetailsRowFixture({
+            bookingid: "booking-b",
+            FromTime: "2026-06-30T09:32:00.000Z",
+            MemberName: "Nan Eaindray Moe",
+          }),
+          buildApicoreBookingDetailsRowFixture({
+            bookingid: "booking-c",
+            FromTime: "2026-06-30T11:53:00.000Z",
+            MemberName: "Su Sandy Htun J",
+          }),
+        ],
+      }),
+      fetchCheckIns: async () => ({ totalCount: 0, data: [] }),
+    },
+  )
+  const countTool = requireTool(
+    createAppointmentTools({
+      getCompletedDayAppointmentProfileSnapshot: async () => null,
+      getOperationalAppointmentSnapshot: async () => null,
+      fetchLiveSnapshot: async () => snapshot,
+    }),
+    "get_live_appointment_counts",
+  )
+  const result = await countTool.execute(
+    buildAgentToolInputFixture({
+      fromDate: "2026-06-30",
+      toDate: "2026-06-30",
+      label: "today",
+      timezone: "Asia/Yangon",
+      intent: "appointment_summary",
+    }),
+  )
+
+  assert.equal(result.metrics?.find((metric) => metric.label === "Total appointments today")?.value, 2)
+  assert.deepEqual(result.tables?.[0]?.rows.map((row) => row.appointmentId), ["booking-b", "booking-c"])
+  assert.deepEqual(result.entityRefs?.map((ref) => ref.appointmentId), ["booking-b", "booking-c"])
 })
 
 test("source error sanitizer hides APICORE Prisma pool details", () => {

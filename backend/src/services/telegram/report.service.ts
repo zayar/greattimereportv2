@@ -1,5 +1,9 @@
 import { fetchApicoreBookingDetails, type ApicoreBookingDetailsRow } from "../apicore.service.js";
 import {
+  buildApicoreBookingDetailsDateRange,
+  isApicoreBookingWallClockDateInRange,
+} from "../apicore-booking-details-range.js";
+import {
   buildAppointmentReportAiPayload,
   percentageRate,
 } from "../reports/report-ai-insights.service.js";
@@ -8,7 +12,6 @@ import { GT_GROWTH_AI_FEATURE_GATE } from "../../types/report-ai.js";
 import { sendTelegramMessage } from "./bot.service.js";
 import { formatGtGrowthAiTelegramSection } from "./gt-growth-ai-message.js";
 import {
-  buildUtcDayRangeForDateKeyInTimeZone,
   formatDateKeyInTimeZone,
   formatDisplayTimeInTimeZone,
   normalizeTimeZone,
@@ -110,25 +113,33 @@ function addDaysToDateKey(dateKey: string, days: number) {
 
 async function fetchAllAppointmentsForRange(input: {
   clinicCode: string;
-  startIso: string;
-  endIso: string;
+  fromDate: string;
+  toDate: string;
   authorizationHeader?: string;
 }) {
   const rows: ApicoreBookingDetailsRow[] = [];
+  const range = buildApicoreBookingDetailsDateRange({
+    fromDate: input.fromDate,
+    toDate: input.toDate,
+  });
   let skip = 0;
   let totalCount = Number.POSITIVE_INFINITY;
 
   while (rows.length < totalCount) {
     const result = await fetchApicoreBookingDetails({
       clinicCode: input.clinicCode,
-      startDate: input.startIso,
-      endDate: input.endIso,
+      startDate: range.startIso,
+      endDate: range.endIso,
       skip,
       take: PAGE_SIZE,
       authorizationHeader: input.authorizationHeader,
     });
 
-    rows.push(...result.data);
+    rows.push(
+      ...result.data.filter((row) =>
+        isApicoreBookingWallClockDateInRange(row.FromTime, input.fromDate, input.toDate),
+      ),
+    );
     totalCount = result.totalCount;
     if (result.data.length === 0) {
       break;
@@ -147,14 +158,13 @@ async function fetchAllAppointmentsForToday(input: {
   dateKey?: string;
 }) {
   const dateKey = input.dateKey ?? formatDateKeyInTimeZone(input.referenceDate ?? new Date(), input.timezone);
-  const { startIso, endIso } = buildUtcDayRangeForDateKeyInTimeZone(dateKey, input.timezone);
 
   return {
     dateKey,
     rows: await fetchAllAppointmentsForRange({
       clinicCode: input.clinicCode,
-      startIso,
-      endIso,
+      fromDate: dateKey,
+      toDate: dateKey,
       authorizationHeader: input.authorizationHeader,
     }),
   };
@@ -318,12 +328,10 @@ async function countCompletedCustomersWithoutFutureBooking(input: {
   try {
     const startDateKey = addDaysToDateKey(input.dateKey, 1);
     const endDateKey = addDaysToDateKey(input.dateKey, REBOOKING_LOOKAHEAD_DAYS);
-    const startRange = buildUtcDayRangeForDateKeyInTimeZone(startDateKey, input.timezone);
-    const endRange = buildUtcDayRangeForDateKeyInTimeZone(endDateKey, input.timezone);
     const futureRows = await fetchAllAppointmentsForRange({
       clinicCode: input.clinicCode,
-      startIso: startRange.startIso,
-      endIso: endRange.endIso,
+      fromDate: startDateKey,
+      toDate: endDateKey,
       authorizationHeader: input.authorizationHeader,
     });
     const futureCustomerKeys = new Set(futureRows.map(buildCustomerKey).filter(Boolean));
@@ -351,11 +359,10 @@ async function fetchSameWeekdayBenchmark(input: {
     );
     const rowsByDay = await Promise.all(
       dateKeys.map((dateKey) => {
-        const { startIso, endIso } = buildUtcDayRangeForDateKeyInTimeZone(dateKey, input.timezone);
         return fetchAllAppointmentsForRange({
           clinicCode: input.clinicCode,
-          startIso,
-          endIso,
+          fromDate: dateKey,
+          toDate: dateKey,
           authorizationHeader: input.authorizationHeader,
         });
       }),

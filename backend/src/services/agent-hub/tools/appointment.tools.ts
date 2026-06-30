@@ -1,5 +1,9 @@
 import { z } from "zod";
 import { env } from "../../../config/env.js";
+import {
+  buildApicoreBookingDetailsDateRange,
+  isApicoreBookingWallClockDateInRange,
+} from "../../apicore-booking-details-range.js";
 import { runWithAnalyticsQueryContext } from "../../analytics-query-context.js";
 import { fetchApicoreBookingDetails, type ApicoreBookingDetailsRow } from "../../apicore.service.js";
 import { getServiceBehaviorReport } from "../../reports/service-behavior.service.js";
@@ -11,7 +15,7 @@ import {
   liveAppointmentEntityRef,
   type LiveAppointmentRow,
 } from "../appointment-live.service.js";
-import { buildUtcDayRangeForDateKey, normalizeTimeZone } from "../../telegram/time.js";
+import { normalizeTimeZone } from "../../telegram/time.js";
 import { buildCustomerKey } from "../customer-identity.js";
 import { limitRows, maskPhone, nowIso, sanitizeError } from "../safety.js";
 import {
@@ -216,12 +220,13 @@ async function fetchAppointmentLedger(input: AgentToolInput) {
   const range = buildAppointmentLedgerQueryRange(input);
   const warnings: NonNullable<AgentToolResult["warnings"]> = [];
   const rows: ApicoreBookingDetailsRow[] = [];
-  let totalCount = Number.POSITIVE_INFINITY;
+  let sourceTotalCount = Number.POSITIVE_INFINITY;
+  let loadedSourceRows = 0;
   let skip = 0;
   let dataStatus: AgentDataStatus = "ok";
   let mismatchedRows = 0;
 
-  while (rows.length < totalCount && rows.length < LEDGER_MAX_FETCH_ROWS) {
+  while (loadedSourceRows < sourceTotalCount && rows.length < LEDGER_MAX_FETCH_ROWS) {
     const take = Math.min(LEDGER_PAGE_SIZE, LEDGER_MAX_FETCH_ROWS - rows.length);
     const result = await fetchApicoreBookingDetails({
       clinicCode: input.clinic.clinicCode,
@@ -233,7 +238,8 @@ async function fetchAppointmentLedger(input: AgentToolInput) {
       readOnly: true,
     });
 
-    totalCount = result.totalCount;
+    sourceTotalCount = result.totalCount;
+    loadedSourceRows += result.data.length;
 
     const filteredRows = result.data.filter((row) => {
       const matchesClinic =
@@ -242,7 +248,7 @@ async function fetchAppointmentLedger(input: AgentToolInput) {
       if (!matchesClinic) {
         mismatchedRows += 1;
       }
-      return matchesClinic;
+      return matchesClinic && isApicoreBookingWallClockDateInRange(row.FromTime, input.period.fromDate, input.period.toDate);
     });
 
     rows.push(...filteredRows);
@@ -262,16 +268,14 @@ async function fetchAppointmentLedger(input: AgentToolInput) {
     });
   }
 
-  if (!Number.isFinite(totalCount)) {
-    totalCount = rows.length;
-  }
+  const totalCount = rows.length;
 
-  if (rows.length < totalCount) {
-    dataStatus = totalCount > 0 ? "partial" : "no_activity";
+  if (rows.length >= LEDGER_MAX_FETCH_ROWS && loadedSourceRows < sourceTotalCount) {
+    dataStatus = rows.length > 0 ? "partial" : "no_activity";
     warnings.push({
       type: "appointment_ledger_truncated",
       title: "Appointment ledger limited",
-      message: `The source reported ${totalCount.toLocaleString("en-US")} appointments, and the agent loaded the first ${rows.length.toLocaleString("en-US")} rows for detail.`,
+      message: `The source returned more than ${rows.length.toLocaleString("en-US")} matching appointments, and the agent loaded the first ${rows.length.toLocaleString("en-US")} rows for detail.`,
     });
   } else if (totalCount === 0) {
     dataStatus = "no_activity";
@@ -290,12 +294,15 @@ async function fetchAppointmentLedger(input: AgentToolInput) {
 
 export function buildAppointmentLedgerQueryRange(input: Pick<AgentToolInput, "period" | "request">) {
   const timezone = normalizeTimeZone(input.request.timezone);
-  const startRange = buildUtcDayRangeForDateKey(input.period.fromDate);
-  const endRange = buildUtcDayRangeForDateKey(input.period.toDate);
+  const range = buildApicoreBookingDetailsDateRange({
+    fromDate: input.period.fromDate,
+    toDate: input.period.toDate,
+    timezone,
+  });
 
   return {
-    startIso: startRange.startIso,
-    endIso: endRange.endIso,
+    startIso: range.startIso,
+    endIso: range.endIso,
     timezone,
   };
 }

@@ -5,6 +5,10 @@ import {
   type ApicoreOrderWithPaymentsRow,
 } from "../apicore.service.js";
 import {
+  buildApicoreBookingDetailsDateRange,
+  isApicoreBookingWallClockDateInRange,
+} from "../apicore-booking-details-range.js";
+import {
   buildWeeklySummaryReportAiPayload,
   percentageChange,
   percentageRate,
@@ -109,25 +113,33 @@ function getPreviousWeekRangeFromRange(range: {
 
 async function fetchAllAppointmentsForWeek(input: {
   clinicCode: string;
-  startIso: string;
-  endIso: string;
+  weekStartDateKey: string;
+  weekEndDateKey: string;
   authorizationHeader?: string;
 }) {
   const rows: ApicoreBookingDetailsRow[] = [];
+  const range = buildApicoreBookingDetailsDateRange({
+    fromDate: input.weekStartDateKey,
+    toDate: input.weekEndDateKey,
+  });
   let skip = 0;
   let totalCount = Number.POSITIVE_INFINITY;
 
   while (rows.length < totalCount) {
     const result = await fetchApicoreBookingDetails({
       clinicCode: input.clinicCode,
-      startDate: input.startIso,
-      endDate: input.endIso,
+      startDate: range.startIso,
+      endDate: range.endIso,
       skip,
       take: PAGE_SIZE,
       authorizationHeader: input.authorizationHeader,
     });
 
-    rows.push(...result.data);
+    rows.push(
+      ...result.data.filter((row) =>
+        isApicoreBookingWallClockDateInRange(row.FromTime, input.weekStartDateKey, input.weekEndDateKey),
+      ),
+    );
     totalCount = result.totalCount;
     if (result.data.length === 0) {
       break;
@@ -514,8 +526,8 @@ async function fetchOptionalPreviousWeekData(input: {
     const [appointments, orders] = await Promise.all([
       fetchAllAppointmentsForWeek({
         clinicCode: input.clinicCode,
-        startIso: previousRange.startIso,
-        endIso: previousRange.endIso,
+        weekStartDateKey: previousRange.weekStartDateKey,
+        weekEndDateKey: previousRange.weekEndDateKey,
         authorizationHeader: input.authorizationHeader,
       }),
       fetchAllOrdersForWeek({
@@ -589,8 +601,8 @@ export async function buildWeeklySummaryReport(input: {
   const [appointments, orders] = await Promise.all([
     fetchAllAppointmentsForWeek({
       clinicCode: input.clinicCode,
-      startIso: range.startIso,
-      endIso: range.endIso,
+      weekStartDateKey: range.weekStartDateKey,
+      weekEndDateKey: range.weekEndDateKey,
       authorizationHeader: input.authorizationHeader,
     }),
     fetchAllOrdersForWeek({

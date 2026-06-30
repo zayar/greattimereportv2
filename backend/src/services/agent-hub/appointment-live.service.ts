@@ -4,6 +4,10 @@ import {
   type ApicoreBookingDetailsRow,
   type ApicoreCheckInRow,
 } from "../apicore.service.js";
+import {
+  buildApicoreBookingDetailsDateRange,
+  isApicoreBookingWallClockDateInRange,
+} from "../apicore-booking-details-range.js";
 import { buildUtcDayRangeForDateKeyInTimeZone } from "../telegram/time.js";
 import { normalizeAppointmentLifecycle, type AppointmentLifecycleState } from "./appointment-lifecycle.js";
 import { buildCustomerKey } from "./customer-identity.js";
@@ -39,6 +43,14 @@ export type LiveAppointmentSnapshot = {
 };
 
 const LIVE_APPOINTMENT_SNAPSHOT_CACHE_TTL_MS = 15_000;
+type LiveAppointmentSourceDeps = {
+  fetchBookingDetails: typeof fetchApicoreBookingDetails;
+  fetchCheckIns: typeof fetchApicoreCheckIns;
+};
+const defaultLiveAppointmentSourceDeps: LiveAppointmentSourceDeps = {
+  fetchBookingDetails: fetchApicoreBookingDetails,
+  fetchCheckIns: fetchApicoreCheckIns,
+};
 const liveAppointmentSnapshotCache = new Map<
   string,
   {
@@ -159,19 +171,24 @@ async function loadLiveAppointmentSnapshot(params: {
   authorizationHeader?: string;
   rowLimit?: number;
   includeCheckIns?: boolean;
-}): Promise<LiveAppointmentSnapshot> {
+}, deps: LiveAppointmentSourceDeps = defaultLiveAppointmentSourceDeps): Promise<LiveAppointmentSnapshot> {
   const checkedAt = new Date().toISOString();
-  const range = buildUtcDayRangeForDateKeyInTimeZone(params.dateKey, params.timezone);
+  const bookingRange = buildApicoreBookingDetailsDateRange({
+    fromDate: params.dateKey,
+    toDate: params.dateKey,
+    timezone: params.timezone,
+  });
+  const checkInRange = buildUtcDayRangeForDateKeyInTimeZone(params.dateKey, params.timezone);
   const warnings: Array<{ type: string; title: string; message: string }> = [];
   let bookingRows: LiveAppointmentRow[] = [];
   let checkInRows: LiveAppointmentRow[] = [];
   let dataStatus: AgentDataStatus = "ok";
 
   try {
-    const bookings = await fetchApicoreBookingDetails({
+    const bookings = await deps.fetchBookingDetails({
       clinicCode: params.clinicCode,
-      startDate: range.startIso,
-      endDate: range.endIso,
+      startDate: bookingRange.startIso,
+      endDate: bookingRange.endIso,
       take: params.rowLimit ?? 200,
       authorizationHeader: params.authorizationHeader,
       readOnly: true,
@@ -194,7 +211,8 @@ async function loadLiveAppointmentSnapshot(params: {
       .filter(
         (row) =>
           row.ClinicID === params.clinicId &&
-          row.ClinicCode.toLowerCase() === params.clinicCode.toLowerCase(),
+          row.ClinicCode.toLowerCase() === params.clinicCode.toLowerCase() &&
+          isApicoreBookingWallClockDateInRange(row.FromTime, params.dateKey, params.dateKey),
       )
       .map(bookingToLiveRow);
   } catch {
@@ -211,10 +229,10 @@ async function loadLiveAppointmentSnapshot(params: {
 
   if (params.includeCheckIns !== false) {
     try {
-      const checkIns = await fetchApicoreCheckIns({
+      const checkIns = await deps.fetchCheckIns({
         clinicId: params.clinicId,
-        startDate: range.startIso,
-        endDate: range.endIso,
+        startDate: checkInRange.startIso,
+        endDate: checkInRange.endIso,
         take: params.rowLimit ?? 200,
         authorizationHeader: params.authorizationHeader,
         readOnly: true,
@@ -317,3 +335,8 @@ export function liveAppointmentEntityRef(row: LiveAppointmentRow, rank: number, 
     rank,
   };
 }
+
+export const __test = {
+  loadLiveAppointmentSnapshot,
+  clearLiveAppointmentSnapshotCache: () => liveAppointmentSnapshotCache.clear(),
+};
