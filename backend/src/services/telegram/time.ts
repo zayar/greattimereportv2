@@ -31,7 +31,7 @@ function getOffsetMilliseconds(date: Date, timeZone: string) {
     Number(getPart(parts, "second")),
   );
 
-  return zonedTimestamp - date.getTime();
+  return zonedTimestamp - (date.getTime() - date.getUTCMilliseconds());
 }
 
 function getUtcDateForLocalParts(

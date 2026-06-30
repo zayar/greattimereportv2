@@ -11,7 +11,7 @@ import {
   liveAppointmentEntityRef,
   type LiveAppointmentRow,
 } from "../appointment-live.service.js";
-import { buildUtcDayRangeForDateKey } from "../../telegram/time.js";
+import { buildUtcDayRangeForDateKeyInTimeZone, normalizeTimeZone } from "../../telegram/time.js";
 import { buildCustomerKey } from "../customer-identity.js";
 import { limitRows, maskPhone, nowIso, sanitizeError } from "../safety.js";
 import {
@@ -213,8 +213,7 @@ function appointmentLedgerEntityRef(row: ApicoreBookingDetailsRow, rank: number)
 
 async function fetchAppointmentLedger(input: AgentToolInput) {
   const checkedAt = nowIso();
-  const startRange = buildUtcDayRangeForDateKey(input.period.fromDate);
-  const endRange = buildUtcDayRangeForDateKey(input.period.toDate);
+  const range = buildAppointmentLedgerQueryRange(input);
   const warnings: NonNullable<AgentToolResult["warnings"]> = [];
   const rows: ApicoreBookingDetailsRow[] = [];
   let totalCount = Number.POSITIVE_INFINITY;
@@ -226,8 +225,8 @@ async function fetchAppointmentLedger(input: AgentToolInput) {
     const take = Math.min(LEDGER_PAGE_SIZE, LEDGER_MAX_FETCH_ROWS - rows.length);
     const result = await fetchApicoreBookingDetails({
       clinicCode: input.clinic.clinicCode,
-      startDate: startRange.startIso,
-      endDate: endRange.endIso,
+      startDate: range.startIso,
+      endDate: range.endIso,
       skip,
       take,
       authorizationHeader: input.requestContext.authorizationHeader,
@@ -286,6 +285,18 @@ async function fetchAppointmentLedger(input: AgentToolInput) {
     rows,
     dataStatus,
     warnings,
+  };
+}
+
+export function buildAppointmentLedgerQueryRange(input: Pick<AgentToolInput, "period" | "request">) {
+  const timezone = normalizeTimeZone(input.request.timezone);
+  const startRange = buildUtcDayRangeForDateKeyInTimeZone(input.period.fromDate, timezone);
+  const endRange = buildUtcDayRangeForDateKeyInTimeZone(input.period.toDate, timezone);
+
+  return {
+    startIso: startRange.startIso,
+    endIso: endRange.endIso,
+    timezone,
   };
 }
 

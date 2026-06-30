@@ -40,7 +40,7 @@ const { assertToolAllowed, executeToolPlan } = await import("../src/services/age
 const { createAgentToolRegistry, getAgentToolAllowlist } = await import("../src/services/agent-hub/tool-registry.ts")
 const { extractInvoiceSearch } = await import("../src/services/agent-hub/tools/finance.tools.ts")
 const { buildFinanceSnapshotSummaryResult, createFinanceTools } = await import("../src/services/agent-hub/tools/finance.tools.ts")
-const { buildAppointmentCountResultFromSnapshot, createAppointmentTools } = await import("../src/services/agent-hub/tools/appointment.tools.ts")
+const { buildAppointmentCountResultFromSnapshot, buildAppointmentLedgerQueryRange, createAppointmentTools } = await import("../src/services/agent-hub/tools/appointment.tools.ts")
 const { buildOwnerDailyBriefFromSnapshots, selectOwnerDailyBriefDate } = await import("../src/services/agent-hub/tools/business.tools.ts")
 const { extractLikelyCustomerSearchText } = await import("../src/services/agent-hub/customer-query.ts")
 const { extractExplicitServiceSearchText } = await import("../src/services/agent-hub/service-query.ts")
@@ -2206,6 +2206,31 @@ test("planner maps appointment count questions to the live count tool and lists 
   assert.equal(myanmarWhoComingPlan.resolvedAgent, "appointment")
   assert.equal(myanmarWhoComingPlan.intent, "appointment_list")
   assert.deepEqual(myanmarWhoComingPlan.toolNames, ["get_appointment_ledger"])
+})
+
+test("appointment ledger query uses Myanmar day boundaries by default", () => {
+  const input = buildAgentToolInputFixture({
+    fromDate: "2026-06-30",
+    toDate: "2026-06-30",
+    label: "today",
+    timezone: "Asia/Yangon",
+    intent: "appointment_list",
+  })
+  const range = buildAppointmentLedgerQueryRange(input)
+  const defaultRange = buildAppointmentLedgerQueryRange({
+    ...input,
+    request: {
+      ...input.request,
+      timezone: undefined,
+    },
+  })
+
+  assert.equal(range.timezone, "Asia/Yangon")
+  assert.equal(range.startIso, "2026-06-29T17:30:00.000Z")
+  assert.equal(range.endIso, "2026-06-30T17:29:59.999Z")
+  assert.equal(defaultRange.timezone, "Asia/Yangon")
+  assert.equal(defaultRange.startIso, range.startIso)
+  assert.equal(defaultRange.endIso, range.endIso)
 })
 
 test("source error sanitizer hides APICORE Prisma pool details", () => {
