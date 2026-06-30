@@ -238,18 +238,18 @@ test("today appointment list with 13 appointments uses named paginated customer 
   const buttonTexts = markup?.inline_keyboard.flat().map((button) => button.text) ?? []
 
   assert.match(message, /appointment 13 ခု/)
-  assert.match(message, /1\. 18:34 — Thein Oo/)
-  assert.match(message, /13\. 13:30 — Yadanar/)
+  assert.match(message, /1\. 13:30 — Yadanar/)
+  assert.match(message, /13\. 18:34 — Thein Oo/)
   assert.match(message, /Phone: 95900000061/)
   assert.match(message, /Service: Booking deposit/)
   assert.match(message, /Staff: Dr Zun Ko Lwin/)
   assert.match(message, /Status: ချိန်းထား/)
   assert.match(message, /Showing 1-8 of 13 appointments/)
   assert.equal(items.length, 13)
-  assert.equal(items[0]?.appointmentId, "appt-1")
-  assert.equal(items[0]?.customerId, "cust-1")
-  assert.equal(buttonTexts[0], "18:34 Thein Oo")
-  assert.equal(buttonTexts[1], "18:15 Ju Ju P")
+  assert.equal(items[0]?.appointmentId, "appt-13")
+  assert.equal(items[0]?.customerId, "cust-13")
+  assert.equal(buttonTexts[0], "13:30 Yadanar")
+  assert.equal(buttonTexts[1], "14:10 Moe Pwint")
   assert.equal(buttonTexts[8], "Next")
   assert.equal(buttonTexts.at(-1), "Download CSV")
   assert.doesNotMatch(buttonTexts.join("\n"), /\b\d+\s+Details\b|\b\d+\s+History\b/)
@@ -257,8 +257,8 @@ test("today appointment list with 13 appointments uses named paginated customer 
   const firstCallback = markup?.inline_keyboard[0]?.[0]?.callback_data ?? ""
   assert.match(firstCallback, /^apptsel:/)
   const token = botTest.getAppointmentActionToken(firstCallback.replace("apptsel:", ""))
-  assert.equal(token?.appointmentId, "appt-1")
-  assert.equal(token?.customerId, "cust-1")
+  assert.equal(token?.appointmentId, "appt-13")
+  assert.equal(token?.customerId, "cust-13")
 })
 
 test("customer-name button token resolves exact appointment and customer card actions", () => {
@@ -298,12 +298,12 @@ test("customer-name button token resolves exact appointment and customer card ac
     : undefined
   const cardButtons = cardMarkup?.inline_keyboard.flat().map((button) => button.text) ?? []
 
-  assert.equal(entity?.customerKey, "cust-1")
-  assert.equal(entity?.appointmentId, "appt-1")
-  assert.equal(entity?.customerName, "Thein Oo")
-  assert.match(cardMessage, /^Thein Oo/)
-  assert.match(cardMessage, /Today appointment: 18:34/)
-  assert.match(cardMessage, /Service: Booking deposit/)
+  assert.equal(entity?.customerKey, "cust-2")
+  assert.equal(entity?.appointmentId, "appt-2")
+  assert.equal(entity?.customerName, "Ju Ju P")
+  assert.match(cardMessage, /^Ju Ju P/)
+  assert.match(cardMessage, /Today appointment: 18:15/)
+  assert.match(cardMessage, /Service: Hair Removal Half Leg/)
   assert.match(cardMessage, /Last visit:/)
   assert.match(cardMessage, /Total visits: 3/)
   assert.deepEqual(cardButtons, ["Full History", "Package / Balance", "Back to Today Appointments"])
@@ -395,10 +395,10 @@ test("duplicate customer names disambiguate appointment buttons and manual searc
   const buttonTexts = markup?.inline_keyboard.flat().map((button) => button.text) ?? []
   const secondToken = botTest.getAppointmentActionToken((markup?.inline_keyboard[1]?.[0]?.callback_data ?? "").replace("apptsel:", ""))
 
-  assert.equal(buttonTexts[0], "18:15 Su Myat Lwin · 902")
-  assert.equal(buttonTexts[1], "17:30 Su Myat Lwin · 210")
-  assert.equal(secondToken?.appointmentId, "appt-2")
-  assert.equal(secondToken?.customerId, "cust-2")
+  assert.equal(buttonTexts[0], "17:30 Su Myat Lwin · 210")
+  assert.equal(buttonTexts[1], "18:15 Su Myat Lwin · 902")
+  assert.equal(secondToken?.appointmentId, "appt-1")
+  assert.equal(secondToken?.customerId, "cust-1")
 
   const duplicateSearchResponse = {
     sessionId: "session-1",
@@ -563,9 +563,9 @@ test("recent appointment context still resolves typed indexes and fuzzy names fi
   const first = resolveRecentAppointmentReference({ message: "first customer", context })
   const fuzzy = resolveRecentAppointmentReference({ message: "show Thein O", context })
 
-  assert.equal(stored?.appointments[0]?.appointmentId, "appt-1")
+  assert.equal(stored?.appointments[0]?.appointmentId, "appt-2")
   assert.equal(first.status, "resolved")
-  assert.equal(first.status === "resolved" ? first.item.customerId : "", "cust-1")
+  assert.equal(first.status === "resolved" ? first.item.customerId : "", "cust-2")
   assert.equal(fuzzy.status, "resolved")
   assert.equal(fuzzy.status === "resolved" ? fuzzy.item.customerName : "", "Thein Oo")
 })

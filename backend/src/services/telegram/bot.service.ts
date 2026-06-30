@@ -500,6 +500,44 @@ function appointmentTableFromResponse(response: GreatTimeAgentChatResponse) {
   );
 }
 
+function appointmentSortValue(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  const text = value.trim();
+  const date = new Date(text);
+  if (!Number.isNaN(date.getTime())) {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: env.DEFAULT_TIMEZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(date);
+    const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "0";
+
+    return Date.UTC(
+      Number(part("year")),
+      Number(part("month")) - 1,
+      Number(part("day")),
+      Number(part("hour")),
+      Number(part("minute")),
+      Number(part("second")),
+    );
+  }
+
+  const timeMatch = text.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (timeMatch) {
+    return Number(timeMatch[1]) * 60 * 60 + Number(timeMatch[2]) * 60 + Number(timeMatch[3] ?? "0");
+  }
+
+  return Number.POSITIVE_INFINITY;
+}
+
 function appointmentRefForRow(
   response: GreatTimeAgentChatResponse,
   row: Record<string, unknown>,
@@ -515,17 +553,34 @@ function appointmentRefForRow(
   );
 }
 
+function sortedAppointmentRowsFromResponse(response: GreatTimeAgentChatResponse) {
+  const appointmentTable = appointmentTableFromResponse(response);
+  const rows = appointmentTable?.rows ?? [];
+
+  return rows
+    .map((row, index) => {
+      const ref = appointmentRefForRow(response, row, index);
+      const rawTime = ref?.appointmentTime ?? stringValue(row, "scheduledFrom", stringValue(row, "checkInTime", ""));
+
+      return {
+        row,
+        originalIndex: index,
+        sortValue: appointmentSortValue(rawTime),
+      };
+    })
+    .sort((left, right) => left.sortValue - right.sortValue || left.originalIndex - right.originalIndex);
+}
+
 export function buildRecentAppointmentContextItemsFromResponse(params: {
   response: GreatTimeAgentChatResponse;
   viewerContext?: CustomerPhoneViewerContext;
   clinicCode: string;
 }) {
-  const appointmentTable = appointmentTableFromResponse(params.response);
-  const rows = appointmentTable?.rows ?? [];
+  const rows = sortedAppointmentRowsFromResponse(params.response);
   const canStoreFullPhone = canViewFullCustomerPhone(params.viewerContext);
 
-  return rows.slice(0, 30).map<RecentAppointmentContextItem>((row, index) => {
-    const ref = appointmentRefForRow(params.response, row, index);
+  return rows.slice(0, 30).map<RecentAppointmentContextItem>(({ row, originalIndex }, index) => {
+    const ref = appointmentRefForRow(params.response, row, originalIndex);
     const appointmentId = ref?.appointmentId ?? stringValue(row, "appointmentId", `appointment-${index + 1}`);
     const customerName = ref?.customerName ?? ref?.displayName ?? stringValue(row, "customerName", "Unknown customer");
     const rawFullPhone = ref?.customerPhone ?? stringValue(row, "customerPhone", "");
@@ -583,6 +638,7 @@ function sanitizeOwnerFacingText(text: string) {
 
 function formatAppointmentConversation(response: GreatTimeAgentChatResponse, viewerContext?: CustomerPhoneViewerContext, clinicCode = "") {
   const appointmentTable = appointmentTableFromResponse(response);
+  const appointmentRows = sortedAppointmentRowsFromResponse(response);
   const appointmentContextItems = buildRecentAppointmentContextItemsFromResponse({
     response,
     viewerContext,
@@ -595,13 +651,13 @@ function formatAppointmentConversation(response: GreatTimeAgentChatResponse, vie
   const total = typeof totalAppointments === "number" ? totalAppointments : appointmentTable?.rows.length ?? appointmentContextItems.length;
   const lines = [`ဒီနေ့ appointment ${formatMetricValue(totalAppointments, undefined)} ခုရှိပါတယ်။`];
 
-  if (appointmentTable?.rows.length) {
+  if (appointmentRows.length) {
     if (appointmentContextItems.length > appointmentPageSize()) {
       const bounds = appointmentPageBounds(appointmentContextItems.length, 0);
       lines.push(`Showing ${bounds.start + 1}-${bounds.end} of ${appointmentContextItems.length.toLocaleString("en-US")} appointments`);
     }
 
-    appointmentTable.rows.slice(0, 30).forEach((row, index) => {
+    appointmentRows.slice(0, 30).forEach(({ row }, index) => {
       const contextItem = appointmentContextItems[index];
       const time = contextItem?.appointmentTime ?? formatDateTimeForOwner(row.scheduledFrom);
       const customer = contextItem?.customerName ?? stringValue(row, "customerName", "Unknown customer");
@@ -624,8 +680,8 @@ function formatAppointmentConversation(response: GreatTimeAgentChatResponse, vie
       lines.push(`Status: ${status}`);
     });
 
-    if (appointmentTable.rows.length > 30 || total > 30) {
-      const remaining = Math.max(appointmentTable.rows.length, total) - 30;
+    if (appointmentRows.length > 30 || total > 30) {
+      const remaining = Math.max(appointmentRows.length, total) - 30;
       lines.push("", `နောက်ထပ် appointment ${remaining.toLocaleString("en-US")} ခုကို CSV/report ထဲမှာ ဆက်ကြည့်နိုင်ပါတယ်။`);
     }
 
