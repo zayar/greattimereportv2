@@ -15,6 +15,7 @@ import {
   liveAppointmentEntityRef,
   type LiveAppointmentRow,
 } from "../appointment-live.service.js";
+import { APPOINTMENT_BOOKING_COUNT_DEFINITION } from "../count-definitions.js";
 import { normalizeTimeZone } from "../../telegram/time.js";
 import { buildCustomerKey } from "../customer-identity.js";
 import { limitRows, maskPhone, nowIso, sanitizeError } from "../safety.js";
@@ -237,7 +238,7 @@ function appointmentLedgerEntityRef(row: ApicoreBookingDetailsRow, rank: number)
   };
 }
 
-async function fetchAppointmentLedger(input: AgentToolInput) {
+export async function fetchAppointmentLedger(input: AgentToolInput) {
   const checkedAt = nowIso();
   const range = buildAppointmentLedgerQueryRange(input);
   const warnings: NonNullable<AgentToolResult["warnings"]> = [];
@@ -510,7 +511,7 @@ export function buildAppointmentCountResultFromSnapshot(params: {
     dataStatus: params.staleFallback ? "stale" : totalAppointments > 0 ? params.snapshot.dataStatus : "no_activity",
     live: false,
     freshnessSeconds: source.freshnessSeconds,
-    summary: `${summaryPrefix} has ${totalAppointments.toLocaleString("en-US")} scheduled appointment${totalAppointments === 1 ? "" : "s"} for ${periodLabel(params.input)}.`,
+    summary: `${summaryPrefix} has ${totalAppointments.toLocaleString("en-US")} appointment booking${totalAppointments === 1 ? "" : "s"} for ${periodLabel(params.input)}.`,
     metrics: [
       { label: totalLabel, value: totalAppointments, helperText: "From a source-backed APICORE appointment snapshot." },
       { label: "Booked", value: booked },
@@ -521,6 +522,9 @@ export function buildAppointmentCountResultFromSnapshot(params: {
     ],
     warnings: warnings.length ? warnings : undefined,
     sources: [source],
+    data: {
+      countDefinition: APPOINTMENT_BOOKING_COUNT_DEFINITION,
+    },
   };
 }
 
@@ -555,16 +559,19 @@ async function getAppointmentLedger(input: AgentToolInput): Promise<AgentToolRes
 
   return {
     toolName: "get_appointment_ledger",
-    sourceName: "APICORE appointment ledger",
+    sourceName: "APICORE booking ledger",
     checkedAt: data.checkedAt,
     period: label,
     dataStatus: data.dataStatus,
     live: true,
-    summary: `Appointment ledger has ${data.totalCount.toLocaleString("en-US")} appointment${data.totalCount === 1 ? "" : "s"} for ${label}.`,
+    summary: `Appointment ledger has ${data.totalCount.toLocaleString("en-US")} appointment booking${data.totalCount === 1 ? "" : "s"} for ${input.period.label}.`,
     metrics: ledgerStatusMetrics(data.rows, data.totalCount),
     tables: [appointmentServiceTable(data.rows), ledgerTable("Appointments", data.rows)],
     warnings: data.warnings,
     entityRefs: data.rows.map((row, index) => appointmentLedgerEntityRef(row, index + 1)),
+    data: {
+      countDefinition: APPOINTMENT_BOOKING_COUNT_DEFINITION,
+    },
   };
 }
 
@@ -685,11 +692,14 @@ async function getLiveAppointmentCounts(
     period: input.period.toDate,
     dataStatus: data.dataStatus,
     live: true,
-    summary: `Today's appointment snapshot has ${countableRows.length.toLocaleString("en-US")} scheduled appointment${countableRows.length === 1 ? "" : "s"} for ${input.period.toDate}, excluding merchant-cancelled rows.`,
+    summary: `Today's appointment snapshot has ${countableRows.length.toLocaleString("en-US")} appointment booking${countableRows.length === 1 ? "" : "s"} for ${input.period.toDate}, excluding merchant-cancelled rows.`,
     metrics,
     tables: [liveTable("Today's appointment rows", countableRows)],
     warnings: data.warnings,
     entityRefs: countableRows.map((row, index) => liveAppointmentEntityRef(row, index + 1, input.clinic.clinicCode)),
+    data: {
+      countDefinition: APPOINTMENT_BOOKING_COUNT_DEFINITION,
+    },
   };
 }
 

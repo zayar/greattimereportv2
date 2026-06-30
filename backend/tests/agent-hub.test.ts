@@ -2258,6 +2258,29 @@ test("planner preserves requested customer service practitioner dimensions", () 
   }
 })
 
+test("planner routes operations count reconciliation questions to business reconciliation", () => {
+  const cases = [
+    "why got two different data for yesterday",
+    "မနေ့က appointment နဲ့ treatment count ဘာလို့မတူတာလဲ",
+    "appointment 48 treatment 127 why different",
+  ]
+
+  for (const message of cases) {
+    const plan = planAgentRequest({
+      request: {
+        clinicId: "clinic-1",
+        clinicCode: "ABC",
+        agent: "auto",
+        message,
+      },
+    })
+
+    assert.equal(plan.resolvedAgent, "business", message)
+    assert.equal(plan.intent, "operations_count_reconciliation", message)
+    assert.deepEqual(plan.toolNames, ["get_daily_operations_reconciliation"], message)
+  }
+})
+
 test("planner maps appointment count questions to the live count tool and lists to the ledger", () => {
   const countPlan = planAgentRequest({
     request: {
@@ -2930,7 +2953,7 @@ test("Telegram formatter explains appointment services and practitioner rows wit
   const appointmentMessage = formatAgentHubTelegramReply(appointmentResponse)
   const appointmentMarkup = buildAgentHubTelegramReplyMarkup(appointmentResponse)
 
-  assert.match(appointmentMessage, /ဒီနေ့ appointment 2 ခုရှိပါတယ်/)
+  assert.match(appointmentMessage, /ဒီနေ့ appointment booking 2 ခုရှိပါတယ်/)
   assert.match(appointmentMessage, /1\. .* — Ma Aye/)
   assert.match(appointmentMessage, /Service: Whitening Laser/)
   assert.match(appointmentMessage, /Staff: Wai Phoo/)
@@ -3020,9 +3043,9 @@ test("Telegram appointment formatter uses response period and clear loaded pagin
     actions: [{ type: "read_only_agent_response" }],
   })
 
-  assert.match(message, /မနေ့က appointment 47 ခုရှိပါတယ်/)
+  assert.match(message, /မနေ့က appointment booking 47 ခုရှိပါတယ်/)
   assert.doesNotMatch(message, /ဒီနေ့ appointment/)
-  assert.match(message, /Showing 1-8 of 30 loaded appointments\. Full total: 47\./)
+  assert.match(message, /Showing 1-8 of 30 loaded appointment bookings\. Full total: 47 appointment bookings\./)
 })
 
 test("Telegram appointment formatter uses intent-specific lifecycle count wording", () => {
@@ -3120,7 +3143,7 @@ test("Telegram formatter renders daily treatment records as customer service the
     },
     assistantMessage: "Daily treatments.",
     summary: "Daily treatments.",
-    metrics: [{ label: "Treatments", value: 2 }],
+    metrics: [{ label: "Treatments", value: 127 }],
     tables: [
       {
         title: "Daily treatment records",
@@ -3145,6 +3168,12 @@ test("Telegram formatter renders daily treatment records as customer service the
             therapistName: "Shwe Yee",
             status: "CHECKOUT",
           },
+          ...Array.from({ length: 23 }, (_, index) => ({
+            checkInTime: `2026-06-24 03:${String(index).padStart(2, "0")} PM`,
+            customerName: `Customer ${index + 3}`,
+            serviceName: "Whitening Laser",
+            therapistName: "Thandar",
+          })),
         ],
       },
     ],
@@ -3153,7 +3182,10 @@ test("Telegram formatter renders daily treatment records as customer service the
     actions: [{ type: "read_only_agent_response" }],
   })
 
-  assert.match(message, /မနေ့က customer\/service\/therapist စာရင်း/)
+  assert.match(message, /မနေ့က customer\/service\/therapist treatment\/service records 127 ခုရှိပါတယ်/)
+  assert.match(message, /မနေ့က customer\/service\/therapist treatment\/service records စာရင်း/)
+  assert.match(message, /Appointment တစ်ခုမှာ service\/treatment records များနိုင်ပါတယ်/)
+  assert.match(message, /Showing 1-8 of 25 loaded treatment\/service records\. Full total: 127 treatment\/service records\./)
   assert.match(message, /1\. 13:20 — Ma Zar/)
   assert.match(message, /Service: LT Member only/)
   assert.match(message, /Therapist: Thandar/)
@@ -3162,6 +3194,66 @@ test("Telegram formatter renders daily treatment records as customer service the
   assert.match(message, /Therapist: Shwe Yee/)
   assert.match(message, /Status: ပြီးဆုံး/)
   assert.doesNotMatch(message, /Service အလိုက် owner/)
+})
+
+test("Telegram formatter explains appointment booking and treatment service record reconciliation", () => {
+  const message = formatAgentHubTelegramReply({
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "business",
+    autoMode: true,
+    intent: "operations_count_reconciliation",
+    period: {
+      fromDate: "2026-06-24",
+      toDate: "2026-06-24",
+      label: "yesterday",
+    },
+    assistantMessage:
+      "For yesterday, APICORE shows 48 appointment bookings, while BigQuery shows 127 treatment/service records.",
+    summary:
+      "For yesterday, APICORE shows 48 appointment bookings, while BigQuery shows 127 treatment/service records.",
+    metrics: [
+      { label: "Appointment bookings", value: 48 },
+      { label: "Treatment/service records", value: 127 },
+    ],
+    tables: [
+      {
+        title: "Count reconciliation",
+        columns: [
+          { key: "metric", title: "Metric" },
+          { key: "value", title: "Value" },
+          { key: "definition", title: "Definition" },
+          { key: "source", title: "Source" },
+        ],
+        rows: [
+          {
+            metric: "Appointment bookings",
+            value: 48,
+            definition: "scheduled appointment rows",
+            source: "APICORE booking ledger",
+          },
+          {
+            metric: "Treatment/service records",
+            value: 127,
+            definition: "service/treatment rows by CheckInTime",
+            source: "BigQuery daily treatment report",
+          },
+        ],
+      },
+    ],
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  })
+
+  assert.match(message, /Appointment booking: 48/)
+  assert.match(message, /Treatment\/service records: 127/)
+  assert.match(message, /APICORE booking ledger/)
+  assert.match(message, /BigQuery daily treatment report/)
+  assert.match(message, /Appointment တစ်ခုမှာ service\/treatment records များနိုင်ပါတယ်/)
+  assert.match(message, /Appointment report က scheduled time/)
 })
 
 test("Telegram formatter keeps service and practitioner performance separate from treatment roster", () => {
@@ -4281,6 +4373,50 @@ test("response builder suggests useful appointment next actions without repeatin
     "Show customers who arrived but have not started treatment.",
     "Show checked-out customers today.",
   ])
+})
+
+test("response builder preserves safe count definition metadata", () => {
+  const response = buildAgentResponse({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "appointment",
+      message: "Yesterday appointment?",
+    },
+    sessionId: "session-1",
+    requestId: "request-1",
+    plan: {
+      requestedAgent: "appointment",
+      resolvedAgent: "appointment",
+      autoMode: false,
+      intent: "appointment_summary",
+      toolNames: ["get_live_appointment_counts"],
+      period: { fromDate: "2026-06-24", toDate: "2026-06-24", label: "yesterday" },
+    },
+    toolResults: [
+      {
+        toolName: "get_live_appointment_counts",
+        sourceName: "APICORE booking ledger",
+        checkedAt: "2026-06-24T00:00:00.000Z",
+        dataStatus: "ok",
+        live: true,
+        metrics: [{ label: "Total appointments", value: 48 }],
+        data: {
+          countDefinition: {
+            grain: "appointment_booking",
+            label: "appointment bookings",
+            ownerMyanmarLabel: "appointment booking",
+            source: "APICORE booking ledger",
+            dateField: "FromTime / scheduled appointment time",
+            explanation: "Counts scheduled appointment/booking rows.",
+          },
+        },
+      },
+    ],
+  })
+
+  assert.equal((response.data?.countDefinition as { grain?: string } | undefined)?.grain, "appointment_booking")
+  assert.equal((response.data?.countDefinitions as Array<{ grain?: string }> | undefined)?.[0]?.grain, "appointment_booking")
 })
 
 test("response builder exposes Customer 360 fact packs with scoped sources and dynamic follow-ups", () => {

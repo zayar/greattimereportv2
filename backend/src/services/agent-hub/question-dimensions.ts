@@ -65,3 +65,21 @@ export function isTreatmentRosterQuestion(message: string) {
     !dimensions.wantsAppointments
   );
 }
+
+export function isOperationsCountReconciliationQuestion(message: string) {
+  const mentionsAppointmentTreatment =
+    /appointments?|bookings?|ချိန်း|ဘိုကင်/i.test(message) &&
+    /treatments?|services?|ကုသမှု|ဝန်ဆောင်မှု/i.test(message);
+  const asksDifference =
+    /why[\s\S]{0,80}(?:different|not\s+same)|different\s+data|two\s+different\s+data|count\s*(?:is\s*)?(?:different|not\s+same)|not\s+same|reconcile/i.test(
+      message,
+    ) ||
+    /ဘာလို့[\s\S]{0,80}မတူ|count\s*မတူ|data\s*မတူ|မတူတာလဲ|data\s*နှစ်ခု\s*မတူ/i.test(message);
+  const bareTwoDataQuestion = /why\s+got\s+two\s+different\s+data|data\s*နှစ်ခု\s*မတူ/i.test(message);
+  const numericAppointmentTreatmentComparison =
+    /appointment[\s\S]{0,30}\d+[\s\S]{0,80}treatment[\s\S]{0,30}\d+|treatment[\s\S]{0,30}\d+[\s\S]{0,80}appointment[\s\S]{0,30}\d+/i.test(
+      message,
+    );
+
+  return bareTwoDataQuestion || numericAppointmentTreatmentComparison || (mentionsAppointmentTreatment && asksDifference);
+}

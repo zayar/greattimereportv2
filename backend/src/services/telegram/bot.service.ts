@@ -749,7 +749,7 @@ function appointmentCountLineForIntent(response: GreatTimeAgentChatResponse, cou
     case "appointment_list":
     case "appointment_summary":
     default:
-      return `${periodPrefix} appointment ${countText} ခုရှိပါတယ်။`;
+      return `${periodPrefix} appointment booking ${countText} ခုရှိပါတယ်။`;
   }
 }
 
@@ -796,10 +796,10 @@ function formatAppointmentConversation(response: GreatTimeAgentChatResponse, vie
       const bounds = appointmentPageBounds(appointmentContextItems.length, 0);
       if (typeof total === "number" && total > appointmentContextItems.length) {
         lines.push(
-          `Showing ${bounds.start + 1}-${bounds.end} of ${appointmentContextItems.length.toLocaleString("en-US")} loaded appointments. Full total: ${total.toLocaleString("en-US")}.`,
+          `Showing ${bounds.start + 1}-${bounds.end} of ${appointmentContextItems.length.toLocaleString("en-US")} loaded appointment bookings. Full total: ${total.toLocaleString("en-US")} appointment bookings.`,
         );
       } else {
-        lines.push(`Showing ${bounds.start + 1}-${bounds.end} of ${appointmentContextItems.length.toLocaleString("en-US")} appointments`);
+        lines.push(`Showing ${bounds.start + 1}-${bounds.end} of ${appointmentContextItems.length.toLocaleString("en-US")} appointment bookings`);
       }
     }
 
@@ -828,7 +828,7 @@ function formatAppointmentConversation(response: GreatTimeAgentChatResponse, vie
 
     if (appointmentRows.length > 30 || total > 30) {
       const remaining = Math.max(appointmentRows.length, total) - 30;
-      lines.push("", `နောက်ထပ် appointment ${remaining.toLocaleString("en-US")} ခုကို CSV/report ထဲမှာ ဆက်ကြည့်နိုင်ပါတယ်။`);
+      lines.push("", `နောက်ထပ် appointment booking ${remaining.toLocaleString("en-US")} ခုကို CSV/report ထဲမှာ ဆက်ကြည့်နိုင်ပါတယ်။`);
     }
 
     lines.push("", "Customer တစ်ယောက်ကိုရွေးပါ။");
@@ -847,15 +847,20 @@ function formatDailyTreatmentRosterConversation(response: GreatTimeAgentChatResp
   const total = typeof totalTreatments === "number" ? totalTreatments : Number(totalTreatments);
   const pageSize = appointmentPageSize();
   const shownRows = table.rows.slice(0, pageSize);
-  const lines = [`${ownerBodyPeriodPrefix(response.period)} customer/service/therapist စာရင်း:`];
+  const totalText = Number.isFinite(total) ? total.toLocaleString("en-US") : formatMetricValue(totalTreatments, undefined);
+  const lines = [
+    `${ownerBodyPeriodPrefix(response.period)} customer/service/therapist treatment/service records ${totalText} ခုရှိပါတယ်။`,
+    `${ownerBodyPeriodPrefix(response.period)} customer/service/therapist treatment/service records စာရင်း:`,
+    "မှတ်ချက်: ဒါက appointment count မဟုတ်ပါ။ Appointment တစ်ခုမှာ service/treatment records များနိုင်ပါတယ်။",
+  ];
 
   if (table.rows.length > pageSize) {
     if (Number.isFinite(total) && total > table.rows.length) {
       lines.push(
-        `Showing 1-${shownRows.length} of ${table.rows.length.toLocaleString("en-US")} loaded treatment records. Full total: ${total.toLocaleString("en-US")}.`,
+        `Showing 1-${shownRows.length} of ${table.rows.length.toLocaleString("en-US")} loaded treatment/service records. Full total: ${total.toLocaleString("en-US")} treatment/service records.`,
       );
     } else {
-      lines.push(`Showing 1-${shownRows.length} of ${table.rows.length.toLocaleString("en-US")} treatment records`);
+      lines.push(`Showing 1-${shownRows.length} of ${table.rows.length.toLocaleString("en-US")} treatment/service records`);
     }
   }
 
@@ -888,6 +893,49 @@ function formatDailyTreatmentRosterConversation(response: GreatTimeAgentChatResp
   });
 
   return lines;
+}
+
+function formatOperationsCountReconciliationConversation(response: GreatTimeAgentChatResponse) {
+  const table = response.tables?.find((item) => item.title === "Count reconciliation");
+  if (response.intent !== "operations_count_reconciliation" && !table?.rows.length) {
+    return [];
+  }
+
+  const rows = table?.rows ?? [];
+  const appointmentRow = rows.find((row) => /appointment bookings/i.test(stringValue(row, "metric", "")));
+  const treatmentRow = rows.find((row) => /treatment\/service records/i.test(stringValue(row, "metric", "")));
+  const appointmentValue = appointmentRow ? stringValue(appointmentRow, "value", "-") : formatMetricValue(metricValue(response, ["Appointment bookings"]) ?? "-", undefined);
+  const treatmentValue = treatmentRow
+    ? stringValue(treatmentRow, "value", "-")
+    : formatMetricValue(metricValue(response, ["Treatment/service records"]) ?? "-", undefined);
+  const appointmentSource = appointmentRow ? stringValue(appointmentRow, "source", "APICORE booking ledger") : "APICORE booking ledger";
+  const treatmentSource = treatmentRow ? stringValue(treatmentRow, "source", "BigQuery daily treatment report") : "BigQuery daily treatment report";
+  const appointmentMeaning = appointmentRow ? stringValue(appointmentRow, "definition", "scheduled appointment rows") : "scheduled appointment rows";
+  const treatmentMeaning = treatmentRow
+    ? stringValue(treatmentRow, "definition", "service/treatment rows by CheckInTime")
+    : "customer တစ်ယောက် service/treatment တစ်ခုလုပ်တိုင်း row တစ်ခု";
+
+  return [
+    `${ownerBodyPeriodPrefix(response.period)} count နှစ်ခုမတူတာက report type မတူလို့ပါ။`,
+    "",
+    `1. Appointment booking: ${appointmentValue}`,
+    `Source: ${appointmentSource}`,
+    `Meaning: ${appointmentMeaning}`,
+    "",
+    `2. Treatment/service records: ${treatmentValue}`,
+    `Source: ${treatmentSource}`,
+    `Meaning: ${treatmentMeaning}`,
+    "",
+    "ဘာကြောင့် treatment records ပိုများနိုင်လဲ:",
+    "- Appointment တစ်ခုမှာ service/treatment records များနိုင်ပါတယ်။",
+    "- Cancel/no-show appointment တွေက appointment ထဲပါနိုင်ပေမယ့် treatment records ထဲမပါနိုင်ပါ။",
+    "- Appointment report က scheduled time ကိုသုံးပြီး treatment report က CheckInTime ကိုသုံးပါတယ်။",
+    "- BigQuery analytics report က APICORE live booking data ထက် update နောက်ကျနိုင်ပါတယ်။",
+    "",
+    "အကြံပြုချက်:",
+    "Appointment schedule ကြည့်ချင်ရင် “မနေ့က appointment စာရင်းပြပါ” လို့မေးပါ။",
+    "တကယ်လုပ်သွားတဲ့ service/therapist list ကြည့်ချင်ရင် “မနေ့က ဘယ် customer တွေ ဘယ် service ကို ဘယ် therapist နဲ့လုပ်လဲ” လို့မေးပါ။",
+  ];
 }
 
 function formatPractitionerPerformanceConversation(response: GreatTimeAgentChatResponse) {
@@ -1158,6 +1206,11 @@ function formatConversationTablePreview(
     return formatAppointmentConversation(response, options?.viewerContext, options?.clinicCode);
   }
 
+  const reconciliation = formatOperationsCountReconciliationConversation(response);
+  if (reconciliation.length) {
+    return reconciliation;
+  }
+
   const financeSales = formatFinanceSalesConversation(response);
   if (financeSales.length) {
     return financeSales;
@@ -1377,7 +1430,12 @@ export function formatAgentHubTelegramReply(
     lines.push("", sanitizeOwnerFacingText(response.summary || response.assistantMessage));
   }
 
-  if (metrics.length > 0 && response.resolvedAgent !== "appointment" && !isFinanceSalesSummaryResponse(response)) {
+  if (
+    metrics.length > 0 &&
+    response.resolvedAgent !== "appointment" &&
+    response.intent !== "operations_count_reconciliation" &&
+    !isFinanceSalesSummaryResponse(response)
+  ) {
     lines.push("", "အဓိကကိန်းဂဏန်းများ:");
     metrics.forEach((metric) => {
       lines.push(`- ${translateMetricLabel(metric.label)}: ${formatMetricValue(metric.value, metric.unit)}`);

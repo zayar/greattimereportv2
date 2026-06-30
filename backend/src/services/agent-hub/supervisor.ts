@@ -1,6 +1,6 @@
 import type { GreatTimeAgentId, GreatTimeRequestedAgentId } from "./types.js";
 import { extractLikelyCustomerSearchText, hasExplicitCustomerSearchIntent } from "./customer-query.js";
-import { isAppointmentRosterQuestion, isTreatmentRosterQuestion } from "./question-dimensions.js";
+import { isAppointmentRosterQuestion, isOperationsCountReconciliationQuestion, isTreatmentRosterQuestion } from "./question-dimensions.js";
 import { hasExplicitServiceSearchIntent } from "./service-query.js";
 
 const AGENT_ORDER: GreatTimeAgentId[] = ["finance", "customer_relationship", "business", "appointment"];
@@ -106,6 +106,10 @@ export function resolveAgent(params: {
 
   if (isCustomerRelationshipOpportunityQuestion(params.message)) {
     scores.customer_relationship += 4;
+  }
+
+  if (isOperationsCountReconciliationQuestion(params.message)) {
+    scores.business += 8;
   }
 
   if (isTreatmentRosterQuestion(params.message)) {

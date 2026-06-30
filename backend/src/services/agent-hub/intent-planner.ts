@@ -2,7 +2,12 @@ import { env } from "../../config/env.js";
 import { shiftRange, toIsoDate } from "../../utils/date-range.js";
 import { formatDateKeyInTimeZone, normalizeTimeZone } from "../telegram/time.js";
 import { hasCustomerEntityReference, hasExplicitCustomerSearchIntent, isCustomer360Question } from "./customer-query.js";
-import { isAppointmentRosterQuestion, isTreatmentRosterQuestion, parseQuestionDimensions } from "./question-dimensions.js";
+import {
+  isAppointmentRosterQuestion,
+  isOperationsCountReconciliationQuestion,
+  isTreatmentRosterQuestion,
+  parseQuestionDimensions,
+} from "./question-dimensions.js";
 import { buildReadOnlyRefusalMessage, isDangerousBusinessMutationRequest } from "./read-only-guard.js";
 import { isService360Question } from "./service-query.js";
 import { isAppointmentLedgerQuestion, resolveAgent } from "./supervisor.js";
@@ -223,6 +228,9 @@ export function toolsForBusinessOwnerDailyBrief(enabled = env.AGENT_OWNER_DAILY_
 function detectBusinessIntent(message: string) {
   const dimensions = parseQuestionDimensions(message);
 
+  if (isOperationsCountReconciliationQuestion(message)) {
+    return "operations_count_reconciliation";
+  }
   if (env.AGENT_OWNER_DAILY_BRIEF_ENABLED && isOwnerDailyBriefIntentMessage(message)) {
     return "owner_daily_brief";
   }
@@ -378,6 +386,8 @@ function toolsForIntent(agentId: GreatTimeAgentId, intent: string) {
         return ["get_service_behavior", "get_service_overview"];
       case "practitioner_performance":
         return ["get_practitioner_overview", "get_practitioner_treatments"];
+      case "operations_count_reconciliation":
+        return ["get_daily_operations_reconciliation"];
       case "treatment_roster":
       case "daily_treatment":
         return ["get_daily_treatments"];

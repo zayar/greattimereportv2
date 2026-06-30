@@ -237,14 +237,14 @@ test("today appointment list with 13 appointments uses named paginated customer 
   })
   const buttonTexts = markup?.inline_keyboard.flat().map((button) => button.text) ?? []
 
-  assert.match(message, /appointment 13 ခု/)
+  assert.match(message, /appointment booking 13 ခု/)
   assert.match(message, /1\. 13:30 — Yadanar/)
   assert.match(message, /13\. 18:34 — Thein Oo/)
   assert.match(message, /Phone: 95900000061/)
   assert.match(message, /Service: Booking deposit/)
   assert.match(message, /Staff: Dr Zun Ko Lwin/)
   assert.match(message, /Status: ချိန်းထား/)
-  assert.match(message, /Showing 1-8 of 13 appointments/)
+  assert.match(message, /Showing 1-8 of 13 appointment bookings/)
   assert.equal(items.length, 13)
   assert.equal(items[0]?.appointmentId, "appt-13")
   assert.equal(items[0]?.customerId, "cust-13")

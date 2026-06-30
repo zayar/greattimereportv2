@@ -7,6 +7,7 @@ import { getServiceBehaviorReport } from "../../reports/service-behavior.service
 import { getServicePortalList, getServicePortalOverview } from "../../reports/service-portal.service.js";
 import { getTherapistPortalReport } from "../../reports/therapist-portal.service.js";
 import { formatDateKeyInTimeZone, normalizeTimeZone } from "../../telegram/time.js";
+import { APPOINTMENT_BOOKING_COUNT_DEFINITION, TREATMENT_SERVICE_RECORD_COUNT_DEFINITION } from "../count-definitions.js";
 import { listInsightCards } from "../memory/memory.repository.js";
 import type { GtAgentFactSnapshot, GtAgentInsightCard } from "../memory/memory-types.js";
 import { parseQuestionDimensions } from "../question-dimensions.js";
@@ -19,6 +20,7 @@ import {
   isCompletedHistoricalDay,
 } from "../snapshot-cache.service.js";
 import type { AgentDataStatus, AgentToolDefinition, AgentToolInput, AgentToolResult, GreatTimeAgentSource } from "../types.js";
+import { fetchAppointmentLedger } from "./appointment.tools.js";
 
 const toolInputSchema = z.custom<AgentToolInput>(() => true);
 
@@ -112,6 +114,28 @@ function latestCheckedAt(sources: GreatTimeAgentSource[]) {
   return sources
     .map((source) => source.checkedAt)
     .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] ?? nowIso();
+}
+
+function normalizeAppointmentStatus(value: unknown) {
+  return String(value ?? "").trim().toUpperCase().replace(/[\s-]+/g, "_");
+}
+
+function appointmentStatusCounts(rows: Array<{ status?: string | null }>) {
+  return rows.reduce(
+    (summary, row) => {
+      const status = normalizeAppointmentStatus(row.status);
+      if (status === "CHECKOUT" || status === "CHECKED_OUT") {
+        summary.checkedOut += 1;
+      } else if (status === "NO_SHOW" || status === "NOSHOW") {
+        summary.noShow += 1;
+      } else if (status === "MERCHANT_CANCEL" || status === "MEMBER_CANCEL" || status === "CANCEL" || status === "CANCELLED") {
+        summary.cancelled += 1;
+      }
+
+      return summary;
+    },
+    { checkedOut: 0, cancelled: 0, noShow: 0 },
+  );
 }
 
 function secondsSince(value: string | null | undefined, now = new Date()) {
@@ -953,10 +977,12 @@ async function getDailyTreatments(input: AgentToolInput): Promise<AgentToolResul
     period: data.selectedDate,
     dataStatus: data.summary.totalTreatments > 0 ? "ok" : "no_activity",
     live: false,
+    summary: `Daily treatment report has ${data.summary.totalTreatments.toLocaleString("en-US")} treatment/service record${data.summary.totalTreatments === 1 ? "" : "s"} for ${input.period.label}. This is not the appointment booking count; one appointment can contain multiple service/treatment rows.`,
     metrics: [
       { label: "Treatments", value: data.summary.totalTreatments },
       { label: "Practitioners", value: data.summary.therapists },
       { label: "Services", value: data.summary.uniqueServices },
+      { label: "Distinct treatment customers", value: data.summary.distinctCustomers },
     ],
     tables: [
       {
@@ -971,6 +997,160 @@ async function getDailyTreatments(input: AgentToolInput): Promise<AgentToolResul
       },
     ],
     warnings: warnings.length ? warnings : undefined,
+    data: {
+      countDefinition: TREATMENT_SERVICE_RECORD_COUNT_DEFINITION,
+    },
+  };
+}
+
+async function getDailyOperationsReconciliation(input: AgentToolInput): Promise<AgentToolResult> {
+  const [appointments, treatments] = await Promise.all([
+    fetchAppointmentLedger(input),
+    getDailyTreatmentReport({
+      clinicCode: input.clinic.clinicCode,
+      date: input.period.toDate,
+    }),
+  ]);
+  const appointmentCounts = appointmentStatusCounts(appointments.rows);
+  const treatmentStatus: AgentDataStatus = treatments.summary.totalTreatments > 0 ? "ok" : "no_activity";
+  const dataStatus: AgentDataStatus =
+    appointments.dataStatus === "partial" ? "partial" :
+    appointments.totalCount > 0 || treatments.summary.totalTreatments > 0 ? "ok" :
+    "no_activity";
+  const treatmentCheckedAt = nowIso();
+  const period = input.period.label;
+  const sources: GreatTimeAgentSource[] = [
+    {
+      tool: "get_daily_operations_reconciliation",
+      sourceName: APPOINTMENT_BOOKING_COUNT_DEFINITION.source,
+      checkedAt: appointments.checkedAt,
+      period,
+      dataStatus: appointments.dataStatus,
+      live: true,
+    },
+    {
+      tool: "get_daily_operations_reconciliation",
+      sourceName: TREATMENT_SERVICE_RECORD_COUNT_DEFINITION.source,
+      checkedAt: treatmentCheckedAt,
+      period: treatments.selectedDate,
+      dataStatus: treatmentStatus,
+      live: false,
+    },
+  ];
+  const countRows = [
+    {
+      metric: "Appointment bookings",
+      value: appointments.totalCount,
+      definition: "scheduled appointment rows",
+      source: APPOINTMENT_BOOKING_COUNT_DEFINITION.source,
+    },
+    {
+      metric: "Treatment/service records",
+      value: treatments.summary.totalTreatments,
+      definition: "service/treatment rows by CheckInTime",
+      source: TREATMENT_SERVICE_RECORD_COUNT_DEFINITION.source,
+    },
+    {
+      metric: "Distinct treatment customers",
+      value: treatments.summary.distinctCustomers,
+      definition: "distinct customer phone/name keys in treatment records",
+      source: TREATMENT_SERVICE_RECORD_COUNT_DEFINITION.source,
+    },
+    {
+      metric: "Practitioners",
+      value: treatments.summary.therapists,
+      definition: "distinct practitioners in treatment records",
+      source: TREATMENT_SERVICE_RECORD_COUNT_DEFINITION.source,
+    },
+    {
+      metric: "Services",
+      value: treatments.summary.uniqueServices,
+      definition: "distinct services in treatment records",
+      source: TREATMENT_SERVICE_RECORD_COUNT_DEFINITION.source,
+    },
+    {
+      metric: "Cancelled appointments",
+      value: appointmentCounts.cancelled,
+      definition: "cancelled rows in loaded appointment bookings",
+      source: APPOINTMENT_BOOKING_COUNT_DEFINITION.source,
+    },
+    {
+      metric: "No-show appointments",
+      value: appointmentCounts.noShow,
+      definition: "no-show rows in loaded appointment bookings",
+      source: APPOINTMENT_BOOKING_COUNT_DEFINITION.source,
+    },
+    {
+      metric: "Checked-out appointments",
+      value: appointmentCounts.checkedOut,
+      definition: "checked-out rows in loaded appointment bookings",
+      source: APPOINTMENT_BOOKING_COUNT_DEFINITION.source,
+    },
+  ];
+
+  return {
+    toolName: "get_daily_operations_reconciliation",
+    sourceName: "APICORE booking ledger and BigQuery daily treatment report",
+    checkedAt: latestCheckedAt(sources),
+    period,
+    dataStatus,
+    live: false,
+    summary: `For ${period}, APICORE shows ${appointments.totalCount.toLocaleString("en-US")} appointment booking${appointments.totalCount === 1 ? "" : "s"}, while BigQuery shows ${treatments.summary.totalTreatments.toLocaleString("en-US")} treatment/service record${treatments.summary.totalTreatments === 1 ? "" : "s"}. These counts use different grains. Appointment bookings count scheduled visits; treatment records count service rows done after check-in. One appointment can produce multiple treatment records.`,
+    metrics: [
+      { label: "Appointment bookings", value: appointments.totalCount, helperText: "Scheduled appointment rows from APICORE booking ledger." },
+      {
+        label: "Treatment/service records",
+        value: treatments.summary.totalTreatments,
+        helperText: "Service/treatment rows by CheckInTime from the BigQuery daily treatment report.",
+      },
+      { label: "Loaded appointment rows", value: appointments.rows.length },
+      { label: "Loaded treatment rows", value: treatments.records.length },
+      { label: "Distinct treatment customers", value: treatments.summary.distinctCustomers },
+      { label: "Services", value: treatments.summary.uniqueServices },
+      { label: "Practitioners", value: treatments.summary.therapists },
+      { label: "Cancelled appointments", value: appointmentCounts.cancelled },
+      { label: "No-show appointments", value: appointmentCounts.noShow },
+      { label: "Checked-out appointments", value: appointmentCounts.checkedOut },
+    ],
+    tables: [
+      {
+        title: "Count reconciliation",
+        columns: [
+          { key: "metric", title: "Metric" },
+          { key: "value", title: "Value" },
+          { key: "definition", title: "Definition" },
+          { key: "source", title: "Source" },
+        ],
+        rows: countRows,
+      },
+      {
+        title: "Why counts differ",
+        columns: [{ key: "reason", title: "Reason" }],
+        rows: [
+          { reason: "One appointment can include multiple services/treatments." },
+          { reason: "Cancelled/no-show appointments may count as appointments but not treatment records." },
+          { reason: "Treatment report uses CheckInTime; appointment report uses scheduled FromTime." },
+          { reason: "BigQuery analytics may not be as live as APICORE." },
+        ],
+      },
+    ],
+    warnings: appointments.warnings.length ? appointments.warnings : undefined,
+    sources,
+    data: {
+      countDefinitions: [APPOINTMENT_BOOKING_COUNT_DEFINITION, TREATMENT_SERVICE_RECORD_COUNT_DEFINITION],
+      operationsReconciliation: {
+        appointmentBookings: appointments.totalCount,
+        treatmentServiceRecords: treatments.summary.totalTreatments,
+        loadedAppointmentRows: appointments.rows.length,
+        loadedTreatmentRows: treatments.records.length,
+        distinctTreatmentCustomers: treatments.summary.distinctCustomers,
+        uniqueServices: treatments.summary.uniqueServices,
+        practitioners: treatments.summary.therapists,
+        cancelledAppointments: appointmentCounts.cancelled,
+        noShowAppointments: appointmentCounts.noShow,
+        checkedOutAppointments: appointmentCounts.checkedOut,
+      },
+    },
   };
 }
 
@@ -1163,6 +1343,17 @@ export function createBusinessTools(): AgentToolDefinition[] {
       maxRows: 25,
       timeoutMs: 15_000,
       execute: getDailyTreatments,
+    },
+    {
+      name: "get_daily_operations_reconciliation",
+      agentId: "business",
+      description: "Reconcile appointment booking counts with treatment/service record counts for a day.",
+      inputSchema: toolInputSchema,
+      sourceName: "APICORE booking ledger and BigQuery daily treatment report",
+      live: false,
+      maxRows: 25,
+      timeoutMs: 20_000,
+      execute: getDailyOperationsReconciliation,
     },
     {
       name: "compare_service_periods",

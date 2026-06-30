@@ -430,6 +430,47 @@ function buildOwnerDailyBriefMessage(result: AgentToolResult) {
   ].join("\n");
 }
 
+function safeResponseDataFromToolResults(results: AgentToolResult[]) {
+  const data: Record<string, unknown> = {};
+  const countDefinitions: unknown[] = [];
+
+  results.forEach((result) => {
+    const toolData = result.data ?? {};
+    const countDefinition = toolData.countDefinition;
+    if (countDefinition) {
+      countDefinitions.push(countDefinition);
+      data.countDefinition ??= countDefinition;
+    }
+
+    if (Array.isArray(toolData.countDefinitions)) {
+      toolData.countDefinitions.forEach((definition) => countDefinitions.push(definition));
+    }
+
+    if (toolData.operationsReconciliation) {
+      data.operationsReconciliation = toolData.operationsReconciliation;
+    }
+  });
+
+  if (countDefinitions.length) {
+    const seen = new Set<string>();
+    data.countDefinitions = countDefinitions.filter((definition) => {
+      if (!definition || typeof definition !== "object" || !("grain" in definition)) {
+        return true;
+      }
+
+      const grain = String((definition as { grain: unknown }).grain);
+      if (seen.has(grain)) {
+        return false;
+      }
+
+      seen.add(grain);
+      return true;
+    });
+  }
+
+  return Object.keys(data).length ? data : undefined;
+}
+
 export function buildAgentResponse(params: {
   request: GreatTimeAgentChatRequest;
   plan: GreatTimeAgentIntentPlan;
@@ -470,6 +511,7 @@ export function buildAgentResponse(params: {
   const entityRefs = params.toolResults.flatMap((result) => result.entityRefs ?? []);
   const entityContext = entityRefs[0] ?? params.request.entityContext;
   const ownerDailyBriefResult = params.toolResults.find((result) => result.toolName === "get_owner_daily_brief");
+  const responseData = safeResponseDataFromToolResults(params.toolResults);
   const summary =
     isUnsupportedWriteRequest ? buildUnsupportedWriteSummary() :
     (ownerDailyBriefResult ? buildOwnerDailyBriefMessage(ownerDailyBriefResult) : defaultSummary(params.plan, params.toolResults));
@@ -505,6 +547,7 @@ export function buildAgentResponse(params: {
     followUpQuestions: isUnsupportedWriteRequest
       ? ["Show the relevant records for manual review."]
       : followUpsForAgent(params.plan, params.toolResults, customer360, service360),
+    data: responseData,
     customer360,
     service360,
     sources,

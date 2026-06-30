@@ -259,6 +259,7 @@ export type GreatTimeAgentChatResponse = {
   recommendations?: GreatTimeAgentRecommendation[];
   followUpQuestions?: string[];
   usedMemoryIds?: string[];
+  data?: Record<string, unknown>;
   customer360?: Customer360FactPack;
   service360?: Service360FactPack;
   sources: GreatTimeAgentSource[];

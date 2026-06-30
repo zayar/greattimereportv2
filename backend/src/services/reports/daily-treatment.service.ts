@@ -31,11 +31,18 @@ type RecordRow = {
   customerPhone?: string | null;
 };
 
+type SummaryRow = {
+  totalTreatments: number;
+  therapists: number;
+  uniqueServices: number;
+  distinctCustomers: number;
+};
+
 export async function getDailyTreatmentReport(params: {
   clinicCode: string;
   date: string;
 }) {
-  const [matrixRows, recordRows] = await Promise.all([
+  const [matrixRows, recordRows, summaryRows] = await Promise.all([
     runAnalyticsQuery<MatrixRow>(
       `
         WITH service_matrix AS (
@@ -76,6 +83,20 @@ export async function getDailyTreatmentReport(params: {
       `,
       params,
     ),
+    runAnalyticsQuery<SummaryRow>(
+      `
+        SELECT
+          COUNT(*) AS totalTreatments,
+          COUNT(DISTINCT COALESCE(PractitionerName, 'Unknown')) AS therapists,
+          COUNT(DISTINCT ServiceName) AS uniqueServices,
+          COUNT(DISTINCT CONCAT(COALESCE(CustomerPhoneNumber, ''), '|', COALESCE(CustomerName, ''))) AS distinctCustomers
+        FROM ${analyticsTables.mainDataView}
+        WHERE DATE(CheckInTime) = @date
+          AND ServiceName IS NOT NULL
+          AND LOWER(ClinicCode) = LOWER(@clinicCode)
+      `,
+      params,
+    ),
   ]);
 
   const serviceTotals = new Map<string, number>();
@@ -96,13 +117,16 @@ export async function getDailyTreatmentReport(params: {
   });
 
   const uniqueServices = [...serviceTotals.keys()].sort((left, right) => left.localeCompare(right));
+  const summary = summaryRows[0];
+  const matrixTotalTreatments = matrix.reduce((sum, row) => sum + row.totalServices, 0);
 
   return {
     selectedDate: params.date,
     summary: {
-      totalTreatments: matrix.reduce((sum, row) => sum + row.totalServices, 0),
-      therapists: matrix.length,
-      uniqueServices: uniqueServices.length,
+      totalTreatments: summary ? parseNumber(summary.totalTreatments) : matrixTotalTreatments,
+      therapists: summary ? parseNumber(summary.therapists) : matrix.length,
+      uniqueServices: summary ? parseNumber(summary.uniqueServices) : uniqueServices.length,
+      distinctCustomers: summary ? parseNumber(summary.distinctCustomers) : 0,
     },
     uniqueServices,
     serviceTotals: uniqueServices.map((serviceName) => ({
@@ -119,4 +143,3 @@ export async function getDailyTreatmentReport(params: {
     })),
   };
 }
-
