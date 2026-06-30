@@ -103,40 +103,52 @@ function followUpsForAppointment(plan: GreatTimeAgentIntentPlan, results: AgentT
   switch (plan.intent) {
     case "checked_in_customers":
       return [
+        "Show customers who arrived but have not started treatment.",
+        "Show appointments not checked out today.",
         "Show checked-out customers today.",
-        "Show cancelled and no-show appointments today.",
-        "Show all appointments today.",
       ];
     case "checked_out_customers":
       return [
         "Show checked-in customers now.",
+        "Show appointments not checked out today.",
         "Show cancelled and no-show appointments today.",
-        "Show all appointments today.",
+      ];
+    case "not_checked_out_customers":
+      return [
+        "Show checked-in customers now.",
+        "Show checked-out customers today.",
+        "Show customers who arrived but have not started treatment.",
+      ];
+    case "arrived_not_started_customers":
+      return [
+        "Show appointments not checked out today.",
+        "Show checked-in customers now.",
+        "Show checked-out customers today.",
       ];
     case "cancelled_no_show":
       return [
         "Show all appointments today.",
+        "Show appointments not checked out today.",
         "Show checked-in customers now.",
-        "Show checked-out customers today.",
       ];
     case "waiting_customers":
     case "treatment_in_progress":
       return [
+        "Show customers who arrived but have not started treatment.",
         "Show checked-in customers now.",
         "Show checked-out customers today.",
-        "Show all appointments today.",
       ];
     case "appointment_trend":
       return [
         "Show all appointments today.",
+        "Show appointments not checked out today.",
         "Show cancelled and no-show appointments today.",
-        "Show checked-out customers today.",
       ];
     case "appointment_detail":
       return [
         "Show all appointments today.",
+        "Show appointments not checked out today.",
         "Show checked-in customers now.",
-        "Show checked-out customers today.",
       ];
     case "appointment_summary":
     case "appointment_list":
@@ -144,13 +156,14 @@ function followUpsForAppointment(plan: GreatTimeAgentIntentPlan, results: AgentT
       return hasRows
         ? [
             "Show checked-in customers now.",
+            "Show appointments not checked out today.",
+            "Show customers who arrived but have not started treatment.",
             "Show checked-out customers today.",
-            "Show cancelled and no-show appointments today.",
           ]
         : [
             "Show tomorrow appointments.",
+            "Show appointments not checked out today.",
             "Show appointment trend this week.",
-            "Show cancelled and no-show appointments today.",
           ];
   }
 }

@@ -18,8 +18,8 @@ const KEYWORDS: Record<GreatTimeAgentId, RegExp[]> = {
     /လုပ်ငန်း|ဝန်ဆောင်မှု|ဆရာဝန်|therapist|ဆိုင်|တိုး|ကျ/i,
   ],
   appointment: [
-    /appointment|booking|booked|arrival|arrived|check[- ]?in|checked in|check[- ]?out|checked out|waiting|no[- ]?show|cancel/i,
-    /ချိန်း|ဘိုကင်|ရောက်|check in|check out|မလာ|ဖျက်/i,
+    /appointment|booking|booked|arrival|arrived|check[- ]?in|checked in|check[- ]?out|checked out|checkout|completed|finished|waiting|no[- ]?show|cancel/i,
+    /ချိန်း|ဘိုကင်|ရောက်|check in|check out|checkout|ပြီးဆုံး|ပြီးသွား|မပြီး|မလုပ်သေး|မလာ|ဖျက်/i,
   ],
 };
 
@@ -30,6 +30,13 @@ function scoreAgent(message: string, agentId: GreatTimeAgentId) {
 export function isAppointmentLedgerQuestion(message: string) {
   const mentionsAppointment = /appointment|appointments|booking|bookings|schedule|ချိန်း|ဘိုကင်/i.test(message);
   const mentionsToday = /today|\bnow\b|right now|this\s+(?:morning|afternoon|evening)|ဒီနေ့|ယနေ့|အခု|ယခု/i.test(message);
+  const asksLifecycleRoster =
+    /check[- ]?in|checked in|arrived|check[- ]?out|checked out|checkout|not\s+(?:checked\s*out|finished|completed)|completed|finished|မပြီး|မလုပ်သေး|checkout\s*မလုပ်|check-out\s*မလုပ်|ရောက်ပြီး[\s\S]{0,40}(?:treatment|process)?\s*မစ|ကုသမှု\s*မစ|မစသေး/i.test(
+      message,
+    ) &&
+    /today|\bnow\b|right now|who|which|list|show|customers?|members?|ဒီနေ့|ယနေ့|အခု|ယခု|ဘယ်သူ|customer|ဖောက်သည်/i.test(
+      message,
+    );
   const asksWhoIsComingToday =
     /(?:who|which\s+customers?|customers?|members?)[\s\S]{0,80}(?:coming|come|arriv(?:e|ing)|visit(?:ing)?)[\s\S]{0,80}today|today[\s\S]{0,80}(?:who|which\s+customers?|customers?|members?)[\s\S]{0,80}(?:coming|come|arriv(?:e|ing)|visit(?:ing)?)|ဘယ်သူ[\s\S]{0,80}(?:ဒီနေ့|ယနေ့)[\s\S]{0,80}လာ|(?:ဒီနေ့|ယနေ့)[\s\S]{0,80}ဘယ်သူ[\s\S]{0,80}လာ/i.test(
       message,
@@ -45,7 +52,7 @@ export function isAppointmentLedgerQuestion(message: string) {
     );
   const asksFinance = /sales?|revenue|payment|collection|collected|invoice|purchase|purchased|bought|buy|ငွေ|ရောင်း|ဝင်ငွေ|ဝယ်/i.test(message);
 
-  return ((mentionsAppointment && asksLedgerDetail) || asksWhoIsComingToday || asksCustomerServiceRoster) && !asksFinance;
+  return ((mentionsAppointment && asksLedgerDetail) || asksLifecycleRoster || asksWhoIsComingToday || asksCustomerServiceRoster) && !asksFinance;
 }
 
 function isNamedCustomerPurchaseQuestion(message: string) {

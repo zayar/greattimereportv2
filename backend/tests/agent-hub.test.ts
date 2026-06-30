@@ -2185,6 +2185,38 @@ test("planner maps checked-in appointment questions to active check-in rows", ()
   assert.deepEqual(plan.toolNames, ["get_checked_in_customers"])
 })
 
+test("planner maps appointment lifecycle wording before positive checkout matches", () => {
+  const cases = [
+    ["မပြီးသေးတဲ့ ဒီနေ့ appointment တွေပြပါ", "not_checked_out_customers", ["get_not_checked_out_customers"]],
+    ["Checkout မလုပ်သေးတဲ့ appointment တွေပြပါ", "not_checked_out_customers", ["get_not_checked_out_customers"]],
+    ["ဒီနေ့ checkout မလုပ်သေးသူတွေပြပါ", "not_checked_out_customers", ["get_not_checked_out_customers"]],
+    ["ဒီနေ့ checkout လုပ်ပြီးသူတွေပြပါ", "checked_out_customers", ["get_checked_out_customers"]],
+    ["ပြီးဆုံးသွားတဲ့ appointment တွေပြပါ", "checked_out_customers", ["get_checked_out_customers"]],
+    ["Who has not checked out today?", "not_checked_out_customers", ["get_not_checked_out_customers"]],
+    ["Who has not finished today?", "not_checked_out_customers", ["get_not_checked_out_customers"]],
+    ["Who checked out today?", "checked_out_customers", ["get_checked_out_customers"]],
+    ["Who finished today?", "checked_out_customers", ["get_checked_out_customers"]],
+    ["Who arrived?", "checked_in_customers", ["get_checked_in_customers"]],
+    ["Who arrived but has not started treatment?", "arrived_not_started_customers", ["get_arrived_not_started_customers"]],
+    ["ရောက်ပြီး treatment မစသေးတဲ့ customer တွေပြပါ", "arrived_not_started_customers", ["get_arrived_not_started_customers"]],
+  ] as const
+
+  for (const [message, intent, toolNames] of cases) {
+    const plan = planAgentRequest({
+      request: {
+        clinicId: "clinic-1",
+        clinicCode: "ABC",
+        agent: "auto",
+        message,
+      },
+    })
+
+    assert.equal(plan.resolvedAgent, "appointment", message)
+    assert.equal(plan.intent, intent, message)
+    assert.deepEqual(plan.toolNames, toolNames, message)
+  }
+})
+
 test("planner maps appointment count questions to the live count tool and lists to the ledger", () => {
   const countPlan = planAgentRequest({
     request: {
@@ -2341,6 +2373,60 @@ test("live appointment snapshot uses APICORE wall-clock booking dates and filter
   assert.equal(snapshot.countsByLifecycle.booked, 2)
 })
 
+test("live appointment snapshot merges booking schedule with matching check-in/out rows", async () => {
+  const snapshot = await liveAppointmentTest.loadLiveAppointmentSnapshot(
+    {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      dateKey: "2026-06-30",
+      timezone: "Asia/Yangon",
+      rowLimit: 20,
+    },
+    {
+      fetchBookingDetails: async () => ({
+        totalCount: 1,
+        data: [
+          buildApicoreBookingDetailsRowFixture({
+            bookingid: "booking-merge",
+            FromTime: "2026-06-30T10:00:00.000Z",
+            ToTime: "2026-06-30T10:30:00.000Z",
+            MemberName: "Merge Customer",
+            MemberPhoneNumber: "95911111111",
+            ServiceName: "Laser",
+            PractitionerName: "July",
+          }),
+        ],
+      }),
+      fetchCheckIns: async () => ({
+        totalCount: 1,
+        data: [
+          {
+            id: "checkin-merge",
+            in_time: "2026-06-30T10:05:00.000Z",
+            out_time: null,
+            status: "CHECKIN",
+            created_at: "2026-06-30T10:05:00.000Z",
+            service: { name: "Laser" },
+            practitioner: { name: "July" },
+            member: {
+              name: "Merge Customer",
+              phonenumber: "95911111111",
+              clinic_members: [{ name: "Merge Customer", phonenumber: "95911111111", clinic_id: "clinic-1" }],
+            },
+          },
+        ],
+      }),
+    },
+  )
+
+  assert.equal(snapshot.rows.length, 1)
+  assert.equal(snapshot.rows[0]?.appointmentId, "booking-merge")
+  assert.equal(snapshot.rows[0]?.sourceType, "merged")
+  assert.equal(snapshot.rows[0]?.scheduledFrom, "2026-06-30T10:00:00.000Z")
+  assert.equal(snapshot.rows[0]?.checkInTime, "2026-06-30T10:05:00.000Z")
+  assert.equal(snapshot.rows[0]?.lifecycleState, "arrived_start_unknown")
+})
+
 test("live appointment count result uses filtered booking rows for totals tables and entity refs", async () => {
   const snapshot = await liveAppointmentTest.loadLiveAppointmentSnapshot(
     {
@@ -2396,6 +2482,147 @@ test("live appointment count result uses filtered booking rows for totals tables
   assert.equal(result.metrics?.find((metric) => metric.label === "Total appointments today")?.value, 2)
   assert.deepEqual(result.tables?.[0]?.rows.map((row) => row.appointmentId), ["booking-b", "booking-c"])
   assert.deepEqual(result.entityRefs?.map((ref) => ref.appointmentId), ["booking-b", "booking-c"])
+})
+
+test("appointment lifecycle tools filter not-checked-out, checked-in, checked-out, and proxy arrived-not-started rows", async () => {
+  const liveRows = [
+    {
+      appointmentId: "booked-1",
+      customerName: "Booked Customer",
+      customerPhoneMasked: "959xxxx001",
+      customerPhone: "95900000001",
+      serviceName: "Laser",
+      practitionerName: "July",
+      scheduledFrom: "2026-06-30T09:00:00.000Z",
+      scheduledTo: "2026-06-30T09:30:00.000Z",
+      checkInTime: null,
+      checkOutTime: null,
+      rawStatus: "BOOKED",
+      lifecycleState: "booked" as const,
+      stateConfidence: "confirmed" as const,
+      sourceType: "booking" as const,
+    },
+    {
+      appointmentId: "checkin-1",
+      customerName: "Checked In Customer",
+      customerPhoneMasked: "959xxxx002",
+      customerPhone: "95900000002",
+      serviceName: "Facial",
+      practitionerName: "Wai Phoo",
+      scheduledFrom: "2026-06-30T10:00:00.000Z",
+      scheduledTo: "2026-06-30T10:30:00.000Z",
+      checkInTime: "2026-06-30T10:01:00.000Z",
+      checkOutTime: null,
+      rawStatus: "CHECKIN",
+      lifecycleState: "arrived_start_unknown" as const,
+      stateConfidence: "inferred" as const,
+      sourceType: "merged" as const,
+    },
+    {
+      appointmentId: "checkout-1",
+      customerName: "Checked Out Customer",
+      customerPhoneMasked: "959xxxx003",
+      customerPhone: "95900000003",
+      serviceName: "Facial",
+      practitionerName: "July",
+      scheduledFrom: "2026-06-30T11:00:00.000Z",
+      scheduledTo: "2026-06-30T11:30:00.000Z",
+      checkInTime: "2026-06-30T11:00:00.000Z",
+      checkOutTime: "2026-06-30T11:25:00.000Z",
+      rawStatus: "CHECKOUT",
+      lifecycleState: "checked_out" as const,
+      stateConfidence: "confirmed" as const,
+      sourceType: "merged" as const,
+    },
+    {
+      appointmentId: "cancel-1",
+      customerName: "Cancelled Customer",
+      customerPhoneMasked: "959xxxx004",
+      customerPhone: "95900000004",
+      serviceName: "Laser",
+      practitionerName: "July",
+      scheduledFrom: "2026-06-30T12:00:00.000Z",
+      scheduledTo: "2026-06-30T12:30:00.000Z",
+      checkInTime: null,
+      checkOutTime: null,
+      rawStatus: "MEMBER_CANCEL",
+      lifecycleState: "cancelled" as const,
+      stateConfidence: "confirmed" as const,
+      sourceType: "booking" as const,
+    },
+    {
+      appointmentId: "noshow-1",
+      customerName: "No Show Customer",
+      customerPhoneMasked: "959xxxx005",
+      customerPhone: "95900000005",
+      serviceName: "Laser",
+      practitionerName: "July",
+      scheduledFrom: "2026-06-30T13:00:00.000Z",
+      scheduledTo: "2026-06-30T13:30:00.000Z",
+      checkInTime: null,
+      checkOutTime: null,
+      rawStatus: "NO_SHOW",
+      lifecycleState: "no_show" as const,
+      stateConfidence: "confirmed" as const,
+      sourceType: "booking" as const,
+    },
+    {
+      appointmentId: "unknown-1",
+      customerName: "Unknown State Customer",
+      customerPhoneMasked: "959xxxx006",
+      customerPhone: "95900000006",
+      serviceName: "Laser",
+      practitionerName: "July",
+      scheduledFrom: "2026-06-30T14:00:00.000Z",
+      scheduledTo: "2026-06-30T14:30:00.000Z",
+      checkInTime: null,
+      checkOutTime: null,
+      rawStatus: "ODD_STATUS",
+      lifecycleState: "unknown" as const,
+      stateConfidence: "unknown" as const,
+      sourceType: "booking" as const,
+    },
+  ]
+  const liveSnapshot = {
+    checkedAt: "2026-06-30T08:00:00.000Z",
+    dataStatus: "ok" as const,
+    rows: liveRows,
+    countsByLifecycle: {},
+    countsByService: {},
+    countsByPractitioner: {},
+    warnings: [],
+  }
+  const tools = createAppointmentTools({
+    getCompletedDayAppointmentProfileSnapshot: async () => null,
+    getOperationalAppointmentSnapshot: async () => null,
+    fetchLiveSnapshot: async () => liveSnapshot,
+  })
+  const input = buildAgentToolInputFixture({
+    fromDate: "2026-06-30",
+    toDate: "2026-06-30",
+    label: "today",
+    timezone: "Asia/Yangon",
+    intent: "not_checked_out_customers",
+  })
+
+  const notCheckedOut = await requireTool(tools, "get_not_checked_out_customers").execute(input)
+  assert.deepEqual(notCheckedOut.tables?.[0]?.rows.map((row) => row.appointmentId), ["booked-1", "checkin-1", "unknown-1"])
+  assert.equal(notCheckedOut.metrics?.find((metric) => metric.label === "Not checked out yet")?.value, 3)
+  assert.match(notCheckedOut.summary ?? "", /3 appointments have not checked out yet for 2026-06-30/)
+
+  const checkedIn = await requireTool(tools, "get_checked_in_customers").execute({ ...input, intent: "checked_in_customers" })
+  assert.deepEqual(checkedIn.tables?.[0]?.rows.map((row) => row.appointmentId), ["checkin-1"])
+
+  const checkedOut = await requireTool(tools, "get_checked_out_customers").execute({ ...input, intent: "checked_out_customers" })
+  assert.deepEqual(checkedOut.tables?.[0]?.rows.map((row) => row.appointmentId), ["checkout-1"])
+
+  const arrivedNotStarted = await requireTool(tools, "get_arrived_not_started_customers").execute({
+    ...input,
+    intent: "arrived_not_started_customers",
+  })
+  assert.deepEqual(arrivedNotStarted.tables?.[0]?.rows.map((row) => row.appointmentId), ["checkin-1"])
+  assert.equal(arrivedNotStarted.tables?.[0]?.title, "Arrived, treatment start unknown")
+  assert.match(arrivedNotStarted.warnings?.map((warning) => warning.message).join("\n") ?? "", /Treatment\/process start time is not exposed/)
 })
 
 test("source error sanitizer hides APICORE Prisma pool details", () => {
@@ -2706,6 +2933,85 @@ test("Telegram formatter explains appointment services and practitioner rows wit
   assert.match(practitionerMessage, /Wai Phoo က treatment 5 ကြိမ်လုပ်ထားပြီး customer 3 ယောက်/)
   assert.match(practitionerMessage, /အများဆုံးလုပ်ထားတဲ့ service က Whitening Laser ပါ/)
   assert.doesNotMatch(practitionerMessage, /Wai Phoo \| 5 \| 3 \| Whitening Laser/)
+})
+
+test("Telegram appointment formatter uses intent-specific lifecycle count wording", () => {
+  const baseResponse = {
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "appointment",
+    autoMode: true,
+    period: {
+      fromDate: "2026-06-24",
+      toDate: "2026-06-24",
+      label: "today",
+    },
+    assistantMessage: "Appointment lifecycle response.",
+    summary: "Appointment lifecycle response.",
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  } as const
+  const columns = [
+    { key: "scheduledFrom", title: "Time" },
+    { key: "customerName", title: "Customer" },
+    { key: "serviceName", title: "Service" },
+    { key: "practitionerName", title: "Practitioner" },
+    { key: "rawStatus", title: "Status" },
+  ] as const
+  const row = {
+    appointmentId: "appt-1",
+    scheduledFrom: "2026-06-24T09:00:00.000Z",
+    customerName: "Ma Aye",
+    customerPhoneMasked: "959xxxx001",
+    serviceName: "Whitening Laser",
+    practitionerName: "Wai Phoo",
+    rawStatus: "CHECKIN",
+  }
+
+  const checkedOutMessage = formatAgentHubTelegramReply({
+    ...baseResponse,
+    intent: "checked_out_customers",
+    metrics: [{ label: "Checked out", value: 0 }],
+    tables: [{ title: "Checked-out customers", columns, rows: [] }],
+  })
+  assert.match(checkedOutMessage, /ဒီနေ့ checkout လုပ်ပြီးသူ 0 ယောက်ရှိပါတယ်/)
+  assert.doesNotMatch(checkedOutMessage, /ဒီနေ့ appointment 0 ခုရှိပါတယ်/)
+
+  const notCheckedOutMessage = formatAgentHubTelegramReply({
+    ...baseResponse,
+    intent: "not_checked_out_customers",
+    metrics: [{ label: "Not checked out yet", value: 1 }],
+    tables: [{ title: "Appointments not checked out", columns, rows: [row] }],
+  })
+  assert.match(notCheckedOutMessage, /ဒီနေ့ checkout မလုပ်သေးတဲ့ appointment 1 ခုရှိပါတယ်/)
+
+  const checkedInMessage = formatAgentHubTelegramReply({
+    ...baseResponse,
+    intent: "checked_in_customers",
+    metrics: [{ label: "Checked in now", value: 1 }],
+    tables: [{ title: "Checked-in appointments not checked out", columns, rows: [row] }],
+  })
+  assert.match(checkedInMessage, /အခု check-in လုပ်ပြီး checkout မလုပ်သေးတဲ့ customer 1 ယောက်ရှိပါတယ်/)
+
+  const arrivedProxyMessage = formatAgentHubTelegramReply({
+    ...baseResponse,
+    intent: "arrived_not_started_customers",
+    metrics: [{ label: "Arrived not checked out proxy", value: 1 }],
+    tables: [{ title: "Arrived, treatment start unknown", columns, rows: [row] }],
+    warnings: [
+      {
+        type: "treatment_start_unavailable",
+        title: "Treatment/process start time unavailable",
+        message:
+          "Treatment/process start time is not exposed by APICORE in this query, so this list shows checked-in customers who have not checked out.",
+      },
+    ],
+  })
+  assert.match(arrivedProxyMessage, /ရောက်ရှိပြီး checkout မလုပ်သေးတဲ့ customer 1 ယောက်ရှိပါတယ်/)
+  assert.match(arrivedProxyMessage, /proxy အနေနဲ့ပြထားပါတယ်/)
 })
 
 test("Telegram formatter leads finance sales answers with total sales and treats unknown services as caveat", () => {
@@ -3747,8 +4053,9 @@ test("response builder suggests useful appointment next actions without repeatin
 
   assert.deepEqual(response.followUpQuestions, [
     "Show checked-in customers now.",
+    "Show appointments not checked out today.",
+    "Show customers who arrived but have not started treatment.",
     "Show checked-out customers today.",
-    "Show cancelled and no-show appointments today.",
   ])
 })
 

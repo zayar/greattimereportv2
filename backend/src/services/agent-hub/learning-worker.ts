@@ -537,8 +537,8 @@ async function runJob(params: {
         dateKey: params.dateKey,
         timezone: params.timezone,
       });
-      const bookingRows = snapshot.rows.filter((row) => row.sourceType === "booking");
-      const checkInRows = snapshot.rows.filter((row) => row.sourceType === "check_in");
+      const bookingRows = snapshot.rows.filter((row) => row.sourceType !== "check_in");
+      const checkInRows = snapshot.rows.filter((row) => row.sourceType !== "booking");
       await saveSnapshot({
         clinicId: params.clinicId,
         clinicCode: params.clinicCode,
@@ -571,8 +571,8 @@ async function runJob(params: {
         dateKey: settledDateKey,
         timezone: params.timezone,
       });
-      const bookingRows = snapshot.rows.filter((row) => row.sourceType === "booking");
-      const checkInRows = snapshot.rows.filter((row) => row.sourceType === "check_in");
+      const bookingRows = snapshot.rows.filter((row) => row.sourceType !== "check_in");
+      const checkInRows = snapshot.rows.filter((row) => row.sourceType !== "booking");
       await saveSnapshot({
         clinicId: params.clinicId,
         clinicCode: params.clinicCode,

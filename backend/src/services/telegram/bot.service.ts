@@ -525,10 +525,16 @@ function translateMetricLabel(label: string) {
 }
 
 function appointmentTableFromResponse(response: GreatTimeAgentChatResponse) {
-  return (
+  const table = (
     response.tables?.find((table) => table.title === "Appointments") ??
     response.tables?.find((table) => /appointment/i.test(table.title) && table.title !== "Appointment services")
   );
+
+  if (table || response.resolvedAgent !== "appointment") {
+    return table;
+  }
+
+  return response.tables?.find((item) => item.title !== "Appointment services" && item.rows.length > 0);
 }
 
 function appointmentSortValue(value: unknown) {
@@ -657,11 +663,82 @@ export function buildRecentAppointmentContextItemsFromResponse(params: {
   });
 }
 
+function metricNumber(response: GreatTimeAgentChatResponse, label: string) {
+  const value = response.metrics?.find((metric) => metric.label.toLowerCase() === label.toLowerCase())?.value;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function metricValue(response: GreatTimeAgentChatResponse, labels: string[]) {
+  for (const label of labels) {
+    const value = response.metrics?.find((metric) => metric.label.toLowerCase() === label.toLowerCase())?.value;
+    if (value !== undefined) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function appointmentCountForIntent(response: GreatTimeAgentChatResponse, fallback: number) {
+  if (response.intent === "cancelled_no_show") {
+    const cancelled = metricNumber(response, "Cancelled");
+    const noShow = metricNumber(response, "No-show");
+    if (cancelled !== undefined || noShow !== undefined) {
+      return (cancelled ?? 0) + (noShow ?? 0);
+    }
+  }
+
+  const labelsByIntent: Record<string, string[]> = {
+    appointment_list: ["Appointments", "Total appointments today", "Total appointments"],
+    appointment_summary: ["Total appointments today", "Total appointments", "Appointments"],
+    checked_in_customers: ["Checked in now"],
+    checked_out_customers: ["Checked out"],
+    not_checked_out_customers: ["Not checked out yet"],
+    arrived_not_started_customers: ["Arrived but not started treatment", "Arrived not checked out proxy"],
+  };
+
+  return metricValue(response, labelsByIntent[response.intent] ?? ["Appointments"]) ?? fallback;
+}
+
+function appointmentCountLineForIntent(response: GreatTimeAgentChatResponse, count: string | number) {
+  const countText = formatMetricValue(count, undefined);
+
+  switch (response.intent) {
+    case "checked_in_customers":
+      return `အခု check-in လုပ်ပြီး checkout မလုပ်သေးတဲ့ customer ${countText} ယောက်ရှိပါတယ်။`;
+    case "checked_out_customers":
+      return `ဒီနေ့ checkout လုပ်ပြီးသူ ${countText} ယောက်ရှိပါတယ်။`;
+    case "not_checked_out_customers":
+      return `ဒီနေ့ checkout မလုပ်သေးတဲ့ appointment ${countText} ခုရှိပါတယ်။`;
+    case "arrived_not_started_customers": {
+      const proxy = response.warnings?.some((warning) => warning.type === "treatment_start_unavailable");
+      return proxy
+        ? `ရောက်ရှိပြီး checkout မလုပ်သေးတဲ့ customer ${countText} ယောက်ရှိပါတယ်။ Treatment စတင်ချိန် data မရှိသေးလို့ proxy အနေနဲ့ပြထားပါတယ်။`
+        : `ရောက်ရှိပြီး treatment မစသေးတဲ့ customer ${countText} ယောက်ရှိပါတယ်။`;
+    }
+    case "cancelled_no_show":
+      return `ဖျက်ထား/မလာ appointment ${countText} ခုရှိပါတယ်။`;
+    case "appointment_list":
+    case "appointment_summary":
+    default:
+      return `ဒီနေ့ appointment ${countText} ခုရှိပါတယ်။`;
+  }
+}
+
 function sanitizeOwnerFacingText(text: string) {
   return text
     .replace(
       /APICORE does not expose a treatment_started_at event here, so this uses booking status as a proxy and does not confirm exact treatment-start time\./gi,
       "Treatment စတင်ချိန်ကို စနစ်ထဲမှာ တိတိကျကျ မတွေ့ရလို့ booking status ကို အခြေခံပြီး ခန့်မှန်းထားပါတယ်။",
+    )
+    .replace(
+      /Treatment\/process start time is not exposed by APICORE in this query, so this list shows checked-in customers who have not checked out\./gi,
+      "Treatment စတင်ချိန် data မရှိသေးလို့ check-in လုပ်ပြီး checkout မလုပ်သေးတဲ့ customer များကို proxy အနေနဲ့ပြထားပါတယ်။",
     )
     .replace(/APICORE booking ledger/gi, "appointment စာရင်း")
     .replace(/APICORE appointment ledger/gi, "appointment စာရင်း")
@@ -687,12 +764,9 @@ function formatAppointmentConversation(response: GreatTimeAgentChatResponse, vie
     viewerContext,
     clinicCode,
   });
-  const totalAppointments =
-    response.metrics?.find((metric) => metric.label.toLowerCase() === "appointments")?.value ??
-    appointmentTable?.rows.length ??
-    0;
+  const totalAppointments = appointmentCountForIntent(response, appointmentTable?.rows.length ?? appointmentContextItems.length);
   const total = typeof totalAppointments === "number" ? totalAppointments : appointmentTable?.rows.length ?? appointmentContextItems.length;
-  const lines = [`ဒီနေ့ appointment ${formatMetricValue(totalAppointments, undefined)} ခုရှိပါတယ်။`];
+  const lines = [appointmentCountLineForIntent(response, totalAppointments)];
 
   if (appointmentRows.length) {
     if (appointmentContextItems.length > appointmentPageSize()) {
@@ -1260,6 +1334,12 @@ function suggestionCategory(question: string) {
   if (/cancel|no[- ]?show|မလာ|ဖျက်/.test(normalized)) {
     return "appointment_cancelled_no_show";
   }
+  if (/arrived\s+but\s+not\s+started|checked\s+in\s+but\s+not\s+started|treatment\s+not\s+started|process\s+not\s+started|ရောက်ပြီး[\s\S]{0,40}(?:treatment|process)?\s*မစ|ကုသမှု\s*မစ|မစသေး/.test(normalized)) {
+    return "appointment_arrived_not_started";
+  }
+  if (/not\s+(?:checked\s*out|completed|finished|done)|haven['’]?t\s+checked\s*out|hasn['’]?t\s+checked\s*out|no\s+checkout\s+yet|မပြီး|မလုပ်သေး|checkout\s*မလုပ်|check-out\s*မလုပ်/.test(normalized)) {
+    return "appointment_not_checked_out";
+  }
   if (/checked[- ]?in|check[- ]?in|arrived|ရောက်/.test(normalized)) {
     return "appointment_checked_in";
   }
@@ -1308,6 +1388,12 @@ function isRedundantSuggestion(response: GreatTimeAgentChatResponse, category: s
   if (response.intent === "checked_out_customers") {
     return category === "appointment_checked_out";
   }
+  if (response.intent === "not_checked_out_customers") {
+    return category === "appointment_not_checked_out";
+  }
+  if (response.intent === "arrived_not_started_customers") {
+    return category === "appointment_arrived_not_started";
+  }
   if (response.intent === "cancelled_no_show") {
     return category === "appointment_cancelled_no_show";
   }
@@ -1334,6 +1420,12 @@ function suggestionLabel(question: string, index: number) {
   }
   if (/cancel|no[- ]?show|မလာ|ဖျက်/.test(normalized)) {
     return "ဖျက်/မလာ ကြည့်မယ်";
+  }
+  if (/arrived\s+but\s+not\s+started|checked\s+in\s+but\s+not\s+started|treatment\s+not\s+started|process\s+not\s+started|ရောက်ပြီး[\s\S]{0,40}(?:treatment|process)?\s*မစ|ကုသမှု\s*မစ|မစသေး/.test(normalized)) {
+    return "ရောက်ပြီး treatment မစသေးသူ ကြည့်မယ်";
+  }
+  if (/not\s+(?:checked\s*out|completed|finished|done)|haven['’]?t\s+checked\s*out|hasn['’]?t\s+checked\s*out|no\s+checkout\s+yet|မပြီး|မလုပ်သေး|checkout\s*မလုပ်|check-out\s*မလုပ်/.test(normalized)) {
+    return "Checkout မလုပ်သေးသူ ကြည့်မယ်";
   }
   if (/checked[- ]?in|check[- ]?in|arrived|ရောက်/.test(normalized)) {
     return "ရောက်ရှိပြီးသူ ကြည့်မယ်";

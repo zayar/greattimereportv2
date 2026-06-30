@@ -26,10 +26,13 @@ export type LiveAppointmentRow = {
   scheduledTo?: string | null;
   checkInTime?: string | null;
   checkOutTime?: string | null;
+  treatmentStartedAt?: string | null;
+  treatmentCompletedAt?: string | null;
+  treatmentStartKnown?: boolean;
   rawStatus: string;
   lifecycleState: AppointmentLifecycleState;
   stateConfidence: "confirmed" | "inferred" | "unknown";
-  sourceType: "booking" | "check_in";
+  sourceType: "booking" | "check_in" | "merged";
 };
 
 export type LiveAppointmentSnapshot = {
@@ -69,6 +72,50 @@ function normalizeRawStatus(value?: string | null) {
   return value?.trim().toUpperCase().replace(/[\s-]+/g, "_") ?? "";
 }
 
+function stringFromUnknown(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function hasOwn(record: Record<string, unknown>, key: string) {
+  return Object.prototype.hasOwnProperty.call(record, key);
+}
+
+function extractTreatmentTiming(row: ApicoreBookingDetailsRow | ApicoreCheckInRow) {
+  const record = row as Record<string, unknown>;
+  const treatmentStartKeys = ["treatment_started_at", "process_started_at", "treatmentStartedAt", "processStartedAt"];
+  const treatmentCompleteKeys = [
+    "treatment_completed_at",
+    "process_completed_at",
+    "treatmentCompletedAt",
+    "processCompletedAt",
+  ];
+
+  return {
+    treatmentStartedAt: treatmentStartKeys.map((key) => stringFromUnknown(record[key])).find(Boolean) ?? null,
+    treatmentCompletedAt: treatmentCompleteKeys.map((key) => stringFromUnknown(record[key])).find(Boolean) ?? null,
+    treatmentStartKnown: treatmentStartKeys.some((key) => hasOwn(record, key)),
+  };
+}
+
+type LiveAppointmentRowWithoutLifecycle = Omit<LiveAppointmentRow, "lifecycleState" | "stateConfidence">;
+
+function withLifecycle(row: LiveAppointmentRowWithoutLifecycle): LiveAppointmentRow {
+  const lifecycle = normalizeAppointmentLifecycle({
+    rawStatus: row.rawStatus,
+    inTime: row.checkInTime,
+    outTime: row.checkOutTime,
+    treatmentStartedAt: row.treatmentStartedAt,
+    treatmentCompletedAt: row.treatmentCompletedAt,
+    treatmentStartKnown: row.treatmentStartKnown,
+  });
+
+  return {
+    ...row,
+    lifecycleState: lifecycle.state,
+    stateConfidence: lifecycle.stateConfidence,
+  };
+}
+
 export function isMerchantCancelledAppointment(row: Pick<LiveAppointmentRow, "rawStatus">) {
   return normalizeRawStatus(row.rawStatus) === "MERCHANT_CANCEL";
 }
@@ -91,9 +138,9 @@ export function isCountableTodayAppointment(row: Pick<LiveAppointmentRow, "rawSt
 }
 
 function bookingToLiveRow(row: ApicoreBookingDetailsRow): LiveAppointmentRow {
-  const lifecycle = normalizeAppointmentLifecycle({ rawStatus: row.status });
+  const treatmentTiming = extractTreatmentTiming(row);
 
-  return {
+  return withLifecycle({
     appointmentId: row.bookingid,
     customerName: normalizeText(row.MemberName),
     customerPhoneMasked: maskPhone(row.MemberPhoneNumber),
@@ -102,22 +149,19 @@ function bookingToLiveRow(row: ApicoreBookingDetailsRow): LiveAppointmentRow {
     practitionerName: normalizeText(row.PractitionerName),
     scheduledFrom: row.FromTime,
     scheduledTo: row.ToTime,
+    treatmentStartedAt: treatmentTiming.treatmentStartedAt,
+    treatmentCompletedAt: treatmentTiming.treatmentCompletedAt,
+    treatmentStartKnown: treatmentTiming.treatmentStartKnown,
     rawStatus: row.status,
-    lifecycleState: lifecycle.state,
-    stateConfidence: lifecycle.stateConfidence,
     sourceType: "booking",
-  };
+  });
 }
 
 function checkInToLiveRow(row: ApicoreCheckInRow): LiveAppointmentRow {
-  const lifecycle = normalizeAppointmentLifecycle({
-    rawStatus: row.status,
-    inTime: row.in_time,
-    outTime: row.out_time,
-  });
+  const treatmentTiming = extractTreatmentTiming(row);
   const clinicMember = row.member?.clinic_members?.[0];
 
-  return {
+  return withLifecycle({
     appointmentId: row.id,
     customerName: normalizeText(clinicMember?.name ?? row.member?.name),
     customerPhoneMasked: maskPhone(clinicMember?.phonenumber ?? row.member?.phonenumber),
@@ -127,11 +171,138 @@ function checkInToLiveRow(row: ApicoreCheckInRow): LiveAppointmentRow {
     practitionerName: normalizeText(row.practitioner?.name),
     checkInTime: row.in_time,
     checkOutTime: row.out_time ?? null,
+    treatmentStartedAt: treatmentTiming.treatmentStartedAt,
+    treatmentCompletedAt: treatmentTiming.treatmentCompletedAt,
+    treatmentStartKnown: treatmentTiming.treatmentStartKnown,
     rawStatus: row.status,
-    lifecycleState: lifecycle.state,
-    stateConfidence: lifecycle.stateConfidence,
     sourceType: "check_in",
-  };
+  });
+}
+
+function normalizeMergeText(value?: string | null) {
+  const text = value?.trim().toLowerCase().replace(/\s+/g, " ") ?? "";
+  return text && !/^unknown(?:\s+(?:customer|service|practitioner))?$/.test(text) ? text : "";
+}
+
+function normalizePhone(value?: string | null) {
+  return value?.replace(/\D/g, "") ?? "";
+}
+
+function mergeFallbackKey(row: LiveAppointmentRow, dateKey: string) {
+  const phone = normalizePhone(row.customerPhone);
+  const name = normalizeMergeText(row.customerName);
+  const service = normalizeMergeText(row.serviceName);
+  const practitioner = normalizeMergeText(row.practitionerName);
+
+  if (phone && service && practitioner) {
+    return `phone:${phone}|service:${service}|practitioner:${practitioner}|date:${dateKey}`;
+  }
+
+  if (name && service && practitioner) {
+    return `name:${name}|service:${service}|practitioner:${practitioner}|date:${dateKey}`;
+  }
+
+  return null;
+}
+
+function pushToMapList<K, V>(map: Map<K, V[]>, key: K, value: V) {
+  const existing = map.get(key);
+  if (existing) {
+    existing.push(value);
+  } else {
+    map.set(key, [value]);
+  }
+}
+
+function selectMergedStatus(booking: LiveAppointmentRow, checkIn: LiveAppointmentRow) {
+  const bookingStatus = normalizeRawStatus(booking.rawStatus);
+  const checkInStatus = normalizeRawStatus(checkIn.rawStatus);
+
+  if (checkIn.checkOutTime || checkInStatus === "CHECKOUT" || checkInStatus === "CHECKED_OUT") {
+    return checkIn.rawStatus;
+  }
+
+  if (["MERCHANT_CANCEL", "MEMBER_CANCEL", "CANCEL", "CANCELLED", "NO_SHOW", "NOSHOW"].includes(bookingStatus)) {
+    return booking.rawStatus;
+  }
+
+  return checkIn.rawStatus || booking.rawStatus;
+}
+
+function mergeBookingAndCheckInRow(booking: LiveAppointmentRow, checkIn: LiveAppointmentRow): LiveAppointmentRow {
+  return withLifecycle({
+    appointmentId: booking.appointmentId,
+    customerName: booking.customerName || checkIn.customerName,
+    customerPhoneMasked: booking.customerPhoneMasked || checkIn.customerPhoneMasked,
+    customerPhone: booking.customerPhone ?? checkIn.customerPhone,
+    memberId: booking.memberId ?? checkIn.memberId,
+    serviceName: booking.serviceName || checkIn.serviceName,
+    practitionerName: booking.practitionerName || checkIn.practitionerName,
+    scheduledFrom: booking.scheduledFrom ?? checkIn.scheduledFrom,
+    scheduledTo: booking.scheduledTo ?? checkIn.scheduledTo,
+    checkInTime: checkIn.checkInTime ?? booking.checkInTime,
+    checkOutTime: checkIn.checkOutTime ?? booking.checkOutTime,
+    treatmentStartedAt: checkIn.treatmentStartedAt ?? booking.treatmentStartedAt,
+    treatmentCompletedAt: checkIn.treatmentCompletedAt ?? booking.treatmentCompletedAt,
+    treatmentStartKnown: checkIn.treatmentStartKnown || booking.treatmentStartKnown,
+    rawStatus: selectMergedStatus(booking, checkIn),
+    sourceType: "merged",
+  });
+}
+
+function mergeLiveAppointmentRows(params: {
+  bookingRows: LiveAppointmentRow[];
+  checkInRows: LiveAppointmentRow[];
+  dateKey: string;
+  rowLimit?: number;
+}) {
+  const bookingById = new Map(params.bookingRows.map((row) => [row.appointmentId, row]));
+  const bookingFallbackRows = new Map<string, LiveAppointmentRow[]>();
+  const checkInFallbackCounts = new Map<string, number>();
+  const usedBookingIds = new Set<string>();
+
+  params.bookingRows.forEach((row) => {
+    const key = mergeFallbackKey(row, params.dateKey);
+    if (key) {
+      pushToMapList(bookingFallbackRows, key, row);
+    }
+  });
+  params.checkInRows.forEach((row) => {
+    const key = mergeFallbackKey(row, params.dateKey);
+    if (key) {
+      checkInFallbackCounts.set(key, (checkInFallbackCounts.get(key) ?? 0) + 1);
+    }
+  });
+
+  const rows = params.checkInRows.map((checkIn) => {
+    let booking = bookingById.get(checkIn.appointmentId);
+
+    if (booking && usedBookingIds.has(booking.appointmentId)) {
+      booking = undefined;
+    }
+
+    if (!booking) {
+      const key = mergeFallbackKey(checkIn, params.dateKey);
+      const candidates = key ? bookingFallbackRows.get(key) ?? [] : [];
+      const uniqueCheckInForKey = key ? checkInFallbackCounts.get(key) === 1 : false;
+      const uniqueUnusedBookings = candidates.filter((candidate) => !usedBookingIds.has(candidate.appointmentId));
+
+      if (uniqueCheckInForKey && uniqueUnusedBookings.length === 1) {
+        booking = uniqueUnusedBookings[0];
+      }
+    }
+
+    if (!booking) {
+      return checkIn;
+    }
+
+    usedBookingIds.add(booking.appointmentId);
+    return mergeBookingAndCheckInRow(booking, checkIn);
+  });
+
+  rows.push(...params.bookingRows.filter((row) => !usedBookingIds.has(row.appointmentId)));
+
+  return rows.slice(0, params.rowLimit ?? 200);
 }
 
 function countBy<T extends string>(rows: LiveAppointmentRow[], key: (row: LiveAppointmentRow) => T) {
@@ -248,7 +419,15 @@ async function loadLiveAppointmentSnapshot(params: {
     }
   }
 
-  const rows = [...checkInRows, ...bookingRows].slice(0, params.rowLimit ?? 200);
+  const rows =
+    params.includeCheckIns === false
+      ? bookingRows.slice(0, params.rowLimit ?? 200)
+      : mergeLiveAppointmentRows({
+          bookingRows,
+          checkInRows,
+          dateKey: params.dateKey,
+          rowLimit: params.rowLimit,
+        });
   if (rows.length === 0 && dataStatus === "ok") {
     dataStatus = "no_activity";
   }

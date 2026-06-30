@@ -243,16 +243,31 @@ function detectBusinessIntent(message: string) {
 
 function detectAppointmentIntent(message: string) {
   const asksAppointmentLedger = /appointment|appointments|booking|bookings|schedule|ချိန်း|ဘိုကင်/i.test(message) || isAppointmentLedgerQuestion(message);
+  const hasArrivedCue = /check[- ]?in|checked[- ]?in|checked in|arrived|ရောက်/i.test(message);
+  const notStartedCue =
+    /arrived\s+but\s+not\s+started|checked\s+in\s+but\s+not\s+started|treatment\s+not\s+started|process\s+not\s+started|not\s+(?:have\s+)?started|have\s+not\s+started|has\s+not\s+started|haven['’]?t\s+started|hasn['’]?t\s+started|ရောက်ပြီး[\s\S]{0,40}(?:treatment|process)?\s*မစ|ကုသမှု\s*မစ|မစသေး/i;
+  const notCheckedOutCue =
+    /not\s+(?:completed|finished|done|checked\s*out)|(?:has|have)\s+not\s+(?:completed|finished|done|checked\s*out)|haven['’]?t\s+checked\s*out|hasn['’]?t\s+checked\s*out|no\s+checkout\s+yet|မပြီး|မပြီးသေး|မလုပ်သေး|checkout\s*မလုပ်|checkout\s*မလုပ်သေး|check-out\s*မလုပ်|check-out\s*မလုပ်သေး/i;
+  const checkedOutCue =
+    /checked\s*out|check[- ]?out|completed|finished|done|ပြီးဆုံး|ပြီးသွား|ပြီးသူ|checkout\s*လုပ်ပြီး|check-out\s*လုပ်ပြီး/i;
+  const hasNotStartedCue = notStartedCue.test(message);
+
+  if ((hasArrivedCue && hasNotStartedCue) || /arrived\s+but\s+not\s+started|checked\s+in\s+but\s+not\s+started|ရောက်ပြီး[\s\S]{0,40}(?:treatment|process)?\s*မစ|ကုသမှု\s*မစ|မစသေး/i.test(message)) {
+    return "arrived_not_started_customers";
+  }
+  if (notCheckedOutCue.test(message)) {
+    return "not_checked_out_customers";
+  }
   if (/waiting|not\s+(?:have\s+)?started|have\s+not\s+started|has\s+not\s+started|haven't\s+started|hasn't\s+started|မစ/i.test(message)) {
     return "waiting_customers";
   }
   if (/in progress|started treatment|ကုသနေ/i.test(message)) {
     return "treatment_in_progress";
   }
-  if (/who|list|they|them|first|second|third|ဘယ်သူ/i.test(message) && /check[- ]?in|checked[- ]?in|checked in|arrived|ရောက်/i.test(message)) {
+  if (/who|list|they|them|first|second|third|ဘယ်သူ/i.test(message) && hasArrivedCue) {
     return "checked_in_customers";
   }
-  if (/check[- ]?out|completed|ပြီး/i.test(message)) {
+  if (checkedOutCue.test(message)) {
     return "checked_out_customers";
   }
   if (/cancel|no[- ]?show|ဖျက်|မလာ/i.test(message)) {
@@ -264,7 +279,7 @@ function detectAppointmentIntent(message: string) {
   if (/detail|first|second|third/i.test(message)) {
     return "appointment_detail";
   }
-  if (/check[- ]?in|checked[- ]?in|checked in|arrived|ရောက်/i.test(message)) {
+  if (hasArrivedCue) {
     return "checked_in_customers";
   }
   if (/live|right now|currently|\bnow\b|ယခု|အခု/i.test(message) && asksAppointmentLedger) {
@@ -369,6 +384,10 @@ function toolsForIntent(agentId: GreatTimeAgentId, intent: string) {
       return ["get_checked_in_customers"];
     case "checked_out_customers":
       return ["get_checked_out_customers"];
+    case "not_checked_out_customers":
+      return ["get_not_checked_out_customers"];
+    case "arrived_not_started_customers":
+      return ["get_arrived_not_started_customers"];
     case "cancelled_no_show":
       return ["get_cancelled_no_show_customers"];
     case "waiting_customers":

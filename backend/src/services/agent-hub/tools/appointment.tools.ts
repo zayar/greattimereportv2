@@ -107,6 +107,28 @@ function normalizeStatus(value: string | null | undefined) {
   return value?.trim().toUpperCase().replace(/[\s-]+/g, "_") ?? "";
 }
 
+function isCancelledNoShowOrCancelledStatus(row: Pick<LiveAppointmentRow, "rawStatus" | "lifecycleState">) {
+  const status = normalizeStatus(row.rawStatus);
+  return (
+    row.lifecycleState === "cancelled" ||
+    row.lifecycleState === "no_show" ||
+    status === "MERCHANT_CANCEL" ||
+    status === "MEMBER_CANCEL" ||
+    status === "CANCEL" ||
+    status === "CANCELLED" ||
+    status === "NO_SHOW" ||
+    status === "NOSHOW"
+  );
+}
+
+function isNotCheckedOutAppointment(row: LiveAppointmentRow) {
+  return row.lifecycleState !== "checked_out" && !isCancelledNoShowOrCancelledStatus(row);
+}
+
+function isScheduledLiveRow(row: Pick<LiveAppointmentRow, "sourceType">) {
+  return row.sourceType === "booking" || row.sourceType === "merged";
+}
+
 function periodLabel(input: AgentToolInput) {
   return input.period.fromDate === input.period.toDate
     ? input.period.fromDate
@@ -633,15 +655,14 @@ async function getLiveAppointmentCounts(
     }
   }
 
-  const bookingRows = data.rows.filter((row) => row.sourceType === "booking");
-  const checkInRows = data.rows.filter((row) => row.sourceType === "check_in");
+  const bookingRows = data.rows.filter(isScheduledLiveRow);
   const countableRows = bookingRows.filter(isCountableTodayAppointment);
-  const activeCheckedInRows = checkInRows.filter(isActiveCheckedInAppointment);
+  const activeCheckedInRows = data.rows.filter(isActiveCheckedInAppointment);
   const countableLifecycle = {
     booked: countableRows.filter((row) => row.lifecycleState === "booked").length,
     activeCheckedIn: activeCheckedInRows.length,
     checkedOut: includeCheckIns
-      ? checkInRows.filter((row) => row.lifecycleState === "checked_out").length
+      ? data.rows.filter((row) => row.lifecycleState === "checked_out").length
       : countableRows.filter((row) => row.lifecycleState === "checked_out").length,
     cancelled: countableRows.filter((row) => row.lifecycleState === "cancelled").length,
     noShow: countableRows.filter((row) => row.lifecycleState === "no_show").length,
@@ -672,8 +693,8 @@ async function getLiveAppointmentCounts(
   };
 }
 
-async function listLiveAppointments(input: AgentToolInput): Promise<AgentToolResult> {
-  const data = await snapshot(input);
+async function listLiveAppointments(input: AgentToolInput, deps: AppointmentToolDeps = defaultAppointmentToolDeps): Promise<AgentToolResult> {
+  const data = await deps.fetchLiveSnapshot(input);
 
   return {
     toolName: "list_live_appointments",
@@ -688,8 +709,8 @@ async function listLiveAppointments(input: AgentToolInput): Promise<AgentToolRes
   };
 }
 
-async function getCheckedInCustomers(input: AgentToolInput): Promise<AgentToolResult> {
-  const data = await snapshot(input);
+async function getCheckedInCustomers(input: AgentToolInput, deps: AppointmentToolDeps = defaultAppointmentToolDeps): Promise<AgentToolResult> {
+  const data = await deps.fetchLiveSnapshot(input);
   const rows = data.rows.filter(isActiveCheckedInAppointment);
 
   return {
@@ -714,8 +735,8 @@ async function getCheckedInCustomers(input: AgentToolInput): Promise<AgentToolRe
   };
 }
 
-async function getCheckedOutCustomers(input: AgentToolInput): Promise<AgentToolResult> {
-  const data = await snapshot(input);
+async function getCheckedOutCustomers(input: AgentToolInput, deps: AppointmentToolDeps = defaultAppointmentToolDeps): Promise<AgentToolResult> {
+  const data = await deps.fetchLiveSnapshot(input);
   const rows = data.rows.filter((row) => row.lifecycleState === "checked_out");
 
   return {
@@ -732,8 +753,71 @@ async function getCheckedOutCustomers(input: AgentToolInput): Promise<AgentToolR
   };
 }
 
-async function getCancelledNoShowCustomers(input: AgentToolInput): Promise<AgentToolResult> {
-  const data = await snapshot(input);
+async function getNotCheckedOutCustomers(input: AgentToolInput, deps: AppointmentToolDeps = defaultAppointmentToolDeps): Promise<AgentToolResult> {
+  const data = await deps.fetchLiveSnapshot(input);
+  const rows = data.rows.filter(isNotCheckedOutAppointment);
+
+  return {
+    toolName: "get_not_checked_out_customers",
+    sourceName: "APICORE live bookings and check-ins",
+    checkedAt: data.checkedAt,
+    period: input.period.toDate,
+    dataStatus: rows.length ? data.dataStatus : "no_activity",
+    live: true,
+    summary: `${rows.length.toLocaleString("en-US")} appointments have not checked out yet for ${input.period.toDate}.`,
+    metrics: [{ label: "Not checked out yet", value: rows.length }],
+    tables: [liveTable("Appointments not checked out", rows)],
+    warnings: data.warnings,
+    entityRefs: rows.map((row, index) => liveAppointmentEntityRef(row, index + 1, input.clinic.clinicCode)),
+  };
+}
+
+async function getArrivedNotStartedCustomers(input: AgentToolInput, deps: AppointmentToolDeps = defaultAppointmentToolDeps): Promise<AgentToolResult> {
+  const data = await deps.fetchLiveSnapshot(input);
+  const hasTreatmentStartField = data.rows.some((row) => row.treatmentStartKnown);
+  const rows = hasTreatmentStartField
+    ? data.rows.filter(
+        (row) =>
+          Boolean(row.checkInTime) &&
+          !row.treatmentStartedAt &&
+          !row.checkOutTime &&
+          !isCancelledNoShowOrCancelledStatus(row) &&
+          row.lifecycleState !== "checked_out",
+      )
+    : data.rows.filter(isActiveCheckedInAppointment);
+  const warning = hasTreatmentStartField
+    ? null
+    : {
+        type: "treatment_start_unavailable",
+        title: "Treatment/process start time unavailable",
+        message:
+          "Treatment/process start time is not exposed by APICORE in this query, so this list shows checked-in customers who have not checked out.",
+      };
+
+  return {
+    toolName: "get_arrived_not_started_customers",
+    sourceName: "APICORE live bookings and check-ins",
+    checkedAt: data.checkedAt,
+    period: input.period.toDate,
+    dataStatus: rows.length ? data.dataStatus : "no_activity",
+    live: true,
+    summary: hasTreatmentStartField
+      ? `${rows.length.toLocaleString("en-US")} checked-in customers have not started treatment for ${input.period.toDate}.`
+      : `${rows.length.toLocaleString("en-US")} checked-in customers have not checked out for ${input.period.toDate}; treatment/process start time is not exposed by APICORE in this query.`,
+    metrics: [
+      {
+        label: hasTreatmentStartField ? "Arrived but not started treatment" : "Arrived not checked out proxy",
+        value: rows.length,
+      },
+    ],
+    tables: [liveTable(hasTreatmentStartField ? "Arrived but not started treatment" : "Arrived, treatment start unknown", rows)],
+    warnings: warning ? [...data.warnings, warning] : data.warnings,
+    entityRefs: rows.map((row, index) => liveAppointmentEntityRef(row, index + 1, input.clinic.clinicCode)),
+  };
+}
+
+async function getCancelledNoShowCustomers(input: AgentToolInput, deps: AppointmentToolDeps = defaultAppointmentToolDeps): Promise<AgentToolResult> {
+  const data = await deps.fetchLiveSnapshot(input);
   const rows = data.rows.filter((row) => row.lifecycleState === "cancelled" || row.lifecycleState === "no_show");
 
   return {
@@ -753,8 +837,8 @@ async function getCancelledNoShowCustomers(input: AgentToolInput): Promise<Agent
   };
 }
 
-async function getAppointmentDetail(input: AgentToolInput): Promise<AgentToolResult> {
-  const data = await snapshot(input);
+async function getAppointmentDetail(input: AgentToolInput, deps: AppointmentToolDeps = defaultAppointmentToolDeps): Promise<AgentToolResult> {
+  const data = await deps.fetchLiveSnapshot(input);
   const appointmentId = input.entityContext?.appointmentId ?? input.entityContext?.entityId;
   const rows = appointmentId
     ? data.rows.filter((row) => row.appointmentId === appointmentId)
@@ -856,7 +940,7 @@ export function createAppointmentTools(overrides: Partial<AppointmentToolDeps> =
       live: true,
       maxRows: 50,
       timeoutMs: 20_000,
-      execute: listLiveAppointments,
+      execute: (input) => listLiveAppointments(input, deps),
     },
     {
       name: "get_checked_in_customers",
@@ -867,7 +951,7 @@ export function createAppointmentTools(overrides: Partial<AppointmentToolDeps> =
       live: true,
       maxRows: 50,
       timeoutMs: 20_000,
-      execute: getCheckedInCustomers,
+      execute: (input) => getCheckedInCustomers(input, deps),
     },
     {
       name: "get_checked_out_customers",
@@ -878,7 +962,29 @@ export function createAppointmentTools(overrides: Partial<AppointmentToolDeps> =
       live: true,
       maxRows: 50,
       timeoutMs: 20_000,
-      execute: getCheckedOutCustomers,
+      execute: (input) => getCheckedOutCustomers(input, deps),
+    },
+    {
+      name: "get_not_checked_out_customers",
+      agentId: "appointment",
+      description: "List appointments that have not checked out yet.",
+      inputSchema: toolInputSchema,
+      sourceName: "APICORE live bookings and check-ins",
+      live: true,
+      maxRows: 50,
+      timeoutMs: 20_000,
+      execute: (input) => getNotCheckedOutCustomers(input, deps),
+    },
+    {
+      name: "get_arrived_not_started_customers",
+      agentId: "appointment",
+      description: "List arrived customers whose treatment start is not confirmed yet.",
+      inputSchema: toolInputSchema,
+      sourceName: "APICORE live bookings and check-ins",
+      live: true,
+      maxRows: 50,
+      timeoutMs: 20_000,
+      execute: (input) => getArrivedNotStartedCustomers(input, deps),
     },
     {
       name: "get_cancelled_no_show_customers",
@@ -889,7 +995,7 @@ export function createAppointmentTools(overrides: Partial<AppointmentToolDeps> =
       live: true,
       maxRows: 50,
       timeoutMs: 20_000,
-      execute: getCancelledNoShowCustomers,
+      execute: (input) => getCancelledNoShowCustomers(input, deps),
     },
     {
       name: "get_appointment_detail",
@@ -900,7 +1006,7 @@ export function createAppointmentTools(overrides: Partial<AppointmentToolDeps> =
       live: true,
       maxRows: 20,
       timeoutMs: 20_000,
-      execute: getAppointmentDetail,
+      execute: (input) => getAppointmentDetail(input, deps),
     },
     {
       name: "get_appointment_trends",

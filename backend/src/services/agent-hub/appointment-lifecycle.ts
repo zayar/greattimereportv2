@@ -17,6 +17,7 @@ export type AppointmentLifecycleInput = {
   outTime?: string | null;
   treatmentStartedAt?: string | null;
   treatmentCompletedAt?: string | null;
+  treatmentStartKnown?: boolean;
 };
 
 function normalizeRawStatus(value?: string | null) {
@@ -46,6 +47,10 @@ export function normalizeAppointmentLifecycle(input: AppointmentLifecycleInput):
   }
 
   if (rawStatus === "CHECKIN" || rawStatus === "CHECK_IN" || input.inTime) {
+    if (input.treatmentStartKnown) {
+      return { state: "waiting_for_treatment", stateConfidence: "confirmed" };
+    }
+
     return { state: "arrived_start_unknown", stateConfidence: "inferred" };
   }
 
