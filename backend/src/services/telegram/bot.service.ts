@@ -14,6 +14,7 @@ import type {
   GreatTimeAgentEntityContext,
   GreatTimeAgentId,
   GreatTimeAgentMetric,
+  GreatTimeAgentTableColumn,
 } from "../agent-hub/types.js";
 import { buildTelegramSalesAssistantReply } from "../gt-growth-ai/sales-assistant.service.js";
 import { GT_GROWTH_AI_FEATURE_GATE } from "../../types/report-ai.js";
@@ -1057,13 +1058,15 @@ function formatFinanceSalesConversation(response: GreatTimeAgentChatResponse) {
 }
 
 function formatPaymentMethodsConversation(response: GreatTimeAgentChatResponse) {
-  const table = response.tables?.find((item) => /payment methods/i.test(item.title));
+  const table =
+    response.tables?.find((item) => /payment method/i.test(item.title)) ??
+    (response.intent === "payment_method_breakdown" ? response.tables?.find((item) => item.rows.length > 0) : undefined);
   if (!table?.rows.length) {
     return [];
   }
 
   const periodLabel = translatePeriodLabel(response.period.label);
-  const lines = [`${periodLabel} payment method / bank transaction summary:`];
+  const lines = [`${periodLabel} payment method collection summary:`];
 
   table.rows.slice(0, 10).forEach((row, index) => {
     const method = stringValue(row, "paymentMethod", stringValue(row, "method", "Method"));
@@ -1079,6 +1082,8 @@ function formatPaymentMethodsConversation(response: GreatTimeAgentChatResponse) 
       lines.push(`Transactions: ${formatTelegramNumber(transactions)}`);
     }
   });
+
+  lines.push("", "မှတ်ချက်: ဒါက payment method collection summary ဖြစ်ပါတယ်။ Real bank statement ledger မဟုတ်ပါ။");
 
   return lines;
 }
@@ -1236,7 +1241,11 @@ function formatCustomerChoiceConversation(response: GreatTimeAgentChatResponse, 
   return lines;
 }
 
-function isProtectedNumericColumn(column: { key: string; title: string }) {
+function isProtectedNumericColumn(column: GreatTimeAgentTableColumn) {
+  if (column.pii === "phone" || column.pii === "id") {
+    return true;
+  }
+
   const key = column.key.toLowerCase();
   const title = column.title.toLowerCase();
   const combined = `${key} ${title}`;
@@ -1248,7 +1257,11 @@ function isProtectedNumericColumn(column: { key: string; title: string }) {
   );
 }
 
-function isMoneyColumn(column: { key: string; title: string }) {
+function isMoneyColumn(column: GreatTimeAgentTableColumn) {
+  if (column.unit) {
+    return column.unit === "amount";
+  }
+
   const text = `${column.key} ${column.title}`.toLowerCase();
   return (
     text.includes("amount") ||
@@ -1262,7 +1275,11 @@ function isMoneyColumn(column: { key: string; title: string }) {
   );
 }
 
-function isCountColumn(column: { key: string; title: string }) {
+function isCountColumn(column: GreatTimeAgentTableColumn) {
+  if (column.unit) {
+    return column.unit === "count";
+  }
+
   const text = `${column.key} ${column.title}`.toLowerCase();
   return (
     text.includes("count") ||
@@ -1274,10 +1291,33 @@ function isCountColumn(column: { key: string; title: string }) {
   );
 }
 
-function formatTableCellForTelegram(row: Record<string, unknown>, column: { key: string; title: string }) {
+function formatTableCellForTelegram(
+  row: Record<string, unknown>,
+  column: GreatTimeAgentTableColumn,
+  viewerContext?: CustomerPhoneViewerContext,
+) {
   const raw = row[column.key];
+  if (column.pii === "phone") {
+    return formatCustomerPhone(
+      {
+        fullPhone: typeof raw === "string" || typeof raw === "number" ? String(raw) : undefined,
+        maskedPhone:
+          stringValue(row, `${column.key}Masked`, "") ||
+          stringValue(row, "maskedPhone", "") ||
+          stringValue(row, "customerPhoneMasked", ""),
+      },
+      viewerContext,
+      { logContext: "generic_table_phone" },
+    );
+  }
   if (isProtectedNumericColumn(column)) {
     return stringValue(row, column.key);
+  }
+  if (column.unit === "text") {
+    return stringValue(row, column.key);
+  }
+  if (column.unit === "percent") {
+    return isNumericLike(raw) ? `${formatTelegramNumber(raw)}%` : stringValue(row, column.key);
   }
   if (isMoneyColumn(column)) {
     return formatTelegramMoney(raw);
@@ -1289,7 +1329,7 @@ function formatTableCellForTelegram(row: Record<string, unknown>, column: { key:
   return stringValue(row, column.key);
 }
 
-function formatGenericTableConversation(response: GreatTimeAgentChatResponse) {
+function formatGenericTableConversation(response: GreatTimeAgentChatResponse, viewerContext?: CustomerPhoneViewerContext) {
   const table = response.tables?.find((item) => item.rows.length > 0);
   if (!table) {
     return [];
@@ -1299,7 +1339,7 @@ function formatGenericTableConversation(response: GreatTimeAgentChatResponse) {
   const lines = [`${table.title} ကို ဖတ်ရလွယ်အောင် ပြထားပါတယ်:`];
   table.rows.slice(0, 6).forEach((row, index) => {
     const values = columns
-      .map((column) => `${column.title}: ${formatTableCellForTelegram(row, column)}`)
+      .map((column) => `${column.title}: ${formatTableCellForTelegram(row, column, viewerContext)}`)
       .join("၊ ");
     lines.push(`${index + 1}. ${values}။`);
   });
@@ -1360,7 +1400,7 @@ function formatConversationTablePreview(
     return purchases;
   }
 
-  return formatGenericTableConversation(response);
+  return formatGenericTableConversation(response, options?.viewerContext);
 }
 
 function formatCustomer360PackageLine(row: Customer360FactPack["packages"]["holdings"][number]) {

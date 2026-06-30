@@ -38,9 +38,10 @@ type SummaryRow = {
   distinctCustomers: number;
 };
 
-export async function getDailyTreatmentReport(params: {
+export async function getTreatmentReportRange(params: {
   clinicCode: string;
-  date: string;
+  fromDate: string;
+  toDate: string;
 }) {
   const [matrixRows, recordRows, summaryRows] = await Promise.all([
     runAnalyticsQuery<MatrixRow>(
@@ -51,7 +52,7 @@ export async function getDailyTreatmentReport(params: {
             ServiceName AS serviceName,
             COUNT(*) AS serviceCount
           FROM ${analyticsTables.mainDataView}
-          WHERE DATE(CheckInTime) = @date
+          WHERE DATE(CheckInTime) BETWEEN @fromDate AND @toDate
             AND ServiceName IS NOT NULL
             AND LOWER(ClinicCode) = LOWER(@clinicCode)
           GROUP BY therapistName, serviceName
@@ -75,7 +76,7 @@ export async function getDailyTreatmentReport(params: {
           CustomerName AS customerName,
           CustomerPhoneNumber AS customerPhone
         FROM ${analyticsTables.mainDataView}
-        WHERE DATE(CheckInTime) = @date
+        WHERE DATE(CheckInTime) BETWEEN @fromDate AND @toDate
           AND ServiceName IS NOT NULL
           AND LOWER(ClinicCode) = LOWER(@clinicCode)
         ORDER BY CheckInTime DESC
@@ -91,7 +92,7 @@ export async function getDailyTreatmentReport(params: {
           COUNT(DISTINCT ServiceName) AS uniqueServices,
           COUNT(DISTINCT CONCAT(COALESCE(CustomerPhoneNumber, ''), '|', COALESCE(CustomerName, ''))) AS distinctCustomers
         FROM ${analyticsTables.mainDataView}
-        WHERE DATE(CheckInTime) = @date
+        WHERE DATE(CheckInTime) BETWEEN @fromDate AND @toDate
           AND ServiceName IS NOT NULL
           AND LOWER(ClinicCode) = LOWER(@clinicCode)
       `,
@@ -121,7 +122,9 @@ export async function getDailyTreatmentReport(params: {
   const matrixTotalTreatments = matrix.reduce((sum, row) => sum + row.totalServices, 0);
 
   return {
-    selectedDate: params.date,
+    selectedDate: params.toDate,
+    selectedFromDate: params.fromDate,
+    selectedToDate: params.toDate,
     summary: {
       totalTreatments: summary ? parseNumber(summary.totalTreatments) : matrixTotalTreatments,
       therapists: summary ? parseNumber(summary.therapists) : matrix.length,
@@ -141,5 +144,21 @@ export async function getDailyTreatmentReport(params: {
       customerName: row.customerName,
       customerPhone: row.customerPhone ?? null,
     })),
+  };
+}
+
+export async function getDailyTreatmentReport(params: {
+  clinicCode: string;
+  date: string;
+}) {
+  const report = await getTreatmentReportRange({
+    clinicCode: params.clinicCode,
+    fromDate: params.date,
+    toDate: params.date,
+  });
+
+  return {
+    ...report,
+    selectedDate: params.date,
   };
 }

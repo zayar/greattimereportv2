@@ -1,4 +1,4 @@
-import type { GreatTimeAgentChatResponse, GreatTimeAgentTable } from "../agent-hub/types.js";
+import type { GreatTimeAgentChatResponse, GreatTimeAgentTable, GreatTimeAgentTableColumn } from "../agent-hub/types.js";
 
 const UTF8_BOM = "\uFEFF";
 
@@ -111,19 +111,56 @@ function buildFileName(params: CsvExportParams, table: GreatTimeAgentTable) {
   return `${base.slice(0, 96)}.csv`;
 }
 
+const sensitiveCsvKeys = new Set([
+  "phone",
+  "phoneNumber",
+  "customerPhone",
+  "customerPhoneNumber",
+  "mobile",
+  "memberId",
+  "customerId",
+  "appointmentId",
+  "invoiceId",
+]);
+
+function normalizeCsvKey(key: string) {
+  return key.replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+const normalizedSensitiveCsvKeys = new Set([...sensitiveCsvKeys].map(normalizeCsvKey));
+
+function isSensitiveCsvKey(key: string) {
+  return normalizedSensitiveCsvKeys.has(normalizeCsvKey(key));
+}
+
+function shouldExportDeclaredColumn(column: GreatTimeAgentTableColumn) {
+  if (column.exportable === false) {
+    return false;
+  }
+
+  const sensitive = column.pii === "phone" || column.pii === "id" || isSensitiveCsvKey(column.key);
+  return !sensitive || column.exportable === true;
+}
+
 function buildHeaders(table: GreatTimeAgentTable) {
   const seen = new Set<string>();
-  const headers = table.columns.map((column) => {
+  const headers = table.columns.flatMap((column) => {
     seen.add(column.key);
-    return {
-      key: column.key,
-      title: column.title || column.key,
-    };
+    if (!shouldExportDeclaredColumn(column)) {
+      return [];
+    }
+
+    return [
+      {
+        key: column.key,
+        title: column.title || column.key,
+      },
+    ];
   });
 
   for (const row of table.rows) {
     for (const key of Object.keys(row)) {
-      if (!seen.has(key)) {
+      if (!seen.has(key) && !isSensitiveCsvKey(key)) {
         seen.add(key);
         headers.push({ key, title: key });
       }

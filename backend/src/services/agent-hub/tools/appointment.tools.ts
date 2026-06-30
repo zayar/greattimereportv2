@@ -692,9 +692,9 @@ async function getLiveAppointmentCounts(
     period: input.period.toDate,
     dataStatus: data.dataStatus,
     live: true,
-    summary: `Today's appointment snapshot has ${countableRows.length.toLocaleString("en-US")} appointment booking${countableRows.length === 1 ? "" : "s"} for ${input.period.toDate}, excluding merchant-cancelled rows.`,
+    summary: `Live appointment snapshot has ${countableRows.length.toLocaleString("en-US")} appointment booking${countableRows.length === 1 ? "" : "s"} for ${input.period.toDate}, excluding merchant-cancelled rows.`,
     metrics,
-    tables: [liveTable("Today's appointment rows", countableRows)],
+    tables: [liveTable("Live appointment rows", countableRows)],
     warnings: data.warnings,
     entityRefs: countableRows.map((row, index) => liveAppointmentEntityRef(row, index + 1, input.clinic.clinicCode)),
     data: {

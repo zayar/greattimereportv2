@@ -828,9 +828,17 @@ export interface GreatTimeAgentMetric {
   helperText?: string;
 }
 
+export interface GreatTimeAgentTableColumn {
+  key: string;
+  title: string;
+  unit?: "amount" | "count" | "percent" | "text";
+  pii?: "phone" | "id" | "none";
+  exportable?: boolean;
+}
+
 export interface GreatTimeAgentTable {
   title: string;
-  columns: Array<{ key: string; title: string }>;
+  columns: GreatTimeAgentTableColumn[];
   rows: Array<Record<string, unknown>>;
 }
 

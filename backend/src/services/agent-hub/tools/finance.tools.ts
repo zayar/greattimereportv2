@@ -290,9 +290,9 @@ async function getSalesSummary(input: AgentToolInput, deps: FinanceToolDeps = de
       {
         title: "Top services by sales",
         columns: [
-          { key: "serviceName", title: "Service" },
-          { key: "totalRevenue", title: "Revenue" },
-          { key: "invoiceCount", title: "Invoices" },
+          { key: "serviceName", title: "Service", unit: "text" },
+          { key: "totalRevenue", title: "Revenue", unit: "amount" },
+          { key: "invoiceCount", title: "Invoices", unit: "count" },
         ],
         rows: report.topServices,
       },
@@ -339,17 +339,26 @@ async function getPaymentMethodBreakdown(input: AgentToolInput): Promise<AgentTo
     period: periodLabel(input),
     dataStatus: report.methods.length > 0 ? "ok" : "no_activity",
     live: false,
+    summary: `Payment method collection summary for ${input.period.label}: ${report.summary.totalAmount.toLocaleString("en-US")} across ${report.summary.invoiceCount.toLocaleString("en-US")} invoices. This is not a real bank statement ledger.`,
     tables: [
       {
         title: "Payment methods",
         columns: [
-          { key: "paymentMethod", title: "Method" },
-          { key: "totalAmount", title: "Amount" },
-          { key: "transactionCount", title: "Transactions" },
+          { key: "paymentMethod", title: "Method", unit: "text" },
+          { key: "totalAmount", title: "Amount", unit: "amount" },
+          { key: "transactionCount", title: "Transactions", unit: "count" },
         ],
         rows: report.methods,
       },
     ],
+    data: {
+      reportDefinition: {
+        grain: "payment_method_collection",
+        source: "BigQuery payment report",
+        dateField: "OrderCreatedDate",
+        explanation: "Counts payment method collection rows. This is not a real bank statement ledger.",
+      },
+    },
   };
 }
 
@@ -402,11 +411,11 @@ async function compareSalesPeriods(input: AgentToolInput): Promise<AgentToolResu
       {
         title: "Period comparison",
         columns: [
-          { key: "period", title: "Period" },
-          { key: "fromDate", title: "From" },
-          { key: "toDate", title: "To" },
-          { key: "revenue", title: "Revenue" },
-          { key: "invoices", title: "Invoices" },
+          { key: "period", title: "Period", unit: "text" },
+          { key: "fromDate", title: "From", unit: "text" },
+          { key: "toDate", title: "To", unit: "text" },
+          { key: "revenue", title: "Revenue", unit: "amount" },
+          { key: "invoices", title: "Invoices", unit: "count" },
         ],
         rows: [
           {
@@ -473,11 +482,11 @@ async function getCustomerPaymentHistory(input: AgentToolInput): Promise<AgentTo
       {
         title: "Customer payment history",
         columns: [
-          { key: "dateLabel", title: "Date" },
-          { key: "invoiceNumber", title: "Invoice" },
-          { key: "serviceName", title: "Service" },
-          { key: "paymentMethod", title: "Method" },
-          { key: "invoiceNetTotal", title: "Amount" },
+          { key: "dateLabel", title: "Date", unit: "text" },
+          { key: "invoiceNumber", title: "Invoice", unit: "text", pii: "id", exportable: true },
+          { key: "serviceName", title: "Service", unit: "text" },
+          { key: "paymentMethod", title: "Method", unit: "text" },
+          { key: "invoiceNetTotal", title: "Amount", unit: "amount" },
         ],
         rows: limitRows(report.rows, 20),
       },
@@ -509,12 +518,12 @@ async function getInvoiceDetail(input: AgentToolInput): Promise<AgentToolResult>
           {
             title: "Invoice detail",
             columns: [
-              { key: "dateLabel", title: "Date" },
-              { key: "invoiceNumber", title: "Invoice" },
-              { key: "customerName", title: "Customer" },
-              { key: "serviceName", title: "Service" },
-              { key: "paymentMethod", title: "Method" },
-              { key: "invoiceNetTotal", title: "Invoice total" },
+              { key: "dateLabel", title: "Date", unit: "text" },
+              { key: "invoiceNumber", title: "Invoice", unit: "text", pii: "id", exportable: true },
+              { key: "customerName", title: "Customer", unit: "text" },
+              { key: "serviceName", title: "Service", unit: "text" },
+              { key: "paymentMethod", title: "Method", unit: "text" },
+              { key: "invoiceNetTotal", title: "Invoice total", unit: "amount" },
             ],
             rows,
           },

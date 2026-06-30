@@ -320,7 +320,11 @@ function detectAppointmentIntent(message: string) {
   return "appointment_summary";
 }
 
-function toolsForIntent(agentId: GreatTimeAgentId, intent: string) {
+function isTodayPeriod(period?: AgentPeriod) {
+  return Boolean(period && period.label === "today" && period.fromDate === period.toDate);
+}
+
+function toolsForIntent(agentId: GreatTimeAgentId, intent: string, period?: AgentPeriod) {
   if (intent === "unsupported_write_request") {
     return [];
   }
@@ -398,7 +402,7 @@ function toolsForIntent(agentId: GreatTimeAgentId, intent: string) {
 
   switch (intent) {
     case "appointment_summary":
-      return ["get_live_appointment_counts"];
+      return isTodayPeriod(period) ? ["get_live_appointment_counts"] : ["get_appointment_ledger"];
     case "appointment_list":
       return ["get_appointment_ledger"];
     case "live_appointment_counts":
@@ -478,7 +482,7 @@ export function planAgentRequest(params: {
     resolvedAgent,
     autoMode,
     intent,
-    toolNames: toolsForIntent(resolvedAgent, intent),
+    toolNames: toolsForIntent(resolvedAgent, intent, period),
     period,
   };
 }

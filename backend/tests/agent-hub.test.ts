@@ -50,6 +50,7 @@ const { extractInvoiceSearch } = await import("../src/services/agent-hub/tools/f
 const { buildFinanceSnapshotSummaryResult, createFinanceTools } = await import("../src/services/agent-hub/tools/finance.tools.ts")
 const { buildAppointmentCountResultFromSnapshot, buildAppointmentLedgerQueryRange, createAppointmentTools } = await import("../src/services/agent-hub/tools/appointment.tools.ts")
 const { buildOwnerDailyBriefFromSnapshots, selectOwnerDailyBriefDate } = await import("../src/services/agent-hub/tools/business.tools.ts")
+const { getTreatmentReportRange } = await import("../src/services/reports/daily-treatment.service.ts")
 const { extractLikelyCustomerSearchText } = await import("../src/services/agent-hub/customer-query.ts")
 const { extractExplicitServiceSearchText } = await import("../src/services/agent-hub/service-query.ts")
 const { enhanceAgentResponseNarrative } = await import("../src/services/agent-hub/narrative.service.ts")
@@ -1269,6 +1270,66 @@ test("BigQuery forceRefresh bypasses cache", async () => {
   )
 })
 
+test("Daily treatment report queries the full selected date range", async () => {
+  const queryOptions: Array<{ query: string; params: Record<string, unknown> }> = []
+
+  await withMockedBigQuery(
+    async (options) => {
+      const queryOption = options as { query: string; params: Record<string, unknown> }
+      queryOptions.push(queryOption)
+
+      if (queryOption.query.includes("FORMAT_TIMESTAMP")) {
+        return [
+          [
+            {
+              checkInTime: "2026-06-15 01:20 PM",
+              therapistName: "Thandar",
+              serviceName: "Laser",
+              customerName: "Ma Zar",
+              customerPhone: "0959423664860",
+            },
+          ],
+        ]
+      }
+
+      if (queryOption.query.includes("WITH service_matrix")) {
+        return [
+          [
+            {
+              therapistName: "Thandar",
+              serviceDetails: [{ serviceName: "Laser", serviceCount: 1 }],
+              totalServices: 1,
+            },
+          ],
+        ]
+      }
+
+      return [[{ totalTreatments: 1, therapists: 1, uniqueServices: 1, distinctCustomers: 1 }]]
+    },
+    async () => {
+      const report = await getTreatmentReportRange({
+        clinicCode: "ABC",
+        fromDate: "2026-06-01",
+        toDate: "2026-06-30",
+      })
+
+      assert.equal(report.selectedFromDate, "2026-06-01")
+      assert.equal(report.selectedToDate, "2026-06-30")
+      assert.equal(report.summary.totalTreatments, 1)
+      assert.equal(report.records.length, 1)
+    },
+  )
+
+  assert.equal(queryOptions.length, 3)
+  for (const option of queryOptions) {
+    assert.equal(option.params.clinicCode, "ABC")
+    assert.equal(option.params.fromDate, "2026-06-01")
+    assert.equal(option.params.toDate, "2026-06-30")
+    assert.match(option.query, /DATE\(CheckInTime\) BETWEEN @fromDate AND @toDate/)
+    assert.doesNotMatch(option.query, /DATE\(CheckInTime\) = @date/)
+  }
+})
+
 test("BigQuery analytics query context can bypass in-memory and BigQuery cache for learning jobs", async () => {
   let queryCalls = 0
   const queryOptions: unknown[] = []
@@ -2219,7 +2280,7 @@ test("planner maps appointment lifecycle wording before positive checkout matche
 
 test("planner preserves requested customer service practitioner dimensions", () => {
   const cases = [
-    ["Yesterday appointment?", "appointment", "appointment_summary", ["get_live_appointment_counts"]],
+    ["Yesterday appointment?", "appointment", "appointment_summary", ["get_appointment_ledger"]],
     ["မနေ့က appointment စာရင်းပြပါ", "appointment", "appointment_list", ["get_appointment_ledger"]],
     ["မနေ့က ဘယ် customers တွေ ဘယ် service ကို ဘယ်သူနဲ့လုပ်လဲ", "business", "treatment_roster", ["get_daily_treatments"]],
     [
@@ -2802,8 +2863,9 @@ test("Telegram Agent reply formatter uses Myanmar conversational text and button
   assert.match(message, /ဖြေဆိုသူ: GT Brain → ငွေကြေး Agent/)
   assert.match(message, /ကာလ: ဒီလ/)
   assert.match(message, /စုဆောင်းငွေ: 10,000 ကျပ်/)
-  assert.match(message, /ဒီလ payment method \/ bank transaction summary/)
+  assert.match(message, /ဒီလ payment method collection summary/)
   assert.match(message, /CASH — 10,000 ကျပ်/)
+  assert.match(message, /Real bank statement ledger မဟုတ်ပါ/)
   assert.doesNotMatch(message, /BigQuery payment report: ok/)
   assert.doesNotMatch(message, /Sources:/)
   assert.doesNotMatch(message, /\/ask Show payment methods by amount/)
@@ -2853,6 +2915,8 @@ test("Telegram finance payment methods formatter adds money separators and trans
   assert.match(message, /KPAY — 29,363,000 ကျပ်/)
   assert.match(message, /WAVE — 1,202,500 ကျပ်/)
   assert.match(message, /Transactions: 1,234/)
+  assert.match(message, /payment method collection summary/)
+  assert.match(message, /Real bank statement ledger မဟုတ်ပါ/)
   assert.doesNotMatch(message, /58550000/)
   assert.doesNotMatch(message, /34952000/)
   assert.doesNotMatch(message, /29363000/)
@@ -2879,10 +2943,10 @@ test("Telegram generic table formatter formats money and counts but preserves ph
       {
         title: "Finance detail rows",
         columns: [
-          { key: "amount", title: "Amount" },
-          { key: "transactionCount", title: "Transactions" },
-          { key: "customerPhone", title: "Phone" },
-          { key: "invoiceNumber", title: "Invoice Number" },
+          { key: "amount", title: "Amount", unit: "amount" },
+          { key: "transactionCount", title: "Transactions", unit: "count" },
+          { key: "customerPhone", title: "Phone", unit: "text" },
+          { key: "invoiceNumber", title: "Invoice Number", unit: "text" },
         ],
         rows: [
           {

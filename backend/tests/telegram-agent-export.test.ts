@@ -84,6 +84,77 @@ test("GreatTime Agent CSV builder exports only structured table rows safely", ()
   )
 })
 
+test("GreatTime Agent CSV builder blocks undeclared sensitive extra row keys", () => {
+  const exportFile = buildGreatTimeAgentCsvExportFromTables({
+    tables: [
+      {
+        title: "Daily treatment records",
+        columns: [
+          { key: "customerName", title: "Customer" },
+          { key: "serviceName", title: "Service" },
+        ],
+        rows: [
+          {
+            customerName: "Ma Zar",
+            serviceName: "Laser",
+            customerPhone: "0959423664860",
+            memberId: "MEM-123",
+            note: "VIP",
+          },
+        ],
+      },
+    ],
+    resolvedAgent: "business",
+    intent: "treatment_roster",
+    period,
+    originalMessage: "treatment roster csv",
+    now: "2026-06-26T03:00:00.000Z",
+  })
+
+  assert.equal(exportFile.csv.slice(1).startsWith("Customer,Service,note\r\n"), true)
+  assert.match(exportFile.csv, /Ma Zar,Laser,VIP/)
+  assert.doesNotMatch(exportFile.csv, /customerPhone/)
+  assert.doesNotMatch(exportFile.csv, /0959423664860/)
+  assert.doesNotMatch(exportFile.csv, /memberId/)
+  assert.doesNotMatch(exportFile.csv, /MEM-123/)
+})
+
+test("GreatTime Agent CSV builder exports declared masked phones but requires explicit sensitive export opt-in", () => {
+  const exportFile = buildGreatTimeAgentCsvExportFromTables({
+    tables: [
+      {
+        title: "Customer matches",
+        columns: [
+          { key: "customerName", title: "Customer" },
+          { key: "customerPhoneMasked", title: "Phone", pii: "none", exportable: true },
+          { key: "customerPhone", title: "Raw phone", pii: "phone" },
+          { key: "customerId", title: "Customer ID", pii: "id" },
+        ],
+        rows: [
+          {
+            customerName: "Ma Zar",
+            customerPhoneMasked: "09***860",
+            customerPhone: "0959423664860",
+            customerId: "cust-1",
+          },
+        ],
+      },
+    ],
+    resolvedAgent: "customer_relationship",
+    intent: "top_customers",
+    period,
+    originalMessage: "customer csv",
+    now: "2026-06-26T03:00:00.000Z",
+  })
+
+  assert.equal(exportFile.csv.slice(1).startsWith("Customer,Phone\r\n"), true)
+  assert.match(exportFile.csv, /Ma Zar,09\*\*\*860/)
+  assert.doesNotMatch(exportFile.csv, /Raw phone/)
+  assert.doesNotMatch(exportFile.csv, /0959423664860/)
+  assert.doesNotMatch(exportFile.csv, /Customer ID/)
+  assert.doesNotMatch(exportFile.csv, /cust-1/)
+})
+
 test("Telegram Agent export cache stores only the latest unexpired table result", () => {
   exportCacheTest.clearAll()
   const now = Date.now()

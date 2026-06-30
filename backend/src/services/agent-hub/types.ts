@@ -56,9 +56,17 @@ export type GreatTimeAgentMetric = {
   helperText?: string;
 };
 
+export type GreatTimeAgentTableColumn = {
+  key: string;
+  title: string;
+  unit?: "amount" | "count" | "percent" | "text";
+  pii?: "phone" | "id" | "none";
+  exportable?: boolean;
+};
+
 export type GreatTimeAgentTable = {
   title: string;
-  columns: Array<{ key: string; title: string }>;
+  columns: GreatTimeAgentTableColumn[];
   rows: Array<Record<string, unknown>>;
 };
 

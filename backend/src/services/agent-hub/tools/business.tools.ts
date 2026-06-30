@@ -2,7 +2,7 @@ import { z } from "zod";
 import { env } from "../../../config/env.js";
 import { runWithAnalyticsQueryContext } from "../../analytics-query-context.js";
 import { getDashboardOverview } from "../../reports/dashboard.service.js";
-import { getDailyTreatmentReport } from "../../reports/daily-treatment.service.js";
+import { getTreatmentReportRange } from "../../reports/daily-treatment.service.js";
 import { getServiceBehaviorReport } from "../../reports/service-behavior.service.js";
 import { getServicePortalList, getServicePortalOverview } from "../../reports/service-portal.service.js";
 import { getTherapistPortalReport } from "../../reports/therapist-portal.service.js";
@@ -954,9 +954,10 @@ async function getPractitionerOverview(input: AgentToolInput): Promise<AgentTool
 }
 
 async function getDailyTreatments(input: AgentToolInput): Promise<AgentToolResult> {
-  const data = await getDailyTreatmentReport({
+  const data = await getTreatmentReportRange({
     clinicCode: input.clinic.clinicCode,
-    date: input.period.toDate,
+    fromDate: input.period.fromDate,
+    toDate: input.period.toDate,
   });
   const dimensions = parseQuestionDimensions(input.request.message);
   const warnings: NonNullable<AgentToolResult["warnings"]> = [];
@@ -974,7 +975,7 @@ async function getDailyTreatments(input: AgentToolInput): Promise<AgentToolResul
     toolName: "get_daily_treatments",
     sourceName: "BigQuery daily treatment report",
     checkedAt: nowIso(),
-    period: data.selectedDate,
+    period: periodLabel(input),
     dataStatus: data.summary.totalTreatments > 0 ? "ok" : "no_activity",
     live: false,
     summary: `Daily treatment report has ${data.summary.totalTreatments.toLocaleString("en-US")} treatment/service record${data.summary.totalTreatments === 1 ? "" : "s"} for ${input.period.label}. This is not the appointment booking count; one appointment can contain multiple service/treatment rows.`,
@@ -988,10 +989,10 @@ async function getDailyTreatments(input: AgentToolInput): Promise<AgentToolResul
       {
         title: "Daily treatment records",
         columns: [
-          { key: "checkInTime", title: "Time" },
-          { key: "therapistName", title: "Practitioner" },
-          { key: "serviceName", title: "Service" },
-          { key: "customerName", title: "Customer" },
+          { key: "checkInTime", title: "Time", unit: "text" },
+          { key: "therapistName", title: "Practitioner", unit: "text" },
+          { key: "serviceName", title: "Service", unit: "text" },
+          { key: "customerName", title: "Customer", unit: "text" },
         ],
         rows: limitRows(data.records, 25),
       },
@@ -1006,9 +1007,10 @@ async function getDailyTreatments(input: AgentToolInput): Promise<AgentToolResul
 async function getDailyOperationsReconciliation(input: AgentToolInput): Promise<AgentToolResult> {
   const [appointments, treatments] = await Promise.all([
     fetchAppointmentLedger(input),
-    getDailyTreatmentReport({
+    getTreatmentReportRange({
       clinicCode: input.clinic.clinicCode,
-      date: input.period.toDate,
+      fromDate: input.period.fromDate,
+      toDate: input.period.toDate,
     }),
   ]);
   const appointmentCounts = appointmentStatusCounts(appointments.rows);
@@ -1032,7 +1034,7 @@ async function getDailyOperationsReconciliation(input: AgentToolInput): Promise<
       tool: "get_daily_operations_reconciliation",
       sourceName: TREATMENT_SERVICE_RECORD_COUNT_DEFINITION.source,
       checkedAt: treatmentCheckedAt,
-      period: treatments.selectedDate,
+      period,
       dataStatus: treatmentStatus,
       live: false,
     },
@@ -1116,16 +1118,16 @@ async function getDailyOperationsReconciliation(input: AgentToolInput): Promise<
       {
         title: "Count reconciliation",
         columns: [
-          { key: "metric", title: "Metric" },
-          { key: "value", title: "Value" },
-          { key: "definition", title: "Definition" },
-          { key: "source", title: "Source" },
+          { key: "metric", title: "Metric", unit: "text" },
+          { key: "value", title: "Value", unit: "count" },
+          { key: "definition", title: "Definition", unit: "text" },
+          { key: "source", title: "Source", unit: "text" },
         ],
         rows: countRows,
       },
       {
         title: "Why counts differ",
-        columns: [{ key: "reason", title: "Reason" }],
+        columns: [{ key: "reason", title: "Reason", unit: "text" }],
         rows: [
           { reason: "One appointment can include multiple services/treatments." },
           { reason: "Cancelled/no-show appointments may count as appointments but not treatment records." },
