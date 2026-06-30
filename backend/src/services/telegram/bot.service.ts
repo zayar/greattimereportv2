@@ -423,15 +423,11 @@ function numberValue(row: Record<string, unknown>, key: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function hasExplicitTimeZone(value: string) {
-  return /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value.trim());
-}
-
-function localDateTimeParts(value: string) {
-  const match = value
-    .trim()
+function apicoreAppointmentWallClockParts(value: string) {
+  const text = value.trim().replace(/(?:Z|[+-]\d{2}:?\d{2})$/i, "");
+  const match = text
     .match(/^(\d{4})-(\d{2})-(\d{2})[T\s]+(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:\s*(AM|PM))?$/i);
-  if (!match || hasExplicitTimeZone(value)) {
+  if (!match) {
     return null;
   }
 
@@ -458,9 +454,9 @@ function formatDateTimeForOwner(value: unknown) {
     return "-";
   }
 
-  const localParts = localDateTimeParts(value);
-  if (localParts) {
-    return `${String(localParts.hour).padStart(2, "0")}:${String(localParts.minute).padStart(2, "0")}`;
+  const wallClockParts = apicoreAppointmentWallClockParts(value);
+  if (wallClockParts) {
+    return `${String(wallClockParts.hour).padStart(2, "0")}:${String(wallClockParts.minute).padStart(2, "0")}`;
   }
 
   const date = new Date(value);
@@ -541,15 +537,15 @@ function appointmentSortValue(value: unknown) {
   }
 
   const text = value.trim();
-  const localParts = localDateTimeParts(text);
-  if (localParts) {
+  const wallClockParts = apicoreAppointmentWallClockParts(text);
+  if (wallClockParts) {
     return Date.UTC(
-      localParts.year,
-      localParts.month - 1,
-      localParts.day,
-      localParts.hour,
-      localParts.minute,
-      localParts.second,
+      wallClockParts.year,
+      wallClockParts.month - 1,
+      wallClockParts.day,
+      wallClockParts.hour,
+      wallClockParts.minute,
+      wallClockParts.second,
     );
   }
 

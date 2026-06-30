@@ -11,7 +11,7 @@ import {
   liveAppointmentEntityRef,
   type LiveAppointmentRow,
 } from "../appointment-live.service.js";
-import { buildUtcDayRangeForDateKeyInTimeZone, normalizeTimeZone } from "../../telegram/time.js";
+import { buildUtcDayRangeForDateKey, normalizeTimeZone } from "../../telegram/time.js";
 import { buildCustomerKey } from "../customer-identity.js";
 import { limitRows, maskPhone, nowIso, sanitizeError } from "../safety.js";
 import {
@@ -290,8 +290,8 @@ async function fetchAppointmentLedger(input: AgentToolInput) {
 
 export function buildAppointmentLedgerQueryRange(input: Pick<AgentToolInput, "period" | "request">) {
   const timezone = normalizeTimeZone(input.request.timezone);
-  const startRange = buildUtcDayRangeForDateKeyInTimeZone(input.period.fromDate, timezone);
-  const endRange = buildUtcDayRangeForDateKeyInTimeZone(input.period.toDate, timezone);
+  const startRange = buildUtcDayRangeForDateKey(input.period.fromDate);
+  const endRange = buildUtcDayRangeForDateKey(input.period.toDate);
 
   return {
     startIso: startRange.startIso,

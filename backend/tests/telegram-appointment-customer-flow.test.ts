@@ -262,8 +262,10 @@ test("today appointment list with 13 appointments uses named paginated customer 
 })
 
 test("Telegram appointment list preserves local APICORE times without Yangon double shift", () => {
-  const response = appointmentResponse(2, [
-    ["2026-06-30T09:59:00.000", "May Thu Khine", "95900000543", "959xxxx543", "Booking deposit", "Dr Zun Ko Lwin"],
+  const response = appointmentResponse(4, [
+    ["2026-06-30T10:25:00.000Z", "Yin Thu Min@ Thinza San E", "95900000293", "959xxxx293", "Hair Removal Underarm", "Mon Mon"],
+    ["2026-06-30T11:08:00.000Z", "Poe Myat Hay Thar", "95900000195", "959xxxx195", "Whitening Laser", "Htet Htet"],
+    ["2026-06-30T09:59:00.000Z", "May Thu Khine", "95900000543", "959xxxx543", "Booking deposit", "Dr Zun Ko Lwin"],
     ["2026-06-30 09:32 AM", "Nan Eaindray Moe", "95900000998", "959xxxx998", "Hair Removal Underarm", "Zin Mar"],
   ])
   const message = formatAgentHubTelegramReply(response, { viewerContext: authorizedViewer, clinicCode: "ABC" })
@@ -275,9 +277,13 @@ test("Telegram appointment list preserves local APICORE times without Yangon dou
 
   assert.match(message, /1\. 09:32 — Nan Eaindray Moe/)
   assert.match(message, /2\. 09:59 — May Thu Khine/)
-  assert.doesNotMatch(message, /16:02|16:29/)
+  assert.match(message, /3\. 10:25 — Yin Thu Min@ Thinza San E/)
+  assert.match(message, /4\. 11:08 — Poe Myat Hay Thar/)
+  assert.doesNotMatch(message, /16:02|16:29|16:55|17:38|24:/)
   assert.equal(items[0]?.appointmentTime, "09:32")
   assert.equal(items[1]?.appointmentTime, "09:59")
+  assert.equal(items[2]?.appointmentTime, "10:25")
+  assert.equal(items[3]?.appointmentTime, "11:08")
 })
 
 test("customer-name button token resolves exact appointment and customer card actions", () => {

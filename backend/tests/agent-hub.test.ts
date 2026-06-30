@@ -2208,7 +2208,7 @@ test("planner maps appointment count questions to the live count tool and lists 
   assert.deepEqual(myanmarWhoComingPlan.toolNames, ["get_appointment_ledger"])
 })
 
-test("appointment ledger query uses Myanmar day boundaries by default", () => {
+test("appointment ledger query matches APICORE app date boundaries", () => {
   const input = buildAgentToolInputFixture({
     fromDate: "2026-06-30",
     toDate: "2026-06-30",
@@ -2226,8 +2226,8 @@ test("appointment ledger query uses Myanmar day boundaries by default", () => {
   })
 
   assert.equal(range.timezone, "Asia/Yangon")
-  assert.equal(range.startIso, "2026-06-29T17:30:00.000Z")
-  assert.equal(range.endIso, "2026-06-30T17:29:59.999Z")
+  assert.equal(range.startIso, "2026-06-30T00:00:00.000Z")
+  assert.equal(range.endIso, "2026-06-30T23:59:59.999Z")
   assert.equal(defaultRange.timezone, "Asia/Yangon")
   assert.equal(defaultRange.startIso, range.startIso)
   assert.equal(defaultRange.endIso, range.endIso)
