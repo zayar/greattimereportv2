@@ -9,6 +9,7 @@ import { getTherapistPortalReport } from "../../reports/therapist-portal.service
 import { formatDateKeyInTimeZone, normalizeTimeZone } from "../../telegram/time.js";
 import { listInsightCards } from "../memory/memory.repository.js";
 import type { GtAgentFactSnapshot, GtAgentInsightCard } from "../memory/memory-types.js";
+import { parseQuestionDimensions } from "../question-dimensions.js";
 import { buildService360ToolResult } from "../service-360.service.js";
 import { limitRows, nowIso } from "../safety.js";
 import {
@@ -933,6 +934,17 @@ async function getDailyTreatments(input: AgentToolInput): Promise<AgentToolResul
     clinicCode: input.clinic.clinicCode,
     date: input.period.toDate,
   });
+  const dimensions = parseQuestionDimensions(input.request.message);
+  const warnings: NonNullable<AgentToolResult["warnings"]> = [];
+
+  if (input.intent === "treatment_roster" && dimensions.wantsSales) {
+    warnings.push({
+      type: "row_level_sales_unavailable",
+      title: "Row-level sales unavailable",
+      message:
+        "Sales amount is not available in the treatment roster source, so this reply shows customer/service/therapist only. Ask sales summary for total sales.",
+    });
+  }
 
   return {
     toolName: "get_daily_treatments",
@@ -958,6 +970,7 @@ async function getDailyTreatments(input: AgentToolInput): Promise<AgentToolResul
         rows: limitRows(data.records, 25),
       },
     ],
+    warnings: warnings.length ? warnings : undefined,
   };
 }
 

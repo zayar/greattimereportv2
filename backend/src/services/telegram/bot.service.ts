@@ -409,6 +409,27 @@ function buildTelegramReplyHeader(response: GreatTimeAgentChatResponse) {
   return ["GT Brain", `ဖြေဆိုသူ: ${answeredBy}`, `ကာလ: ${formatResponsePeriod(response)}`];
 }
 
+function ownerBodyPeriodPrefix(period: GreatTimeAgentChatResponse["period"]) {
+  const normalized = period.label.toLowerCase();
+  if (normalized === "today") {
+    return "ဒီနေ့";
+  }
+  if (normalized === "yesterday") {
+    return "မနေ့က";
+  }
+  if (normalized === "this week") {
+    return "ဒီအပတ်";
+  }
+  if (normalized === "this month") {
+    return "ဒီလ";
+  }
+  if (period.fromDate !== period.toDate) {
+    return `${period.fromDate} မှ ${period.toDate} အထိ`;
+  }
+
+  return period.toDate;
+}
+
 function stringValue(row: Record<string, unknown>, key: string, fallback = "-") {
   const value = row[key];
   return value == null || value === "" ? fallback : String(value);
@@ -707,26 +728,28 @@ function appointmentCountForIntent(response: GreatTimeAgentChatResponse, fallbac
 
 function appointmentCountLineForIntent(response: GreatTimeAgentChatResponse, count: string | number) {
   const countText = formatMetricValue(count, undefined);
+  const periodPrefix = ownerBodyPeriodPrefix(response.period);
+  const checkInPrefix = response.period.label.toLowerCase() === "today" ? "အခု" : periodPrefix;
 
   switch (response.intent) {
     case "checked_in_customers":
-      return `အခု check-in လုပ်ပြီး checkout မလုပ်သေးတဲ့ customer ${countText} ယောက်ရှိပါတယ်။`;
+      return `${checkInPrefix} check-in လုပ်ပြီး checkout မလုပ်သေးတဲ့ customer ${countText} ယောက်ရှိပါတယ်။`;
     case "checked_out_customers":
-      return `ဒီနေ့ checkout လုပ်ပြီးသူ ${countText} ယောက်ရှိပါတယ်။`;
+      return `${periodPrefix} checkout လုပ်ပြီးသူ ${countText} ယောက်ရှိပါတယ်။`;
     case "not_checked_out_customers":
-      return `ဒီနေ့ checkout မလုပ်သေးတဲ့ appointment ${countText} ခုရှိပါတယ်။`;
+      return `${periodPrefix} checkout မလုပ်သေးတဲ့ appointment ${countText} ခုရှိပါတယ်။`;
     case "arrived_not_started_customers": {
       const proxy = response.warnings?.some((warning) => warning.type === "treatment_start_unavailable");
       return proxy
-        ? `ရောက်ရှိပြီး checkout မလုပ်သေးတဲ့ customer ${countText} ယောက်ရှိပါတယ်။ Treatment စတင်ချိန် data မရှိသေးလို့ proxy အနေနဲ့ပြထားပါတယ်။`
-        : `ရောက်ရှိပြီး treatment မစသေးတဲ့ customer ${countText} ယောက်ရှိပါတယ်။`;
+        ? `${periodPrefix} ရောက်ရှိပြီး checkout မလုပ်သေးတဲ့ customer ${countText} ယောက်ရှိပါတယ်။ Treatment စတင်ချိန် data မရှိသေးလို့ proxy အနေနဲ့ပြထားပါတယ်။`
+        : `${periodPrefix} ရောက်ရှိပြီး treatment မစသေးတဲ့ customer ${countText} ယောက်ရှိပါတယ်။`;
     }
     case "cancelled_no_show":
-      return `ဖျက်ထား/မလာ appointment ${countText} ခုရှိပါတယ်။`;
+      return `${periodPrefix} ဖျက်ထား/မလာ appointment ${countText} ခုရှိပါတယ်။`;
     case "appointment_list":
     case "appointment_summary":
     default:
-      return `ဒီနေ့ appointment ${countText} ခုရှိပါတယ်။`;
+      return `${periodPrefix} appointment ${countText} ခုရှိပါတယ်။`;
   }
 }
 
@@ -771,7 +794,13 @@ function formatAppointmentConversation(response: GreatTimeAgentChatResponse, vie
   if (appointmentRows.length) {
     if (appointmentContextItems.length > appointmentPageSize()) {
       const bounds = appointmentPageBounds(appointmentContextItems.length, 0);
-      lines.push(`Showing ${bounds.start + 1}-${bounds.end} of ${appointmentContextItems.length.toLocaleString("en-US")} appointments`);
+      if (typeof total === "number" && total > appointmentContextItems.length) {
+        lines.push(
+          `Showing ${bounds.start + 1}-${bounds.end} of ${appointmentContextItems.length.toLocaleString("en-US")} loaded appointments. Full total: ${total.toLocaleString("en-US")}.`,
+        );
+      } else {
+        lines.push(`Showing ${bounds.start + 1}-${bounds.end} of ${appointmentContextItems.length.toLocaleString("en-US")} appointments`);
+      }
     }
 
     appointmentRows.slice(0, 30).forEach(({ row }, index) => {
@@ -804,6 +833,59 @@ function formatAppointmentConversation(response: GreatTimeAgentChatResponse, vie
 
     lines.push("", "Customer တစ်ယောက်ကိုရွေးပါ။");
   }
+
+  return lines;
+}
+
+function formatDailyTreatmentRosterConversation(response: GreatTimeAgentChatResponse, viewerContext?: CustomerPhoneViewerContext) {
+  const table = response.tables?.find((item) => item.title === "Daily treatment records");
+  if (!table?.rows.length) {
+    return [];
+  }
+
+  const totalTreatments = metricValue(response, ["Treatments"]) ?? table.rows.length;
+  const total = typeof totalTreatments === "number" ? totalTreatments : Number(totalTreatments);
+  const pageSize = appointmentPageSize();
+  const shownRows = table.rows.slice(0, pageSize);
+  const lines = [`${ownerBodyPeriodPrefix(response.period)} customer/service/therapist စာရင်း:`];
+
+  if (table.rows.length > pageSize) {
+    if (Number.isFinite(total) && total > table.rows.length) {
+      lines.push(
+        `Showing 1-${shownRows.length} of ${table.rows.length.toLocaleString("en-US")} loaded treatment records. Full total: ${total.toLocaleString("en-US")}.`,
+      );
+    } else {
+      lines.push(`Showing 1-${shownRows.length} of ${table.rows.length.toLocaleString("en-US")} treatment records`);
+    }
+  }
+
+  shownRows.forEach((row, index) => {
+    const time = formatDateTimeForOwner(stringValue(row, "checkInTime", ""));
+    const customer = stringValue(row, "customerName", "Unknown customer");
+    const service = stringValue(row, "serviceName", "Unknown service");
+    const therapist = stringValue(row, "therapistName", stringValue(row, "practitionerName", "-"));
+    const rawPhone = stringValue(row, "customerPhone", "");
+    const maskedPhone = stringValue(row, "customerPhoneMasked", rawPhone ? maskPhone(rawPhone) : "");
+    const phone = rawPhone || maskedPhone
+      ? formatCustomerPhone(
+          { fullPhone: rawPhone || undefined, maskedPhone: maskedPhone || undefined },
+          viewerContext,
+          { logContext: "daily_treatment_roster" },
+        )
+      : "";
+    const status = stringValue(row, "status", stringValue(row, "rawStatus", ""));
+
+    lines.push("");
+    lines.push(`${index + 1}. ${time} — ${customer}`);
+    if (phone && phone !== "-") {
+      lines.push(`Phone: ${phone}`);
+    }
+    lines.push(`Service: ${service}`);
+    lines.push(`Therapist: ${therapist}`);
+    if (status && status !== "-") {
+      lines.push(`Status: ${translateStatus(status)}`);
+    }
+  });
 
   return lines;
 }
@@ -1079,6 +1161,11 @@ function formatConversationTablePreview(
   const financeSales = formatFinanceSalesConversation(response);
   if (financeSales.length) {
     return financeSales;
+  }
+
+  const treatmentRoster = formatDailyTreatmentRosterConversation(response, options?.viewerContext);
+  if (treatmentRoster.length) {
+    return treatmentRoster;
   }
 
   const practitioner = formatPractitionerPerformanceConversation(response);

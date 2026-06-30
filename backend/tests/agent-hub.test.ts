@@ -2217,6 +2217,47 @@ test("planner maps appointment lifecycle wording before positive checkout matche
   }
 })
 
+test("planner preserves requested customer service practitioner dimensions", () => {
+  const cases = [
+    ["Yesterday appointment?", "appointment", "appointment_summary", ["get_live_appointment_counts"]],
+    ["မနေ့က appointment စာရင်းပြပါ", "appointment", "appointment_list", ["get_appointment_ledger"]],
+    ["မနေ့က ဘယ် customers တွေ ဘယ် service ကို ဘယ်သူနဲ့လုပ်လဲ", "business", "treatment_roster", ["get_daily_treatments"]],
+    [
+      "Yesterday which customers did which service with which therapist?",
+      "business",
+      "treatment_roster",
+      ["get_daily_treatments"],
+    ],
+    ["မနေ့က customer service therapist list", "business", "treatment_roster", ["get_daily_treatments"]],
+    ["Yesterday therapist performance report", "business", "practitioner_performance", ["get_practitioner_overview", "get_practitioner_treatments"]],
+    ["မနေ့က ဘယ် service အများဆုံးလုပ်လဲ", "business", "service_performance", ["get_service_behavior", "get_service_overview"]],
+    ["Yesterday top services", "business", "service_performance", ["get_service_behavior", "get_service_overview"]],
+    ["မနေ့က sales ဘယ်လောက်ရလဲ", "finance", "sales_summary", ["get_sales_summary"]],
+    ["မနေ့က ဘယ် customers တွေ ဘယ် service ကို ဘယ်သူနဲ့လုပ်ပြီး sale ဘယ်လောက်လဲ", "business", "treatment_roster", ["get_daily_treatments"]],
+    [
+      "မနေ့က appointment မှာ ဘယ် customer တွေ ဘယ် service ချိန်းထားလဲ",
+      "appointment",
+      "appointment_list",
+      ["get_appointment_ledger"],
+    ],
+  ] as const
+
+  for (const [message, resolvedAgent, intent, toolNames] of cases) {
+    const plan = planAgentRequest({
+      request: {
+        clinicId: "clinic-1",
+        clinicCode: "ABC",
+        agent: "auto",
+        message,
+      },
+    })
+
+    assert.equal(plan.resolvedAgent, resolvedAgent, message)
+    assert.equal(plan.intent, intent, message)
+    assert.deepEqual(plan.toolNames, toolNames, message)
+  }
+})
+
 test("planner maps appointment count questions to the live count tool and lists to the ledger", () => {
   const countPlan = planAgentRequest({
     request: {
@@ -2935,6 +2976,55 @@ test("Telegram formatter explains appointment services and practitioner rows wit
   assert.doesNotMatch(practitionerMessage, /Wai Phoo \| 5 \| 3 \| Whitening Laser/)
 })
 
+test("Telegram appointment formatter uses response period and clear loaded pagination", () => {
+  const appointmentRows = Array.from({ length: 30 }, (_, index) => ({
+    appointmentId: `appt-${index + 1}`,
+    scheduledFrom: `2026-06-24T${String(9 + Math.floor(index / 2)).padStart(2, "0")}:${index % 2 ? "30" : "00"}:00.000Z`,
+    customerName: `Customer ${index + 1}`,
+    customerPhoneMasked: `959xxxx${String(index + 1).padStart(3, "0")}`,
+    serviceName: index % 2 ? "Hair Removal Underarm" : "Whitening Laser",
+    practitionerName: index % 2 ? "July" : "Wai Phoo",
+    rawStatus: "BOOKED",
+  }))
+  const message = formatAgentHubTelegramReply({
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "appointment",
+    autoMode: true,
+    intent: "appointment_list",
+    period: {
+      fromDate: "2026-06-24",
+      toDate: "2026-06-24",
+      label: "yesterday",
+    },
+    assistantMessage: "Appointment ledger has 47 appointments.",
+    summary: "Appointment ledger has 47 appointments.",
+    metrics: [{ label: "Appointments", value: 47 }],
+    tables: [
+      {
+        title: "Appointments",
+        columns: [
+          { key: "scheduledFrom", title: "Time" },
+          { key: "customerName", title: "Customer" },
+          { key: "serviceName", title: "Service" },
+          { key: "practitionerName", title: "Practitioner" },
+          { key: "rawStatus", title: "Status" },
+        ],
+        rows: appointmentRows,
+      },
+    ],
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  })
+
+  assert.match(message, /မနေ့က appointment 47 ခုရှိပါတယ်/)
+  assert.doesNotMatch(message, /ဒီနေ့ appointment/)
+  assert.match(message, /Showing 1-8 of 30 loaded appointments\. Full total: 47\./)
+})
+
 test("Telegram appointment formatter uses intent-specific lifecycle count wording", () => {
   const baseResponse = {
     sessionId: "session-1",
@@ -3012,6 +3102,140 @@ test("Telegram appointment formatter uses intent-specific lifecycle count wordin
   })
   assert.match(arrivedProxyMessage, /ရောက်ရှိပြီး checkout မလုပ်သေးတဲ့ customer 1 ယောက်ရှိပါတယ်/)
   assert.match(arrivedProxyMessage, /proxy အနေနဲ့ပြထားပါတယ်/)
+})
+
+test("Telegram formatter renders daily treatment records as customer service therapist roster", () => {
+  const message = formatAgentHubTelegramReply({
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "business",
+    autoMode: true,
+    intent: "treatment_roster",
+    period: {
+      fromDate: "2026-06-24",
+      toDate: "2026-06-24",
+      label: "yesterday",
+    },
+    assistantMessage: "Daily treatments.",
+    summary: "Daily treatments.",
+    metrics: [{ label: "Treatments", value: 2 }],
+    tables: [
+      {
+        title: "Daily treatment records",
+        columns: [
+          { key: "checkInTime", title: "Time" },
+          { key: "therapistName", title: "Practitioner" },
+          { key: "serviceName", title: "Service" },
+          { key: "customerName", title: "Customer" },
+        ],
+        rows: [
+          {
+            checkInTime: "2026-06-24 01:20 PM",
+            customerName: "Ma Zar",
+            serviceName: "LT Member only",
+            therapistName: "Thandar",
+            customerPhone: "959123456789",
+          },
+          {
+            checkInTime: "2026-06-24 02:10 PM",
+            customerName: "May Thu Khin",
+            serviceName: "Hair Removal Underarm",
+            therapistName: "Shwe Yee",
+            status: "CHECKOUT",
+          },
+        ],
+      },
+    ],
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  })
+
+  assert.match(message, /မနေ့က customer\/service\/therapist စာရင်း/)
+  assert.match(message, /1\. 13:20 — Ma Zar/)
+  assert.match(message, /Service: LT Member only/)
+  assert.match(message, /Therapist: Thandar/)
+  assert.match(message, /2\. 14:10 — May Thu Khin/)
+  assert.match(message, /Service: Hair Removal Underarm/)
+  assert.match(message, /Therapist: Shwe Yee/)
+  assert.match(message, /Status: ပြီးဆုံး/)
+  assert.doesNotMatch(message, /Service အလိုက် owner/)
+})
+
+test("Telegram formatter keeps service and practitioner performance separate from treatment roster", () => {
+  const practitionerMessage = formatAgentHubTelegramReply({
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "business",
+    autoMode: true,
+    intent: "practitioner_performance",
+    period: {
+      fromDate: "2026-06-24",
+      toDate: "2026-06-24",
+      label: "yesterday",
+    },
+    assistantMessage: "Practitioner performance.",
+    summary: "Practitioner performance.",
+    metrics: [],
+    tables: [
+      {
+        title: "Practitioner performance",
+        columns: [
+          { key: "therapistName", title: "Practitioner" },
+          { key: "treatmentsCompleted", title: "Treatments" },
+          { key: "customersServed", title: "Customers" },
+          { key: "topService", title: "Top service" },
+        ],
+        rows: [{ therapistName: "Wai Phoo", treatmentsCompleted: 5, customersServed: 3, topService: "Whitening Laser" }],
+      },
+    ],
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  })
+
+  assert.match(practitionerMessage, /Wai Phoo က treatment 5 ကြိမ်လုပ်ထားပြီး customer 3 ယောက်/)
+  assert.doesNotMatch(practitionerMessage, /customer\/service\/therapist စာရင်း/)
+
+  const serviceMessage = formatAgentHubTelegramReply({
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "business",
+    autoMode: true,
+    intent: "service_performance",
+    period: {
+      fromDate: "2026-06-24",
+      toDate: "2026-06-24",
+      label: "yesterday",
+    },
+    assistantMessage: "Service performance.",
+    summary: "Service performance.",
+    metrics: [],
+    tables: [
+      {
+        title: "Service performance",
+        columns: [
+          { key: "serviceName", title: "Service" },
+          { key: "bookingCount", title: "Bookings" },
+          { key: "customerCount", title: "Customers" },
+        ],
+        rows: [{ serviceName: "Whitening Laser", bookingCount: 35, customerCount: 30 }],
+      },
+    ],
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  })
+
+  assert.match(serviceMessage, /Service အလိုက် owner အတွက်/)
+  assert.match(serviceMessage, /Whitening Laser — booking 35 ခု/)
+  assert.doesNotMatch(serviceMessage, /customer\/service\/therapist စာရင်း/)
 })
 
 test("Telegram formatter leads finance sales answers with total sales and treats unknown services as caveat", () => {

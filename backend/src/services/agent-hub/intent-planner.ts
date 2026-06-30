@@ -2,6 +2,7 @@ import { env } from "../../config/env.js";
 import { shiftRange, toIsoDate } from "../../utils/date-range.js";
 import { formatDateKeyInTimeZone, normalizeTimeZone } from "../telegram/time.js";
 import { hasCustomerEntityReference, hasExplicitCustomerSearchIntent, isCustomer360Question } from "./customer-query.js";
+import { isAppointmentRosterQuestion, isTreatmentRosterQuestion, parseQuestionDimensions } from "./question-dimensions.js";
 import { buildReadOnlyRefusalMessage, isDangerousBusinessMutationRequest } from "./read-only-guard.js";
 import { isService360Question } from "./service-query.js";
 import { isAppointmentLedgerQuestion, resolveAgent } from "./supervisor.js";
@@ -220,13 +221,18 @@ export function toolsForBusinessOwnerDailyBrief(enabled = env.AGENT_OWNER_DAILY_
 }
 
 function detectBusinessIntent(message: string) {
+  const dimensions = parseQuestionDimensions(message);
+
   if (env.AGENT_OWNER_DAILY_BRIEF_ENABLED && isOwnerDailyBriefIntentMessage(message)) {
     return "owner_daily_brief";
   }
   if (isService360Question(message)) {
     return "service_360";
   }
-  if (/practitioner|therapist|doctor|ဆရာဝန်/i.test(message)) {
+  if (isTreatmentRosterQuestion(message)) {
+    return "treatment_roster";
+  }
+  if (dimensions.wantsPractitioners && dimensions.wantsAggregateSummary) {
     return "practitioner_performance";
   }
   if (/daily treatment|treatment volume|ကုသမှု/i.test(message)) {
@@ -235,8 +241,11 @@ function detectBusinessIntent(message: string) {
   if (/declining|trend|compare|ကျ/i.test(message)) {
     return "service_trend";
   }
-  if (/service|ဝန်ဆောင်မှု/i.test(message)) {
+  if (dimensions.wantsServices) {
     return "service_performance";
+  }
+  if (/practitioner|therapist|doctor|ဆရာဝန်/i.test(message)) {
+    return "practitioner_performance";
   }
   return "business_health";
 }
@@ -281,6 +290,9 @@ function detectAppointmentIntent(message: string) {
   }
   if (hasArrivedCue) {
     return "checked_in_customers";
+  }
+  if (isAppointmentRosterQuestion(message)) {
+    return "appointment_list";
   }
   if (/live|right now|currently|\bnow\b|ယခု|အခု/i.test(message) && asksAppointmentLedger) {
     return "live_appointment_counts";
@@ -366,6 +378,7 @@ function toolsForIntent(agentId: GreatTimeAgentId, intent: string) {
         return ["get_service_behavior", "get_service_overview"];
       case "practitioner_performance":
         return ["get_practitioner_overview", "get_practitioner_treatments"];
+      case "treatment_roster":
       case "daily_treatment":
         return ["get_daily_treatments"];
       default:
