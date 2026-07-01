@@ -245,7 +245,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const params = clinicTargetSchema.pick({ clinicId: true, chatId: true }).parse(req.body);
     const status = await unlinkTelegramIntegration(params);
-    const botMetadata = await getTelegramBotLinkMetadata(null);
+    const botMetadata = await getTelegramBotLinkMetadata(status.pendingLinkCode);
 
     res.json({
       success: true,

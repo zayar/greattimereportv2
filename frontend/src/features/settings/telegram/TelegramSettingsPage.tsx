@@ -391,6 +391,7 @@ export function TelegramSettingsPage() {
   const timezoneOptions = useMemo(() => getTimezoneOptions(), []);
   const [status, setStatus] = useState<TelegramIntegrationStatus | null>(null);
   const [busyAction, setBusyAction] = useState<BusyAction>("load");
+  const [unlinkingChatId, setUnlinkingChatId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
@@ -734,30 +735,51 @@ export function TelegramSettingsPage() {
     }
   }
 
-  async function handleUnlink() {
-    if (!selectedTarget?.telegramChatId) {
+  async function handleUnlink(target = selectedTarget) {
+    if (!target?.telegramChatId) {
       return;
     }
 
-    if (!window.confirm(`Disconnect ${selectedTarget.targetLabel} from this clinic?`)) {
+    const targetLabel = target.targetLabel || "this Telegram target";
+    const targetKind =
+      target.telegramChatType === "group" || target.telegramChatType === "supergroup"
+        ? "group"
+        : target.telegramChatType === "channel"
+          ? "channel"
+          : "private chat";
+    const confirmation = [
+      `Remove ${targetLabel} from this clinic?`,
+      "",
+      `GT will stop sending reports and Agent chat access to this Telegram ${targetKind}.`,
+      "This does not kick members out of a Telegram group; remove group members inside Telegram if needed.",
+    ].join("\n");
+
+    if (!window.confirm(confirmation)) {
       return;
     }
 
     setBusyAction("unlink");
+    setUnlinkingChatId(target.telegramChatId);
     setNotice(null);
     setErrorMessage(null);
 
     try {
       const nextStatus = await unlinkTelegramIntegration({
         clinicId: activeClinic.id,
-        chatId: selectedTarget.telegramChatId,
+        chatId: target.telegramChatId,
       });
       setStatus(nextStatus);
-      setNotice(`${selectedTarget.targetLabel} was disconnected from this clinic.`);
+      setDraftsByChatId((current) => {
+        const { [target.telegramChatId as string]: _removed, ...rest } = current;
+        return rest;
+      });
+      setSelectedChatId(nextStatus.linkedTargets.find((item) => item.telegramChatId !== target.telegramChatId)?.telegramChatId ?? null);
+      setNotice(`${targetLabel} was removed from this clinic.`);
     } catch (error) {
-      setErrorMessage(getApiErrorMessage(error, "Telegram target could not be unlinked."));
+      setErrorMessage(getApiErrorMessage(error, "Telegram target could not be removed."));
     } finally {
       setBusyAction(null);
+      setUnlinkingChatId(null);
     }
   }
 
@@ -1058,6 +1080,13 @@ export function TelegramSettingsPage() {
                   {selectedTarget.telegramChatType ? `${selectedTarget.telegramChatType} chat` : "Telegram target"} · Linked{" "}
                   {formatTimestamp(selectedTarget.telegramLinkedAt)}
                 </small>
+                <button
+                  className="button telegram-settings__button telegram-settings__button--danger telegram-settings__button--compact"
+                  onClick={() => void handleUnlink(selectedTarget)}
+                  disabled={!selectedTarget.telegramChatId || busyAction !== null}
+                >
+                  {busyAction === "unlink" && unlinkingChatId === selectedTarget.telegramChatId ? "Removing..." : "Remove from clinic"}
+                </button>
               </article>
               <article className="telegram-settings__meta-card">
                 <span>Target coverage</span>
@@ -1090,7 +1119,7 @@ export function TelegramSettingsPage() {
                       {REPORT_ROUTING_COLUMNS.map((column) => (
                         <th key={column.key}>{column.label}</th>
                       ))}
-                      <th>Manage</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1119,19 +1148,31 @@ export function TelegramSettingsPage() {
                           );
                         })}
                         <td>
-                          <button
-                            className="button telegram-settings__button telegram-settings__button--secondary"
-                            onClick={() => setSelectedChatId(target.telegramChatId)}
-                            disabled={!target.telegramChatId}
-                          >
-                            Manage
-                          </button>
+                          <div className="telegram-routing-matrix__actions">
+                            <button
+                              className="button telegram-settings__button telegram-settings__button--secondary"
+                              onClick={() => setSelectedChatId(target.telegramChatId)}
+                              disabled={!target.telegramChatId}
+                            >
+                              Manage
+                            </button>
+                            <button
+                              className="button telegram-settings__button telegram-settings__button--danger"
+                              onClick={() => void handleUnlink(target)}
+                              disabled={!target.telegramChatId || busyAction !== null}
+                            >
+                              {busyAction === "unlink" && unlinkingChatId === target.telegramChatId ? "Removing..." : "Remove"}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+              <p className="telegram-settings__hint">
+                Removing a linked target stops GT reports and Agent chat for that private chat, group, or channel. Telegram group members must still be removed inside Telegram by a group admin.
+              </p>
             </div>
           ) : null}
 
@@ -1622,10 +1663,10 @@ export function TelegramSettingsPage() {
             </button>
             <button
               className="button telegram-settings__button telegram-settings__button--danger"
-              onClick={() => void handleUnlink()}
+              onClick={() => void handleUnlink(selectedTarget)}
               disabled={!selectedTarget || busyAction !== null}
             >
-              {busyAction === "unlink" ? "Disconnecting..." : "Disconnect selected target"}
+              {busyAction === "unlink" && unlinkingChatId === selectedTarget?.telegramChatId ? "Removing..." : "Remove selected target"}
             </button>
           </div>
 

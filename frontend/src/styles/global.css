@@ -4568,6 +4568,12 @@ a {
   box-shadow: none;
 }
 
+.telegram-settings__button--compact {
+  width: fit-content;
+  min-width: 0;
+  padding-inline: 14px;
+}
+
 .telegram-settings__button--primary {
   color: #f8fcfb;
   background: linear-gradient(135deg, #224a4b 0%, #163536 100%);
@@ -5577,6 +5583,16 @@ a {
 .telegram-routing-matrix .telegram-routing-matrix__table th,
 .telegram-routing-matrix .telegram-routing-matrix__table td {
   padding-inline: 12px;
+}
+
+.telegram-routing-matrix__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.telegram-routing-matrix__actions .telegram-settings__button {
+  min-width: 108px;
 }
 
 .telegram-routing-matrix__row--selected {
