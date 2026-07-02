@@ -39,8 +39,146 @@ const CHECKED_IN_LEDGER_STATUSES = new Set(["CHECKIN", "CHECK_IN"]);
 type AppointmentToolDeps = {
   getCompletedDayAppointmentProfileSnapshot: typeof getCompletedDayAppointmentProfileSnapshot;
   getOperationalAppointmentSnapshot: typeof getOperationalAppointmentSnapshot;
+  fetchAppointmentLedger: typeof fetchAppointmentLedger;
   fetchLiveSnapshot: typeof snapshot;
 };
+
+export type AppointmentRosterFilter = {
+  practitionerName?: string;
+  serviceName?: string;
+  sourceRowCount: number;
+};
+
+type AppointmentFilterField = "practitionerName" | "serviceName";
+
+type AppointmentFilterCandidateScore = {
+  value: string;
+  normalized: string;
+  tokens: string[];
+  matchedTokens: string[];
+  score: number;
+  exact: boolean;
+  singleToken: boolean;
+};
+
+type AppointmentFilterFieldResolution = {
+  field: AppointmentFilterField;
+  status: "matched" | "no_match" | "ambiguous" | "not_requested";
+  value?: string;
+  requestedValue?: string;
+  candidates: string[];
+  topMatches: string[];
+};
+
+type AppointmentFilterDecision = {
+  appointmentFilter?: AppointmentRosterFilter;
+  blockedStatus?: AgentDataStatus;
+  warnings: NonNullable<AgentToolResult["warnings"]>;
+};
+
+type AppointmentFilterApplication<T> = {
+  rows: T[];
+  appointmentFilter?: AppointmentRosterFilter;
+  blockedStatus?: AgentDataStatus;
+  warnings: NonNullable<AgentToolResult["warnings"]>;
+};
+
+const ENGLISH_APPOINTMENT_FILTER_STOP_WORDS = [
+  "a",
+  "an",
+  "and",
+  "appointment",
+  "appointments",
+  "are",
+  "all",
+  "book",
+  "booking",
+  "bookings",
+  "by",
+  "can",
+  "could",
+  "customer",
+  "customers",
+  "did",
+  "do",
+  "does",
+  "doctor",
+  "dr",
+  "for",
+  "how",
+  "is",
+  "list",
+  "many",
+  "me",
+  "much",
+  "my",
+  "of",
+  "please",
+  "practitioner",
+  "service",
+  "services",
+  "show",
+  "staff",
+  "the",
+  "therapist",
+  "therapy",
+  "today",
+  "treatment",
+  "treatments",
+  "what",
+  "when",
+  "where",
+  "who",
+  "with",
+  "was",
+  "were",
+];
+const MYANMAR_APPOINTMENT_FILTER_STOP_WORDS = [
+  "ဒီနေ့",
+  "ယနေ့",
+  "အခု",
+  "ယခု",
+  "စာရင်း",
+  "စာရင်းပြပါ",
+  "ချိန်း",
+  "ဘိုကင်",
+  "ဝန်ဆောင်မှု",
+  "ကုသမှု",
+  "ဆရာဝန်",
+  "ဆရာမ",
+  "ဆရာ",
+  "တွေ",
+  "များ",
+  "ပြပါ",
+  "တွေပြပါ",
+  "ကို",
+  "မှာ",
+  "နဲ့",
+];
+const APPOINTMENT_FILTER_STOP_WORDS = new Set([
+  ...ENGLISH_APPOINTMENT_FILTER_STOP_WORDS,
+  ...MYANMAR_APPOINTMENT_FILTER_STOP_WORDS,
+]);
+const APPOINTMENT_FILTER_EXTRACTION_STOP_WORDS = new Set([
+  ...ENGLISH_APPOINTMENT_FILTER_STOP_WORDS.filter((word) => word !== "booking" && word !== "dr"),
+  ...MYANMAR_APPOINTMENT_FILTER_STOP_WORDS,
+]);
+const STAFF_FILTER_CUES = ["staff", "doctor", "dr", "therapist", "practitioner", "ဆရာဝန်", "ဆရာမ", "ဆရာ"];
+const SERVICE_FILTER_CUES = [
+  "service",
+  "treatment",
+  "therapy",
+  "package",
+  "hair removal",
+  "body contouring",
+  "facial",
+  "laser",
+  "whitening",
+  "booking deposit",
+  "ဝန်ဆောင်မှု",
+  "ကုသမှု",
+];
+const APPOINTMENT_FILTER_CONNECTORS = new Set(["for", "with", "by"]);
 
 function runAppointmentBigQueryOperation<T>(params: {
   toolName: string;
@@ -102,6 +240,393 @@ function liveTable(title: string, rows: LiveAppointmentRow[]) {
 function normalizeText(value: string | null | undefined, fallback = "Unknown") {
   const text = value?.trim();
   return text || fallback;
+}
+
+export function normalizeAppointmentFilterText(value: string | null | undefined) {
+  return (value ?? "")
+    .toLowerCase()
+    .trim()
+    .replace(/['’`]/g, "")
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function appointmentFilterTokens(value: string | null | undefined) {
+  const normalized = normalizeAppointmentFilterText(value);
+  return normalized ? normalized.split(" ").filter(Boolean) : [];
+}
+
+function significantAppointmentFilterTokens(value: string | null | undefined) {
+  return appointmentFilterTokens(value).filter((token) => !APPOINTMENT_FILTER_STOP_WORDS.has(token));
+}
+
+function containsNormalizedPhrase(haystack: string, needle: string) {
+  return Boolean(needle && ` ${haystack} `.includes(` ${needle} `));
+}
+
+function appointmentFilterCueFound(normalizedMessage: string, cues: string[]) {
+  return cues.some((cue) => containsNormalizedPhrase(normalizedMessage, normalizeAppointmentFilterText(cue)));
+}
+
+function appointmentFilterFieldValue(row: unknown, field: AppointmentFilterField) {
+  if (!row || typeof row !== "object") {
+    return "";
+  }
+
+  const record = row as Record<string, unknown>;
+  const keys = field === "practitionerName"
+    ? ["practitionerName", "PractitionerName", "staffName", "StaffName", "therapistName", "TherapistName"]
+    : ["serviceName", "ServiceName"];
+
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+}
+
+function uniqueAppointmentFilterCandidates(rows: readonly unknown[], field: AppointmentFilterField) {
+  const candidates = new Map<string, string>();
+
+  rows.forEach((row) => {
+    const value = appointmentFilterFieldValue(row, field);
+    const normalized = normalizeAppointmentFilterText(value);
+    if (value && normalized && !candidates.has(normalized)) {
+      candidates.set(normalized, value);
+    }
+  });
+
+  return [...candidates.values()];
+}
+
+function extractRequestedAppointmentFilterPhrase(message: string) {
+  const cleaned = message
+    .replace(/[^\p{L}\p{N}\s'’`.]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  const tokens = cleaned ? cleaned.split(" ").filter(Boolean) : [];
+  const kept = tokens.filter((token) => {
+    const normalized = normalizeAppointmentFilterText(token);
+    return normalized && !APPOINTMENT_FILTER_EXTRACTION_STOP_WORDS.has(normalized);
+  });
+
+  return kept.join(" ").trim();
+}
+
+function scoreAppointmentFilterCandidate(params: {
+  messageNormalized: string;
+  messageTokenSet: Set<string>;
+  candidate: string;
+  lowerThresholdAllowed: boolean;
+}): AppointmentFilterCandidateScore | null {
+  const normalized = normalizeAppointmentFilterText(params.candidate);
+  if (!normalized) {
+    return null;
+  }
+
+  const tokens = significantAppointmentFilterTokens(params.candidate);
+  const exact = containsNormalizedPhrase(params.messageNormalized, normalized);
+  const matchedTokens = tokens.filter((token) => params.messageTokenSet.has(token));
+  const candidateTokenCount = Math.max(tokens.length, 1);
+
+  if (exact) {
+    return {
+      value: params.candidate,
+      normalized,
+      tokens,
+      matchedTokens,
+      score: 1_000 + normalized.length + candidateTokenCount * 20,
+      exact: true,
+      singleToken: false,
+    };
+  }
+
+  if (matchedTokens.length >= 2) {
+    const coverage = matchedTokens.length / candidateTokenCount;
+    return {
+      value: params.candidate,
+      normalized,
+      tokens,
+      matchedTokens,
+      score: 420 + matchedTokens.length * 60 + coverage * 80 + normalized.length / 10,
+      exact: false,
+      singleToken: false,
+    };
+  }
+
+  if (
+    matchedTokens.length === 1 &&
+    params.lowerThresholdAllowed &&
+    matchedTokens[0] &&
+    matchedTokens[0].length >= 4
+  ) {
+    return {
+      value: params.candidate,
+      normalized,
+      tokens,
+      matchedTokens,
+      score: 220 + normalized.length / 10,
+      exact: false,
+      singleToken: true,
+    };
+  }
+
+  return null;
+}
+
+function bestAppointmentFilterCandidate(params: {
+  field: AppointmentFilterField;
+  requested: boolean;
+  requestPhrase: string;
+  messageNormalized: string;
+  messageTokenSet: Set<string>;
+  lowerThresholdAllowed: boolean;
+  candidates: string[];
+}): AppointmentFilterFieldResolution {
+  const scored = params.candidates
+    .map((candidate) =>
+      scoreAppointmentFilterCandidate({
+        messageNormalized: params.messageNormalized,
+        messageTokenSet: params.messageTokenSet,
+        candidate,
+        lowerThresholdAllowed: params.lowerThresholdAllowed,
+      }),
+    )
+    .filter((score): score is AppointmentFilterCandidateScore => Boolean(score))
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+      if (right.tokens.length !== left.tokens.length) {
+        return right.tokens.length - left.tokens.length;
+      }
+      return right.normalized.length - left.normalized.length;
+    });
+
+  const top = scored[0];
+  if (!top) {
+    if (params.requested && params.requestPhrase) {
+      return {
+        field: params.field,
+        status: "no_match",
+        requestedValue: params.requestPhrase,
+        candidates: params.candidates,
+        topMatches: [],
+      };
+    }
+
+    return {
+      field: params.field,
+      status: "not_requested",
+      candidates: params.candidates,
+      topMatches: [],
+    };
+  }
+
+  const second = scored[1];
+  const sameSingleTokenMatches = top.singleToken
+    ? scored.filter((score) => score.matchedTokens.some((token) => top.matchedTokens.includes(token)))
+    : [];
+  const ambiguous =
+    (top.singleToken && sameSingleTokenMatches.length > 1) ||
+    Boolean(second && !top.exact && top.score - second.score < 25);
+
+  if (ambiguous) {
+    return {
+      field: params.field,
+      status: "ambiguous",
+      requestedValue: params.requestPhrase,
+      candidates: params.candidates,
+      topMatches: scored.slice(0, 4).map((score) => score.value),
+    };
+  }
+
+  return {
+    field: params.field,
+    status: "matched",
+    value: top.value,
+    candidates: params.candidates,
+    topMatches: [top.value],
+  };
+}
+
+export function hasAppointmentRosterFilterIntent(message: string) {
+  const normalizedMessage = normalizeAppointmentFilterText(message);
+  const messageTokens = appointmentFilterTokens(message);
+  const messageTokenSet = new Set(messageTokens);
+  const requestPhrase = extractRequestedAppointmentFilterPhrase(message);
+  const hasStaffCue = appointmentFilterCueFound(normalizedMessage, STAFF_FILTER_CUES);
+  const hasServiceCue = appointmentFilterCueFound(normalizedMessage, SERVICE_FILTER_CUES);
+  const hasConnector = [...APPOINTMENT_FILTER_CONNECTORS].some((token) => messageTokenSet.has(token));
+
+  return Boolean(requestPhrase && (hasStaffCue || hasServiceCue || hasConnector));
+}
+
+function appointmentFilterWarningMessage(params: {
+  resolution: AppointmentFilterFieldResolution;
+  requestPhrase: string;
+}) {
+  const requested = params.resolution.requestedValue || params.requestPhrase || "the requested filter";
+  const available = params.resolution.candidates.slice(0, 8).join(", ");
+  const fieldLabel = params.resolution.field === "practitionerName" ? "staff" : "services";
+  const availableText = available ? ` Available ${fieldLabel} today: ${available}.` : "";
+
+  if (params.resolution.status === "ambiguous") {
+    const matches = params.resolution.topMatches.length ? ` Possible matches: ${params.resolution.topMatches.join(", ")}.` : "";
+    return `I could not choose one match for ${requested}.${matches}${availableText}`;
+  }
+
+  return `I could not find ${requested} in today's appointments.${availableText}`;
+}
+
+export function detectAppointmentRosterFilter(params: {
+  message: string;
+  rows: readonly unknown[];
+}): AppointmentFilterDecision {
+  const sourceRowCount = params.rows.length;
+  const messageNormalized = normalizeAppointmentFilterText(params.message);
+  const messageTokens = appointmentFilterTokens(params.message);
+  const messageTokenSet = new Set(messageTokens);
+  const requestPhrase = extractRequestedAppointmentFilterPhrase(params.message);
+  const hasStaffCue = appointmentFilterCueFound(messageNormalized, STAFF_FILTER_CUES);
+  const hasServiceCue = appointmentFilterCueFound(messageNormalized, SERVICE_FILTER_CUES);
+  const hasConnector = [...APPOINTMENT_FILTER_CONNECTORS].some((token) => messageTokenSet.has(token));
+  const staffCandidates = uniqueAppointmentFilterCandidates(params.rows, "practitionerName");
+  const serviceCandidates = uniqueAppointmentFilterCandidates(params.rows, "serviceName");
+  const staffResolution = bestAppointmentFilterCandidate({
+    field: "practitionerName",
+    requested: Boolean(requestPhrase && (hasStaffCue || (hasConnector && !hasServiceCue))),
+    requestPhrase,
+    messageNormalized,
+    messageTokenSet,
+    lowerThresholdAllowed: hasStaffCue || hasConnector,
+    candidates: staffCandidates,
+  });
+  const serviceResolution = bestAppointmentFilterCandidate({
+    field: "serviceName",
+    requested: Boolean(requestPhrase && (hasServiceCue || (hasConnector && !hasStaffCue))),
+    requestPhrase,
+    messageNormalized,
+    messageTokenSet,
+    lowerThresholdAllowed: hasServiceCue || hasConnector,
+    candidates: serviceCandidates,
+  });
+  const warnings: NonNullable<AgentToolResult["warnings"]> = [];
+  const appointmentFilter: AppointmentRosterFilter = { sourceRowCount };
+
+  if (staffResolution.status === "matched" && staffResolution.value) {
+    appointmentFilter.practitionerName = staffResolution.value;
+  }
+  if (serviceResolution.status === "matched" && serviceResolution.value) {
+    appointmentFilter.serviceName = serviceResolution.value;
+  }
+
+  const unresolved = [staffResolution, serviceResolution].find((resolution) =>
+    resolution.status === "ambiguous" || resolution.status === "no_match",
+  );
+
+  if (unresolved) {
+    if (unresolved.status === "no_match") {
+      if (unresolved.field === "practitionerName" && unresolved.requestedValue) {
+        appointmentFilter.practitionerName = unresolved.requestedValue;
+      } else if (unresolved.field === "serviceName" && unresolved.requestedValue) {
+        appointmentFilter.serviceName = unresolved.requestedValue;
+      }
+    }
+
+    warnings.push({
+      type: unresolved.status === "ambiguous" ? "appointment_filter_ambiguous" : "appointment_filter_no_match",
+      title: unresolved.status === "ambiguous" ? "Appointment filter needs clarification" : "Appointment filter not found",
+      message: appointmentFilterWarningMessage({ resolution: unresolved, requestPhrase }),
+    });
+
+    return {
+      appointmentFilter,
+      blockedStatus: unresolved.status === "ambiguous" ? "not_ready" : "no_activity",
+      warnings,
+    };
+  }
+
+  if (!appointmentFilter.practitionerName && !appointmentFilter.serviceName) {
+    return { warnings };
+  }
+
+  return { appointmentFilter, warnings };
+}
+
+function rowMatchesAppointmentRosterFilter(row: unknown, filter: AppointmentRosterFilter) {
+  if (filter.practitionerName) {
+    const rowPractitioner = normalizeAppointmentFilterText(appointmentFilterFieldValue(row, "practitionerName"));
+    if (rowPractitioner !== normalizeAppointmentFilterText(filter.practitionerName)) {
+      return false;
+    }
+  }
+
+  if (filter.serviceName) {
+    const rowService = normalizeAppointmentFilterText(appointmentFilterFieldValue(row, "serviceName"));
+    if (rowService !== normalizeAppointmentFilterText(filter.serviceName)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function applyAppointmentRosterFilter<T>(input: AgentToolInput, rows: T[]): AppointmentFilterApplication<T> {
+  const decision = detectAppointmentRosterFilter({
+    message: input.request.message,
+    rows,
+  });
+
+  if (decision.blockedStatus) {
+    return {
+      rows: [],
+      appointmentFilter: decision.appointmentFilter,
+      blockedStatus: decision.blockedStatus,
+      warnings: decision.warnings,
+    };
+  }
+
+  if (!decision.appointmentFilter) {
+    return {
+      rows,
+      warnings: decision.warnings,
+    };
+  }
+
+  return {
+    rows: rows.filter((row) => rowMatchesAppointmentRosterFilter(row, decision.appointmentFilter!)),
+    appointmentFilter: decision.appointmentFilter,
+    warnings: decision.warnings,
+  };
+}
+
+function appointmentToolData(
+  appointmentFilter: AppointmentRosterFilter | undefined,
+  data?: Record<string, unknown>,
+) {
+  const result = { ...(data ?? {}) };
+  if (appointmentFilter) {
+    result.appointmentFilter = appointmentFilter;
+  }
+
+  return Object.keys(result).length ? result : undefined;
+}
+
+function appointmentDataStatus(params: {
+  rows: readonly unknown[];
+  sourceStatus: AgentDataStatus;
+  blockedStatus?: AgentDataStatus;
+}) {
+  if (params.blockedStatus) {
+    return params.blockedStatus;
+  }
+
+  return params.rows.length ? params.sourceStatus : "no_activity";
 }
 
 function normalizeStatus(value: string | null | undefined) {
@@ -531,6 +1056,7 @@ export function buildAppointmentCountResultFromSnapshot(params: {
 const defaultAppointmentToolDeps: AppointmentToolDeps = {
   getCompletedDayAppointmentProfileSnapshot,
   getOperationalAppointmentSnapshot,
+  fetchAppointmentLedger,
   fetchLiveSnapshot: snapshot,
 };
 
@@ -553,41 +1079,45 @@ async function buildCachedAppointmentCountResultWithDeps(
   });
 }
 
-async function getAppointmentLedger(input: AgentToolInput): Promise<AgentToolResult> {
-  const data = await fetchAppointmentLedger(input);
+async function getAppointmentLedger(input: AgentToolInput, deps: AppointmentToolDeps = defaultAppointmentToolDeps): Promise<AgentToolResult> {
+  const data = await deps.fetchAppointmentLedger(input);
   const label = periodLabel(input);
+  const filter = applyAppointmentRosterFilter(input, data.rows);
+  const rows = filter.rows;
+  const totalCount = rows.length;
 
   return {
     toolName: "get_appointment_ledger",
     sourceName: "APICORE booking ledger",
     checkedAt: data.checkedAt,
     period: label,
-    dataStatus: data.dataStatus,
+    dataStatus: appointmentDataStatus({ rows, sourceStatus: data.dataStatus, blockedStatus: filter.blockedStatus }),
     live: true,
-    summary: `Appointment ledger has ${data.totalCount.toLocaleString("en-US")} appointment booking${data.totalCount === 1 ? "" : "s"} for ${input.period.label}.`,
-    metrics: ledgerStatusMetrics(data.rows, data.totalCount),
-    tables: [appointmentServiceTable(data.rows), ledgerTable("Appointments", data.rows)],
-    warnings: data.warnings,
-    entityRefs: data.rows.map((row, index) => appointmentLedgerEntityRef(row, index + 1)),
-    data: {
+    summary: `Appointment ledger has ${totalCount.toLocaleString("en-US")} appointment booking${totalCount === 1 ? "" : "s"} for ${input.period.label}.`,
+    metrics: ledgerStatusMetrics(rows, totalCount),
+    tables: [appointmentServiceTable(rows), ledgerTable("Appointments", rows)],
+    warnings: [...data.warnings, ...filter.warnings],
+    entityRefs: rows.map((row, index) => appointmentLedgerEntityRef(row, index + 1)),
+    data: appointmentToolData(filter.appointmentFilter, {
       countDefinition: APPOINTMENT_BOOKING_COUNT_DEFINITION,
-    },
+    }),
   };
 }
 
-async function getTreatmentStartProxy(input: AgentToolInput): Promise<AgentToolResult> {
-  const data = await fetchAppointmentLedger(input);
+async function getTreatmentStartProxy(input: AgentToolInput, deps: AppointmentToolDeps = defaultAppointmentToolDeps): Promise<AgentToolResult> {
+  const data = await deps.fetchAppointmentLedger(input);
   const label = periodLabel(input);
+  const filter = applyAppointmentRosterFilter(input, data.rows);
   const rows =
     input.intent === "treatment_in_progress"
-      ? data.rows.filter(isCheckedInLedgerCandidate)
-      : data.rows.filter(isOpenTreatmentCandidate);
+      ? filter.rows.filter(isCheckedInLedgerCandidate)
+      : filter.rows.filter(isOpenTreatmentCandidate);
   const checkedInRows = rows.filter(isCheckedInLedgerCandidate);
   const statusLabel =
     input.intent === "treatment_in_progress"
       ? "checked-in appointments"
       : "appointments that are not completed, cancelled, or no-show";
-  const dataStatus: AgentDataStatus = rows.length ? data.dataStatus : "no_activity";
+  const dataStatus = appointmentDataStatus({ rows, sourceStatus: data.dataStatus, blockedStatus: filter.blockedStatus });
 
   return {
     toolName: "get_treatment_start_proxy",
@@ -614,8 +1144,9 @@ async function getTreatmentStartProxy(input: AgentToolInput): Promise<AgentToolR
       },
     ],
     tables: [ledgerTable(input.intent === "treatment_in_progress" ? "Checked-in proxy rows" : "Treatment not-started proxy rows", rows)],
-    warnings: [...data.warnings, treatmentStartProxyWarning()],
+    warnings: [...data.warnings, ...filter.warnings, treatmentStartProxyWarning()],
     entityRefs: rows.map((row, index) => appointmentLedgerEntityRef(row, index + 1)),
+    data: appointmentToolData(filter.appointmentFilter),
   };
 }
 
@@ -623,22 +1154,26 @@ async function getLiveAppointmentCounts(
   input: AgentToolInput,
   deps: AppointmentToolDeps = defaultAppointmentToolDeps,
 ): Promise<AgentToolResult> {
-  const dailyProfileSnapshot = await deps.getCompletedDayAppointmentProfileSnapshot(input);
-  if (dailyProfileSnapshot) {
-    return buildAppointmentCountResultFromSnapshot({
-      input,
-      snapshot: dailyProfileSnapshot,
-      snapshotKind: "daily_profile",
-    });
-  }
+  const bypassAggregateSnapshots = hasAppointmentRosterFilterIntent(input.request.message);
 
-  const cachedSnapshot = await deps.getOperationalAppointmentSnapshot(input);
-  if (cachedSnapshot) {
-    return buildAppointmentCountResultFromSnapshot({
-      input,
-      snapshot: cachedSnapshot,
-      snapshotKind: "operational",
-    });
+  if (!bypassAggregateSnapshots) {
+    const dailyProfileSnapshot = await deps.getCompletedDayAppointmentProfileSnapshot(input);
+    if (dailyProfileSnapshot) {
+      return buildAppointmentCountResultFromSnapshot({
+        input,
+        snapshot: dailyProfileSnapshot,
+        snapshotKind: "daily_profile",
+      });
+    }
+
+    const cachedSnapshot = await deps.getOperationalAppointmentSnapshot(input);
+    if (cachedSnapshot) {
+      return buildAppointmentCountResultFromSnapshot({
+        input,
+        snapshot: cachedSnapshot,
+        snapshotKind: "operational",
+      });
+    }
   }
 
   let data: Awaited<ReturnType<typeof snapshot>>;
@@ -647,7 +1182,9 @@ async function getLiveAppointmentCounts(
   try {
     data = await deps.fetchLiveSnapshot(input, { includeCheckIns });
   } catch (error) {
-    const fallback = await buildCachedAppointmentCountResultWithDeps(input, sanitizeError(error), deps);
+    const fallback = bypassAggregateSnapshots
+      ? null
+      : await buildCachedAppointmentCountResultWithDeps(input, sanitizeError(error), deps);
     if (fallback) {
       return fallback;
     }
@@ -655,21 +1192,22 @@ async function getLiveAppointmentCounts(
   }
 
   const bookingSourceUnavailable = data.warnings.some((warning) => warning.type === "booking_source_unavailable");
-  if (bookingSourceUnavailable) {
+  if (bookingSourceUnavailable && !bypassAggregateSnapshots) {
     const fallback = await buildCachedAppointmentCountResultWithDeps(input, "Live appointment bookings could not be loaded.", deps);
     if (fallback) {
       return fallback;
     }
   }
 
-  const bookingRows = data.rows.filter(isScheduledLiveRow);
+  const filter = applyAppointmentRosterFilter(input, data.rows);
+  const bookingRows = filter.rows.filter(isScheduledLiveRow);
   const countableRows = bookingRows.filter(isCountableTodayAppointment);
-  const activeCheckedInRows = data.rows.filter(isActiveCheckedInAppointment);
+  const activeCheckedInRows = filter.rows.filter(isActiveCheckedInAppointment);
   const countableLifecycle = {
     booked: countableRows.filter((row) => row.lifecycleState === "booked").length,
     activeCheckedIn: activeCheckedInRows.length,
     checkedOut: includeCheckIns
-      ? data.rows.filter((row) => row.lifecycleState === "checked_out").length
+      ? filter.rows.filter((row) => row.lifecycleState === "checked_out").length
       : countableRows.filter((row) => row.lifecycleState === "checked_out").length,
     cancelled: countableRows.filter((row) => row.lifecycleState === "cancelled").length,
     noShow: countableRows.filter((row) => row.lifecycleState === "no_show").length,
@@ -690,51 +1228,56 @@ async function getLiveAppointmentCounts(
     sourceName: includeCheckIns ? "APICORE live bookings and check-ins" : "APICORE live bookings",
     checkedAt: data.checkedAt,
     period: input.period.toDate,
-    dataStatus: data.dataStatus,
+    dataStatus: appointmentDataStatus({ rows: countableRows, sourceStatus: data.dataStatus, blockedStatus: filter.blockedStatus }),
     live: true,
     summary: `Live appointment snapshot has ${countableRows.length.toLocaleString("en-US")} appointment booking${countableRows.length === 1 ? "" : "s"} for ${input.period.toDate}, excluding merchant-cancelled rows.`,
     metrics,
     tables: [liveTable("Live appointment rows", countableRows)],
-    warnings: data.warnings,
+    warnings: [...data.warnings, ...filter.warnings],
     entityRefs: countableRows.map((row, index) => liveAppointmentEntityRef(row, index + 1, input.clinic.clinicCode)),
-    data: {
+    data: appointmentToolData(filter.appointmentFilter, {
       countDefinition: APPOINTMENT_BOOKING_COUNT_DEFINITION,
-    },
+    }),
   };
 }
 
 async function listLiveAppointments(input: AgentToolInput, deps: AppointmentToolDeps = defaultAppointmentToolDeps): Promise<AgentToolResult> {
   const data = await deps.fetchLiveSnapshot(input);
+  const filter = applyAppointmentRosterFilter(input, data.rows);
+  const rows = filter.rows;
 
   return {
     toolName: "list_live_appointments",
     sourceName: "APICORE live bookings and check-ins",
     checkedAt: data.checkedAt,
     period: input.period.toDate,
-    dataStatus: data.dataStatus,
+    dataStatus: appointmentDataStatus({ rows, sourceStatus: data.dataStatus, blockedStatus: filter.blockedStatus }),
     live: true,
-    tables: [liveTable("Live appointment rows", data.rows)],
-    warnings: data.warnings,
-    entityRefs: data.rows.map((row, index) => liveAppointmentEntityRef(row, index + 1, input.clinic.clinicCode)),
+    tables: [liveTable("Live appointment rows", rows)],
+    warnings: [...data.warnings, ...filter.warnings],
+    entityRefs: rows.map((row, index) => liveAppointmentEntityRef(row, index + 1, input.clinic.clinicCode)),
+    data: appointmentToolData(filter.appointmentFilter),
   };
 }
 
 async function getCheckedInCustomers(input: AgentToolInput, deps: AppointmentToolDeps = defaultAppointmentToolDeps): Promise<AgentToolResult> {
   const data = await deps.fetchLiveSnapshot(input);
-  const rows = data.rows.filter(isActiveCheckedInAppointment);
+  const filter = applyAppointmentRosterFilter(input, data.rows);
+  const rows = filter.rows.filter(isActiveCheckedInAppointment);
 
   return {
     toolName: "get_checked_in_customers",
     sourceName: "APICORE live check-ins",
     checkedAt: data.checkedAt,
     period: input.period.toDate,
-    dataStatus: rows.length ? data.dataStatus : "no_activity",
+    dataStatus: appointmentDataStatus({ rows, sourceStatus: data.dataStatus, blockedStatus: filter.blockedStatus }),
     live: true,
     summary: `${rows.length.toLocaleString("en-US")} appointment${rows.length === 1 ? "" : "s"} are checked in right now and have not checked out.`,
     metrics: [{ label: "Checked in now", value: rows.length, helperText: "Has check-in time and no check-out time." }],
     tables: [liveTable("Checked-in appointments not checked out", rows)],
     warnings: [
       ...data.warnings,
+      ...filter.warnings,
       {
         type: "active_check_in_definition",
         title: "Checked-in definition",
@@ -742,51 +1285,57 @@ async function getCheckedInCustomers(input: AgentToolInput, deps: AppointmentToo
       },
     ],
     entityRefs: rows.map((row, index) => liveAppointmentEntityRef(row, index + 1, input.clinic.clinicCode)),
+    data: appointmentToolData(filter.appointmentFilter),
   };
 }
 
 async function getCheckedOutCustomers(input: AgentToolInput, deps: AppointmentToolDeps = defaultAppointmentToolDeps): Promise<AgentToolResult> {
   const data = await deps.fetchLiveSnapshot(input);
-  const rows = data.rows.filter((row) => row.lifecycleState === "checked_out");
+  const filter = applyAppointmentRosterFilter(input, data.rows);
+  const rows = filter.rows.filter((row) => row.lifecycleState === "checked_out");
 
   return {
     toolName: "get_checked_out_customers",
     sourceName: "APICORE live check-outs",
     checkedAt: data.checkedAt,
     period: input.period.toDate,
-    dataStatus: rows.length ? data.dataStatus : "no_activity",
+    dataStatus: appointmentDataStatus({ rows, sourceStatus: data.dataStatus, blockedStatus: filter.blockedStatus }),
     live: true,
     metrics: [{ label: "Checked out", value: rows.length }],
     tables: [liveTable("Checked-out customers", rows)],
-    warnings: data.warnings,
+    warnings: [...data.warnings, ...filter.warnings],
     entityRefs: rows.map((row, index) => liveAppointmentEntityRef(row, index + 1, input.clinic.clinicCode)),
+    data: appointmentToolData(filter.appointmentFilter),
   };
 }
 
 async function getNotCheckedOutCustomers(input: AgentToolInput, deps: AppointmentToolDeps = defaultAppointmentToolDeps): Promise<AgentToolResult> {
   const data = await deps.fetchLiveSnapshot(input);
-  const rows = data.rows.filter(isNotCheckedOutAppointment);
+  const filter = applyAppointmentRosterFilter(input, data.rows);
+  const rows = filter.rows.filter(isNotCheckedOutAppointment);
 
   return {
     toolName: "get_not_checked_out_customers",
     sourceName: "APICORE live bookings and check-ins",
     checkedAt: data.checkedAt,
     period: input.period.toDate,
-    dataStatus: rows.length ? data.dataStatus : "no_activity",
+    dataStatus: appointmentDataStatus({ rows, sourceStatus: data.dataStatus, blockedStatus: filter.blockedStatus }),
     live: true,
     summary: `${rows.length.toLocaleString("en-US")} appointments have not checked out yet for ${input.period.toDate}.`,
     metrics: [{ label: "Not checked out yet", value: rows.length }],
     tables: [liveTable("Appointments not checked out", rows)],
-    warnings: data.warnings,
+    warnings: [...data.warnings, ...filter.warnings],
     entityRefs: rows.map((row, index) => liveAppointmentEntityRef(row, index + 1, input.clinic.clinicCode)),
+    data: appointmentToolData(filter.appointmentFilter),
   };
 }
 
 async function getArrivedNotStartedCustomers(input: AgentToolInput, deps: AppointmentToolDeps = defaultAppointmentToolDeps): Promise<AgentToolResult> {
   const data = await deps.fetchLiveSnapshot(input);
-  const hasTreatmentStartField = data.rows.some((row) => row.treatmentStartKnown);
+  const filter = applyAppointmentRosterFilter(input, data.rows);
+  const hasTreatmentStartField = filter.rows.some((row) => row.treatmentStartKnown);
   const rows = hasTreatmentStartField
-    ? data.rows.filter(
+    ? filter.rows.filter(
         (row) =>
           Boolean(row.checkInTime) &&
           !row.treatmentStartedAt &&
@@ -794,7 +1343,7 @@ async function getArrivedNotStartedCustomers(input: AgentToolInput, deps: Appoin
           !isCancelledNoShowOrCancelledStatus(row) &&
           row.lifecycleState !== "checked_out",
       )
-    : data.rows.filter(isActiveCheckedInAppointment);
+    : filter.rows.filter(isActiveCheckedInAppointment);
   const warning = hasTreatmentStartField
     ? null
     : {
@@ -809,7 +1358,7 @@ async function getArrivedNotStartedCustomers(input: AgentToolInput, deps: Appoin
     sourceName: "APICORE live bookings and check-ins",
     checkedAt: data.checkedAt,
     period: input.period.toDate,
-    dataStatus: rows.length ? data.dataStatus : "no_activity",
+    dataStatus: appointmentDataStatus({ rows, sourceStatus: data.dataStatus, blockedStatus: filter.blockedStatus }),
     live: true,
     summary: hasTreatmentStartField
       ? `${rows.length.toLocaleString("en-US")} checked-in customers have not started treatment for ${input.period.toDate}.`
@@ -821,49 +1370,57 @@ async function getArrivedNotStartedCustomers(input: AgentToolInput, deps: Appoin
       },
     ],
     tables: [liveTable(hasTreatmentStartField ? "Arrived but not started treatment" : "Arrived, treatment start unknown", rows)],
-    warnings: warning ? [...data.warnings, warning] : data.warnings,
+    warnings: warning ? [...data.warnings, ...filter.warnings, warning] : [...data.warnings, ...filter.warnings],
     entityRefs: rows.map((row, index) => liveAppointmentEntityRef(row, index + 1, input.clinic.clinicCode)),
+    data: appointmentToolData(filter.appointmentFilter),
   };
 }
 
 async function getCancelledNoShowCustomers(input: AgentToolInput, deps: AppointmentToolDeps = defaultAppointmentToolDeps): Promise<AgentToolResult> {
   const data = await deps.fetchLiveSnapshot(input);
-  const rows = data.rows.filter((row) => row.lifecycleState === "cancelled" || row.lifecycleState === "no_show");
+  const filter = applyAppointmentRosterFilter(input, data.rows);
+  const rows = filter.rows.filter((row) => row.lifecycleState === "cancelled" || row.lifecycleState === "no_show");
 
   return {
     toolName: "get_cancelled_no_show_customers",
     sourceName: "APICORE live bookings",
     checkedAt: data.checkedAt,
     period: input.period.toDate,
-    dataStatus: rows.length ? data.dataStatus : "no_activity",
+    dataStatus: appointmentDataStatus({ rows, sourceStatus: data.dataStatus, blockedStatus: filter.blockedStatus }),
     live: true,
     metrics: [
       { label: "Cancelled", value: rows.filter((row) => row.lifecycleState === "cancelled").length },
       { label: "No-show", value: rows.filter((row) => row.lifecycleState === "no_show").length },
     ],
     tables: [liveTable("Cancelled and no-show customers", rows)],
-    warnings: data.warnings,
+    warnings: [...data.warnings, ...filter.warnings],
     entityRefs: rows.map((row, index) => liveAppointmentEntityRef(row, index + 1, input.clinic.clinicCode)),
+    data: appointmentToolData(filter.appointmentFilter),
   };
 }
 
 async function getAppointmentDetail(input: AgentToolInput, deps: AppointmentToolDeps = defaultAppointmentToolDeps): Promise<AgentToolResult> {
   const data = await deps.fetchLiveSnapshot(input);
   const appointmentId = input.entityContext?.appointmentId ?? input.entityContext?.entityId;
+  const filter = appointmentId ? null : applyAppointmentRosterFilter(input, data.rows);
+  const sourceRows = filter?.rows ?? data.rows;
   const rows = appointmentId
     ? data.rows.filter((row) => row.appointmentId === appointmentId)
-    : data.rows.slice(0, 1);
+    : sourceRows.slice(0, 1);
 
   return {
     toolName: "get_appointment_detail",
     sourceName: "APICORE live bookings and check-ins",
     checkedAt: data.checkedAt,
     period: input.period.toDate,
-    dataStatus: rows.length ? data.dataStatus : "not_found",
+    dataStatus: filter
+      ? appointmentDataStatus({ rows, sourceStatus: data.dataStatus, blockedStatus: filter.blockedStatus })
+      : rows.length ? data.dataStatus : "not_found",
     live: true,
     tables: [liveTable("Appointment detail", rows)],
-    warnings: data.warnings,
+    warnings: filter ? [...data.warnings, ...filter.warnings] : data.warnings,
     entityRefs: rows.map((row, index) => liveAppointmentEntityRef(row, index + 1, input.clinic.clinicCode)),
+    data: appointmentToolData(filter?.appointmentFilter),
   };
 }
 
@@ -917,7 +1474,7 @@ export function createAppointmentTools(overrides: Partial<AppointmentToolDeps> =
       live: true,
       maxRows: LEDGER_TABLE_ROWS,
       timeoutMs: 20_000,
-      execute: getAppointmentLedger,
+      execute: (input) => getAppointmentLedger(input, deps),
     },
     {
       name: "get_treatment_start_proxy",
@@ -928,7 +1485,7 @@ export function createAppointmentTools(overrides: Partial<AppointmentToolDeps> =
       live: true,
       maxRows: LEDGER_TABLE_ROWS,
       timeoutMs: 20_000,
-      execute: getTreatmentStartProxy,
+      execute: (input) => getTreatmentStartProxy(input, deps),
     },
     {
       name: "get_live_appointment_counts",

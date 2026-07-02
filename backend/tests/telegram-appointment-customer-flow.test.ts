@@ -261,6 +261,80 @@ test("today appointment list with 13 appointments uses named paginated customer 
   assert.equal(token?.customerId, "cust-13")
 })
 
+test("Telegram appointment list displays roster filter metadata and empty filtered results safely", () => {
+  const staffMessage = formatAgentHubTelegramReply(
+    {
+      ...appointmentResponse(2, [
+        ["09:00", "Chit Thiri Ko", "95900000061", "959xxxx061", "Booking deposit", "Dr Zun Ko Lwin"],
+        ["10:00", "May Thu", "95900000555", "959xxxx555", "Body Contouring", "Dr Zun Ko Lwin"],
+      ]),
+      data: {
+        appointmentFilter: {
+          practitionerName: "Dr Zun Ko Lwin",
+          sourceRowCount: 4,
+        },
+      },
+    },
+    { viewerContext: authorizedViewer, clinicCode: "ABC" },
+  )
+  const serviceMessage = formatAgentHubTelegramReply(
+    {
+      ...appointmentResponse(2, [
+        ["09:00", "Chit Thiri Ko", "95900000061", "959xxxx061", "Booking deposit", "Dr Zun Ko Lwin"],
+        ["11:00", "Nandar", "95900000777", "959xxxx777", "Booking deposit", "Shwe Yee"],
+      ]),
+      data: {
+        appointmentFilter: {
+          serviceName: "Booking deposit",
+          sourceRowCount: 4,
+        },
+      },
+    },
+    { viewerContext: authorizedViewer, clinicCode: "ABC" },
+  )
+  const combinedMessage = formatAgentHubTelegramReply(
+    {
+      ...appointmentResponse(1, [
+        ["09:00", "Chit Thiri Ko", "95900000061", "959xxxx061", "Booking deposit", "Dr Zun Ko Lwin"],
+      ]),
+      data: {
+        appointmentFilter: {
+          practitionerName: "Dr Zun Ko Lwin",
+          serviceName: "Booking deposit",
+          sourceRowCount: 4,
+        },
+      },
+    },
+    { viewerContext: authorizedViewer, clinicCode: "ABC" },
+  )
+  const emptyMessage = formatAgentHubTelegramReply(
+    {
+      ...appointmentResponse(0, []),
+      dataStatus: "no_activity",
+      data: {
+        appointmentFilter: {
+          practitionerName: "Dr Zun Ko Lwin",
+          sourceRowCount: 2,
+        },
+      },
+      warnings: [
+        {
+          type: "appointment_filter_no_match",
+          title: "Appointment filter not found",
+          message: "I could not find Dr Zun Ko Lwin in today's appointments. Available staff today: Shwe Yee, Ngwe Yee.",
+        },
+      ],
+    },
+    { viewerContext: authorizedViewer, clinicCode: "ABC" },
+  )
+
+  assert.match(staffMessage, /Filter: Staff: Dr Zun Ko Lwin/)
+  assert.match(serviceMessage, /Filter: Service: Booking deposit/)
+  assert.match(combinedMessage, /Filter: Staff: Dr Zun Ko Lwin၊ Service: Booking deposit/)
+  assert.match(emptyMessage, /ဒီနေ့ Dr Zun Ko Lwin အတွက် appointment booking မတွေ့ပါ/)
+  assert.doesNotMatch(emptyMessage, /\n1\./)
+})
+
 test("Telegram appointment list preserves local APICORE times without Yangon double shift", () => {
   const response = appointmentResponse(4, [
     ["2026-06-30T10:25:00.000Z", "Yin Thu Min@ Thinza San E", "95900000293", "959xxxx293", "Hair Removal Underarm", "Mon Mon"],

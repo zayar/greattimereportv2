@@ -165,12 +165,13 @@ function buildAgentToolInputFixture(overrides?: Partial<{
   label: string
   timezone: string
   intent: string
+  message: string
 }>) {
   return {
     request: {
       clinicId: "clinic-1",
       clinicCode: "ABC",
-      message: "daily brief",
+      message: overrides?.message ?? "daily brief",
       timezone: overrides?.timezone ?? "Asia/Yangon",
     },
     clinic: {
@@ -412,6 +413,71 @@ function buildApicoreBookingDetailsRowFixture(overrides?: Partial<{
     status: overrides?.status ?? "BOOKED",
     member_note: null,
   }
+}
+
+function buildAppointmentFilterLedgerRows() {
+  return [
+    buildApicoreBookingDetailsRowFixture({
+      bookingid: "booking-dr-deposit",
+      FromTime: "2026-06-30T09:00:00.000Z",
+      MemberName: "Chit Thiri Ko",
+      ServiceName: "Booking deposit",
+      PractitionerName: "Dr Zun Ko Lwin",
+    }),
+    buildApicoreBookingDetailsRowFixture({
+      bookingid: "booking-dr-body",
+      FromTime: "2026-06-30T10:00:00.000Z",
+      MemberName: "May Thu",
+      ServiceName: "Body Contouring",
+      PractitionerName: "Dr Zun Ko Lwin",
+    }),
+    buildApicoreBookingDetailsRowFixture({
+      bookingid: "booking-shwe-deposit",
+      FromTime: "2026-06-30T11:00:00.000Z",
+      MemberName: "Nandar",
+      ServiceName: "Booking deposit",
+      PractitionerName: "Shwe Yee",
+    }),
+    buildApicoreBookingDetailsRowFixture({
+      bookingid: "booking-ngwe-underarm",
+      FromTime: "2026-06-30T12:00:00.000Z",
+      MemberName: "Thandar Aung",
+      ServiceName: "Hair Removal Underarm",
+      PractitionerName: "Ngwe Yee",
+    }),
+  ]
+}
+
+function appointmentRowsFromToolResult(result: {
+  tables?: Array<{ title: string; rows: Array<Record<string, unknown>> }>
+}) {
+  return result.tables?.find((table) => table.title === "Appointments" || table.title === "Live appointment rows")?.rows ?? []
+}
+
+function appointmentFilterFromToolResult(result: { data?: Record<string, unknown> }) {
+  return result.data?.appointmentFilter as
+    | { practitionerName?: string; serviceName?: string; sourceRowCount?: number }
+    | undefined
+}
+
+function buildAppointmentChatResponseFromToolResult(params: {
+  input: ReturnType<typeof buildAgentToolInputFixture>
+  result: Awaited<ReturnType<ReturnType<typeof createAppointmentTools>[number]["execute"]>>
+}) {
+  return buildAgentResponse({
+    request: params.input.request,
+    plan: {
+      requestedAgent: "appointment",
+      resolvedAgent: "appointment",
+      autoMode: false,
+      intent: params.input.intent,
+      toolNames: [params.result.toolName],
+      period: params.input.period,
+    },
+    sessionId: "session-1",
+    requestId: "request-1",
+    toolResults: [params.result],
+  })
 }
 
 test("env defaults parse Agent Hub and BigQuery performance knobs", () => {
@@ -2607,6 +2673,246 @@ test("live appointment count result uses filtered booking rows for totals tables
   assert.equal(result.metrics?.find((metric) => metric.label === "Total appointments today")?.value, 2)
   assert.deepEqual(result.tables?.[0]?.rows.map((row) => row.appointmentId), ["booking-b", "booking-c"])
   assert.deepEqual(result.entityRefs?.map((ref) => ref.appointmentId), ["booking-b", "booking-c"])
+})
+
+test("appointment ledger roster filters staff and service requests deterministically", async () => {
+  const sourceRows = buildAppointmentFilterLedgerRows()
+  const ledgerTool = requireTool(
+    createAppointmentTools({
+      fetchAppointmentLedger: async () => ({
+        checkedAt: "2026-06-30T08:00:00.000Z",
+        totalCount: sourceRows.length,
+        rows: sourceRows,
+        dataStatus: "ok" as const,
+        warnings: [],
+      }),
+    }),
+    "get_appointment_ledger",
+  )
+  const execute = (message: string) =>
+    ledgerTool.execute(
+      buildAgentToolInputFixture({
+        fromDate: "2026-06-30",
+        toDate: "2026-06-30",
+        label: "today",
+        timezone: "Asia/Yangon",
+        intent: "appointment_list",
+        message,
+      }),
+    )
+
+  const unfiltered = await execute("Today appointment")
+  assert.deepEqual(appointmentRowsFromToolResult(unfiltered).map((row) => row.appointmentId), [
+    "booking-dr-deposit",
+    "booking-dr-body",
+    "booking-shwe-deposit",
+    "booking-ngwe-underarm",
+  ])
+  assert.equal(appointmentFilterFromToolResult(unfiltered), undefined)
+
+  const staffEnglish = await execute("Today appointment for Dr Zun Ko Lwin")
+  assert.deepEqual(appointmentRowsFromToolResult(staffEnglish).map((row) => row.appointmentId), [
+    "booking-dr-deposit",
+    "booking-dr-body",
+  ])
+  assert.deepEqual(appointmentFilterFromToolResult(staffEnglish), {
+    practitionerName: "Dr Zun Ko Lwin",
+    sourceRowCount: 4,
+  })
+
+  const staffMixed = await execute("ဒီနေ့ Dr Zun Ko Lwin appointment စာရင်းပြပါ")
+  assert.deepEqual(appointmentRowsFromToolResult(staffMixed).map((row) => row.appointmentId), [
+    "booking-dr-deposit",
+    "booking-dr-body",
+  ])
+
+  const service = await execute("Today appointment for Booking deposit")
+  assert.deepEqual(appointmentRowsFromToolResult(service).map((row) => row.appointmentId), [
+    "booking-dr-deposit",
+    "booking-shwe-deposit",
+  ])
+  assert.deepEqual(appointmentFilterFromToolResult(service), {
+    serviceName: "Booking deposit",
+    sourceRowCount: 4,
+  })
+
+  const servicePhrase = await execute("Today Hair Removal Underarm appointments")
+  assert.deepEqual(appointmentRowsFromToolResult(servicePhrase).map((row) => row.appointmentId), [
+    "booking-ngwe-underarm",
+  ])
+  assert.deepEqual(appointmentFilterFromToolResult(servicePhrase), {
+    serviceName: "Hair Removal Underarm",
+    sourceRowCount: 4,
+  })
+
+  const combined = await execute("Today Booking deposit appointments for Dr Zun Ko Lwin")
+  assert.deepEqual(appointmentRowsFromToolResult(combined).map((row) => row.appointmentId), [
+    "booking-dr-deposit",
+  ])
+  assert.deepEqual(appointmentFilterFromToolResult(combined), {
+    practitionerName: "Dr Zun Ko Lwin",
+    serviceName: "Booking deposit",
+    sourceRowCount: 4,
+  })
+})
+
+test("appointment filter metadata reaches Telegram response formatting", async () => {
+  const sourceRows = buildAppointmentFilterLedgerRows()
+  const ledgerTool = requireTool(
+    createAppointmentTools({
+      fetchAppointmentLedger: async () => ({
+        checkedAt: "2026-06-30T08:00:00.000Z",
+        totalCount: sourceRows.length,
+        rows: sourceRows,
+        dataStatus: "ok" as const,
+        warnings: [],
+      }),
+    }),
+    "get_appointment_ledger",
+  )
+  const input = buildAgentToolInputFixture({
+    fromDate: "2026-06-30",
+    toDate: "2026-06-30",
+    label: "today",
+    timezone: "Asia/Yangon",
+    intent: "appointment_list",
+    message: "Today appointment for Dr Zun Ko Lwin",
+  })
+  const result = await ledgerTool.execute(input)
+  const response = buildAppointmentChatResponseFromToolResult({ input, result })
+  const message = formatAgentHubTelegramReply(response)
+
+  assert.deepEqual(response.data?.appointmentFilter, {
+    practitionerName: "Dr Zun Ko Lwin",
+    sourceRowCount: 4,
+  })
+  assert.match(message, /Filter: Staff: Dr Zun Ko Lwin/)
+  assert.match(message, /Service: Booking deposit/)
+  assert.match(message, /Staff: Dr Zun Ko Lwin/)
+  assert.doesNotMatch(message, /Staff: Shwe Yee/)
+
+  const serviceInput = {
+    ...input,
+    request: {
+      ...input.request,
+      message: "Today appointment for Booking deposit",
+    },
+  }
+  const serviceResult = await ledgerTool.execute(serviceInput)
+  const serviceResponse = buildAppointmentChatResponseFromToolResult({ input: serviceInput, result: serviceResult })
+  const serviceMessage = formatAgentHubTelegramReply(serviceResponse)
+  assert.match(serviceMessage, /Filter: Service: Booking deposit/)
+})
+
+test("appointment filters return no rows instead of unfiltered roster when requested name is absent", async () => {
+  const sourceRows = buildAppointmentFilterLedgerRows().filter((row) => row.PractitionerName !== "Dr Zun Ko Lwin")
+  const ledgerTool = requireTool(
+    createAppointmentTools({
+      fetchAppointmentLedger: async () => ({
+        checkedAt: "2026-06-30T08:00:00.000Z",
+        totalCount: sourceRows.length,
+        rows: sourceRows,
+        dataStatus: "ok" as const,
+        warnings: [],
+      }),
+    }),
+    "get_appointment_ledger",
+  )
+  const input = buildAgentToolInputFixture({
+    fromDate: "2026-06-30",
+    toDate: "2026-06-30",
+    label: "today",
+    timezone: "Asia/Yangon",
+    intent: "appointment_list",
+    message: "Today appointment for Dr Zun Ko Lwin",
+  })
+  const result = await ledgerTool.execute(input)
+  const response = buildAppointmentChatResponseFromToolResult({ input, result })
+  const message = formatAgentHubTelegramReply(response)
+
+  assert.equal(result.dataStatus, "no_activity")
+  assert.deepEqual(appointmentRowsFromToolResult(result), [])
+  assert.deepEqual(appointmentFilterFromToolResult(result), {
+    practitionerName: "Dr Zun Ko Lwin",
+    sourceRowCount: 2,
+  })
+  assert.match(result.warnings?.[0]?.message ?? "", /Available staff today: Shwe Yee, Ngwe Yee/)
+  assert.match(message, /ဒီနေ့ Dr Zun Ko Lwin အတွက် appointment booking မတွေ့ပါ/)
+  assert.doesNotMatch(message, /\n1\./)
+})
+
+test("staff-specific appointment counts bypass aggregate snapshots and use live rows", async () => {
+  let dailyProfileCalls = 0
+  let operationalSnapshotCalls = 0
+  let liveCalls = 0
+  const liveRows = [
+    {
+      ...buildLiveAppointmentSnapshotFixture().rows[0]!,
+      appointmentId: "live-dr",
+      customerName: "Chit Thiri Ko",
+      serviceName: "Booking deposit",
+      practitionerName: "Dr Zun Ko Lwin",
+    },
+    {
+      ...buildLiveAppointmentSnapshotFixture().rows[0]!,
+      appointmentId: "live-shwe",
+      customerName: "Nandar",
+      serviceName: "Booking deposit",
+      practitionerName: "Shwe Yee",
+    },
+  ]
+  const countTool = requireTool(
+    createAppointmentTools({
+      getCompletedDayAppointmentProfileSnapshot: async () => {
+        dailyProfileCalls += 1
+        return buildFactSnapshotFixture({
+          snapshotType: "appointment_daily_profile",
+          summary: { bookingAppointmentCount: 99 },
+        })
+      },
+      getOperationalAppointmentSnapshot: async () => {
+        operationalSnapshotCalls += 1
+        return buildFactSnapshotFixture({
+          snapshotType: "appointment_operational_snapshot",
+          summary: { bookingAppointmentCount: 88 },
+        })
+      },
+      fetchLiveSnapshot: async () => {
+        liveCalls += 1
+        return {
+          checkedAt: "2026-06-30T08:00:00.000Z",
+          dataStatus: "ok" as const,
+          rows: liveRows,
+          countsByLifecycle: {},
+          countsByService: {},
+          countsByPractitioner: {},
+          warnings: [],
+        }
+      },
+    }),
+    "get_live_appointment_counts",
+  )
+  const result = await countTool.execute(
+    buildAgentToolInputFixture({
+      fromDate: "2026-06-30",
+      toDate: "2026-06-30",
+      label: "today",
+      timezone: "Asia/Yangon",
+      intent: "appointment_summary",
+      message: "Today appointment for Dr Zun Ko Lwin",
+    }),
+  )
+
+  assert.equal(dailyProfileCalls, 0)
+  assert.equal(operationalSnapshotCalls, 0)
+  assert.equal(liveCalls, 1)
+  assert.equal(result.sourceName, "APICORE live bookings")
+  assert.equal(result.metrics?.find((metric) => metric.label === "Total appointments today")?.value, 1)
+  assert.deepEqual(result.tables?.[0]?.rows.map((row) => row.appointmentId), ["live-dr"])
+  assert.deepEqual(appointmentFilterFromToolResult(result), {
+    practitionerName: "Dr Zun Ko Lwin",
+    sourceRowCount: 2,
+  })
 })
 
 test("appointment lifecycle tools filter not-checked-out, checked-in, checked-out, and proxy arrived-not-started rows", async () => {

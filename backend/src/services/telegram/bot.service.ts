@@ -783,6 +783,57 @@ function appointmentCountLineForIntent(response: GreatTimeAgentChatResponse, cou
   }
 }
 
+type TelegramAppointmentFilter = {
+  practitionerName?: string;
+  serviceName?: string;
+  sourceRowCount?: number;
+};
+
+function appointmentFilterFromResponse(response: GreatTimeAgentChatResponse): TelegramAppointmentFilter | null {
+  const raw = response.data?.appointmentFilter;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+
+  const record = raw as Record<string, unknown>;
+  const practitionerName = typeof record.practitionerName === "string" && record.practitionerName.trim()
+    ? record.practitionerName.trim()
+    : undefined;
+  const serviceName = typeof record.serviceName === "string" && record.serviceName.trim()
+    ? record.serviceName.trim()
+    : undefined;
+  const sourceRowCount = typeof record.sourceRowCount === "number" && Number.isFinite(record.sourceRowCount)
+    ? record.sourceRowCount
+    : undefined;
+
+  if (!practitionerName && !serviceName && sourceRowCount === undefined) {
+    return null;
+  }
+
+  return { practitionerName, serviceName, sourceRowCount };
+}
+
+function appointmentFilterLine(filter: TelegramAppointmentFilter | null) {
+  if (!filter) {
+    return null;
+  }
+
+  const parts = [
+    filter.practitionerName ? `Staff: ${filter.practitionerName}` : null,
+    filter.serviceName ? `Service: ${filter.serviceName}` : null,
+  ].filter((part): part is string => Boolean(part));
+
+  return parts.length ? `Filter: ${parts.join("၊ ")}` : null;
+}
+
+function appointmentFilterSubject(filter: TelegramAppointmentFilter | null) {
+  if (!filter) {
+    return "";
+  }
+
+  return [filter.practitionerName, filter.serviceName].filter(Boolean).join("၊ ");
+}
+
 function sanitizeOwnerFacingText(text: string) {
   return text
     .replace(
@@ -812,6 +863,7 @@ function sanitizeOwnerFacingText(text: string) {
 function formatAppointmentConversation(response: GreatTimeAgentChatResponse, viewerContext?: CustomerPhoneViewerContext, clinicCode = "") {
   const appointmentTable = appointmentTableFromResponse(response);
   const appointmentRows = sortedAppointmentRowsFromResponse(response);
+  const appointmentFilter = appointmentFilterFromResponse(response);
   const appointmentContextItems = buildRecentAppointmentContextItemsFromResponse({
     response,
     viewerContext,
@@ -819,7 +871,17 @@ function formatAppointmentConversation(response: GreatTimeAgentChatResponse, vie
   });
   const totalAppointments = appointmentCountForIntent(response, appointmentTable?.rows.length ?? appointmentContextItems.length);
   const total = typeof totalAppointments === "number" ? totalAppointments : appointmentTable?.rows.length ?? appointmentContextItems.length;
-  const lines = [appointmentCountLineForIntent(response, totalAppointments)];
+  const filterLine = appointmentFilterLine(appointmentFilter);
+  const filterSubject = appointmentFilterSubject(appointmentFilter);
+  const countLine =
+    appointmentRows.length === 0 && filterSubject
+      ? `${ownerBodyPeriodPrefix(response.period)} ${filterSubject} အတွက် appointment booking မတွေ့ပါ။`
+      : appointmentCountLineForIntent(response, totalAppointments);
+  const lines = [countLine];
+
+  if (filterLine) {
+    lines.push(filterLine);
+  }
 
   if (appointmentRows.length) {
     if (appointmentContextItems.length > appointmentPageSize()) {

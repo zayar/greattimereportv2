@@ -449,6 +449,10 @@ function safeResponseDataFromToolResults(results: AgentToolResult[]) {
     if (toolData.operationsReconciliation) {
       data.operationsReconciliation = toolData.operationsReconciliation;
     }
+
+    if (toolData.appointmentFilter) {
+      data.appointmentFilter ??= toolData.appointmentFilter;
+    }
   });
 
   if (countDefinitions.length) {
