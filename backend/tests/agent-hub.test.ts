@@ -50,7 +50,7 @@ const { createAgentToolRegistry, getAgentToolAllowlist } = await import("../src/
 const { extractInvoiceSearch } = await import("../src/services/agent-hub/tools/finance.tools.ts")
 const { buildFinanceSnapshotSummaryResult, createFinanceTools } = await import("../src/services/agent-hub/tools/finance.tools.ts")
 const { buildAppointmentCountResultFromSnapshot, buildAppointmentLedgerQueryRange, createAppointmentTools } = await import("../src/services/agent-hub/tools/appointment.tools.ts")
-const { buildOwnerDailyBriefFromSnapshots, selectOwnerDailyBriefDate } = await import("../src/services/agent-hub/tools/business.tools.ts")
+const { buildOwnerDailyBriefFromSnapshots, createBusinessTools, selectOwnerDailyBriefDate } = await import("../src/services/agent-hub/tools/business.tools.ts")
 const { getTreatmentReportRange } = await import("../src/services/reports/daily-treatment.service.ts")
 const { extractLikelyCustomerSearchText } = await import("../src/services/agent-hub/customer-query.ts")
 const {
@@ -58,6 +58,12 @@ const {
   hasPaymentMethodReference,
   isPaymentMethodDetailQuestion,
 } = await import("../src/services/agent-hub/payment-method-intent.ts")
+const {
+  extractTreatmentDetailFilters,
+  hasNamedPractitionerInTreatmentQuestion,
+  hasNamedServiceInTreatmentQuestion,
+  isTreatmentDetailQuestion,
+} = await import("../src/services/agent-hub/treatment-detail-intent.ts")
 const { extractExplicitServiceSearchText } = await import("../src/services/agent-hub/service-query.ts")
 const { enhanceAgentResponseNarrative } = await import("../src/services/agent-hub/narrative.service.ts")
 const { buildAgentStatusReport } = await import("../src/services/agent-hub/monitoring/agent-status-monitoring.ts")
@@ -1474,6 +1480,133 @@ test("Daily treatment report queries the full selected date range", async () => 
   }
 })
 
+test("Daily treatment report applies service and practitioner filters", async () => {
+  const queryOptions: Array<{ query: string; params: Record<string, unknown> }> = []
+
+  await withMockedBigQuery(
+    async (options) => {
+      const queryOption = options as { query: string; params: Record<string, unknown> }
+      queryOptions.push(queryOption)
+
+      if (queryOption.query.includes("FORMAT_TIMESTAMP")) {
+        return [
+          [
+            {
+              checkInTime: "2026-06-26 01:20 PM",
+              therapistName: "Aye Aye",
+              serviceName: "Hair Removal Underarm",
+              customerName: "Ma Zar",
+              customerPhone: "0959423664860",
+            },
+          ],
+        ]
+      }
+
+      if (queryOption.query.includes("WITH service_matrix")) {
+        return [
+          [
+            {
+              therapistName: "Aye Aye",
+              serviceDetails: [{ serviceName: "Hair Removal Underarm", serviceCount: 1 }],
+              totalServices: 1,
+            },
+          ],
+        ]
+      }
+
+      return [[{ totalTreatments: 1, therapists: 1, uniqueServices: 1, distinctCustomers: 1 }]]
+    },
+    async () => {
+      const report = await getTreatmentReportRange({
+        clinicCode: "ABC",
+        fromDate: "2026-06-26",
+        toDate: "2026-06-26",
+        serviceName: "Hair Removal",
+        practitionerName: "Aye Aye",
+      })
+
+      assert.equal(report.summary.totalTreatments, 1)
+      assert.equal(report.records[0].serviceName, "Hair Removal Underarm")
+    },
+  )
+
+  assert.equal(queryOptions.length, 3)
+  for (const option of queryOptions) {
+    assert.equal(option.params.serviceName, "Hair Removal")
+    assert.equal(option.params.practitionerName, "Aye Aye")
+    assert.match(option.query, /LOWER\(ServiceName\) LIKE CONCAT/)
+    assert.match(option.query, /LOWER\(COALESCE\(PractitionerName/)
+  }
+})
+
+test("business daily treatments tool returns filtered treatment roster detail", async () => {
+  const treatmentTool = createBusinessTools().find((tool) => tool.name === "get_daily_treatments")
+  assert.ok(treatmentTool)
+
+  await withMockedBigQuery(
+    async (options) => {
+      const queryOption = options as { query: string; params: Record<string, unknown> }
+      assert.equal(queryOption.params.serviceName, "Hair Removal")
+
+      if (queryOption.query.includes("FORMAT_TIMESTAMP")) {
+        return [
+          [
+            {
+              checkInTime: "2026-06-26 01:20 PM",
+              therapistName: "Aye Aye",
+              serviceName: "Hair Removal Underarm",
+              customerName: "Ma Zar",
+              customerPhone: "0959423664860",
+            },
+            {
+              checkInTime: "2026-06-26 02:10 PM",
+              therapistName: "Su Su",
+              serviceName: "Hair Removal Face",
+              customerName: "May Thu",
+              customerPhone: "0959000000000",
+            },
+          ],
+        ]
+      }
+
+      if (queryOption.query.includes("WITH service_matrix")) {
+        return [
+          [
+            {
+              therapistName: "Aye Aye",
+              serviceDetails: [{ serviceName: "Hair Removal Underarm", serviceCount: 1 }],
+              totalServices: 1,
+            },
+            {
+              therapistName: "Su Su",
+              serviceDetails: [{ serviceName: "Hair Removal Face", serviceCount: 1 }],
+              totalServices: 1,
+            },
+          ],
+        ]
+      }
+
+      return [[{ totalTreatments: 2, therapists: 2, uniqueServices: 2, distinctCustomers: 2 }]]
+    },
+    async () => {
+      const result = await treatmentTool.execute(buildAgentToolInputFixture({
+        intent: "treatment_roster",
+        message: "မနေ့က Hair Removal ဘယ်သူတွေလာလုပ်လဲ",
+      }))
+
+      assert.equal(result.toolName, "get_daily_treatments")
+      assert.equal(result.dataStatus, "ok")
+      assert.match(result.summary ?? "", /matching service "Hair Removal"/)
+      assert.equal(result.metrics?.find((metric) => metric.label === "Treatments")?.value, 2)
+      assert.equal(result.tables?.find((table) => table.title === "Daily treatment records")?.rows.length, 2)
+      assert.equal(result.tables?.find((table) => table.title === "Therapist breakdown")?.rows.length, 2)
+      const filter = result.data?.treatmentDetailFilter as Record<string, unknown>
+      assert.equal(filter.serviceName, "Hair Removal")
+      assert.equal(filter.practitionerName, null)
+    },
+  )
+})
+
 test("BigQuery analytics query context can bypass in-memory and BigQuery cache for learning jobs", async () => {
   let queryCalls = 0
   const queryOptions: unknown[] = []
@@ -1606,6 +1739,9 @@ test("supervisor routes four agent domains and respects explicit override", () =
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "မနေ့က MMQR ဘယ်လောက်ဝင်လဲ?" }).resolvedAgent, "finance")
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "tell me details about KPaye" }).resolvedAgent, "finance")
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "MMQR transaction details" }).resolvedAgent, "finance")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "မနေ့က Hair Removal ဘယ်သူတွေလာလုပ်လဲ" }).resolvedAgent, "business")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "yesterday Hair Removal who did?" }).resolvedAgent, "business")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "မနေ့က Aye Aye therapist ဘာ service တွေလုပ်လဲ" }).resolvedAgent, "business")
   assert.equal(
     resolveAgent({ requestedAgent: "auto", message: "Which customers have unused package balance?" }).resolvedAgent,
     "customer_relationship",
@@ -1621,6 +1757,8 @@ test("supervisor routes four agent domains and respects explicit override", () =
 test("payment method aliases are recognized without becoming customer search text", () => {
   assert.equal(extractPaymentMethodFilter("tell me details about KPaye"), "KPAY")
   assert.equal(extractPaymentMethodFilter("k pay transaction details"), "KPAY")
+  assert.equal(extractPaymentMethodFilter("kpay e transcription"), "KPAY")
+  assert.equal(extractPaymentMethodFilter("kbzpay transcription"), "KPAY")
   assert.equal(extractPaymentMethodFilter("မနေ့က MMQR ဘယ်လောက်ဝင်လဲ?"), "MMQR")
   assert.equal(extractPaymentMethodFilter("show qr transaction details"), "MMQR")
   assert.equal(extractPaymentMethodFilter("show QR code setup"), null)
@@ -1629,11 +1767,34 @@ test("payment method aliases are recognized without becoming customer search tex
   assert.equal(extractPaymentMethodFilter("master card details"), "MASTERCARD")
   assert.equal(hasPaymentMethodReference("MMQR transaction details"), true)
   assert.equal(isPaymentMethodDetailQuestion("tell me details about KPaye"), true)
+  assert.equal(isPaymentMethodDetailQuestion("Tell me yesterday KPay transcription?"), true)
+  assert.equal(isPaymentMethodDetailQuestion("မနေ့က KPay transcription တွေပြပါ"), true)
   assert.equal(isPaymentMethodDetailQuestion("How much MMQR ဝင်လဲ?"), true)
   assert.equal(isPaymentMethodDetailQuestion("မနေ့က bank transactions ကို bank အလိုက်ပြပေးပါ"), false)
   assert.equal(extractLikelyCustomerSearchText("tell me details about MMQR"), "")
   assert.equal(extractLikelyCustomerSearchText("tell me details about KPaye"), "")
   assert.equal(extractLikelyCustomerSearchText("Tell me about Phyo Yee Thar"), "Phyo Yee Thar")
+})
+
+test("treatment detail aliases are recognized without becoming customer search text", () => {
+  const hairRemovalFilters = extractTreatmentDetailFilters("မနေ့က Hair Removal ဘယ်သူတွေလာလုပ်လဲ")
+  assert.equal(hairRemovalFilters.serviceName, "Hair Removal")
+  assert.equal(hairRemovalFilters.wantsCustomerRows, true)
+  assert.equal(hairRemovalFilters.wantsPractitionerBreakdown, true)
+  assert.equal(hasNamedServiceInTreatmentQuestion("yesterday Hair Removal customer list"), true)
+  assert.equal(isTreatmentDetailQuestion("yesterday Hair Removal who did?"), true)
+
+  const genericServiceDetails = extractTreatmentDetailFilters("မနေ့က service details")
+  assert.equal(genericServiceDetails.serviceName, undefined)
+  assert.equal(isTreatmentDetailQuestion("မနေ့က service details"), true)
+
+  const practitionerFilters = extractTreatmentDetailFilters("မနေ့က Aye Aye therapist ဘာ service တွေလုပ်လဲ")
+  assert.equal(practitionerFilters.practitionerName, "Aye Aye")
+  assert.equal(hasNamedPractitionerInTreatmentQuestion("မနေ့က Aye Aye therapist ဘာ service တွေလုပ်လဲ"), true)
+  assert.equal(isTreatmentDetailQuestion("မနေ့က therapist details"), true)
+  assert.equal(isTreatmentDetailQuestion("I want to know which customers doing witch service today?"), false)
+  assert.equal(extractLikelyCustomerSearchText("မနေ့က Hair Removal ဘယ်သူတွေလာလုပ်လဲ"), "")
+  assert.equal(extractLikelyCustomerSearchText("yesterday Hair Removal customer list"), "")
 })
 
 test("supervisor routes appointment questions with customer or service words to Appointment Agent", () => {
@@ -1883,6 +2044,11 @@ test("planner routes selected payment method follow-ups to finance detail", () =
     ["MMQR ဘယ်လောက်ဝင်လဲ?", "this month", "2026-07-01", "2026-07-03"],
     ["tell me details about KPaye", "this month", "2026-07-01", "2026-07-03"],
     ["tell me details about KPAY", "this month", "2026-07-01", "2026-07-03"],
+    ["Tell me yesterday KPay transcription?", "yesterday", "2026-07-02", "2026-07-02"],
+    ["မနေ့က KPay transcription တွေပြပါ", "yesterday", "2026-07-02", "2026-07-02"],
+    ["yesterday CASH transactions", "yesterday", "2026-07-02", "2026-07-02"],
+    ["yesterday WavePay details", "yesterday", "2026-07-02", "2026-07-02"],
+    ["yesterday bank transactions", "yesterday", "2026-07-02", "2026-07-02"],
     ["KPAY transaction details", "this month", "2026-07-01", "2026-07-03"],
     ["MMQR transaction details", "this month", "2026-07-01", "2026-07-03"],
     ["show MMQR invoice customer service details", "this month", "2026-07-01", "2026-07-03"],
@@ -2672,6 +2838,12 @@ test("planner preserves requested customer service practitioner dimensions", () 
     ["Yesterday appointment?", "appointment", "appointment_summary", ["get_appointment_ledger"]],
     ["မနေ့က appointment စာရင်းပြပါ", "appointment", "appointment_list", ["get_appointment_ledger"]],
     ["မနေ့က ဘယ် customers တွေ ဘယ် service ကို ဘယ်သူနဲ့လုပ်လဲ", "business", "treatment_roster", ["get_daily_treatments"]],
+    ["မနေ့က Hair Removal ဘယ်သူတွေလာလုပ်လဲ", "business", "treatment_roster", ["get_daily_treatments"]],
+    ["yesterday Hair Removal who did?", "business", "treatment_roster", ["get_daily_treatments"]],
+    ["yesterday Hair Removal customer list", "business", "treatment_roster", ["get_daily_treatments"]],
+    ["မနေ့က service details", "business", "treatment_roster", ["get_daily_treatments"]],
+    ["မနေ့က therapist details", "business", "treatment_roster", ["get_daily_treatments"]],
+    ["မနေ့က Aye Aye therapist ဘာ service တွေလုပ်လဲ", "business", "treatment_roster", ["get_daily_treatments"]],
     [
       "Yesterday which customers did which service with which therapist?",
       "business",
@@ -4004,6 +4176,13 @@ test("Telegram formatter renders daily treatment records as customer service the
     assistantMessage: "Daily treatments.",
     summary: "Daily treatments.",
     metrics: [{ label: "Treatments", value: 127 }],
+    data: {
+      treatmentDetailFilter: {
+        serviceName: "Hair Removal",
+        practitionerName: null,
+        totalLoadedRows: 25,
+      },
+    },
     tables: [
       {
         title: "Daily treatment records",
@@ -4036,6 +4215,19 @@ test("Telegram formatter renders daily treatment records as customer service the
           })),
         ],
       },
+      {
+        title: "Therapist breakdown",
+        columns: [
+          { key: "therapistName", title: "Therapist" },
+          { key: "treatmentsCompleted", title: "Treatments" },
+          { key: "customersServed", title: "Customers" },
+          { key: "topService", title: "Top service" },
+        ],
+        rows: [
+          { therapistName: "Thandar", treatmentsCompleted: 13, customersServed: 11, topService: "Hair Removal" },
+          { therapistName: "Shwe Yee", treatmentsCompleted: 12, customersServed: 10, topService: "Hair Removal Underarm" },
+        ],
+      },
     ],
     sources: [],
     dataStatus: "ok",
@@ -4045,14 +4237,19 @@ test("Telegram formatter renders daily treatment records as customer service the
   assert.match(message, /မနေ့က customer\/service\/therapist treatment\/service records 127 ခုရှိပါတယ်/)
   assert.match(message, /မနေ့က customer\/service\/therapist treatment\/service records စာရင်း/)
   assert.match(message, /Appointment တစ်ခုမှာ service\/treatment records များနိုင်ပါတယ်/)
+  assert.match(message, /Filter: Service: Hair Removal/)
   assert.match(message, /Showing 1-8 of 25 loaded treatment\/service records\. Full total: 127 treatment\/service records\./)
   assert.match(message, /1\. 13:20 — Ma Zar/)
+  assert.match(message, /Phone: .*789/)
+  assert.doesNotMatch(message, /959123456789/)
   assert.match(message, /Service: LT Member only/)
   assert.match(message, /Therapist: Thandar/)
   assert.match(message, /2\. 14:10 — May Thu Khin/)
   assert.match(message, /Service: Hair Removal Underarm/)
   assert.match(message, /Therapist: Shwe Yee/)
   assert.match(message, /Status: ပြီးဆုံး/)
+  assert.match(message, /Therapist breakdown:/)
+  assert.match(message, /Thandar: 13 records, 11 customers, top Hair Removal/)
   assert.doesNotMatch(message, /Service အလိုက် owner/)
 })
 

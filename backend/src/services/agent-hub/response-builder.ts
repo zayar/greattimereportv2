@@ -453,6 +453,10 @@ function safeResponseDataFromToolResults(results: AgentToolResult[]) {
     if (toolData.appointmentFilter) {
       data.appointmentFilter ??= toolData.appointmentFilter;
     }
+
+    if (toolData.treatmentDetailFilter) {
+      data.treatmentDetailFilter ??= toolData.treatmentDetailFilter;
+    }
   });
 
   if (countDefinitions.length) {

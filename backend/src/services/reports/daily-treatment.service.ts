@@ -42,7 +42,17 @@ export async function getTreatmentReportRange(params: {
   clinicCode: string;
   fromDate: string;
   toDate: string;
+  serviceName?: string;
+  practitionerName?: string;
 }) {
+  const queryParams = {
+    clinicCode: params.clinicCode,
+    fromDate: params.fromDate,
+    toDate: params.toDate,
+    serviceName: params.serviceName ?? "",
+    practitionerName: params.practitionerName ?? "",
+  };
+
   const [matrixRows, recordRows, summaryRows] = await Promise.all([
     runAnalyticsQuery<MatrixRow>(
       `
@@ -55,6 +65,8 @@ export async function getTreatmentReportRange(params: {
           WHERE DATE(CheckInTime) BETWEEN @fromDate AND @toDate
             AND ServiceName IS NOT NULL
             AND LOWER(ClinicCode) = LOWER(@clinicCode)
+            AND (@serviceName = '' OR LOWER(ServiceName) LIKE CONCAT('%', LOWER(@serviceName), '%'))
+            AND (@practitionerName = '' OR LOWER(COALESCE(PractitionerName, '')) LIKE CONCAT('%', LOWER(@practitionerName), '%'))
           GROUP BY therapistName, serviceName
         )
         SELECT
@@ -65,7 +77,7 @@ export async function getTreatmentReportRange(params: {
         GROUP BY therapistName
         ORDER BY therapistName ASC
       `,
-      params,
+      queryParams,
     ),
     runAnalyticsQuery<RecordRow>(
       `
@@ -79,10 +91,12 @@ export async function getTreatmentReportRange(params: {
         WHERE DATE(CheckInTime) BETWEEN @fromDate AND @toDate
           AND ServiceName IS NOT NULL
           AND LOWER(ClinicCode) = LOWER(@clinicCode)
+          AND (@serviceName = '' OR LOWER(ServiceName) LIKE CONCAT('%', LOWER(@serviceName), '%'))
+          AND (@practitionerName = '' OR LOWER(COALESCE(PractitionerName, '')) LIKE CONCAT('%', LOWER(@practitionerName), '%'))
         ORDER BY CheckInTime DESC
         LIMIT 500
       `,
-      params,
+      queryParams,
     ),
     runAnalyticsQuery<SummaryRow>(
       `
@@ -95,8 +109,10 @@ export async function getTreatmentReportRange(params: {
         WHERE DATE(CheckInTime) BETWEEN @fromDate AND @toDate
           AND ServiceName IS NOT NULL
           AND LOWER(ClinicCode) = LOWER(@clinicCode)
+          AND (@serviceName = '' OR LOWER(ServiceName) LIKE CONCAT('%', LOWER(@serviceName), '%'))
+          AND (@practitionerName = '' OR LOWER(COALESCE(PractitionerName, '')) LIKE CONCAT('%', LOWER(@practitionerName), '%'))
       `,
-      params,
+      queryParams,
     ),
   ]);
 

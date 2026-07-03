@@ -11,7 +11,7 @@ import {
 import { buildReadOnlyRefusalMessage, isDangerousBusinessMutationRequest } from "./read-only-guard.js";
 import { isService360Question } from "./service-query.js";
 import { isAppointmentLedgerQuestion, resolveAgent } from "./supervisor.js";
-import { isPaymentMethodBreakdownQuestion, isPaymentMethodDetailQuestion } from "./payment-method-intent.js";
+import { extractPaymentMethodFilter, isPaymentMethodBreakdownQuestion, isPaymentMethodDetailQuestion } from "./payment-method-intent.js";
 import type {
   AgentPeriod,
   GreatTimeAgentChatRequest,
@@ -371,6 +371,9 @@ function detectFinanceIntent(message: string) {
   if (isPaymentMethodDetailQuestion(message)) {
     return "payment_method_detail";
   }
+  if (extractPaymentMethodFilter(message)) {
+    return "payment_method_detail";
+  }
   if (/payment method|method|by payment|cash|bank|kpay|kpaye|kbz|wavepay|wave|mmqr|\bqr\b|cbpay|ayapay|mpu|visa|master\s*card|mastercard|နည်းလမ်း/i.test(message)) {
     return "payment_method_breakdown";
   }
@@ -467,11 +470,11 @@ function detectBusinessIntent(message: string) {
   if (env.AGENT_OWNER_DAILY_BRIEF_ENABLED && isOwnerDailyBriefIntentMessage(message)) {
     return "owner_daily_brief";
   }
-  if (isService360Question(message)) {
-    return "service_360";
-  }
   if (isTreatmentRosterQuestion(message)) {
     return "treatment_roster";
+  }
+  if (isService360Question(message)) {
+    return "service_360";
   }
   if (dimensions.wantsPractitioners && dimensions.wantsAggregateSummary) {
     return "practitioner_performance";

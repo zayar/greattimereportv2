@@ -19,6 +19,7 @@ import {
   getFreshFactSnapshot,
   isCompletedHistoricalDay,
 } from "../snapshot-cache.service.js";
+import { extractTreatmentDetailFilters } from "../treatment-detail-intent.js";
 import type { AgentDataStatus, AgentToolDefinition, AgentToolInput, AgentToolResult, GreatTimeAgentSource } from "../types.js";
 import { fetchAppointmentLedger } from "./appointment.tools.js";
 
@@ -953,14 +954,112 @@ async function getPractitionerOverview(input: AgentToolInput): Promise<AgentTool
   };
 }
 
+type DailyTreatmentRecord = {
+  checkInTime: string;
+  therapistName: string;
+  serviceName: string;
+  customerName: string;
+  customerPhone?: string | null;
+};
+
+function customerKeyForTreatment(row: DailyTreatmentRecord) {
+  return `${row.customerPhone ?? ""}|${row.customerName ?? ""}`.toLowerCase();
+}
+
+function topServiceFromCounts(serviceCounts: Map<string, number>) {
+  return [...serviceCounts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0] ?? "-";
+}
+
+function buildTherapistBreakdownRows(records: DailyTreatmentRecord[]) {
+  const byTherapist = new Map<string, { treatmentsCompleted: number; customers: Set<string>; services: Map<string, number> }>();
+
+  records.forEach((row) => {
+    const therapistName = row.therapistName || "Unknown";
+    const entry = byTherapist.get(therapistName) ?? {
+      treatmentsCompleted: 0,
+      customers: new Set<string>(),
+      services: new Map<string, number>(),
+    };
+
+    entry.treatmentsCompleted += 1;
+    entry.customers.add(customerKeyForTreatment(row));
+    entry.services.set(row.serviceName, (entry.services.get(row.serviceName) ?? 0) + 1);
+    byTherapist.set(therapistName, entry);
+  });
+
+  return [...byTherapist.entries()]
+    .map(([therapistName, entry]) => ({
+      therapistName,
+      treatmentsCompleted: entry.treatmentsCompleted,
+      customersServed: entry.customers.size,
+      topService: topServiceFromCounts(entry.services),
+    }))
+    .sort((left, right) => right.treatmentsCompleted - left.treatmentsCompleted || left.therapistName.localeCompare(right.therapistName));
+}
+
+function buildServiceBreakdownRows(records: DailyTreatmentRecord[]) {
+  const byService = new Map<string, { treatmentCount: number; customers: Set<string>; therapists: Set<string> }>();
+
+  records.forEach((row) => {
+    const serviceName = row.serviceName || "Unknown";
+    const entry = byService.get(serviceName) ?? {
+      treatmentCount: 0,
+      customers: new Set<string>(),
+      therapists: new Set<string>(),
+    };
+
+    entry.treatmentCount += 1;
+    entry.customers.add(customerKeyForTreatment(row));
+    entry.therapists.add(row.therapistName || "Unknown");
+    byService.set(serviceName, entry);
+  });
+
+  return [...byService.entries()]
+    .map(([serviceName, entry]) => ({
+      serviceName,
+      treatmentCount: entry.treatmentCount,
+      customerCount: entry.customers.size,
+      therapistCount: entry.therapists.size,
+    }))
+    .sort((left, right) => right.treatmentCount - left.treatmentCount || left.serviceName.localeCompare(right.serviceName));
+}
+
+function treatmentFilterText(filters: { serviceName?: string; practitionerName?: string }) {
+  return [
+    filters.serviceName ? `service "${filters.serviceName}"` : "",
+    filters.practitionerName ? `therapist "${filters.practitionerName}"` : "",
+  ].filter(Boolean).join(" and ");
+}
+
 async function getDailyTreatments(input: AgentToolInput): Promise<AgentToolResult> {
+  const treatmentFilters = extractTreatmentDetailFilters(input.request.message);
   const data = await getTreatmentReportRange({
     clinicCode: input.clinic.clinicCode,
     fromDate: input.period.fromDate,
     toDate: input.period.toDate,
+    serviceName: treatmentFilters.serviceName,
+    practitionerName: treatmentFilters.practitionerName,
   });
   const dimensions = parseQuestionDimensions(input.request.message);
   const warnings: NonNullable<AgentToolResult["warnings"]> = [];
+  const records = data.records;
+  const therapistBreakdownRows = buildTherapistBreakdownRows(records);
+  const serviceBreakdownRows = buildServiceBreakdownRows(records);
+  const filterText = treatmentFilterText(treatmentFilters);
+  const summarySubject = filterText ? ` matching ${filterText}` : "";
+  const tables: NonNullable<AgentToolResult["tables"]> = [
+    {
+      title: "Daily treatment records",
+      columns: [
+        { key: "checkInTime", title: "Time", unit: "text" },
+        { key: "customerName", title: "Customer", unit: "text" },
+        { key: "customerPhone", title: "Phone", unit: "text" },
+        { key: "serviceName", title: "Service", unit: "text" },
+        { key: "therapistName", title: "Practitioner", unit: "text" },
+      ],
+      rows: limitRows(records, 25),
+    },
+  ];
 
   if (input.intent === "treatment_roster" && dimensions.wantsSales) {
     warnings.push({
@@ -971,6 +1070,32 @@ async function getDailyTreatments(input: AgentToolInput): Promise<AgentToolResul
     });
   }
 
+  if (treatmentFilters.wantsPractitionerBreakdown && therapistBreakdownRows.length) {
+    tables.push({
+      title: "Therapist breakdown",
+      columns: [
+        { key: "therapistName", title: "Therapist", unit: "text" },
+        { key: "treatmentsCompleted", title: "Treatments" },
+        { key: "customersServed", title: "Customers" },
+        { key: "topService", title: "Top service", unit: "text" },
+      ],
+      rows: limitRows(therapistBreakdownRows, 10),
+    });
+  }
+
+  if (treatmentFilters.wantsServiceBreakdown && serviceBreakdownRows.length) {
+    tables.push({
+      title: "Service breakdown",
+      columns: [
+        { key: "serviceName", title: "Service", unit: "text" },
+        { key: "treatmentCount", title: "Treatments" },
+        { key: "customerCount", title: "Customers" },
+        { key: "therapistCount", title: "Therapists" },
+      ],
+      rows: limitRows(serviceBreakdownRows, 10),
+    });
+  }
+
   return {
     toolName: "get_daily_treatments",
     sourceName: "BigQuery daily treatment report",
@@ -978,28 +1103,25 @@ async function getDailyTreatments(input: AgentToolInput): Promise<AgentToolResul
     period: periodLabel(input),
     dataStatus: data.summary.totalTreatments > 0 ? "ok" : "no_activity",
     live: false,
-    summary: `Daily treatment report has ${data.summary.totalTreatments.toLocaleString("en-US")} treatment/service record${data.summary.totalTreatments === 1 ? "" : "s"} for ${input.period.label}. This is not the appointment booking count; one appointment can contain multiple service/treatment rows.`,
+    summary: `Daily treatment report has ${data.summary.totalTreatments.toLocaleString("en-US")} treatment/service record${data.summary.totalTreatments === 1 ? "" : "s"} for ${input.period.label}${summarySubject}. This is not the appointment booking count; one appointment can contain multiple service/treatment rows.`,
     metrics: [
       { label: "Treatments", value: data.summary.totalTreatments },
       { label: "Practitioners", value: data.summary.therapists },
       { label: "Services", value: data.summary.uniqueServices },
       { label: "Distinct treatment customers", value: data.summary.distinctCustomers },
     ],
-    tables: [
-      {
-        title: "Daily treatment records",
-        columns: [
-          { key: "checkInTime", title: "Time", unit: "text" },
-          { key: "therapistName", title: "Practitioner", unit: "text" },
-          { key: "serviceName", title: "Service", unit: "text" },
-          { key: "customerName", title: "Customer", unit: "text" },
-        ],
-        rows: limitRows(data.records, 25),
-      },
-    ],
+    tables,
     warnings: warnings.length ? warnings : undefined,
     data: {
       countDefinition: TREATMENT_SERVICE_RECORD_COUNT_DEFINITION,
+      treatmentDetailFilter: {
+        serviceName: treatmentFilters.serviceName ?? null,
+        practitionerName: treatmentFilters.practitionerName ?? null,
+        wantsCustomerRows: treatmentFilters.wantsCustomerRows,
+        wantsServiceBreakdown: treatmentFilters.wantsServiceBreakdown,
+        wantsPractitionerBreakdown: treatmentFilters.wantsPractitionerBreakdown,
+        totalLoadedRows: records.length,
+      },
     },
   };
 }

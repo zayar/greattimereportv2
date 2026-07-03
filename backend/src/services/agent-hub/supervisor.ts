@@ -8,7 +8,7 @@ const AGENT_ORDER: GreatTimeAgentId[] = ["finance", "customer_relationship", "bu
 
 const KEYWORDS: Record<GreatTimeAgentId, RegExp[]> = {
   finance: [
-    /sales?|revenue|income|turnover|invoice|transactions?|payment|collection|collected|received|cash|bank|wallet|kpay|kpaye|kbz|wavepay|wave|mmqr|\bqr\b|cbpay|ayapay|mpu|visa|master\s*card|mastercard|purchase|refund/i,
+    /sales?|revenue|income|turnover|invoice|transactions?|transcriptions?|payment|collection|collected|received|cash|bank|wallet|kpay|kpaye|kbz|wavepay|wave|mmqr|\bqr\b|cbpay|ayapay|mpu|visa|master\s*card|mastercard|purchase|refund/i,
     /ရောင်း|ဝင်ငွေ|ငွေ|ပေးချေ|ဘဏ်|အကြွေး|ငွေသား|ဘယ်လောက်|ဝင်လဲ|ဝင်|ရလဲ|အသေးစိတ်|စာရင်း/i,
   ],
   customer_relationship: [

@@ -820,6 +820,49 @@ function appointmentFilterSubject(filter: TelegramAppointmentFilter | null) {
   return [filter.practitionerName, filter.serviceName].filter(Boolean).join("၊ ");
 }
 
+type TelegramTreatmentDetailFilter = {
+  practitionerName?: string;
+  serviceName?: string;
+  totalLoadedRows?: number;
+};
+
+function treatmentDetailFilterFromResponse(response: GreatTimeAgentChatResponse): TelegramTreatmentDetailFilter | null {
+  const raw = response.data?.treatmentDetailFilter;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+
+  const record = raw as Record<string, unknown>;
+  const practitionerName = typeof record.practitionerName === "string" && record.practitionerName.trim()
+    ? record.practitionerName.trim()
+    : undefined;
+  const serviceName = typeof record.serviceName === "string" && record.serviceName.trim()
+    ? record.serviceName.trim()
+    : undefined;
+  const totalLoadedRows = typeof record.totalLoadedRows === "number" && Number.isFinite(record.totalLoadedRows)
+    ? record.totalLoadedRows
+    : undefined;
+
+  if (!practitionerName && !serviceName && totalLoadedRows === undefined) {
+    return null;
+  }
+
+  return { practitionerName, serviceName, totalLoadedRows };
+}
+
+function treatmentDetailFilterLine(filter: TelegramTreatmentDetailFilter | null) {
+  if (!filter) {
+    return null;
+  }
+
+  const parts = [
+    filter.serviceName ? `Service: ${filter.serviceName}` : null,
+    filter.practitionerName ? `Therapist: ${filter.practitionerName}` : null,
+  ].filter((part): part is string => Boolean(part));
+
+  return parts.length ? `Filter: ${parts.join("၊ ")}` : null;
+}
+
 function sanitizeOwnerFacingText(text: string) {
   return text
     .replace(
@@ -921,6 +964,8 @@ function formatDailyTreatmentRosterConversation(response: GreatTimeAgentChatResp
     return [];
   }
 
+  const treatmentFilter = treatmentDetailFilterFromResponse(response);
+  const filterLine = treatmentDetailFilterLine(treatmentFilter);
   const totalTreatments = metricValue(response, ["Treatments"]) ?? table.rows.length;
   const total = typeof totalTreatments === "number" ? totalTreatments : Number(totalTreatments);
   const pageSize = appointmentPageSize();
@@ -931,6 +976,10 @@ function formatDailyTreatmentRosterConversation(response: GreatTimeAgentChatResp
     `${ownerBodyPeriodPrefix(response.period)} customer/service/therapist treatment/service records စာရင်း:`,
     "မှတ်ချက်: ဒါက appointment count မဟုတ်ပါ။ Appointment တစ်ခုမှာ service/treatment records များနိုင်ပါတယ်။",
   ];
+
+  if (filterLine) {
+    lines.push(filterLine);
+  }
 
   if (table.rows.length > pageSize) {
     if (Number.isFinite(total) && total > table.rows.length) {
@@ -969,6 +1018,40 @@ function formatDailyTreatmentRosterConversation(response: GreatTimeAgentChatResp
       lines.push(`Status: ${translateStatus(status)}`);
     }
   });
+
+  const therapistBreakdown = response.tables?.find((item) => item.title === "Therapist breakdown");
+  if (therapistBreakdown?.rows.length) {
+    lines.push("", "Therapist breakdown:");
+    therapistBreakdown.rows.slice(0, 5).forEach((row) => {
+      const therapistName = stringValue(row, "therapistName", "Unknown");
+      const treatments = numberValue(row, "treatmentsCompleted");
+      const customers = numberValue(row, "customersServed");
+      const topService = stringValue(row, "topService", "");
+      const pieces = [
+        `${formatMetricValue(treatments ?? "-", undefined)} records`,
+        customers != null ? `${customers.toLocaleString("en-US")} customers` : "",
+        topService && topService !== "-" ? `top ${topService}` : "",
+      ].filter(Boolean);
+      lines.push(`- ${therapistName}: ${pieces.join(", ")}`);
+    });
+  }
+
+  const serviceBreakdown = response.tables?.find((item) => item.title === "Service breakdown");
+  if (serviceBreakdown?.rows.length && !treatmentFilter?.serviceName) {
+    lines.push("", "Service breakdown:");
+    serviceBreakdown.rows.slice(0, 5).forEach((row) => {
+      const serviceName = stringValue(row, "serviceName", "Unknown service");
+      const treatments = numberValue(row, "treatmentCount");
+      const customers = numberValue(row, "customerCount");
+      const therapists = numberValue(row, "therapistCount");
+      const pieces = [
+        `${formatMetricValue(treatments ?? "-", undefined)} records`,
+        customers != null ? `${customers.toLocaleString("en-US")} customers` : "",
+        therapists != null ? `${therapists.toLocaleString("en-US")} therapists` : "",
+      ].filter(Boolean);
+      lines.push(`- ${serviceName}: ${pieces.join(", ")}`);
+    });
+  }
 
   return lines;
 }

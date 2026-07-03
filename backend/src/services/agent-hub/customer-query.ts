@@ -1,4 +1,5 @@
 import { hasPaymentMethodReference } from "./payment-method-intent.js";
+import { isTreatmentDetailQuestion } from "./treatment-detail-intent.js";
 
 const ORDINAL_OR_PRONOUN =
   /\b(first|second|third|fourth|fifth|they|them|that customer|that service|that|her|him|it|သူ|အဲ့ဒီ)\b/i;
@@ -28,6 +29,10 @@ function looksLikeNamedCustomer(value: string) {
 }
 
 export function extractExplicitCustomerSearchText(message: string) {
+  if (isTreatmentDetailQuestion(message)) {
+    return "";
+  }
+
   const normalized = message.trim();
   const purchaseSubjectMatch =
     normalized.match(
@@ -61,6 +66,10 @@ export function extractExplicitCustomerSearchText(message: string) {
 }
 
 export function extractLikelyCustomerSearchText(message: string) {
+  if (isTreatmentDetailQuestion(message)) {
+    return "";
+  }
+
   const explicit = extractExplicitCustomerSearchText(message);
 
   if (explicit) {

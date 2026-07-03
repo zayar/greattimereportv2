@@ -47,12 +47,12 @@ const PAYMENT_METHOD_ALIASES: PaymentMethodAlias[] = [
 ];
 
 const PAYMENT_METHOD_CONTEXT_PATTERN =
-  /\b(?:payment|payments|method|transaction|transactions|detail|details|invoice|invoices|customer|service|amount|total|how\s+much|collect(?:ed|ion)?|received|income|rows?|list|bank|cash|wallet)\b|ဘယ်လောက်|ဝင်လဲ|ဝင်|ရလဲ|ငွေ|ကျပ်|ပေးချေ|ဘဏ်|ငွေသား|အသေးစိတ်|စာရင်း|ဘောက်ချာ|ဘယ်သူ|ဘာ\s*service|ပြပါ/i;
+  /\b(?:payment|payments|method|transaction|transactions|transcription|transcriptions|detail|details|invoice|invoices|customer|service|amount|total|how\s+much|collect(?:ed|ion)?|received|income|rows?|list|bank|cash|wallet)\b|ဘယ်လောက်|ဝင်လဲ|ဝင်|ရလဲ|ငွေ|ကျပ်|ပေးချေ|ဘဏ်|ငွေသား|အသေးစိတ်|စာရင်း|ဘောက်ချာ|ဘယ်သူ|ဘာ\s*service|ပြပါ/i;
 
 const QR_PATTERN = /\bqr\b/i;
 
 const PAYMENT_METHOD_DETAIL_CUE_PATTERN =
-  /\b(?:detail|details|transaction|transactions|invoice|invoice\s+number|customer|customer\s+name|service|service\s+name|list|rows?|show)\b|အသေးစိတ်|စာရင်း|ဘောက်ချာ|ဘယ်သူ|ဘာ\s*service|ပြပါ/i;
+  /\b(?:detail|details|transaction|transactions|transcription|transcriptions|invoice|invoice\s+number|customer|customer\s+name|service|service\s+name|list|rows?|show)\b|အသေးစိတ်|စာရင်း|ဘောက်ချာ|ဘယ်သူ|ဘာ\s*service|ပြပါ/i;
 
 const PAYMENT_METHOD_AMOUNT_CUE_PATTERN =
   /\b(?:how\s+much|collected|collection|received|payment|income|amount|total)\b|ဘယ်လောက်|ဝင်လဲ|ဝင်|ရလဲ|ငွေ|ကျပ်/i;

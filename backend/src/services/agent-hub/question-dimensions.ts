@@ -1,3 +1,5 @@
+import { isTreatmentDetailQuestion } from "./treatment-detail-intent.js";
+
 export type QuestionDimension = {
   wantsCustomers: boolean;
   wantsServices: boolean;
@@ -52,6 +54,10 @@ export function isAppointmentRosterQuestion(message: string) {
 }
 
 export function isTreatmentRosterQuestion(message: string) {
+  if (isTreatmentDetailQuestion(message)) {
+    return true;
+  }
+
   const dimensions = parseQuestionDimensions(message);
   const hasRosterDimensions = dimensions.wantsCustomers && dimensions.wantsServices && dimensions.wantsPractitioners;
   const hasTreatmentAction = dimensions.wantsTreatments || /did|served|လုပ်|ကုသ|service\s*ပေး/i.test(message);
