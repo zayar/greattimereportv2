@@ -1,8 +1,10 @@
+import { hasPaymentMethodReference } from "./payment-method-intent.js";
+
 const ORDINAL_OR_PRONOUN =
   /\b(first|second|third|fourth|fifth|they|them|that customer|that service|that|her|him|it|သူ|အဲ့ဒီ)\b/i;
 
 const GENERIC_NON_CUSTOMER_TERMS =
-  /\b(all|today|yesterday|week|month|appointments?|bookings?|sales?|revenue|payments?|invoices?|services?|practitioners?|therapists?|packages?|customers?|members?|report|summary|list|count|total|trend|method|cash|bank|kbz|kpay)\b/i;
+  /\b(all|today|yesterday|week|month|appointments?|bookings?|sales?|revenue|transactions?|payments?|payment\s+method|invoices?|services?|practitioners?|therapists?|packages?|customers?|members?|report|summary|list|count|total|trend|method|wallet|cash|bank|kbz|kpay|kpaye|kbzpay|kbz\s+pay|wavepay|wave|mmqr|qr|cbpay|ayapay|mpu|visa|mastercard)\b|ဘယ်လောက်|ဝင်လဲ|ဝင်|ငွေ|ပေးချေ|အသေးစိတ်|စာရင်း/i;
 
 function cleanupSearchText(value: string | undefined) {
   return (value ?? "")
@@ -15,7 +17,7 @@ function cleanupSearchText(value: string | undefined) {
 function looksLikeNamedCustomer(value: string) {
   const cleaned = cleanupSearchText(value);
 
-  if (!cleaned || ORDINAL_OR_PRONOUN.test(cleaned) || GENERIC_NON_CUSTOMER_TERMS.test(cleaned)) {
+  if (!cleaned || ORDINAL_OR_PRONOUN.test(cleaned) || GENERIC_NON_CUSTOMER_TERMS.test(cleaned) || hasPaymentMethodReference(cleaned)) {
     return false;
   }
 

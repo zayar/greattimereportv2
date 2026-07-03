@@ -30,6 +30,7 @@ const { composeCustomer360Summary } = await import("../src/services/agent-hub/cu
 const { resolveEntityReference } = await import("../src/services/agent-hub/entity-context.ts")
 const {
   extractAgentPeriod,
+  hasExplicitPeriodCue,
   isOwnerDailyBriefIntentMessage,
   planAgentRequest,
   toolsForBusinessOwnerDailyBrief,
@@ -52,6 +53,11 @@ const { buildAppointmentCountResultFromSnapshot, buildAppointmentLedgerQueryRang
 const { buildOwnerDailyBriefFromSnapshots, selectOwnerDailyBriefDate } = await import("../src/services/agent-hub/tools/business.tools.ts")
 const { getTreatmentReportRange } = await import("../src/services/reports/daily-treatment.service.ts")
 const { extractLikelyCustomerSearchText } = await import("../src/services/agent-hub/customer-query.ts")
+const {
+  extractPaymentMethodFilter,
+  hasPaymentMethodReference,
+  isPaymentMethodDetailQuestion,
+} = await import("../src/services/agent-hub/payment-method-intent.ts")
 const { extractExplicitServiceSearchText } = await import("../src/services/agent-hub/service-query.ts")
 const { enhanceAgentResponseNarrative } = await import("../src/services/agent-hub/narrative.service.ts")
 const { buildAgentStatusReport } = await import("../src/services/agent-hub/monitoring/agent-status-monitoring.ts")
@@ -334,6 +340,8 @@ const requiredSafeReadMessages = [
 function buildPaymentReportFixture(overrides?: Partial<{
   totalAmount: number
   invoiceCount: number
+  methods: Array<{ paymentMethod: string; totalAmount: number; transactionCount: number }>
+  rows: Array<Record<string, unknown>>
 }>) {
   const totalAmount = overrides?.totalAmount ?? 880
   const invoiceCount = overrides?.invoiceCount ?? 2
@@ -345,9 +353,9 @@ function buildPaymentReportFixture(overrides?: Partial<{
       methodsCount: 1,
       averageInvoice: invoiceCount ? totalAmount / invoiceCount : 0,
     },
-    methods: [],
-    rows: [],
-    totalCount: invoiceCount,
+    methods: overrides?.methods ?? [],
+    rows: overrides?.rows ?? [],
+    totalCount: overrides?.rows?.length ?? invoiceCount,
   }
 }
 
@@ -746,6 +754,76 @@ test("finance summary falls back to existing report behavior when snapshot is mi
   assert.equal(result.sourceName, "BigQuery sales report")
   assert.equal(result.metrics?.find((metric) => metric.label === "Total sales")?.value, 990)
   assert.equal(result.dataStatus, "ok")
+})
+
+test("finance payment method detail filters payment report rows by selected method", async () => {
+  let requestedPaymentMethod = ""
+  const detailTool = requireTool(
+    createFinanceTools({
+      getCompletedDayFinanceSnapshot: async () => null,
+      getSalesReport: async () => buildSalesReportFixture(),
+      getPaymentReport: async (params) => {
+        requestedPaymentMethod = params.paymentMethod
+        return buildPaymentReportFixture({
+          totalAmount: 350000,
+          invoiceCount: 2,
+          methods: [{ paymentMethod: "MMQR", totalAmount: 350000, transactionCount: 2 }],
+          rows: [
+            {
+              dateLabel: "2026-07-02",
+              invoiceNumber: "INV-001",
+              customerName: "Aye Aye",
+              memberId: "M-1",
+              salePerson: "Owner",
+              serviceName: "Whitening Laser",
+              servicePackageName: "Package A",
+              paymentMethod: "MMQR",
+              paymentStatus: "PAID",
+              paymentType: "Wallet",
+              paymentAmount: 200000,
+              paymentNote: "MMQR paid",
+              invoiceNetTotal: 250000,
+            },
+            {
+              dateLabel: "2026-07-02",
+              invoiceNumber: "INV-002",
+              customerName: "Mya Mya",
+              memberId: "M-2",
+              salePerson: "Owner",
+              serviceName: "Body Contouring",
+              servicePackageName: null,
+              paymentMethod: "MMQR",
+              paymentStatus: "PAID",
+              paymentType: "Wallet",
+              paymentAmount: 150000,
+              paymentNote: "",
+              invoiceNetTotal: 150000,
+            },
+          ],
+        })
+      },
+    }),
+    "get_payment_method_detail",
+  )
+
+  const result = await detailTool.execute(buildAgentToolInputFixture({
+    fromDate: "2026-07-02",
+    toDate: "2026-07-02",
+    label: "yesterday",
+    intent: "payment_method_detail",
+    message: "မနေ့က MMQR transaction အသေးစိတ်ပြပါ",
+  }))
+
+  assert.equal(requestedPaymentMethod, "MMQR")
+  assert.equal(result.dataStatus, "ok")
+  assert.equal(result.metrics?.find((metric) => metric.label === "MMQR collected")?.value, 350000)
+  assert.equal(result.metrics?.find((metric) => metric.label === "Transactions")?.value, 2)
+  assert.equal(result.tables?.[0]?.title, "Payment method detail")
+  assert.equal(result.tables?.[0]?.columns.some((column) => column.key === "customerName"), true)
+  assert.equal(result.tables?.[0]?.columns.some((column) => column.key === "paymentNote"), true)
+  assert.equal(result.tables?.[0]?.rows[0]?.invoiceNumber, "INV-001")
+  assert.equal(result.data?.paymentMethod, "MMQR")
+  assert.match(result.summary ?? "", /not a real bank statement ledger/i)
 })
 
 test("appointment snapshot count result labels operational and daily profile sources", () => {
@@ -1522,6 +1600,12 @@ test("BigQuery cache returns cloned rows to avoid mutation leakage", async () =>
 
 test("supervisor routes four agent domains and respects explicit override", () => {
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "sales revenue by payment method" }).resolvedAgent, "finance")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "Last month total income?" }).resolvedAgent, "finance")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "Jun income" }).resolvedAgent, "finance")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "April turnover" }).resolvedAgent, "finance")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "မနေ့က MMQR ဘယ်လောက်ဝင်လဲ?" }).resolvedAgent, "finance")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "tell me details about KPaye" }).resolvedAgent, "finance")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "MMQR transaction details" }).resolvedAgent, "finance")
   assert.equal(
     resolveAgent({ requestedAgent: "auto", message: "Which customers have unused package balance?" }).resolvedAgent,
     "customer_relationship",
@@ -1530,7 +1614,26 @@ test("supervisor routes four agent domains and respects explicit override", () =
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "How many appointments are checked in now?" }).resolvedAgent, "appointment")
   assert.equal(resolveAgent({ requestedAgent: "finance", message: "appointments today" }).resolvedAgent, "finance")
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "Soe Moe Thu ( C )" }).resolvedAgent, "customer_relationship")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "Tell me about Phyo Yee Thar" }).resolvedAgent, "customer_relationship")
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "Tell me about Whitening Laser" }).resolvedAgent, "business")
+})
+
+test("payment method aliases are recognized without becoming customer search text", () => {
+  assert.equal(extractPaymentMethodFilter("tell me details about KPaye"), "KPAY")
+  assert.equal(extractPaymentMethodFilter("k pay transaction details"), "KPAY")
+  assert.equal(extractPaymentMethodFilter("မနေ့က MMQR ဘယ်လောက်ဝင်လဲ?"), "MMQR")
+  assert.equal(extractPaymentMethodFilter("show qr transaction details"), "MMQR")
+  assert.equal(extractPaymentMethodFilter("show QR code setup"), null)
+  assert.equal(extractPaymentMethodFilter("wave pay details"), "WAVEPAY")
+  assert.equal(extractPaymentMethodFilter("cb pay details"), "CBPAY")
+  assert.equal(extractPaymentMethodFilter("master card details"), "MASTERCARD")
+  assert.equal(hasPaymentMethodReference("MMQR transaction details"), true)
+  assert.equal(isPaymentMethodDetailQuestion("tell me details about KPaye"), true)
+  assert.equal(isPaymentMethodDetailQuestion("How much MMQR ဝင်လဲ?"), true)
+  assert.equal(isPaymentMethodDetailQuestion("မနေ့က bank transactions ကို bank အလိုက်ပြပေးပါ"), false)
+  assert.equal(extractLikelyCustomerSearchText("tell me details about MMQR"), "")
+  assert.equal(extractLikelyCustomerSearchText("tell me details about KPaye"), "")
+  assert.equal(extractLikelyCustomerSearchText("Tell me about Phyo Yee Thar"), "Phyo Yee Thar")
 })
 
 test("supervisor routes appointment questions with customer or service words to Appointment Agent", () => {
@@ -1613,6 +1716,226 @@ test("planner extracts relative periods and blocks write requests", () => {
   })
   assert.equal(collectPlan.intent, "unsupported_write_request")
   assert.deepEqual(collectPlan.toolNames, [])
+})
+
+test("planner resolves calendar month income questions before tools run", () => {
+  const julyNow = new Date("2026-07-03T06:00:00.000Z")
+  const cases = [
+    {
+      message: "Last month total income?",
+      label: "last month",
+      fromDate: "2026-06-01",
+      toDate: "2026-06-30",
+    },
+    {
+      message: "Last month total sales?",
+      label: "last month",
+      fromDate: "2026-06-01",
+      toDate: "2026-06-30",
+    },
+    {
+      message: "previous month income",
+      label: "last month",
+      fromDate: "2026-06-01",
+      toDate: "2026-06-30",
+    },
+    {
+      message: "Jun income",
+      label: "June 2026",
+      fromDate: "2026-06-01",
+      toDate: "2026-06-30",
+    },
+    {
+      message: "June income",
+      label: "June 2026",
+      fromDate: "2026-06-01",
+      toDate: "2026-06-30",
+    },
+    {
+      message: "April income",
+      label: "April 2026",
+      fromDate: "2026-04-01",
+      toDate: "2026-04-30",
+    },
+    {
+      message: "July income",
+      label: "July 2026 month to date",
+      fromDate: "2026-07-01",
+      toDate: "2026-07-03",
+    },
+    {
+      message: "2026-06 income",
+      label: "June 2026",
+      fromDate: "2026-06-01",
+      toDate: "2026-06-30",
+    },
+    {
+      message: "2026/06 income",
+      label: "June 2026",
+      fromDate: "2026-06-01",
+      toDate: "2026-06-30",
+    },
+    {
+      message: "December income",
+      label: "December 2025",
+      fromDate: "2025-12-01",
+      toDate: "2025-12-31",
+    },
+    {
+      message: "ပြီးခဲ့တဲ့လ ဝင်ငွေ",
+      label: "last month",
+      fromDate: "2026-06-01",
+      toDate: "2026-06-30",
+    },
+    {
+      message: "ဇွန် ဝင်ငွေ",
+      label: "June 2026",
+      fromDate: "2026-06-01",
+      toDate: "2026-06-30",
+    },
+  ]
+
+  for (const item of cases) {
+    const period = extractAgentPeriod({
+      message: item.message,
+      timezone: "UTC",
+      now: julyNow,
+    })
+    assert.equal(period.label, item.label, item.message)
+    assert.equal(period.fromDate, item.fromDate, item.message)
+    assert.equal(period.toDate, item.toDate, item.message)
+    assert.equal(hasExplicitPeriodCue(item.message), true, item.message)
+
+    const plan = planAgentRequest({
+      request: {
+        clinicId: "clinic-1",
+        clinicCode: "ABC",
+        agent: "auto",
+        message: item.message,
+        timezone: "UTC",
+      },
+      now: julyNow,
+    })
+    assert.equal(plan.resolvedAgent, "finance", item.message)
+    assert.equal(plan.intent, "sales_summary", item.message)
+    assert.deepEqual(plan.toolNames, ["get_sales_summary"], item.message)
+    assert.equal(plan.period.label, item.label, item.message)
+    assert.equal(plan.period.fromDate, item.fromDate, item.message)
+    assert.equal(plan.period.toDate, item.toDate, item.message)
+  }
+
+  assert.equal(hasExplicitPeriodCue("may I know income"), false)
+  assert.equal(hasExplicitPeriodCue("May income"), true)
+})
+
+test("planner only compares finance periods for explicit comparison wording", () => {
+  const julyNow = new Date("2026-07-03T06:00:00.000Z")
+  const previousMonthPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "previous month income",
+      timezone: "UTC",
+    },
+    now: julyNow,
+  })
+  assert.equal(previousMonthPlan.resolvedAgent, "finance")
+  assert.equal(previousMonthPlan.intent, "sales_summary")
+  assert.deepEqual(previousMonthPlan.toolNames, ["get_sales_summary"])
+
+  const lastWeekPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "last week sales",
+      timezone: "UTC",
+    },
+    now: julyNow,
+  })
+  assert.equal(lastWeekPlan.resolvedAgent, "finance")
+  assert.equal(lastWeekPlan.intent, "sales_summary")
+  assert.deepEqual(lastWeekPlan.toolNames, ["get_sales_summary"])
+
+  const comparisonPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "compare this month vs last month sales",
+      timezone: "UTC",
+    },
+    now: julyNow,
+  })
+  assert.equal(comparisonPlan.resolvedAgent, "finance")
+  assert.equal(comparisonPlan.intent, "sales_period_comparison")
+  assert.deepEqual(comparisonPlan.toolNames, ["compare_sales_periods"])
+  assert.equal(comparisonPlan.period.label, "this month")
+  assert.equal(comparisonPlan.period.fromDate, "2026-07-01")
+  assert.equal(comparisonPlan.period.toDate, "2026-07-03")
+})
+
+test("planner routes selected payment method follow-ups to finance detail", () => {
+  const julyNow = new Date("2026-07-03T06:00:00.000Z")
+  const cases = [
+    ["မနေ့က MMQR ဘယ်လောက်ဝင်လဲ?", "yesterday", "2026-07-02", "2026-07-02"],
+    ["MMQR ဘယ်လောက်ဝင်လဲ?", "this month", "2026-07-01", "2026-07-03"],
+    ["tell me details about KPaye", "this month", "2026-07-01", "2026-07-03"],
+    ["tell me details about KPAY", "this month", "2026-07-01", "2026-07-03"],
+    ["KPAY transaction details", "this month", "2026-07-01", "2026-07-03"],
+    ["MMQR transaction details", "this month", "2026-07-01", "2026-07-03"],
+    ["show MMQR invoice customer service details", "this month", "2026-07-01", "2026-07-03"],
+    ["မနေ့က MMQR transaction အသေးစိတ်ပြပါ", "yesterday", "2026-07-02", "2026-07-02"],
+    ["မနေ့က KPAY invoice number customer name service နဲ့ပြပါ", "yesterday", "2026-07-02", "2026-07-02"],
+  ] as const
+
+  for (const [message, label, fromDate, toDate] of cases) {
+    const plan = planAgentRequest({
+      request: {
+        clinicId: "clinic-1",
+        clinicCode: "ABC",
+        agent: "auto",
+        message,
+        timezone: "UTC",
+      },
+      now: julyNow,
+    })
+    assert.equal(plan.resolvedAgent, "finance", message)
+    assert.equal(plan.intent, "payment_method_detail", message)
+    assert.deepEqual(plan.toolNames, ["get_payment_method_detail"], message)
+    assert.equal(plan.period.label, label, message)
+    assert.equal(plan.period.fromDate, fromDate, message)
+    assert.equal(plan.period.toDate, toDate, message)
+  }
+
+  const breakdownPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "How much did we collect today by payment method?",
+      timezone: "UTC",
+    },
+    now: julyNow,
+  })
+  assert.equal(breakdownPlan.resolvedAgent, "finance")
+  assert.equal(breakdownPlan.intent, "payment_method_breakdown")
+  assert.deepEqual(breakdownPlan.toolNames, ["get_payment_summary", "get_payment_method_breakdown"])
+
+  const bankBreakdownPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "မနေ့က bank transactions ကို bank အလိုက်ပြပေးပါ",
+      timezone: "UTC",
+    },
+    now: julyNow,
+  })
+  assert.equal(bankBreakdownPlan.resolvedAgent, "finance")
+  assert.equal(bankBreakdownPlan.intent, "payment_method_breakdown")
+  assert.deepEqual(bankBreakdownPlan.toolNames, ["get_payment_summary", "get_payment_method_breakdown"])
 })
 
 test("read-only guard detects dangerous business mutations without blocking safe report questions", () => {
@@ -3228,6 +3551,75 @@ test("Telegram finance payment methods formatter adds money separators and trans
   assert.doesNotMatch(message, /29363000/)
 })
 
+test("Telegram finance payment method detail formatter shows invoice customer service rows", () => {
+  const message = formatAgentHubTelegramReply({
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "finance",
+    autoMode: true,
+    intent: "payment_method_detail",
+    period: {
+      fromDate: "2026-07-02",
+      toDate: "2026-07-02",
+      label: "yesterday",
+    },
+    assistantMessage: "MMQR detail.",
+    summary: "MMQR detail.",
+    metrics: [
+      { label: "MMQR collected", value: 350000, unit: "amount" },
+      { label: "Transactions", value: 2 },
+      { label: "Invoices", value: 2 },
+    ],
+    tables: [
+      {
+        title: "Payment method detail",
+        columns: [
+          { key: "dateLabel", title: "Date" },
+          { key: "invoiceNumber", title: "Invoice" },
+          { key: "customerName", title: "Customer" },
+          { key: "serviceName", title: "Service" },
+          { key: "servicePackageName", title: "Package" },
+          { key: "paymentMethod", title: "Method" },
+          { key: "paymentAmount", title: "Payment amount" },
+          { key: "invoiceNetTotal", title: "Invoice total" },
+          { key: "paymentStatus", title: "Status" },
+          { key: "paymentNote", title: "Note" },
+        ],
+        rows: [
+          {
+            dateLabel: "2026-07-02",
+            invoiceNumber: "INV-001",
+            customerName: "Aye Aye",
+            serviceName: "Whitening Laser",
+            servicePackageName: "Package A",
+            paymentMethod: "MMQR",
+            paymentAmount: 200000,
+            invoiceNetTotal: 250000,
+            paymentStatus: "PAID",
+            paymentNote: "MMQR paid",
+          },
+        ],
+      },
+    ],
+    data: { paymentMethod: "MMQR" },
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  })
+
+  assert.match(message, /ကာလ: မနေ့ \(2026-07-02\)/)
+  assert.match(message, /MMQR payment method detail \(2026-07-02 to 2026-07-02\)/)
+  assert.match(message, /MMQR total collected: 350,000 ကျပ်/)
+  assert.match(message, /transactions 2၊ invoice 2 စောင်/)
+  assert.match(message, /invoice INV-001၊ Aye Aye၊ Whitening Laser \/ Package A/)
+  assert.match(message, /payment 200,000 ကျပ်၊ invoice total 250,000 ကျပ်၊ status PAID၊ note MMQR paid/)
+  assert.match(message, /GreatTime payment report rows/)
+  assert.match(message, /Real bank statement ledger မဟုတ်ပါ/)
+  assert.doesNotMatch(message, /Payment amount: 200000/)
+})
+
 test("Telegram generic table formatter formats money and counts but preserves phone and id values", () => {
   const message = formatAgentHubTelegramReply({
     sessionId: "session-1",
@@ -3847,6 +4239,55 @@ test("Telegram formatter leads finance sales answers with total sales and treats
   assert.doesNotMatch(message, /1\. Unknown — ဝင်ငွေ/)
   assert.doesNotMatch(message, /အဓိကကိန်းဂဏန်းများ/)
   assert.doesNotMatch(message, /406,666\.667/)
+})
+
+test("Telegram formatter shows explicit month labels with exact date ranges", () => {
+  const lastMonthMessage = formatAgentHubTelegramReply({
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "finance",
+    autoMode: true,
+    intent: "sales_summary",
+    period: {
+      fromDate: "2026-06-01",
+      toDate: "2026-06-30",
+      label: "last month",
+    },
+    assistantMessage: "Sales for last month.",
+    summary: "Sales for last month.",
+    metrics: [{ label: "Total sales", value: 14_040_000, unit: "amount" }],
+    tables: [],
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  })
+  assert.match(lastMonthMessage, /ကာလ: last month \(2026-06-01 to 2026-06-30\)/)
+  assert.match(lastMonthMessage, /last month total sales က 14,040,000 ကျပ် ပါ/)
+
+  const currentNamedMonthMessage = formatAgentHubTelegramReply({
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "finance",
+    autoMode: true,
+    intent: "sales_summary",
+    period: {
+      fromDate: "2026-07-01",
+      toDate: "2026-07-03",
+      label: "July 2026 month to date",
+    },
+    assistantMessage: "Sales for July month to date.",
+    summary: "Sales for July month to date.",
+    metrics: [{ label: "Total sales", value: 1000, unit: "amount" }],
+    tables: [],
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  })
+  assert.match(currentNamedMonthMessage, /ကာလ: July 2026 month to date \(2026-07-01 to 2026-07-03\)/)
 })
 
 test("Telegram formatter explains never-visited package customers and customer purchases", () => {

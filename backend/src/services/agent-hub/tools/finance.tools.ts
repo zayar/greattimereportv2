@@ -6,6 +6,7 @@ import { getCustomerPortalPayments } from "../../reports/customer-portal.service
 import { getPaymentReport } from "../../reports/payment-report.service.js";
 import { getSalesReport } from "../../reports/sales-report.service.js";
 import type { GtAgentFactSnapshot } from "../memory/memory-types.js";
+import { extractPaymentMethodFilter } from "../payment-method-intent.js";
 import { limitRows, nowIso } from "../safety.js";
 import {
   factSnapshotToAgentSource,
@@ -219,18 +220,26 @@ export function buildFinanceSnapshotSummaryResult(params: {
   };
 }
 
-function paymentReportParams(input: AgentToolInput, search = "") {
+function paymentReportParams(input: AgentToolInput, search = "", paymentMethod = "") {
   return {
     clinicId: input.clinic.clinicId,
     clinicCode: input.clinic.clinicCode,
     fromDate: input.period.fromDate,
     toDate: input.period.toDate,
     search,
-    paymentMethod: "",
+    paymentMethod,
     includeZeroValues: false,
     limit: 25,
     offset: 0,
   };
+}
+
+function canonicalPaymentMethod(value: string | null | undefined) {
+  return extractPaymentMethodFilter(value ?? "") ?? (value ?? "").replace(/\s+/g, "").toUpperCase();
+}
+
+function selectedPaymentMethodFromInput(input: AgentToolInput) {
+  return extractPaymentMethodFilter(input.request.message);
 }
 
 export function extractInvoiceSearch(message: string) {
@@ -359,6 +368,100 @@ async function getPaymentMethodBreakdown(input: AgentToolInput): Promise<AgentTo
         explanation: "Counts payment method collection rows. This is not a real bank statement ledger.",
       },
     },
+  };
+}
+
+async function getPaymentMethodDetail(input: AgentToolInput, deps: FinanceToolDeps = defaultFinanceToolDeps): Promise<AgentToolResult> {
+  const paymentMethod = selectedPaymentMethodFromInput(input);
+
+  if (!paymentMethod) {
+    return {
+      toolName: "get_payment_method_detail",
+      sourceName: "BigQuery payment report",
+      checkedAt: nowIso(),
+      period: periodLabel(input),
+      dataStatus: "not_ready",
+      live: false,
+      summary: "Please include a payment method such as KPAY, MMQR, CASH, BANK, WAVEPAY, CBPAY, AYAPAY, MPU, VISA, or MASTERCARD.",
+      warnings: [
+        {
+          type: "missing_payment_method",
+          title: "Payment method needed",
+          message: "A selected payment method is required for payment method detail rows.",
+        },
+      ],
+    };
+  }
+
+  const report = await deps.getPaymentReport(paymentReportParams(input, "", paymentMethod));
+  const methodSummary = report.methods.find((row) => canonicalPaymentMethod(row.paymentMethod) === paymentMethod);
+  const totalCollected = methodSummary?.totalAmount ?? report.summary.totalAmount;
+  const transactionCount = methodSummary?.transactionCount ?? report.summary.invoiceCount;
+  const rows = limitRows(report.rows, 25);
+  const dataStatus = rows.length > 0 || totalCollected > 0 ? "ok" : "no_activity";
+
+  return {
+    toolName: "get_payment_method_detail",
+    sourceName: "BigQuery payment report",
+    checkedAt: nowIso(),
+    period: periodLabel(input),
+    dataStatus,
+    live: false,
+    summary:
+      dataStatus === "ok"
+        ? `${paymentMethod} collection detail for ${input.period.label}: ${totalCollected.toLocaleString("en-US")} across ${transactionCount.toLocaleString("en-US")} transactions/invoices. This is not a real bank statement ledger.`
+        : `No ${paymentMethod} payment rows were found for ${input.period.label}. This is not a real bank statement ledger.`,
+    metrics: [
+      { label: `${paymentMethod} collected`, value: totalCollected, unit: "amount" },
+      { label: "Transactions", value: transactionCount },
+      { label: "Invoices", value: report.summary.invoiceCount },
+      { label: "Rows loaded", value: rows.length },
+    ],
+    tables: rows.length
+      ? [
+          {
+            title: "Payment method detail",
+            columns: [
+              { key: "dateLabel", title: "Date", unit: "text" },
+              { key: "invoiceNumber", title: "Invoice", unit: "text", pii: "id", exportable: true },
+              { key: "customerName", title: "Customer", unit: "text" },
+              { key: "serviceName", title: "Service", unit: "text" },
+              { key: "servicePackageName", title: "Package", unit: "text" },
+              { key: "paymentMethod", title: "Method", unit: "text" },
+              { key: "paymentAmount", title: "Payment amount", unit: "amount" },
+              { key: "invoiceNetTotal", title: "Invoice total", unit: "amount" },
+              { key: "paymentStatus", title: "Status", unit: "text" },
+              { key: "paymentNote", title: "Note", unit: "text" },
+            ],
+            rows,
+          },
+        ]
+      : undefined,
+    warnings: [
+      {
+        type: "payment_method_report_not_bank_statement",
+        title: "Not a bank statement ledger",
+        message: "Payment method reports use GreatTime payment report rows and are not real bank statement ledgers.",
+      },
+    ],
+    data: {
+      paymentMethod,
+      reportDefinition: {
+        grain: "payment_method_invoice_service_detail",
+        source: "BigQuery payment report",
+        dateField: "OrderCreatedDate",
+        explanation: "Shows GreatTime payment report rows for one selected payment method. This is not a real bank statement ledger.",
+      },
+    },
+    entityRefs: rows.slice(0, 10).map((row, index) => ({
+      entityType: "invoice",
+      entityId: row.invoiceNumber,
+      invoiceNumber: row.invoiceNumber,
+      displayName: row.invoiceNumber,
+      customerName: row.customerName,
+      memberId: row.memberId,
+      rank: index + 1,
+    })),
   };
 }
 
@@ -577,6 +680,17 @@ export function createFinanceTools(overrides: Partial<FinanceToolDeps> = {}): Ag
       maxRows: 25,
       timeoutMs: 15_000,
       execute: getPaymentMethodBreakdown,
+    },
+    {
+      name: "get_payment_method_detail",
+      agentId: "finance",
+      description: "Get sourced invoice/customer/service rows for one selected payment method.",
+      inputSchema: toolInputSchema,
+      sourceName: "BigQuery payment report",
+      live: false,
+      maxRows: 25,
+      timeoutMs: 15_000,
+      execute: (input) => getPaymentMethodDetail(input, deps),
     },
     {
       name: "compare_sales_periods",

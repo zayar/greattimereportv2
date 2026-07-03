@@ -8,7 +8,7 @@ import {
 } from "./customer-query.js";
 import { isExportOnlyFollowUp } from "./export-intent.js";
 import { extractExplicitServiceSearchText, hasExplicitServiceSearchIntent, isService360Question } from "./service-query.js";
-import { planAgentRequest } from "./intent-planner.js";
+import { hasExplicitPeriodCue, planAgentRequest } from "./intent-planner.js";
 import { enhanceAgentResponseNarrative } from "./narrative.service.js";
 import { buildAgentResponse } from "./response-builder.js";
 import { newId, nowIso, sanitizeError } from "./safety.js";
@@ -122,12 +122,6 @@ function serviceTextMatchesEntity(searchText: string, entityContext: GreatTimeAg
   const name = normalizeNameForComparison(entityContext?.serviceName ?? entityContext?.displayName);
 
   return Boolean(search && name && (search === name || name.includes(search) || search.includes(name)));
-}
-
-function hasExplicitPeriodCue(message: string) {
-  return /last\s+\d+\s+days|last\s+90\s+days|90\s+days|last\s+30\s+days|30\s+days|this\s+week|current\s+week|last\s+week|previous\s+week|yesterday|today|now|right now|this\s+month|current\s+month|month\s+to\s+date|mtd|this\s+year|current\s+year|year\s+to\s+date|ytd|ဒီနေ့|ဒီ\s*လ|ဒီ\s*နှစ်|မနေ့/i.test(
-    message,
-  );
 }
 
 function recommendationOpportunityKey(params: {

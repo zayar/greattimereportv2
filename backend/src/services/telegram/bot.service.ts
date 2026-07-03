@@ -368,20 +368,6 @@ function formatShortDate(dateKey: string) {
   });
 }
 
-function formatShortDateMyanmar(dateKey: string) {
-  const date = new Date(`${dateKey}T00:00:00.000Z`);
-  if (Number.isNaN(date.getTime())) {
-    return dateKey;
-  }
-
-  return date.toLocaleDateString("my-MM", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  });
-}
-
 function translatePeriodLabel(label: string) {
   const normalized = label.toLowerCase();
   if (normalized === "today") {
@@ -415,10 +401,10 @@ function translatePeriodLabel(label: string) {
 function formatResponsePeriod(response: GreatTimeAgentChatResponse) {
   const { period } = response;
   if (period.fromDate === period.toDate) {
-    return `${translatePeriodLabel(period.label)} (${formatShortDateMyanmar(period.toDate)})`;
+    return `${translatePeriodLabel(period.label)} (${period.toDate})`;
   }
 
-  return `${translatePeriodLabel(period.label)} (${formatShortDateMyanmar(period.fromDate)} - ${formatShortDateMyanmar(period.toDate)})`;
+  return `${translatePeriodLabel(period.label)} (${period.fromDate} to ${period.toDate})`;
 }
 
 function buildTelegramReplyHeader(response: GreatTimeAgentChatResponse) {
@@ -1150,6 +1136,70 @@ function formatPaymentMethodsConversation(response: GreatTimeAgentChatResponse) 
   return lines;
 }
 
+function formatPaymentMethodDetailConversation(response: GreatTimeAgentChatResponse) {
+  if (response.intent !== "payment_method_detail") {
+    return [];
+  }
+
+  const table = response.tables?.find((item) => /payment method detail/i.test(item.title));
+  const dataPaymentMethod = typeof response.data?.paymentMethod === "string" ? response.data.paymentMethod : "";
+  const firstMethod = table?.rows[0] ? stringValue(table.rows[0], "paymentMethod", "") : "";
+  const method = dataPaymentMethod || firstMethod || "Selected method";
+  const collected =
+    response.metrics?.find((metric) => metric.label.toLowerCase().includes("collected")) ??
+    response.metrics?.find((metric) => metric.unit === "amount");
+  const transactions = metricByLabel(response, "Transactions");
+  const invoices = metricByLabel(response, "Invoices");
+  const lines = [`${method} payment method detail (${response.period.fromDate} to ${response.period.toDate}):`];
+
+  if (collected) {
+    lines.push(`${method} total collected: ${formatMetricValue(collected.value, collected.unit)}`);
+  }
+
+  const countParts: string[] = [];
+  if (transactions) {
+    countParts.push(`transactions ${formatMetricValue(transactions.value, transactions.unit)}`);
+  }
+  if (invoices) {
+    countParts.push(`invoice ${formatMetricValue(invoices.value, invoices.unit)} စောင်`);
+  }
+  if (countParts.length) {
+    lines.push(countParts.join("၊ "));
+  }
+
+  if (!table?.rows.length) {
+    lines.push("", `${method} payment rows မတွေ့ပါ။`);
+    lines.push("", "မှတ်ချက်: ဒါက GreatTime payment report rows အပေါ်အခြေခံထားတာပါ။ Real bank statement ledger မဟုတ်ပါ။");
+    return lines;
+  }
+
+  lines.push("", "Invoice / customer / service detail:");
+  table.rows.slice(0, 10).forEach((row, index) => {
+    const date = stringValue(row, "dateLabel", "-");
+    const invoice = stringValue(row, "invoiceNumber", "-");
+    const customer = stringValue(row, "customerName", "-");
+    const service = stringValue(row, "serviceName", "-");
+    const servicePackage = stringValue(row, "servicePackageName", "");
+    const paymentAmount = numberValue(row, "paymentAmount");
+    const invoiceTotal = numberValue(row, "invoiceNetTotal");
+    const status = stringValue(row, "paymentStatus", "");
+    const note = stringValue(row, "paymentNote", "");
+    const packageText = servicePackage && servicePackage !== "-" ? ` / ${servicePackage}` : "";
+    const paymentText = paymentAmount != null ? formatTelegramMoney(paymentAmount) : "-";
+    const invoiceTotalText = invoiceTotal != null ? formatTelegramMoney(invoiceTotal) : "-";
+    const statusText = status && status !== "-" ? `၊ status ${status}` : "";
+    const noteText = note && note !== "-" ? `၊ note ${note}` : "";
+
+    lines.push(
+      `${index + 1}. ${date} — invoice ${invoice}၊ ${customer}၊ ${service}${packageText}၊ payment ${paymentText}၊ invoice total ${invoiceTotalText}${statusText}${noteText}`,
+    );
+  });
+
+  lines.push("", "မှတ်ချက်: ဒါက GreatTime payment report rows အပေါ်အခြေခံထားတာပါ။ Real bank statement ledger မဟုတ်ပါ။");
+
+  return lines;
+}
+
 function formatServicePerformanceConversation(response: GreatTimeAgentChatResponse) {
   const table = response.tables?.find((item) => /top services|service performance/i.test(item.title));
   if (!table?.rows.length) {
@@ -1425,6 +1475,11 @@ function formatConversationTablePreview(
   const financeSales = formatFinanceSalesConversation(response);
   if (financeSales.length) {
     return financeSales;
+  }
+
+  const paymentMethodDetail = formatPaymentMethodDetailConversation(response);
+  if (paymentMethodDetail.length) {
+    return paymentMethodDetail;
   }
 
   const paymentMethods = formatPaymentMethodsConversation(response);

@@ -11,6 +11,7 @@ import {
 import { buildReadOnlyRefusalMessage, isDangerousBusinessMutationRequest } from "./read-only-guard.js";
 import { isService360Question } from "./service-query.js";
 import { isAppointmentLedgerQuestion, resolveAgent } from "./supervisor.js";
+import { isPaymentMethodBreakdownQuestion, isPaymentMethodDetailQuestion } from "./payment-method-intent.js";
 import type {
   AgentPeriod,
   GreatTimeAgentChatRequest,
@@ -51,6 +52,63 @@ function daysInUtcMonth(year: number, monthIndex: number) {
   return new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
 }
 
+const ENGLISH_MONTHS = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+] as const;
+
+const ENGLISH_MONTH_PATTERNS = [
+  { monthIndex: 0, pattern: /\bjan(?:uary)?\b/gi },
+  { monthIndex: 1, pattern: /\bfeb(?:ruary)?\b/gi },
+  { monthIndex: 2, pattern: /\bmar(?:ch)?\b/gi },
+  { monthIndex: 3, pattern: /\bapr(?:il)?\b/gi },
+  { monthIndex: 4, pattern: /\bmay\b/gi },
+  { monthIndex: 5, pattern: /\bjun(?:e)?\b/gi },
+  { monthIndex: 6, pattern: /\bjul(?:y)?\b/gi },
+  { monthIndex: 7, pattern: /\baug(?:ust)?\b/gi },
+  { monthIndex: 8, pattern: /\bsep(?:t(?:ember)?|tember)?\b/gi },
+  { monthIndex: 9, pattern: /\boct(?:ober)?\b/gi },
+  { monthIndex: 10, pattern: /\bnov(?:ember)?\b/gi },
+  { monthIndex: 11, pattern: /\bdec(?:ember)?\b/gi },
+];
+
+const MYANMAR_MONTH_PATTERNS = [
+  { monthIndex: 0, pattern: /(^|[\s,၊။?!"'()])ဇန်နဝါရီ(?=$|[\s,၊။?!"'()])/gi },
+  { monthIndex: 1, pattern: /(^|[\s,၊။?!"'()])ဖေဖော်ဝါရီ(?=$|[\s,၊။?!"'()])/gi },
+  { monthIndex: 2, pattern: /(^|[\s,၊။?!"'()])မတ်(?=$|[\s,၊။?!"'()])/gi },
+  { monthIndex: 3, pattern: /(^|[\s,၊။?!"'()])ဧပြီ(?=$|[\s,၊။?!"'()])/gi },
+  { monthIndex: 4, pattern: /(^|[\s,၊။?!"'()])မေ(?=$|[\s,၊။?!"'()])/gi },
+  { monthIndex: 5, pattern: /(^|[\s,၊။?!"'()])ဇွန်(?=$|[\s,၊။?!"'()])/gi },
+  { monthIndex: 6, pattern: /(^|[\s,၊။?!"'()])ဇူလိုင်(?=$|[\s,၊။?!"'()])/gi },
+  { monthIndex: 7, pattern: /(^|[\s,၊။?!"'()])(?:ဩဂုတ်|သြဂုတ်)(?=$|[\s,၊။?!"'()])/gi },
+  { monthIndex: 8, pattern: /(^|[\s,၊။?!"'()])စက်တင်ဘာ(?=$|[\s,၊။?!"'()])/gi },
+  { monthIndex: 9, pattern: /(^|[\s,၊။?!"'()])အောက်တိုဘာ(?=$|[\s,၊။?!"'()])/gi },
+  { monthIndex: 10, pattern: /(^|[\s,၊။?!"'()])နိုဝင်ဘာ(?=$|[\s,၊။?!"'()])/gi },
+  { monthIndex: 11, pattern: /(^|[\s,၊။?!"'()])ဒီဇင်ဘာ(?=$|[\s,၊။?!"'()])/gi },
+];
+
+const NUMERIC_MONTH_PATTERN = /(^|[^\d])((?:19|20)\d{2})[-/](0?[1-9]|1[0-2])(?=$|[^\d/-])/g;
+const LAST_MONTH_PATTERN = /last\s+month|previous\s+month|prev(?:ious)?\s+mo(?:nth)?|ပြီးခဲ့တဲ့\s*လ|ပြီးခဲ့သည့်\s*လ|ယခင်\s*လ/i;
+const PERIOD_CUE_PATTERN =
+  /last\s+\d+\s+days|last\s+365\s+days|365\s+days|last\s+90\s+days|90\s+days|last\s+30\s+days|30\s+days|this\s+week|current\s+week|last\s+week|previous\s+week|\byesterday\b|\btoday\b|\bnow\b|right\s+now|this\s+month|current\s+month|month\s+to\s+date|\bmtd\b|this\s+year|current\s+year|year\s+to\s+date|\bytd\b|ဒီနေ့|ဒီ\s*လ|ဒီ\s*နှစ်|မနေ့|ဒီ\s*အပတ်|ပြီးခဲ့တဲ့\s*အပတ်/i;
+
+type MonthCue = {
+  monthIndex: number;
+  year?: number;
+  index: number;
+  endIndex: number;
+};
+
 function buildPeriod(fromDate: string, toDate: string, label: string): AgentPeriod {
   const previous = shiftRange(fromDate, toDate);
   return {
@@ -58,6 +116,37 @@ function buildPeriod(fromDate: string, toDate: string, label: string): AgentPeri
     toDate,
     label,
     ...previous,
+  };
+}
+
+function previousMonthParts(year: number, monthIndex: number) {
+  return monthIndex === 0 ? { year: year - 1, monthIndex: 11 } : { year, monthIndex: monthIndex - 1 };
+}
+
+function buildCalendarMonthPeriod(params: {
+  year: number;
+  monthIndex: number;
+  today: string;
+  label?: string;
+}): AgentPeriod {
+  const current = new Date(`${params.today}T00:00:00.000Z`);
+  const currentYear = current.getUTCFullYear();
+  const currentMonth = current.getUTCMonth();
+  const isCurrentMonth = params.year === currentYear && params.monthIndex === currentMonth;
+  const previousMonth = previousMonthParts(params.year, params.monthIndex);
+  const previousDay = isCurrentMonth
+    ? Math.min(current.getUTCDate(), daysInUtcMonth(previousMonth.year, previousMonth.monthIndex))
+    : daysInUtcMonth(previousMonth.year, previousMonth.monthIndex);
+  const monthLabel = `${ENGLISH_MONTHS[params.monthIndex]} ${params.year}`;
+
+  return {
+    fromDate: dateFromUtc(new Date(Date.UTC(params.year, params.monthIndex, 1))),
+    toDate: isCurrentMonth
+      ? params.today
+      : dateFromUtc(new Date(Date.UTC(params.year, params.monthIndex, daysInUtcMonth(params.year, params.monthIndex)))),
+    label: params.label ?? (isCurrentMonth ? `${monthLabel} month to date` : monthLabel),
+    previousFromDate: dateFromUtc(new Date(Date.UTC(previousMonth.year, previousMonth.monthIndex, 1))),
+    previousToDate: dateFromUtc(new Date(Date.UTC(previousMonth.year, previousMonth.monthIndex, previousDay))),
   };
 }
 
@@ -76,6 +165,129 @@ function buildThisMonthPeriod(today: string): AgentPeriod {
     previousFromDate: dateFromUtc(new Date(Date.UTC(previousYear, previousMonth, 1))),
     previousToDate: dateFromUtc(new Date(Date.UTC(previousYear, previousMonth, previousDay))),
   };
+}
+
+function extractYearNearMonth(message: string, startIndex: number, endIndex: number) {
+  const before = message.slice(Math.max(0, startIndex - 12), startIndex);
+  const after = message.slice(endIndex, Math.min(message.length, endIndex + 12));
+  const beforeMatch = before.match(/(?:^|[^\d])((?:19|20)\d{2})\s*$/);
+  if (beforeMatch?.[1]) {
+    return Number(beforeMatch[1]);
+  }
+
+  const afterMatch = after.match(/^\s*((?:19|20)\d{2})(?=$|[^\d])/);
+  return afterMatch?.[1] ? Number(afterMatch[1]) : undefined;
+}
+
+function isPoliteMayUsage(message: string, startIndex: number, endIndex: number) {
+  const after = message.slice(endIndex).trimStart().toLowerCase();
+  if (/^(?:i|we|you|he|she|they)\b/.test(after)) {
+    return true;
+  }
+
+  const before = message.slice(Math.max(0, startIndex - 24), startIndex).toLowerCase();
+  const nearby = `${before} ${message.slice(endIndex, Math.min(message.length, endIndex + 80)).toLowerCase()}`;
+  return !/(?:\b(?:for|in|during|of|total|sales?|revenue|income|turnover|invoice|payment|collection|collected|received|summary|report|performance|amount)\b|ဝင်ငွေ|ရောင်း|ငွေ)/i.test(
+    nearby,
+  );
+}
+
+function resolveYearForMonthCue(today: string, monthIndex: number, explicitYear?: number) {
+  if (explicitYear) {
+    return explicitYear;
+  }
+
+  const current = new Date(`${today}T00:00:00.000Z`);
+  const currentYear = current.getUTCFullYear();
+  const currentMonth = current.getUTCMonth();
+  return monthIndex > currentMonth ? currentYear - 1 : currentYear;
+}
+
+function extractNumericMonthCue(message: string): MonthCue | null {
+  const match = NUMERIC_MONTH_PATTERN.exec(message);
+  NUMERIC_MONTH_PATTERN.lastIndex = 0;
+  if (!match?.[2] || !match[3]) {
+    return null;
+  }
+
+  return {
+    year: Number(match[2]),
+    monthIndex: Number(match[3]) - 1,
+    index: (match.index ?? 0) + (match[1]?.length ?? 0),
+    endIndex: (match.index ?? 0) + match[0].length,
+  };
+}
+
+function extractNamedMonthCue(message: string): MonthCue | null {
+  const cues: MonthCue[] = [];
+
+  for (const month of ENGLISH_MONTH_PATTERNS) {
+    for (const match of message.matchAll(month.pattern)) {
+      const index = match.index ?? 0;
+      const endIndex = index + match[0].length;
+      if (month.monthIndex === 4 && isPoliteMayUsage(message, index, endIndex)) {
+        continue;
+      }
+
+      cues.push({
+        monthIndex: month.monthIndex,
+        year: extractYearNearMonth(message, index, endIndex),
+        index,
+        endIndex,
+      });
+    }
+  }
+
+  for (const month of MYANMAR_MONTH_PATTERNS) {
+    for (const match of message.matchAll(month.pattern)) {
+      const rawIndex = match.index ?? 0;
+      const prefixLength = match[1]?.length ?? 0;
+      const index = rawIndex + prefixLength;
+      const endIndex = rawIndex + match[0].length;
+      cues.push({
+        monthIndex: month.monthIndex,
+        year: extractYearNearMonth(message, index, endIndex),
+        index,
+        endIndex,
+      });
+    }
+  }
+
+  cues.sort((left, right) => left.index - right.index);
+  return cues[0] ?? null;
+}
+
+function extractCalendarMonthPeriod(message: string, today: string): AgentPeriod | null {
+  if (LAST_MONTH_PATTERN.test(message)) {
+    const current = new Date(`${today}T00:00:00.000Z`);
+    const previous = previousMonthParts(current.getUTCFullYear(), current.getUTCMonth());
+    return buildCalendarMonthPeriod({
+      year: previous.year,
+      monthIndex: previous.monthIndex,
+      today,
+      label: "last month",
+    });
+  }
+
+  const numericMonth = extractNumericMonthCue(message);
+  if (numericMonth) {
+    return buildCalendarMonthPeriod({
+      year: numericMonth.year!,
+      monthIndex: numericMonth.monthIndex,
+      today,
+    });
+  }
+
+  const namedMonth = extractNamedMonthCue(message);
+  if (namedMonth) {
+    return buildCalendarMonthPeriod({
+      year: resolveYearForMonthCue(today, namedMonth.monthIndex, namedMonth.year),
+      monthIndex: namedMonth.monthIndex,
+      today,
+    });
+  }
+
+  return null;
 }
 
 export function extractAgentPeriod(params: {
@@ -112,17 +324,22 @@ export function extractAgentPeriod(params: {
     return buildPeriod(previousFrom, previousTo, "last week");
   }
 
-  if (/yesterday|မနေ့/i.test(normalized)) {
+  if (/\byesterday\b|မနေ့/i.test(normalized)) {
     const yesterday = addDays(today, -1);
     return buildPeriod(yesterday, yesterday, "yesterday");
   }
 
-  if (/today|now|right now|ဒီနေ့|ယခု|အခု/i.test(params.message)) {
+  if (/\btoday\b|\bnow\b|right\s+now|ဒီနေ့|ယခု|အခု/i.test(params.message)) {
     return buildPeriod(today, today, "today");
   }
 
   if (/this\s+month|current\s+month|month\s+to\s+date|mtd|ဒီ\s*လ/i.test(params.message)) {
     return buildThisMonthPeriod(today);
+  }
+
+  const calendarMonthPeriod = extractCalendarMonthPeriod(params.message, today);
+  if (calendarMonthPeriod) {
+    return calendarMonthPeriod;
   }
 
   if (/this\s+year|current\s+year|year\s+to\s+date|ytd|ဒီ\s*နှစ်/i.test(params.message)) {
@@ -136,27 +353,43 @@ export function extractAgentPeriod(params: {
   return buildThisMonthPeriod(today);
 }
 
-function hasExplicitPeriodCue(message: string) {
-  return /last\s+\d+\s+days|last\s+365\s+days|365\s+days|last\s+90\s+days|90\s+days|last\s+30\s+days|30\s+days|this\s+week|current\s+week|last\s+week|previous\s+week|yesterday|today|now|right now|this\s+month|current\s+month|month\s+to\s+date|mtd|this\s+year|current\s+year|year\s+to\s+date|ytd|ဒီနေ့|ဒီ\s*လ|ဒီ\s*နှစ်|မနေ့/i.test(
-    message,
+export function hasExplicitPeriodCue(message: string) {
+  return (
+    PERIOD_CUE_PATTERN.test(message) ||
+    LAST_MONTH_PATTERN.test(message) ||
+    Boolean(extractNumericMonthCue(message) || extractNamedMonthCue(message))
   );
 }
 
 function detectFinanceIntent(message: string) {
-  if (/compare|versus|vs|last week|previous|ယှဉ်/i.test(message)) {
+  if (/\b(?:compare|comparison|versus|vs\.?|difference|different)\b|ယှဉ်/i.test(message)) {
     return "sales_period_comparison";
   }
-  if (/payment method|method|by payment|cash|bank|kpay|kbz|နည်းလမ်း/i.test(message)) {
+  if (isPaymentMethodBreakdownQuestion(message)) {
     return "payment_method_breakdown";
   }
-  if (/payment|collection|collected|ငွေ/i.test(message)) {
-    return "payment_summary";
+  if (isPaymentMethodDetailQuestion(message)) {
+    return "payment_method_detail";
   }
-  if (/invoice|detail|voucher|ဘောက်ချာ/i.test(message)) {
+  if (/payment method|method|by payment|cash|bank|kpay|kpaye|kbz|wavepay|wave|mmqr|\bqr\b|cbpay|ayapay|mpu|visa|master\s*card|mastercard|နည်းလမ်း/i.test(message)) {
+    return "payment_method_breakdown";
+  }
+  if (/detail|voucher|ဘောက်ချာ/i.test(message) && /invoice|voucher|ဘောက်ချာ/i.test(message)) {
     return "invoice_detail";
   }
   if (/purchase history|bought|ဝယ်/i.test(message)) {
     return "customer_purchase_history";
+  }
+  // Sales/revenue/income/turnover are invoice-side totals, not profit or net income.
+  if (/sales?|revenue|income|turnover|ရောင်းအား|ဝင်ငွေ/i.test(message)) {
+    return "sales_summary";
+  }
+  // Payment/collection wording means cash collected or received, not invoice-side sales.
+  if (/payment|collection|collected|received|ပေးချေ|ကောက်ခံ|လက်ခံ|ငွေ/i.test(message)) {
+    return "payment_summary";
+  }
+  if (/invoice/i.test(message)) {
+    return "invoice_detail";
   }
   return "sales_summary";
 }
@@ -334,6 +567,8 @@ function toolsForIntent(agentId: GreatTimeAgentId, intent: string, period?: Agen
       case "payment_summary":
       case "payment_method_breakdown":
         return ["get_payment_summary", "get_payment_method_breakdown"];
+      case "payment_method_detail":
+        return ["get_payment_method_detail"];
       case "sales_period_comparison":
         return ["compare_sales_periods"];
       case "customer_purchase_history":

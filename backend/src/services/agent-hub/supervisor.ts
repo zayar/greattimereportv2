@@ -1,5 +1,6 @@
 import type { GreatTimeAgentId, GreatTimeRequestedAgentId } from "./types.js";
 import { extractLikelyCustomerSearchText, hasExplicitCustomerSearchIntent } from "./customer-query.js";
+import { hasPaymentMethodReference } from "./payment-method-intent.js";
 import { isAppointmentRosterQuestion, isOperationsCountReconciliationQuestion, isTreatmentRosterQuestion } from "./question-dimensions.js";
 import { hasExplicitServiceSearchIntent } from "./service-query.js";
 
@@ -7,8 +8,8 @@ const AGENT_ORDER: GreatTimeAgentId[] = ["finance", "customer_relationship", "bu
 
 const KEYWORDS: Record<GreatTimeAgentId, RegExp[]> = {
   finance: [
-    /sales?|revenue|invoice|payment|collection|collected|cash|bank|wallet|kpay|kbz|purchase|refund/i,
-    /ရောင်း|ဝင်ငွေ|ငွေ|ပေးချေ|ဘဏ်|အကြွေး|ငွေသား/i,
+    /sales?|revenue|income|turnover|invoice|transactions?|payment|collection|collected|received|cash|bank|wallet|kpay|kpaye|kbz|wavepay|wave|mmqr|\bqr\b|cbpay|ayapay|mpu|visa|master\s*card|mastercard|purchase|refund/i,
+    /ရောင်း|ဝင်ငွေ|ငွေ|ပေးချေ|ဘဏ်|အကြွေး|ငွေသား|ဘယ်လောက်|ဝင်လဲ|ဝင်|ရလဲ|အသေးစိတ်|စာရင်း/i,
   ],
   customer_relationship: [
     /customer|member|vip|package|package balance|inactive|churn|risk|treatment due|follow[- ]?up|preference|retention/i,
@@ -51,7 +52,10 @@ export function isAppointmentLedgerQuestion(message: string) {
     /today|ဒီနေ့|who|what|which|list|show|all|customer|customers|member|members|service|services|therapist|therapists|practitioner|practitioners|ဘယ်သူ|ဝန်ဆောင်မှု|ဖောက်သည်/i.test(
       message,
     );
-  const asksFinance = /sales?|revenue|payment|collection|collected|invoice|purchase|purchased|bought|buy|ငွေ|ရောင်း|ဝင်ငွေ|ဝယ်/i.test(message);
+  const asksFinance =
+    /sales?|revenue|income|turnover|transactions?|payment|collection|collected|received|invoice|kpay|kpaye|wavepay|wave|mmqr|\bqr\b|cbpay|ayapay|mpu|visa|master\s*card|mastercard|purchase|purchased|bought|buy|ငွေ|ရောင်း|ဝင်ငွေ|ဝယ်|ဘယ်လောက်|ဝင်လဲ|ဝင်|ရလဲ|အသေးစိတ်|စာရင်း/i.test(
+      message,
+    ) || hasPaymentMethodReference(message);
 
   return ((mentionsAppointment && asksLedgerDetail) || asksLifecycleRoster || asksWhoIsComingToday || asksCustomerServiceRoster) && !asksFinance;
 }
@@ -98,6 +102,10 @@ export function resolveAgent(params: {
 
   if (hasExplicitServiceSearchIntent(params.message)) {
     scores.business += 2;
+  }
+
+  if (hasPaymentMethodReference(params.message)) {
+    scores.finance += 6;
   }
 
   if (isNamedCustomerPurchaseQuestion(params.message)) {
