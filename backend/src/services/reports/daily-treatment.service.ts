@@ -29,6 +29,7 @@ type RecordRow = {
   serviceName: string;
   customerName: string;
   customerPhone?: string | null;
+  status?: string | null;
 };
 
 type SummaryRow = {
@@ -38,20 +39,50 @@ type SummaryRow = {
   distinctCustomers: number;
 };
 
+function normalizeTreatmentSearchText(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
 export async function getTreatmentReportRange(params: {
   clinicCode: string;
   fromDate: string;
   toDate: string;
   serviceName?: string;
   practitionerName?: string;
+  search?: string;
+  limit?: number;
 }) {
   const queryParams = {
     clinicCode: params.clinicCode,
     fromDate: params.fromDate,
     toDate: params.toDate,
     serviceName: params.serviceName ?? "",
+    normalizedServiceName: normalizeTreatmentSearchText(params.serviceName ?? ""),
     practitionerName: params.practitionerName ?? "",
+    normalizedPractitionerName: normalizeTreatmentSearchText(params.practitionerName ?? ""),
+    search: params.search ?? "",
+    normalizedSearch: normalizeTreatmentSearchText(params.search ?? ""),
+    limit: params.limit ?? 500,
   };
+  const serviceFilterSql = `
+            AND (
+              @serviceName = ''
+              OR LOWER(ServiceName) LIKE CONCAT('%', LOWER(@serviceName), '%')
+              OR REGEXP_REPLACE(LOWER(ServiceName), r'[^a-z0-9]+', '') LIKE CONCAT('%', @normalizedServiceName, '%')
+              OR @normalizedServiceName LIKE CONCAT('%', REGEXP_REPLACE(LOWER(ServiceName), r'[^a-z0-9]+', ''), '%')
+            )
+            AND (
+              @practitionerName = ''
+              OR LOWER(COALESCE(PractitionerName, '')) LIKE CONCAT('%', LOWER(@practitionerName), '%')
+              OR REGEXP_REPLACE(LOWER(COALESCE(PractitionerName, '')), r'[^a-z0-9]+', '') LIKE CONCAT('%', @normalizedPractitionerName, '%')
+            )
+            AND (
+              @search = ''
+              OR LOWER(ServiceName) LIKE CONCAT('%', LOWER(@search), '%')
+              OR LOWER(COALESCE(PractitionerName, '')) LIKE CONCAT('%', LOWER(@search), '%')
+              OR LOWER(COALESCE(CustomerName, '')) LIKE CONCAT('%', LOWER(@search), '%')
+              OR REGEXP_REPLACE(LOWER(ServiceName), r'[^a-z0-9]+', '') LIKE CONCAT('%', @normalizedSearch, '%')
+            )`;
 
   const [matrixRows, recordRows, summaryRows] = await Promise.all([
     runAnalyticsQuery<MatrixRow>(
@@ -65,8 +96,7 @@ export async function getTreatmentReportRange(params: {
           WHERE DATE(CheckInTime) BETWEEN @fromDate AND @toDate
             AND ServiceName IS NOT NULL
             AND LOWER(ClinicCode) = LOWER(@clinicCode)
-            AND (@serviceName = '' OR LOWER(ServiceName) LIKE CONCAT('%', LOWER(@serviceName), '%'))
-            AND (@practitionerName = '' OR LOWER(COALESCE(PractitionerName, '')) LIKE CONCAT('%', LOWER(@practitionerName), '%'))
+${serviceFilterSql}
           GROUP BY therapistName, serviceName
         )
         SELECT
@@ -86,15 +116,15 @@ export async function getTreatmentReportRange(params: {
           COALESCE(PractitionerName, 'Unknown') AS therapistName,
           ServiceName AS serviceName,
           CustomerName AS customerName,
-          CustomerPhoneNumber AS customerPhone
+          CustomerPhoneNumber AS customerPhone,
+          'CHECKOUT' AS status
         FROM ${analyticsTables.mainDataView}
         WHERE DATE(CheckInTime) BETWEEN @fromDate AND @toDate
           AND ServiceName IS NOT NULL
           AND LOWER(ClinicCode) = LOWER(@clinicCode)
-          AND (@serviceName = '' OR LOWER(ServiceName) LIKE CONCAT('%', LOWER(@serviceName), '%'))
-          AND (@practitionerName = '' OR LOWER(COALESCE(PractitionerName, '')) LIKE CONCAT('%', LOWER(@practitionerName), '%'))
+${serviceFilterSql}
         ORDER BY CheckInTime DESC
-        LIMIT 500
+        LIMIT @limit
       `,
       queryParams,
     ),
@@ -109,8 +139,7 @@ export async function getTreatmentReportRange(params: {
         WHERE DATE(CheckInTime) BETWEEN @fromDate AND @toDate
           AND ServiceName IS NOT NULL
           AND LOWER(ClinicCode) = LOWER(@clinicCode)
-          AND (@serviceName = '' OR LOWER(ServiceName) LIKE CONCAT('%', LOWER(@serviceName), '%'))
-          AND (@practitionerName = '' OR LOWER(COALESCE(PractitionerName, '')) LIKE CONCAT('%', LOWER(@practitionerName), '%'))
+${serviceFilterSql}
       `,
       queryParams,
     ),
@@ -159,6 +188,7 @@ export async function getTreatmentReportRange(params: {
       serviceName: row.serviceName,
       customerName: row.customerName,
       customerPhone: row.customerPhone ?? null,
+      status: row.status ?? "CHECKOUT",
     })),
   };
 }

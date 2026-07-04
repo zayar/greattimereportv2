@@ -3,6 +3,7 @@ import { extractLikelyCustomerSearchText, hasExplicitCustomerSearchIntent } from
 import { hasPaymentMethodReference } from "./payment-method-intent.js";
 import { isAppointmentRosterQuestion, isOperationsCountReconciliationQuestion, isTreatmentRosterQuestion } from "./question-dimensions.js";
 import { hasExplicitServiceSearchIntent } from "./service-query.js";
+import { isTreatmentDetailQuestion } from "./treatment-detail-intent.js";
 
 const AGENT_ORDER: GreatTimeAgentId[] = ["finance", "customer_relationship", "business", "appointment"];
 
@@ -120,7 +121,10 @@ export function resolveAgent(params: {
     scores.business += 8;
   }
 
-  if (isTreatmentRosterQuestion(params.message)) {
+  if (isTreatmentDetailQuestion(params.message)) {
+    scores.business += 8;
+    scores.customer_relationship = Math.max(0, scores.customer_relationship - 3);
+  } else if (isTreatmentRosterQuestion(params.message)) {
     scores.business += 6;
     scores.customer_relationship = Math.max(0, scores.customer_relationship - 2);
   }

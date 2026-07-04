@@ -19,7 +19,7 @@ import {
   getFreshFactSnapshot,
   isCompletedHistoricalDay,
 } from "../snapshot-cache.service.js";
-import { extractTreatmentDetailFilters } from "../treatment-detail-intent.js";
+import { extractTreatmentDetailFilters, normalizeServiceSearchText } from "../treatment-detail-intent.js";
 import type { AgentDataStatus, AgentToolDefinition, AgentToolInput, AgentToolResult, GreatTimeAgentSource } from "../types.js";
 import { fetchAppointmentLedger } from "./appointment.tools.js";
 
@@ -960,6 +960,7 @@ type DailyTreatmentRecord = {
   serviceName: string;
   customerName: string;
   customerPhone?: string | null;
+  status?: string | null;
 };
 
 function customerKeyForTreatment(row: DailyTreatmentRecord) {
@@ -1031,21 +1032,118 @@ function treatmentFilterText(filters: { serviceName?: string; practitionerName?:
   ].filter(Boolean).join(" and ");
 }
 
-async function getDailyTreatments(input: AgentToolInput): Promise<AgentToolResult> {
+function levenshteinDistance(left: string, right: string) {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  const current = Array.from({ length: right.length + 1 }, () => 0);
+
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    current[0] = leftIndex;
+
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      const cost = left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1;
+      current[rightIndex] = Math.min(
+        current[rightIndex - 1] + 1,
+        previous[rightIndex] + 1,
+        previous[rightIndex - 1] + cost,
+      );
+    }
+
+    for (let index = 0; index < previous.length; index += 1) {
+      previous[index] = current[index];
+    }
+  }
+
+  return previous[right.length];
+}
+
+function closestServiceMatch(requestedServiceName: string, serviceNames: string[]) {
+  const requested = normalizeServiceSearchText(requestedServiceName);
+  if (!requested) {
+    return null;
+  }
+
+  const ranked = serviceNames
+    .map((serviceName) => {
+      const normalized = normalizeServiceSearchText(serviceName);
+      const distance = levenshteinDistance(requested, normalized);
+      const substringMatch = normalized.includes(requested) || requested.includes(normalized);
+
+      return { serviceName, distance, substringMatch, normalizedLength: normalized.length };
+    })
+    .filter((item) => item.normalizedLength > 0)
+    .sort((left, right) => {
+      if (left.substringMatch !== right.substringMatch) {
+        return left.substringMatch ? -1 : 1;
+      }
+
+      return left.distance - right.distance || left.serviceName.localeCompare(right.serviceName);
+    });
+  const best = ranked[0];
+  if (!best) {
+    return null;
+  }
+
+  const maxDistance = requested.length <= 8 ? 2 : 3;
+  return best.substringMatch || best.distance <= maxDistance ? best.serviceName : null;
+}
+
+async function buildTreatmentDetails(input: AgentToolInput, toolName: "get_daily_treatments" | "get_treatment_details"): Promise<AgentToolResult> {
   const treatmentFilters = extractTreatmentDetailFilters(input.request.message);
-  const data = await getTreatmentReportRange({
+  let selectedServiceName = treatmentFilters.serviceName;
+  let selectedPractitionerName = treatmentFilters.practitionerName;
+  let data = await getTreatmentReportRange({
     clinicCode: input.clinic.clinicCode,
     fromDate: input.period.fromDate,
     toDate: input.period.toDate,
-    serviceName: treatmentFilters.serviceName,
-    practitionerName: treatmentFilters.practitionerName,
+    serviceName: selectedServiceName,
+    practitionerName: selectedPractitionerName,
+    limit: 500,
   });
   const dimensions = parseQuestionDimensions(input.request.message);
   const warnings: NonNullable<AgentToolResult["warnings"]> = [];
+  let suggestedServices: string[] = [];
+  let fuzzyMatchedServiceName: string | null = null;
+
+  if (selectedServiceName && data.summary.totalTreatments === 0) {
+    const unfilteredData = await getTreatmentReportRange({
+      clinicCode: input.clinic.clinicCode,
+      fromDate: input.period.fromDate,
+      toDate: input.period.toDate,
+      practitionerName: selectedPractitionerName,
+      limit: 500,
+    });
+    const serviceNames = unfilteredData.serviceTotals.map((row) => row.serviceName);
+    const closest = closestServiceMatch(selectedServiceName, serviceNames);
+    suggestedServices = serviceNames.slice(0, 5);
+
+    if (closest) {
+      fuzzyMatchedServiceName = closest;
+      selectedServiceName = closest;
+      data = await getTreatmentReportRange({
+        clinicCode: input.clinic.clinicCode,
+        fromDate: input.period.fromDate,
+        toDate: input.period.toDate,
+        serviceName: closest,
+        practitionerName: selectedPractitionerName,
+        limit: 500,
+      });
+      suggestedServices = [closest, ...serviceNames.filter((serviceName) => serviceName !== closest).slice(0, 4)];
+      warnings.push({
+        type: "service_filter_fuzzy_match",
+        title: "Closest service used",
+        message: `No exact treatment rows matched "${treatmentFilters.serviceName}". Showing closest service "${closest}".`,
+      });
+    }
+  }
+
   const records = data.records;
   const therapistBreakdownRows = buildTherapistBreakdownRows(records);
   const serviceBreakdownRows = buildServiceBreakdownRows(records);
-  const filterText = treatmentFilterText(treatmentFilters);
+  const selectedFilters = {
+    serviceName: selectedServiceName,
+    practitionerName: selectedPractitionerName,
+  };
+  const filterText = treatmentFilterText(selectedFilters);
   const summarySubject = filterText ? ` matching ${filterText}` : "";
   const tables: NonNullable<AgentToolResult["tables"]> = [
     {
@@ -1056,12 +1154,16 @@ async function getDailyTreatments(input: AgentToolInput): Promise<AgentToolResul
         { key: "customerPhone", title: "Phone", unit: "text" },
         { key: "serviceName", title: "Service", unit: "text" },
         { key: "therapistName", title: "Practitioner", unit: "text" },
+        { key: "status", title: "Status", unit: "text" },
       ],
       rows: limitRows(records, 25),
     },
   ];
 
-  if (input.intent === "treatment_roster" && dimensions.wantsSales) {
+  if (
+    ["treatment_roster", "treatment_detail", "service_treatment_detail", "practitioner_treatment_detail"].includes(input.intent) &&
+    dimensions.wantsSales
+  ) {
     warnings.push({
       type: "row_level_sales_unavailable",
       title: "Row-level sales unavailable",
@@ -1097,7 +1199,7 @@ async function getDailyTreatments(input: AgentToolInput): Promise<AgentToolResul
   }
 
   return {
-    toolName: "get_daily_treatments",
+    toolName,
     sourceName: "BigQuery daily treatment report",
     checkedAt: nowIso(),
     period: periodLabel(input),
@@ -1115,8 +1217,11 @@ async function getDailyTreatments(input: AgentToolInput): Promise<AgentToolResul
     data: {
       countDefinition: TREATMENT_SERVICE_RECORD_COUNT_DEFINITION,
       treatmentDetailFilter: {
-        serviceName: treatmentFilters.serviceName ?? null,
-        practitionerName: treatmentFilters.practitionerName ?? null,
+        serviceName: selectedServiceName ?? null,
+        practitionerName: selectedPractitionerName ?? null,
+        requestedServiceName: treatmentFilters.serviceName ?? null,
+        fuzzyMatchedServiceName,
+        suggestedServices,
         wantsCustomerRows: treatmentFilters.wantsCustomerRows,
         wantsServiceBreakdown: treatmentFilters.wantsServiceBreakdown,
         wantsPractitionerBreakdown: treatmentFilters.wantsPractitionerBreakdown,
@@ -1124,6 +1229,14 @@ async function getDailyTreatments(input: AgentToolInput): Promise<AgentToolResul
       },
     },
   };
+}
+
+async function getDailyTreatments(input: AgentToolInput): Promise<AgentToolResult> {
+  return buildTreatmentDetails(input, "get_daily_treatments");
+}
+
+async function getTreatmentDetails(input: AgentToolInput): Promise<AgentToolResult> {
+  return buildTreatmentDetails(input, "get_treatment_details");
 }
 
 async function getDailyOperationsReconciliation(input: AgentToolInput): Promise<AgentToolResult> {
@@ -1467,6 +1580,17 @@ export function createBusinessTools(): AgentToolDefinition[] {
       maxRows: 25,
       timeoutMs: 15_000,
       execute: getDailyTreatments,
+    },
+    {
+      name: "get_treatment_details",
+      agentId: "business",
+      description: "Get treatment/service detail rows filtered by service or practitioner.",
+      inputSchema: toolInputSchema,
+      sourceName: "BigQuery daily treatment report",
+      live: false,
+      maxRows: 25,
+      timeoutMs: 15_000,
+      execute: getTreatmentDetails,
     },
     {
       name: "get_daily_operations_reconciliation",

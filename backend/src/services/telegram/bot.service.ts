@@ -823,6 +823,9 @@ function appointmentFilterSubject(filter: TelegramAppointmentFilter | null) {
 type TelegramTreatmentDetailFilter = {
   practitionerName?: string;
   serviceName?: string;
+  requestedServiceName?: string;
+  fuzzyMatchedServiceName?: string;
+  suggestedServices?: string[];
   totalLoadedRows?: number;
 };
 
@@ -839,15 +842,24 @@ function treatmentDetailFilterFromResponse(response: GreatTimeAgentChatResponse)
   const serviceName = typeof record.serviceName === "string" && record.serviceName.trim()
     ? record.serviceName.trim()
     : undefined;
+  const requestedServiceName = typeof record.requestedServiceName === "string" && record.requestedServiceName.trim()
+    ? record.requestedServiceName.trim()
+    : undefined;
+  const fuzzyMatchedServiceName = typeof record.fuzzyMatchedServiceName === "string" && record.fuzzyMatchedServiceName.trim()
+    ? record.fuzzyMatchedServiceName.trim()
+    : undefined;
+  const suggestedServices = Array.isArray(record.suggestedServices)
+    ? record.suggestedServices.filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    : undefined;
   const totalLoadedRows = typeof record.totalLoadedRows === "number" && Number.isFinite(record.totalLoadedRows)
     ? record.totalLoadedRows
     : undefined;
 
-  if (!practitionerName && !serviceName && totalLoadedRows === undefined) {
+  if (!practitionerName && !serviceName && !requestedServiceName && totalLoadedRows === undefined) {
     return null;
   }
 
-  return { practitionerName, serviceName, totalLoadedRows };
+  return { practitionerName, serviceName, requestedServiceName, fuzzyMatchedServiceName, suggestedServices, totalLoadedRows };
 }
 
 function treatmentDetailFilterLine(filter: TelegramTreatmentDetailFilter | null) {
@@ -861,6 +873,10 @@ function treatmentDetailFilterLine(filter: TelegramTreatmentDetailFilter | null)
   ].filter((part): part is string => Boolean(part));
 
   return parts.length ? `Filter: ${parts.join("၊ ")}` : null;
+}
+
+function isTreatmentDetailResponse(response: GreatTimeAgentChatResponse) {
+  return ["treatment_detail", "service_treatment_detail", "practitioner_treatment_detail"].includes(response.intent);
 }
 
 function sanitizeOwnerFacingText(text: string) {
@@ -960,22 +976,60 @@ function formatAppointmentConversation(response: GreatTimeAgentChatResponse, vie
 
 function formatDailyTreatmentRosterConversation(response: GreatTimeAgentChatResponse, viewerContext?: CustomerPhoneViewerContext) {
   const table = response.tables?.find((item) => item.title === "Daily treatment records");
+  const treatmentFilter = treatmentDetailFilterFromResponse(response);
+  const isDetail = isTreatmentDetailResponse(response);
+
   if (!table?.rows.length) {
-    return [];
+    if (!isDetail) {
+      return [];
+    }
+
+    const service = treatmentFilter?.serviceName ?? treatmentFilter?.requestedServiceName;
+    const subject = service
+      ? `${ownerBodyPeriodPrefix(response.period)} ${service} treatment/service detail`
+      : `${ownerBodyPeriodPrefix(response.period)} treatment/service detail`;
+    const lines = [`${subject}:`, "စုစုပေါင်း records: 0"];
+    const suggestions = treatmentFilter?.suggestedServices ?? [];
+
+    if (suggestions.length) {
+      lines.push("", "Closest services:");
+      suggestions.slice(0, 5).forEach((item, index) => {
+        lines.push(`${index + 1}. ${item}`);
+      });
+    }
+
+    lines.push("", "မှတ်ချက်: ဒါက appointment count မဟုတ်ပါ။ Appointment တစ်ခုမှာ service/treatment records များနိုင်ပါတယ်။");
+    return lines;
   }
 
-  const treatmentFilter = treatmentDetailFilterFromResponse(response);
   const filterLine = treatmentDetailFilterLine(treatmentFilter);
   const totalTreatments = metricValue(response, ["Treatments"]) ?? table.rows.length;
+  const customers = metricValue(response, ["Distinct treatment customers"]);
+  const staff = metricValue(response, ["Practitioners"]);
   const total = typeof totalTreatments === "number" ? totalTreatments : Number(totalTreatments);
   const pageSize = appointmentPageSize();
   const shownRows = table.rows.slice(0, pageSize);
   const totalText = Number.isFinite(total) ? total.toLocaleString("en-US") : formatMetricValue(totalTreatments, undefined);
-  const lines = [
-    `${ownerBodyPeriodPrefix(response.period)} customer/service/therapist treatment/service records ${totalText} ခုရှိပါတယ်။`,
-    `${ownerBodyPeriodPrefix(response.period)} customer/service/therapist treatment/service records စာရင်း:`,
-    "မှတ်ချက်: ဒါက appointment count မဟုတ်ပါ။ Appointment တစ်ခုမှာ service/treatment records များနိုင်ပါတယ်။",
-  ];
+  const detailSubject = treatmentFilter?.serviceName
+    ? `${ownerBodyPeriodPrefix(response.period)} ${treatmentFilter.serviceName} treatment/service detail`
+    : treatmentFilter?.practitionerName
+      ? `${ownerBodyPeriodPrefix(response.period)} ${treatmentFilter.practitionerName} treatment/service detail`
+      : `${ownerBodyPeriodPrefix(response.period)} treatment/service detail`;
+  const lines = isDetail
+    ? [
+        `${detailSubject}:`,
+        "",
+        `စုစုပေါင်း records: ${totalText}`,
+        `Customers: ${formatMetricValue(customers ?? "-", undefined)}`,
+        `Staff/Therapists: ${formatMetricValue(staff ?? "-", undefined)}`,
+        "",
+        "Customer / service detail:",
+      ]
+    : [
+        `${ownerBodyPeriodPrefix(response.period)} customer/service/therapist treatment/service records ${totalText} ခုရှိပါတယ်။`,
+        `${ownerBodyPeriodPrefix(response.period)} customer/service/therapist treatment/service records စာရင်း:`,
+        "မှတ်ချက်: ဒါက appointment count မဟုတ်ပါ။ Appointment တစ်ခုမှာ service/treatment records များနိုင်ပါတယ်။",
+      ];
 
   if (filterLine) {
     lines.push(filterLine);
@@ -1013,11 +1067,15 @@ function formatDailyTreatmentRosterConversation(response: GreatTimeAgentChatResp
       lines.push(`Phone: ${phone}`);
     }
     lines.push(`Service: ${service}`);
-    lines.push(`Therapist: ${therapist}`);
+    lines.push(`${isDetail ? "Staff" : "Therapist"}: ${therapist}`);
     if (status && status !== "-") {
       lines.push(`Status: ${translateStatus(status)}`);
     }
   });
+
+  if (isDetail) {
+    lines.push("", "မှတ်ချက်: ဒါက appointment count မဟုတ်ပါ။ Appointment တစ်ခုမှာ service/treatment records များနိုင်ပါတယ်။");
+  }
 
   const therapistBreakdown = response.tables?.find((item) => item.title === "Therapist breakdown");
   if (therapistBreakdown?.rows.length) {

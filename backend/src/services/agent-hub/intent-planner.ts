@@ -12,6 +12,12 @@ import { buildReadOnlyRefusalMessage, isDangerousBusinessMutationRequest } from 
 import { isService360Question } from "./service-query.js";
 import { isAppointmentLedgerQuestion, resolveAgent } from "./supervisor.js";
 import { extractPaymentMethodFilter, isPaymentMethodBreakdownQuestion, isPaymentMethodDetailQuestion } from "./payment-method-intent.js";
+import {
+  extractTreatmentDetailFilters,
+  hasNamedPractitionerInTreatmentQuestion,
+  hasNamedServiceInTreatmentQuestion,
+  isTreatmentDetailQuestion,
+} from "./treatment-detail-intent.js";
 import type {
   AgentPeriod,
   GreatTimeAgentChatRequest,
@@ -470,6 +476,21 @@ function detectBusinessIntent(message: string) {
   if (env.AGENT_OWNER_DAILY_BRIEF_ENABLED && isOwnerDailyBriefIntentMessage(message)) {
     return "owner_daily_brief";
   }
+  if (isTreatmentDetailQuestion(message)) {
+    const treatmentFilters = extractTreatmentDetailFilters(message);
+
+    if (hasNamedPractitionerInTreatmentQuestion(message)) {
+      return "practitioner_treatment_detail";
+    }
+    if (hasNamedServiceInTreatmentQuestion(message)) {
+      return "service_treatment_detail";
+    }
+    if (treatmentFilters.wantsPractitionerBreakdown && !treatmentFilters.wantsServiceBreakdown) {
+      return "practitioner_treatment_detail";
+    }
+
+    return "treatment_detail";
+  }
   if (isTreatmentRosterQuestion(message)) {
     return "treatment_roster";
   }
@@ -630,6 +651,10 @@ function toolsForIntent(agentId: GreatTimeAgentId, intent: string, period?: Agen
         return ["get_practitioner_overview", "get_practitioner_treatments"];
       case "operations_count_reconciliation":
         return ["get_daily_operations_reconciliation"];
+      case "treatment_detail":
+      case "service_treatment_detail":
+      case "practitioner_treatment_detail":
+        return ["get_treatment_details"];
       case "treatment_roster":
       case "daily_treatment":
         return ["get_daily_treatments"];
