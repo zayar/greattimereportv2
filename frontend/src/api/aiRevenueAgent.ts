@@ -8,10 +8,13 @@ import type {
   AiRevenueAuditActorType,
   AiRevenueAuditLog,
   AiRevenueAttributionType,
+  AiRevenueCustomerSuppression,
   AiRevenueMessageEvent,
   AiRevenuePriority,
+  AiRevenueResolutionReason,
   AiRevenueSettings,
   AiRevenueSummary,
+  AiRevenueSuppressionScope,
 } from "../types/domain";
 
 type ApiEnvelope<T> = {
@@ -27,6 +30,7 @@ export type AiRevenueActionQuery = {
   status?: AiRevenueActionStatus;
   priority?: AiRevenuePriority;
   limit?: number;
+  includeResolved?: boolean;
 };
 
 export type AiRevenueSummaryQuery = {
@@ -151,6 +155,48 @@ export async function rejectAiRevenueAction(actionId: string, payload: {
   );
 
   return response.data.data.action;
+}
+
+export async function resolveAiRevenueAction(actionId: string, payload: {
+  clinicId: string;
+  reason: AiRevenueResolutionReason;
+  note?: string | null;
+  suppressCustomer?: boolean;
+  permanentSuppression?: boolean;
+  suppressUntil?: string | null;
+  snoozeDays?: number;
+  scope?: AiRevenueSuppressionScope;
+}) {
+  const response = await apiClient.post<ApiEnvelope<{ action: AiRevenueAction }>>(
+    `/ai-revenue-agent/actions/${encodeURIComponent(actionId)}/resolve`,
+    payload,
+  );
+
+  return response.data.data.action;
+}
+
+export async function getAiRevenueSuppressions(params: {
+  clinicId: string;
+  includeInactive?: boolean;
+  limit?: number;
+}) {
+  const response = await apiClient.get<ApiEnvelope<{ suppressions: AiRevenueCustomerSuppression[] }>>(
+    "/ai-revenue-agent/suppressions",
+    { params },
+  );
+
+  return response.data.data.suppressions;
+}
+
+export async function liftAiRevenueSuppression(suppressionId: string, payload: {
+  clinicId: string;
+}) {
+  const response = await apiClient.post<ApiEnvelope<{ suppression: AiRevenueCustomerSuppression }>>(
+    `/ai-revenue-agent/suppressions/${encodeURIComponent(suppressionId)}/lift`,
+    payload,
+  );
+
+  return response.data.data.suppression;
 }
 
 export async function markAiRevenueMessageSent(actionId: string, payload: {

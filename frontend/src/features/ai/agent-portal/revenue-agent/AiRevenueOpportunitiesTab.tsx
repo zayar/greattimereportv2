@@ -7,10 +7,14 @@ import {
   quickAnswer,
   titleCase,
 } from "./AiRevenueFollowUpInsights";
+import { AiRevenueResolveControls } from "./AiRevenueResolveControls";
 
 type Props = {
+  clinicId: string;
   actions: AiRevenueAction[];
   loading: boolean;
+  onWorkflowChanged: (message: string) => Promise<void>;
+  onError: (message: string) => void;
   onOpenAction: (action: AiRevenueAction) => void;
 };
 
@@ -37,7 +41,14 @@ function packageBalanceLabel(action: AiRevenueAction) {
   return `${remaining ?? 0}${purchased != null ? ` / ${purchased}` : ""} sessions remaining`;
 }
 
-export function AiRevenueOpportunitiesTab({ actions, loading, onOpenAction }: Props) {
+export function AiRevenueOpportunitiesTab({
+  clinicId,
+  actions,
+  loading,
+  onWorkflowChanged,
+  onError,
+  onOpenAction,
+}: Props) {
   if (loading && actions.length === 0) {
     return <div className="inline-note inline-note--loading">Loading AI Revenue opportunities...</div>;
   }
@@ -105,6 +116,13 @@ export function AiRevenueOpportunitiesTab({ actions, loading, onOpenAction }: Pr
                 Open Action Detail
               </button>
             </div>
+
+            <AiRevenueResolveControls
+              clinicId={clinicId}
+              action={action}
+              onResolved={onWorkflowChanged}
+              onError={onError}
+            />
           </article>
         );
       })}

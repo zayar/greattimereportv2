@@ -176,6 +176,7 @@ function buildActionParams(clinicId: string, filters: FilterState): AiRevenueAct
     status: filters.status || undefined,
     priority: filters.priority || undefined,
     limit: 100,
+    includeResolved: Boolean(filters.status),
   };
 }
 
@@ -700,7 +701,17 @@ export function AiRevenueAgentPage() {
         />
       ) : activeTab === "opportunities" ? (
         <Panel title="Customer follow-up opportunities" subtitle="See who to contact, why now, what they bought, and how likely they are to return.">
-          <AiRevenueOpportunitiesTab actions={actions} loading={busyAction === "load"} onOpenAction={setSelectedAction} />
+          <AiRevenueOpportunitiesTab
+            clinicId={clinic.id}
+            actions={actions}
+            loading={busyAction === "load"}
+            onWorkflowChanged={async (message) => {
+              setNotice(message);
+              await loadData(false);
+            }}
+            onError={(message) => setErrorMessage(message || null)}
+            onOpenAction={setSelectedAction}
+          />
         </Panel>
       ) : activeTab === "message_approval" ? (
         <Panel

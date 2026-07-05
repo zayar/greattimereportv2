@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { firestoreDb } from "../../config/firebase.js";
 import { HttpError } from "../../utils/http-error.js";
 import {
@@ -5,7 +6,10 @@ import {
   aiRevenueActionStatuses,
   aiRevenueActionTypes,
   aiRevenueAttributionTypes,
+  aiRevenueResolutionReasons,
+  aiRevenueSuppressionScopes,
   type AiRevenueAction,
+  type AiRevenueActionResolution,
   type AiRevenuePriority,
   type AiRevenueActionSource,
   type AiRevenueActionStatus,
@@ -20,6 +24,10 @@ import {
   type AiRevenueSettings,
   type AiRevenueSummary,
   type AiRevenueActor,
+  type AiRevenueCustomer,
+  type AiRevenueCustomerSuppression,
+  type AiRevenueResolutionReason,
+  type AiRevenueSuppressionScope,
 } from "../../types/ai-revenue-agent.js";
 
 const ACTIONS_COLLECTION = "gt_ai_revenue_actions";
@@ -27,6 +35,8 @@ const MESSAGE_EVENTS_COLLECTION = "gt_ai_revenue_message_events";
 const APPOINTMENT_OUTCOMES_COLLECTION = "gt_ai_revenue_appointment_outcomes";
 const AUDIT_LOGS_COLLECTION = "gt_ai_revenue_audit_logs";
 const SETTINGS_COLLECTION = "gt_ai_revenue_settings";
+const CUSTOMER_SUPPRESSIONS_COLLECTION = "gt_ai_revenue_customer_suppressions";
+const RESOLVED_STATUSES = new Set<AiRevenueActionStatus>(["closed", "skipped", "not_interested"]);
 
 function nowIso() {
   return new Date().toISOString();
@@ -52,12 +62,34 @@ function settingsCollection() {
   return firestoreDb().collection(SETTINGS_COLLECTION);
 }
 
+function customerSuppressionCollection() {
+  return firestoreDb().collection(CUSTOMER_SUPPRESSIONS_COLLECTION);
+}
+
 function cleanText(value: unknown, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
 
 function nullableText(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function normalizePhone(value: unknown) {
+  return cleanText(value).replace(/\D/g, "");
+}
+
+export function phoneHash(value: unknown) {
+  const phone = normalizePhone(value);
+  return phone ? createHash("sha1").update(phone).digest("hex") : null;
+}
+
+function hashId(value: string) {
+  return createHash("sha1").update(value).digest("hex").slice(0, 24);
+}
+
+function strongCustomerKey(value: unknown) {
+  const key = nullableText(value);
+  return key && !key.startsWith("name:") ? key : null;
 }
 
 function numberOrNull(value: unknown) {
@@ -219,6 +251,30 @@ function normalizeRevenue(value: unknown): AiRevenueRevenueInfo {
   };
 }
 
+function normalizeResolution(value: unknown): AiRevenueActionResolution | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const data = value as Record<string, unknown>;
+  const reason = aiRevenueResolutionReasons.includes(data.reason as AiRevenueResolutionReason)
+    ? (data.reason as AiRevenueResolutionReason)
+    : null;
+  const resolvedAt = nullableText(data.resolvedAt);
+  if (!reason || !resolvedAt) {
+    return null;
+  }
+
+  return {
+    reason,
+    note: nullableText(data.note),
+    suppressCustomer: typeof data.suppressCustomer === "boolean" ? data.suppressCustomer : false,
+    suppressionId: nullableText(data.suppressionId),
+    resolvedAt,
+    resolvedBy: normalizeActor(data.resolvedBy),
+  };
+}
+
 function normalizeAction(id: string, data: FirebaseFirestore.DocumentData | undefined): AiRevenueAction | null {
   if (!data || typeof data.clinicId !== "string") {
     return null;
@@ -291,6 +347,7 @@ function normalizeAction(id: string, data: FirebaseFirestore.DocumentData | unde
     createdBy: normalizeActor(data.createdBy),
     lastStatusAt: nullableText(data.lastStatusAt),
     lastStatusBy: normalizeActor(data.lastStatusBy),
+    resolution: normalizeResolution(data.resolution),
   };
 }
 
@@ -310,6 +367,7 @@ export async function listActions(params: {
   actionType?: AiRevenueActionType;
   priority?: AiRevenuePriority;
   limit?: number;
+  includeResolved?: boolean;
 }) {
   const limit = Math.min(Math.max(params.limit ?? 100, 1), 500);
   const fetchLimit = Math.min(Math.max(limit * 5, limit), 500);
@@ -329,6 +387,7 @@ export async function listActions(params: {
     .filter((action) => !params.source || action.source === params.source)
     .filter((action) => !params.actionType || action.actionType === params.actionType)
     .filter((action) => !params.priority || action.priority === params.priority)
+    .filter((action) => params.includeResolved || Boolean(params.status) || !isActionResolved(action))
     .sort((left, right) => right.priorityScore - left.priorityScore || right.updatedAt.localeCompare(left.updatedAt))
     .slice(0, limit);
 }
@@ -361,6 +420,28 @@ export async function updateActionStatus(params: {
   const nextAction: AiRevenueAction = {
     ...current,
     status: params.status,
+    lastStatusAt: timestamp,
+    lastStatusBy: params.updatedBy,
+    updatedAt: timestamp,
+  };
+
+  await actionCollection().doc(params.actionId).set(stripUndefinedDeep(nextAction) as Record<string, unknown>, { merge: true });
+  return nextAction;
+}
+
+export async function updateActionResolution(params: {
+  clinicId: string;
+  actionId: string;
+  status: AiRevenueActionStatus;
+  resolution: AiRevenueActionResolution;
+  updatedBy: AiRevenueActor | null;
+}) {
+  const current = await getAction(params.clinicId, params.actionId);
+  const timestamp = nowIso();
+  const nextAction: AiRevenueAction = {
+    ...current,
+    status: params.status,
+    resolution: params.resolution,
     lastStatusAt: timestamp,
     lastStatusBy: params.updatedBy,
     updatedAt: timestamp,
@@ -517,6 +598,180 @@ export async function listAuditLogs(params: {
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
+function normalizeSuppressionReason(value: unknown): AiRevenueResolutionReason {
+  return aiRevenueResolutionReasons.includes(value as AiRevenueResolutionReason)
+    ? (value as AiRevenueResolutionReason)
+    : "other";
+}
+
+function normalizeSuppressionScope(value: unknown): AiRevenueSuppressionScope {
+  return aiRevenueSuppressionScopes.includes(value as AiRevenueSuppressionScope)
+    ? (value as AiRevenueSuppressionScope)
+    : "customer";
+}
+
+function normalizeCustomerSuppression(
+  id: string,
+  data: FirebaseFirestore.DocumentData | undefined,
+): AiRevenueCustomerSuppression | null {
+  if (!data || typeof data.clinicId !== "string") {
+    return null;
+  }
+
+  return {
+    id,
+    clinicId: data.clinicId,
+    customerKey: nullableText(data.customerKey),
+    memberId: nullableText(data.memberId),
+    phoneHash: nullableText(data.phoneHash),
+    customerName: nullableText(data.customerName),
+    reason: normalizeSuppressionReason(data.reason),
+    scope: normalizeSuppressionScope(data.scope),
+    sourceActionId: nullableText(data.sourceActionId),
+    active: typeof data.active === "boolean" ? data.active : true,
+    suppressUntil: nullableText(data.suppressUntil),
+    note: nullableText(data.note),
+    createdAt: cleanText(data.createdAt, nowIso()),
+    createdBy: normalizeActor(data.createdBy),
+    liftedAt: nullableText(data.liftedAt),
+    liftedBy: normalizeActor(data.liftedBy),
+  };
+}
+
+export function isSuppressionActive(suppression: AiRevenueCustomerSuppression, dateKey?: string) {
+  if (!suppression.active) {
+    return false;
+  }
+  if (!suppression.suppressUntil) {
+    return true;
+  }
+  return !dateKey || suppression.suppressUntil >= dateKey;
+}
+
+export function isActionResolved(action: AiRevenueAction) {
+  return Boolean(action.resolution || RESOLVED_STATUSES.has(action.status));
+}
+
+export function customerMatchesSuppression(customer: AiRevenueCustomer, suppression: AiRevenueCustomerSuppression) {
+  if (suppression.scope === "phone_only") {
+    const candidatePhoneHash = phoneHash(customer.phoneNumber);
+    return Boolean(candidatePhoneHash && suppression.phoneHash && candidatePhoneHash === suppression.phoneHash);
+  }
+
+  if (suppression.memberId && customer.memberId && suppression.memberId === customer.memberId) {
+    return true;
+  }
+
+  const candidateCustomerKey = strongCustomerKey(customer.customerKey);
+  if (suppression.customerKey && candidateCustomerKey && suppression.customerKey === candidateCustomerKey) {
+    return true;
+  }
+
+  const candidatePhoneHash = phoneHash(customer.phoneNumber);
+  return Boolean(candidatePhoneHash && suppression.phoneHash && candidatePhoneHash === suppression.phoneHash);
+}
+
+export function isCustomerSuppressed(
+  customer: AiRevenueCustomer,
+  suppressions: AiRevenueCustomerSuppression[],
+  dateKey?: string,
+) {
+  return suppressions.some(
+    (suppression) => isSuppressionActive(suppression, dateKey) && customerMatchesSuppression(customer, suppression),
+  );
+}
+
+export async function createCustomerSuppression(input: {
+  clinicId: string;
+  customer: AiRevenueCustomer;
+  reason: AiRevenueResolutionReason;
+  scope: AiRevenueSuppressionScope;
+  sourceActionId?: string | null;
+  suppressUntil?: string | null;
+  note?: string | null;
+  createdBy: AiRevenueActor | null;
+}) {
+  const memberId = nullableText(input.customer.memberId);
+  const customerKey = strongCustomerKey(input.customer.customerKey);
+  const hashedPhone = phoneHash(input.customer.phoneNumber);
+  const identityKey = input.scope === "phone_only" ? hashedPhone : memberId || customerKey || hashedPhone;
+  if (!identityKey) {
+    throw new HttpError(400, "A customer identifier or phone number is required before suppressing future AI Revenue opportunities.");
+  }
+
+  const id = `air_supp_${hashId([input.clinicId, input.scope, identityKey, input.reason].join("|"))}`;
+  const record: AiRevenueCustomerSuppression = {
+    id,
+    clinicId: input.clinicId,
+    customerKey,
+    memberId,
+    phoneHash: hashedPhone,
+    customerName: nullableText(input.customer.customerName),
+    reason: input.reason,
+    scope: input.scope,
+    sourceActionId: input.sourceActionId ?? null,
+    active: true,
+    suppressUntil: input.suppressUntil ?? null,
+    note: input.note ?? null,
+    createdAt: nowIso(),
+    createdBy: input.createdBy,
+    liftedAt: null,
+    liftedBy: null,
+  };
+
+  await customerSuppressionCollection().doc(id).set(stripUndefinedDeep(record) as Record<string, unknown>, { merge: true });
+  return record;
+}
+
+export async function listCustomerSuppressions(params: {
+  clinicId: string;
+  includeInactive?: boolean;
+  limit?: number;
+}) {
+  const limit = Math.min(Math.max(params.limit ?? 100, 1), 500);
+  const snapshot = await customerSuppressionCollection().where("clinicId", "==", params.clinicId).limit(500).get();
+  return snapshot.docs
+    .map((doc) => normalizeCustomerSuppression(doc.id, doc.data()))
+    .filter((suppression): suppression is AiRevenueCustomerSuppression => Boolean(suppression))
+    .filter((suppression) => params.includeInactive || suppression.active)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+    .slice(0, limit);
+}
+
+export async function listActiveCustomerSuppressions(params: {
+  clinicId: string;
+  dateKey?: string;
+}) {
+  const suppressions = await listCustomerSuppressions({
+    clinicId: params.clinicId,
+    includeInactive: false,
+    limit: 500,
+  });
+  return suppressions.filter((suppression) => isSuppressionActive(suppression, params.dateKey));
+}
+
+export async function liftCustomerSuppression(params: {
+  clinicId: string;
+  suppressionId: string;
+  liftedBy: AiRevenueActor | null;
+}) {
+  const currentSnapshot = await customerSuppressionCollection().doc(params.suppressionId).get();
+  const current = normalizeCustomerSuppression(currentSnapshot.id, currentSnapshot.data());
+  if (!current || current.clinicId !== params.clinicId) {
+    throw new HttpError(404, `AI Revenue customer suppression ${params.suppressionId} was not found.`);
+  }
+
+  const next: AiRevenueCustomerSuppression = {
+    ...current,
+    active: false,
+    liftedAt: nowIso(),
+    liftedBy: params.liftedBy,
+  };
+
+  await customerSuppressionCollection().doc(params.suppressionId).set(stripUndefinedDeep(next) as Record<string, unknown>, { merge: true });
+  return next;
+}
+
 export async function getSummary(params: {
   clinicId: string;
   startDateKey?: string;
@@ -529,9 +784,10 @@ export async function getSummary(params: {
   const actions = await listActions({
     clinicId: params.clinicId,
     limit: 500,
+    includeResolved: true,
   });
 
-  const filtered = actions.filter((action) => {
+  const allFiltered = actions.filter((action) => {
     if (params.startDateKey && action.dateKey < params.startDateKey) {
       return false;
     }
@@ -552,15 +808,30 @@ export async function getSummary(params: {
     }
     return true;
   });
+  const filtered = params.status ? allFiltered : allFiltered.filter((action) => !isActionResolved(action));
 
   const countStatus = (...statuses: AiRevenueActionStatus[]) => {
     const statusSet = new Set(statuses);
     return filtered.filter((action) => statusSet.has(action.status)).length;
   };
+  const resolvedActions = allFiltered.filter(isActionResolved).length;
+  const suppressedActions = allFiltered.filter((action) => action.resolution?.suppressCustomer).length;
+  const sourceBreakdown = {
+    serviceReminder: filtered.filter((action) => action.actionType === "service_reminder_follow_up" || action.actionType === "service_reminder_overdue").length,
+    unusedPackage: filtered.filter((action) => action.actionType === "unused_package_follow_up" || action.actionType === "package_upsell_opportunity").length,
+    appointmentReminder: filtered.filter((action) => action.actionType === "appointment_confirmation_reminder").length,
+    noShowRecovery: filtered.filter((action) => action.actionType === "no_show_recovery").length,
+    cancelledRecovery: filtered.filter((action) => action.actionType === "cancelled_appointment_recovery").length,
+    inactiveVip: filtered.filter((action) => action.actionType === "inactive_vip_recovery").length,
+    other: filtered.filter((action) => action.actionType === "payment_follow_up").length,
+  };
 
   return {
-    totalActions: filtered.length,
+    totalActions: allFiltered.length,
     opportunitiesFound: filtered.length,
+    activeOpportunities: filtered.length,
+    resolvedActions,
+    suppressedActions,
     highPriority: filtered.filter((action) => action.priority === "high").length,
     draftsReady: countStatus("draft_ready"),
     pendingApproval: countStatus("pending_approval"),
@@ -583,6 +854,7 @@ export async function getSummary(params: {
     aiGeneratedRevenue: filtered.reduce((sum, action) => sum + numberOrZero(action.revenue.actualRevenue), 0),
     aiInfluencedRevenue: filtered.reduce((sum, action) => sum + numberOrZero(action.revenue.influencedRevenue), 0),
     packageSessionsRecovered: filtered.reduce((sum, action) => sum + numberOrZero(action.revenue.packageSessionsRecovered), 0),
+    sourceBreakdown,
     currency: "MMK",
   } satisfies AiRevenueSummary;
 }

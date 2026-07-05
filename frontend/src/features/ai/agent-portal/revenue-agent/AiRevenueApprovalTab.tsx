@@ -13,6 +13,7 @@ import {
   isSameCustomerAction,
   titleCase,
 } from "./AiRevenueFollowUpInsights";
+import { AiRevenueResolveControls } from "./AiRevenueResolveControls";
 
 type Props = {
   clinicId: string;
@@ -53,7 +54,7 @@ export function AiRevenueApprovalTab({
   const [draftEdits, setDraftEdits] = useState<Record<string, string>>({});
 
   const approvalActions = actions.filter((action) =>
-    ["new", "draft_ready", "pending_approval", "approved", "closed", "sent"].includes(action.status),
+    ["new", "draft_ready", "pending_approval", "approved", "sent"].includes(action.status) && !action.resolution,
   );
 
   async function runWorkflow(action: AiRevenueAction, work: () => Promise<string>) {
@@ -251,6 +252,14 @@ export function AiRevenueApprovalTab({
                 Mark Sent
               </button>
             </div>
+
+            <AiRevenueResolveControls
+              clinicId={clinicId}
+              action={action}
+              disabled={busy}
+              onResolved={onWorkflowChanged}
+              onError={onError}
+            />
           </article>
         );
       })}

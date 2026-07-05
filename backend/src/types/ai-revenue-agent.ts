@@ -60,6 +60,29 @@ export const aiRevenueAttributionTypes = [
 
 export type AiRevenueAttributionType = (typeof aiRevenueAttributionTypes)[number];
 
+export const aiRevenueResolutionReasons = [
+  "already_contacted",
+  "already_booked",
+  "not_interested",
+  "moved_overseas",
+  "deceased",
+  "wrong_number",
+  "duplicate_customer",
+  "do_not_contact",
+  "staff_decision",
+  "other",
+] as const;
+
+export type AiRevenueResolutionReason = (typeof aiRevenueResolutionReasons)[number];
+
+export const aiRevenueSuppressionScopes = [
+  "customer",
+  "service",
+  "phone_only",
+] as const;
+
+export type AiRevenueSuppressionScope = (typeof aiRevenueSuppressionScopes)[number];
+
 export type AiRevenuePriority = "high" | "medium" | "low";
 
 export interface AiRevenueActor {
@@ -141,6 +164,15 @@ export interface AiRevenueRevenueInfo {
   revenueNote?: string | null;
 }
 
+export interface AiRevenueActionResolution {
+  reason: AiRevenueResolutionReason;
+  note?: string | null;
+  suppressCustomer?: boolean;
+  suppressionId?: string | null;
+  resolvedAt: string;
+  resolvedBy: AiRevenueActor | null;
+}
+
 export interface AiRevenueAction {
   id: string;
   clinicId: string;
@@ -168,6 +200,26 @@ export interface AiRevenueAction {
   createdBy: AiRevenueActor | null;
   lastStatusAt: string | null;
   lastStatusBy: AiRevenueActor | null;
+  resolution?: AiRevenueActionResolution | null;
+}
+
+export interface AiRevenueCustomerSuppression {
+  id: string;
+  clinicId: string;
+  customerKey?: string | null;
+  memberId?: string | null;
+  phoneHash?: string | null;
+  customerName?: string | null;
+  reason: AiRevenueResolutionReason;
+  scope: AiRevenueSuppressionScope;
+  sourceActionId?: string | null;
+  active: boolean;
+  suppressUntil?: string | null;
+  note?: string | null;
+  createdAt: string;
+  createdBy: AiRevenueActor | null;
+  liftedAt?: string | null;
+  liftedBy?: AiRevenueActor | null;
 }
 
 export interface AiRevenueMessageEvent {
@@ -232,6 +284,9 @@ export interface AiRevenueSettings {
 export interface AiRevenueSummary {
   totalActions: number;
   opportunitiesFound: number;
+  activeOpportunities: number;
+  resolvedActions: number;
+  suppressedActions: number;
   highPriority: number;
   draftsReady: number;
   pendingApproval: number;
@@ -248,5 +303,14 @@ export interface AiRevenueSummary {
   aiGeneratedRevenue: number;
   aiInfluencedRevenue: number;
   packageSessionsRecovered: number;
+  sourceBreakdown: {
+    serviceReminder: number;
+    unusedPackage: number;
+    appointmentReminder: number;
+    noShowRecovery: number;
+    cancelledRecovery: number;
+    inactiveVip: number;
+    other: number;
+  };
   currency: "MMK";
 }

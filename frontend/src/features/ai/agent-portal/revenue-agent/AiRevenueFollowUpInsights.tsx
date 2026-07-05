@@ -51,6 +51,62 @@ function formatNumber(value: number | null | undefined) {
   return Math.round(value ?? 0).toLocaleString("en-US");
 }
 
+function durationParts(days: number) {
+  const safeDays = Math.max(0, Math.round(days));
+  if (safeDays >= 365) {
+    const years = Math.floor(safeDays / 365);
+    const remainingDays = safeDays % 365;
+    const months = Math.floor(remainingDays / 30);
+    const daysLeft = remainingDays % 30;
+    return [
+      { value: years, unit: "year", myanmarUnit: "နှစ်" },
+      ...(months > 0 ? [{ value: months, unit: "month", myanmarUnit: "လ" }] : []),
+      ...(months === 0 && daysLeft > 0 ? [{ value: daysLeft, unit: "day", myanmarUnit: "ရက်" }] : []),
+    ];
+  }
+
+  if (safeDays >= 60) {
+    const months = Math.floor(safeDays / 30);
+    const daysLeft = safeDays % 30;
+    return [
+      { value: months, unit: "month", myanmarUnit: "လ" },
+      ...(daysLeft > 0 ? [{ value: daysLeft, unit: "day", myanmarUnit: "ရက်" }] : []),
+    ];
+  }
+
+  return [{ value: safeDays, unit: "day", myanmarUnit: "ရက်" }];
+}
+
+function formatDuration(days: number | null | undefined) {
+  if (days == null) {
+    return "";
+  }
+
+  return durationParts(days)
+    .map((part) => `${formatNumber(part.value)} ${part.unit}${part.value === 1 ? "" : "s"}`)
+    .join(" ");
+}
+
+function formatDurationAgo(days: number | null | undefined) {
+  const duration = formatDuration(days);
+  return duration ? `${duration} ago` : "";
+}
+
+function formatDurationSince(days: number | null | undefined) {
+  const duration = formatDuration(days);
+  return duration ? `${duration} since last usage` : "";
+}
+
+function formatDurationMyanmar(days: number | null | undefined) {
+  if (days == null) {
+    return "";
+  }
+
+  return durationParts(days)
+    .map((part) => `${formatNumber(part.value)} ${part.myanmarUnit}`)
+    .join(" ");
+}
+
 function formatMoney(value: number | null | undefined) {
   const amount = Number(value ?? 0);
   return amount > 0 ? `${Math.round(amount).toLocaleString("en-US")} MMK` : "Not available";
@@ -510,7 +566,7 @@ export function myanmarReason(action: AiRevenueAction, relatedActions: AiRevenue
   const focus = focusedBalance(action, relatedActions);
   const otherText = otherBalanceSentence(action, relatedActions);
   const inactiveDays = daysSinceLastVisit(action);
-  const daysText = inactiveDays != null ? `${formatNumber(inactiveDays)} ရက်` : "အချိန်အတော်ကြာ";
+  const daysText = formatDurationMyanmar(inactiveDays) || "အချိန်အတော်ကြာ";
 
   if ((focus.remaining ?? 0) > 0) {
     return `${customerName} သည် နောက်ဆုံး ${focus.serviceName} ကုသမှုလာရောက်ထားပြီး ${balanceLabel(focus)} ရှိနေသေးပါတယ်။ ${daysText} မလာရောက်သေးသောကြောင့် appointment ပြန်ချိန်းပေးရန် အကောင်းဆုံး follow-up ဖြစ်ပါတယ်။`;
@@ -586,7 +642,7 @@ export function buildPurchaseSummary(action: AiRevenueAction, relatedActions: Ai
   rows.push({
     label: "Last visit",
     value: lastDate || "Not available",
-    helper: daysSinceLastVisit(action) != null ? `${formatNumber(daysSinceLastVisit(action))} days ago` : undefined,
+    helper: formatDurationAgo(daysSinceLastVisit(action)) || undefined,
   });
   rows.push({
     label: "Total spending",
@@ -618,7 +674,7 @@ export function buildUsageTimeline(action: AiRevenueAction, relatedActions: AiRe
     timeline.push({
       label: "Last usage",
       value: lastDate,
-      helper: inactiveDays != null ? `${formatNumber(inactiveDays)} days since last usage` : undefined,
+      helper: formatDurationSince(inactiveDays) || undefined,
     });
   }
   if (focus.serviceName) {
@@ -658,7 +714,7 @@ export function quickAnswer(action: AiRevenueAction, relatedActions: AiRevenueAc
     return `အခုဆက်သွယ်ပါ: ${focus.serviceName} ကို highlight လုပ်ပြီး ${otherText} ကျန်ရှိနေကြောင်း ပြောနိုင်ပါတယ်။`;
   }
   if (inactiveDays != null && inactiveDays >= 30) {
-    return `အခုဆက်သွယ်ပါ: ${focus.serviceName} အတွက် နောက်ဆုံးလာရောက်ပြီး ${formatNumber(inactiveDays)} ရက်ရှိပါပြီ။`;
+    return `အခုဆက်သွယ်ပါ: ${focus.serviceName} အတွက် နောက်ဆုံးလာရောက်ပြီး ${formatDurationMyanmar(inactiveDays)} ရှိပါပြီ။`;
   }
   return action.summary || `${focus.serviceName} အတွက် follow-up လုပ်ရန်သင့်ပါတယ်။`;
 }
@@ -756,7 +812,7 @@ export function AiCustomerContextStrip({
       <div>
         <span>Last visit</span>
         <strong>{lastDate || "Not available"}</strong>
-        <small>{inactiveDays != null ? `${formatNumber(inactiveDays)} days ago` : "Visit gap unavailable"}</small>
+        <small>{formatDurationAgo(inactiveDays) || "Visit gap unavailable"}</small>
       </div>
       <div>
         <span>Customer value</span>

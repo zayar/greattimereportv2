@@ -26,6 +26,42 @@ function remainingUnits(action: AiRevenueAction) {
   return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
 }
 
+function durationParts(days: number) {
+  const safeDays = Math.max(0, Math.round(days));
+  if (safeDays >= 365) {
+    const years = Math.floor(safeDays / 365);
+    const remainingDays = safeDays % 365;
+    const months = Math.floor(remainingDays / 30);
+    const daysLeft = remainingDays % 30;
+    return [
+      { value: years, myanmarUnit: "နှစ်" },
+      ...(months > 0 ? [{ value: months, myanmarUnit: "လ" }] : []),
+      ...(months === 0 && daysLeft > 0 ? [{ value: daysLeft, myanmarUnit: "ရက်" }] : []),
+    ];
+  }
+
+  if (safeDays >= 60) {
+    const months = Math.floor(safeDays / 30);
+    const daysLeft = safeDays % 30;
+    return [
+      { value: months, myanmarUnit: "လ" },
+      ...(daysLeft > 0 ? [{ value: daysLeft, myanmarUnit: "ရက်" }] : []),
+    ];
+  }
+
+  return [{ value: safeDays, myanmarUnit: "ရက်" }];
+}
+
+function formatDurationMyanmar(days: number | null | undefined) {
+  if (days == null) {
+    return "";
+  }
+
+  return durationParts(days)
+    .map((part) => `${part.value.toLocaleString("en-US")} ${part.myanmarUnit}`)
+    .join(" ");
+}
+
 function appointmentDateTime(action: AiRevenueAction) {
   return cleanText(action.appointment.appointmentDateTime, "your scheduled appointment time");
 }
@@ -70,7 +106,7 @@ function contextSentence(action: AiRevenueAction) {
     parts.push(`${packageOrServiceName(action)} အတွက် session ${remaining} ကြိမ် ကျန်ရှိနေပါတယ်`);
   }
   if (days != null && days > 0) {
-    parts.push(`နောက်ဆုံးလာရောက်ပြီး ${days} ရက်ခန့်ရှိပါပြီ`);
+    parts.push(`နောက်ဆုံးလာရောက်ပြီး ${formatDurationMyanmar(days)} ခန့်ရှိပါပြီ`);
   }
 
   return parts.length ? `${parts.join("၊ ")}။ ` : "";

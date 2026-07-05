@@ -20,6 +20,8 @@ import {
 } from "../apicore-booking-details-range.js";
 import {
   createAuditLog,
+  isCustomerSuppressed,
+  listActiveCustomerSuppressions,
   listActions,
   upsertAction,
 } from "./ai-revenue-agent.repository.js";
@@ -1080,8 +1082,13 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
     clinicId: input.clinicId,
     dateKey: input.dateKey,
     limit: 500,
+    includeResolved: true,
   });
   const existingIds = new Set(existingActions.map((action) => action.id));
+  const activeSuppressions = await listActiveCustomerSuppressions({
+    clinicId: input.clinicId,
+    dateKey: input.dateKey,
+  });
 
   const candidates = uniqueCandidates([
     ...createServiceReminderCandidates({
@@ -1097,7 +1104,7 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
       highRiskCustomers,
     }),
     ...createInactiveVipCandidates(vipRows),
-  ]);
+  ]).filter((candidate) => !isCustomerSuppressed(candidate.customer, activeSuppressions, input.dateKey));
   const focusCandidates = selectTopFocusCandidates({
     candidates,
     existingActions,

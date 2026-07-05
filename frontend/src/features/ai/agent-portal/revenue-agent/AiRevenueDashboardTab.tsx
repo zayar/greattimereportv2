@@ -141,19 +141,18 @@ export function AiRevenueDashboardTab({
     return right.updatedAt.localeCompare(left.updatedAt);
   });
   const sourceBreakdown = [
-    "Service Reminder",
-    "Unused Package",
-    "Appointment Reminder",
-    "No-show Recovery",
-    "Cancelled Recovery",
-    "Inactive VIP",
-  ].map((label) => ({
-    label,
-    count: actions.filter((action) => sourceBreakdownLabel(action) === label).length,
-  }));
+    { label: "Service Reminder", count: summary?.sourceBreakdown?.serviceReminder ?? actions.filter((action) => sourceBreakdownLabel(action) === "Service Reminder").length },
+    { label: "Unused Package", count: summary?.sourceBreakdown?.unusedPackage ?? actions.filter((action) => sourceBreakdownLabel(action) === "Unused Package").length },
+    { label: "Appointment Reminder", count: summary?.sourceBreakdown?.appointmentReminder ?? actions.filter((action) => sourceBreakdownLabel(action) === "Appointment Reminder").length },
+    { label: "No-show Recovery", count: summary?.sourceBreakdown?.noShowRecovery ?? actions.filter((action) => sourceBreakdownLabel(action) === "No-show Recovery").length },
+    { label: "Cancelled Recovery", count: summary?.sourceBreakdown?.cancelledRecovery ?? actions.filter((action) => sourceBreakdownLabel(action) === "Cancelled Recovery").length },
+    { label: "Inactive VIP", count: summary?.sourceBreakdown?.inactiveVip ?? actions.filter((action) => sourceBreakdownLabel(action) === "Inactive VIP").length },
+  ];
 
   const metrics = [
-    { label: "Opportunities Found", value: numberLabel(summary?.opportunitiesFound), hint: "AI actions available for review" },
+    { label: "Active Opportunities", value: numberLabel(summary?.activeOpportunities ?? summary?.opportunitiesFound), hint: "Visible actionable queue" },
+    { label: "Resolved Actions", value: numberLabel(summary?.resolvedActions), hint: "Closed with full audit history" },
+    { label: "Suppressed Customers", value: numberLabel(summary?.suppressedActions), hint: "Hidden from future AI generation" },
     { label: "High Priority", value: numberLabel(summary?.highPriority), hint: "Needs manager attention first" },
     { label: "Drafts Ready", value: numberLabel(summary?.draftsReady), hint: "Messages prepared for approval" },
     { label: "Approved Messages", value: numberLabel(summary?.approvedMessages), hint: "Human-approved outreach" },

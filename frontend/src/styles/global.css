@@ -2998,6 +2998,64 @@ textarea:focus-visible,
   flex-wrap: wrap;
 }
 
+.ai-revenue-resolve-controls {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(248, 250, 252, 0.82);
+}
+
+.ai-revenue-resolve-controls--resolved {
+  background: rgba(13, 122, 82, 0.06);
+  border-color: rgba(13, 122, 82, 0.12);
+}
+
+.ai-revenue-resolve-controls__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai-revenue-resolve-controls__header > div,
+.ai-revenue-resolve-controls--resolved {
+  display: grid;
+  gap: 4px;
+}
+
+.ai-revenue-resolve-controls strong {
+  color: #111827;
+}
+
+.ai-revenue-resolve-controls span,
+.ai-revenue-resolve-controls small {
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.ai-revenue-resolve-controls__grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(220px, 1.2fr);
+  gap: 10px;
+}
+
+.ai-revenue-resolve-controls__checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.ai-revenue-resolve-controls__checks label {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  color: #334155;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
 .ai-revenue-message-box {
   display: grid;
   gap: 10px;

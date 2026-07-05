@@ -8,6 +8,8 @@ import {
   aiRevenueActionStatuses,
   aiRevenueActionTypes,
   aiRevenueAttributionTypes,
+  aiRevenueResolutionReasons,
+  aiRevenueSuppressionScopes,
 } from "../types/ai-revenue-agent.js";
 import {
   createAiRevenueMessageEvent,
@@ -18,8 +20,11 @@ import {
   getAiRevenueSummary,
   listAiRevenueActions,
   listAiRevenueAuditLogs,
+  listAiRevenueCustomerSuppressions,
   approveAiRevenueMessage,
+  liftAiRevenueCustomerSuppression,
   requestAiRevenueBooking,
+  resolveAiRevenueAction,
   saveAiRevenueSettings,
   syncAiRevenueAppointmentOutcome,
   syncAiRevenueRevenue,
@@ -35,6 +40,15 @@ import { HttpError } from "../utils/http-error.js";
 const router = Router();
 
 const dateKeySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const queryBooleanSchema = z.preprocess((value) => {
+  if (value === "true") {
+    return true;
+  }
+  if (value === "false") {
+    return false;
+  }
+  return value;
+}, z.boolean());
 
 const actionQuerySchema = z.object({
   clinicId: z.string().min(1),
@@ -44,6 +58,7 @@ const actionQuerySchema = z.object({
   actionType: z.enum(aiRevenueActionTypes).optional(),
   priority: z.enum(["high", "medium", "low"]).optional(),
   limit: z.coerce.number().int().min(1).max(500).optional(),
+  includeResolved: queryBooleanSchema.optional(),
 });
 
 const actionDetailQuerySchema = z.object({
@@ -70,6 +85,17 @@ const approveMessageSchema = z.object({
 const rejectSchema = z.object({
   clinicId: z.string().min(1),
   note: z.string().max(500).optional(),
+});
+
+const resolveSchema = z.object({
+  clinicId: z.string().min(1),
+  reason: z.enum(aiRevenueResolutionReasons),
+  note: z.string().max(1000).nullable().optional(),
+  suppressCustomer: z.boolean().optional(),
+  permanentSuppression: z.boolean().optional(),
+  suppressUntil: dateKeySchema.nullable().optional(),
+  snoozeDays: z.number().int().min(1).max(365).optional(),
+  scope: z.enum(aiRevenueSuppressionScopes).optional(),
 });
 
 const markSentSchema = z.object({
@@ -160,6 +186,16 @@ const auditLogQuerySchema = z.object({
   actionId: z.string().optional(),
   actorType: z.enum(["ai", "staff", "customer", "system"]).optional(),
   limit: z.coerce.number().int().min(1).max(500).optional(),
+});
+
+const suppressionQuerySchema = z.object({
+  clinicId: z.string().min(1),
+  includeInactive: queryBooleanSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+});
+
+const suppressionLiftSchema = z.object({
+  clinicId: z.string().min(1),
 });
 
 const settingsSchema = z.object({
@@ -280,6 +316,28 @@ router.post(
       user: req.user,
       auditAction: "message_rejected",
       auditDescription: params.note || "Staff rejected AI Revenue action/message.",
+    });
+
+    res.json({ success: true, data: { action } });
+  }),
+);
+
+router.post(
+  "/actions/:actionId/resolve",
+  requireClinicAccess("body", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = resolveSchema.parse(req.body);
+    const action = await resolveAiRevenueAction({
+      clinicId: params.clinicId,
+      actionId: actionId(req),
+      reason: params.reason,
+      note: params.note,
+      suppressCustomer: params.suppressCustomer,
+      permanentSuppression: params.permanentSuppression,
+      suppressUntil: params.suppressUntil,
+      snoozeDays: params.snoozeDays,
+      scope: params.scope,
+      user: req.user,
     });
 
     res.json({ success: true, data: { action } });
@@ -505,6 +563,36 @@ router.get(
     const auditLogs = await listAiRevenueAuditLogs(params);
 
     res.json({ success: true, data: { auditLogs } });
+  }),
+);
+
+router.get(
+  "/suppressions",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = suppressionQuerySchema.parse(req.query);
+    const suppressions = await listAiRevenueCustomerSuppressions({
+      clinicId: params.clinicId,
+      includeInactive: params.includeInactive,
+      limit: params.limit,
+    });
+
+    res.json({ success: true, data: { suppressions } });
+  }),
+);
+
+router.post(
+  "/suppressions/:suppressionId/lift",
+  requireClinicAccess("body", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = suppressionLiftSchema.parse(req.body);
+    const suppression = await liftAiRevenueCustomerSuppression({
+      clinicId: params.clinicId,
+      suppressionId: String(req.params.suppressionId ?? ""),
+      user: req.user,
+    });
+
+    res.json({ success: true, data: { suppression } });
   }),
 );
 

@@ -5,7 +5,9 @@ import type {
   AiRevenueAuditActorType,
   AiRevenueMessageInfo,
   AiRevenueRevenueInfo,
+  AiRevenueResolutionReason,
   AiRevenueSettings,
+  AiRevenueSuppressionScope,
 } from "../../types/ai-revenue-agent.js";
 import { HttpError } from "../../utils/http-error.js";
 import { fetchApicoreBookingDetails, type ApicoreBookingDetailsRow } from "../apicore.service.js";
@@ -50,6 +52,16 @@ function actorFromUser(user: SessionUser | undefined) {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function dateKeyFromIso(value: string) {
+  return value.slice(0, 10);
+}
+
+function addDays(dateKey: string, days: number) {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 function cleanText(value: unknown) {
@@ -366,6 +378,145 @@ export async function updateAiRevenueStatus(input: {
     status: input.status,
     user: input.user,
     existingAuditAction: input.auditAction,
+  });
+
+  return action;
+}
+
+function defaultSuppressCustomer(reason: AiRevenueResolutionReason) {
+  return [
+    "not_interested",
+    "moved_overseas",
+    "deceased",
+    "wrong_number",
+    "duplicate_customer",
+    "do_not_contact",
+  ].includes(reason);
+}
+
+function defaultPermanentSuppression(reason: AiRevenueResolutionReason) {
+  return ["moved_overseas", "deceased", "wrong_number", "duplicate_customer", "do_not_contact"].includes(reason);
+}
+
+function defaultSuppressionScope(reason: AiRevenueResolutionReason): AiRevenueSuppressionScope {
+  return reason === "wrong_number" ? "phone_only" : "customer";
+}
+
+function statusForResolution(reason: AiRevenueResolutionReason): AiRevenueActionStatus {
+  return reason === "not_interested" ? "not_interested" : "closed";
+}
+
+function resolutionReasonLabel(reason: AiRevenueResolutionReason) {
+  switch (reason) {
+    case "already_contacted":
+      return "Already contacted";
+    case "already_booked":
+      return "Already booked";
+    case "not_interested":
+      return "Not interested";
+    case "moved_overseas":
+      return "Moved overseas";
+    case "deceased":
+      return "Deceased / do not contact";
+    case "wrong_number":
+      return "Wrong number";
+    case "duplicate_customer":
+      return "Duplicate customer";
+    case "do_not_contact":
+      return "Do not contact";
+    case "staff_decision":
+      return "Staff decision";
+    default:
+      return "Other";
+  }
+}
+
+export async function resolveAiRevenueAction(input: {
+  clinicId: string;
+  actionId: string;
+  reason: AiRevenueResolutionReason;
+  note?: string | null;
+  suppressCustomer?: boolean;
+  permanentSuppression?: boolean;
+  suppressUntil?: string | null;
+  snoozeDays?: number;
+  scope?: AiRevenueSuppressionScope;
+  user?: SessionUser;
+}) {
+  const current = await repository.getAction(input.clinicId, input.actionId);
+  const actor = actorFromUser(input.user);
+  const timestamp = nowIso();
+  const suppressCustomer = input.suppressCustomer ?? defaultSuppressCustomer(input.reason);
+  const permanentSuppression = input.permanentSuppression ?? defaultPermanentSuppression(input.reason);
+  const scope = input.scope ?? defaultSuppressionScope(input.reason);
+  const suppressUntil =
+    suppressCustomer && !permanentSuppression
+      ? input.suppressUntil ?? addDays(dateKeyFromIso(timestamp), input.snoozeDays ?? 30)
+      : null;
+  let suppressionId: string | null = null;
+
+  if (suppressCustomer) {
+    const suppression = await repository.createCustomerSuppression({
+      clinicId: input.clinicId,
+      customer: current.customer,
+      reason: input.reason,
+      scope,
+      sourceActionId: input.actionId,
+      suppressUntil,
+      note: input.note,
+      createdBy: actor,
+    });
+    suppressionId = suppression.id;
+
+    await repository.createAuditLog({
+      clinicId: input.clinicId,
+      actionId: input.actionId,
+      actorType: "staff",
+      actorId: input.user?.userId ?? input.user?.uid ?? null,
+      action: "customer_suppressed",
+      description: permanentSuppression
+        ? `Customer suppressed from future AI Revenue opportunities: ${resolutionReasonLabel(input.reason)}.`
+        : `Customer snoozed from AI Revenue opportunities until ${suppressUntil}.`,
+      afterValue: {
+        reason: input.reason,
+        scope,
+        suppressionId,
+        suppressUntil,
+      },
+    });
+  }
+
+  const resolution = {
+    reason: input.reason,
+    note: input.note ?? null,
+    suppressCustomer,
+    suppressionId,
+    resolvedAt: timestamp,
+    resolvedBy: actor,
+  };
+  const action = await repository.updateActionResolution({
+    clinicId: input.clinicId,
+    actionId: input.actionId,
+    status: statusForResolution(input.reason),
+    resolution,
+    updatedBy: actor,
+  });
+
+  await repository.createAuditLog({
+    clinicId: input.clinicId,
+    actionId: input.actionId,
+    actorType: "staff",
+    actorId: input.user?.userId ?? input.user?.uid ?? null,
+    action: "action_resolved",
+    description: `AI Revenue opportunity resolved: ${resolutionReasonLabel(input.reason)}.`,
+    afterValue: resolution,
+  });
+  await createStatusSideEffectAudit({
+    clinicId: input.clinicId,
+    actionId: input.actionId,
+    status: action.status,
+    user: input.user,
+    existingAuditAction: "action_resolved",
   });
 
   return action;
@@ -759,6 +910,38 @@ export async function syncAiRevenueRevenue(input: {
 
 export async function listAiRevenueAuditLogs(input: Parameters<typeof repository.listAuditLogs>[0]) {
   return repository.listAuditLogs(input);
+}
+
+export async function listAiRevenueCustomerSuppressions(input: Parameters<typeof repository.listCustomerSuppressions>[0]) {
+  return repository.listCustomerSuppressions(input);
+}
+
+export async function liftAiRevenueCustomerSuppression(input: {
+  clinicId: string;
+  suppressionId: string;
+  user?: SessionUser;
+}) {
+  const suppression = await repository.liftCustomerSuppression({
+    clinicId: input.clinicId,
+    suppressionId: input.suppressionId,
+    liftedBy: actorFromUser(input.user),
+  });
+
+  await repository.createAuditLog({
+    clinicId: input.clinicId,
+    actionId: suppression.sourceActionId ?? null,
+    actorType: "staff",
+    actorId: input.user?.userId ?? input.user?.uid ?? null,
+    action: "customer_suppression_lifted",
+    description: "Staff lifted an AI Revenue customer suppression.",
+    afterValue: {
+      suppressionId: suppression.id,
+      reason: suppression.reason,
+      scope: suppression.scope,
+    },
+  });
+
+  return suppression;
 }
 
 export async function getAiRevenueSummary(input: Parameters<typeof repository.getSummary>[0]) {
