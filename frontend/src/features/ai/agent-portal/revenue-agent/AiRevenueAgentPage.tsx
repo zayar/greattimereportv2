@@ -5,10 +5,14 @@ import { PageHeader } from "../../../../components/PageHeader";
 import { Panel } from "../../../../components/Panel";
 import { EmptyState, ErrorState } from "../../../../components/StatusViews";
 import {
+  approveAiRevenueMessage,
   generateAiRevenueActions,
+  generateAiRevenueMessage,
   getAiRevenueAuditLogs,
   getAiRevenueActions,
   getAiRevenueSummary,
+  markAiRevenueMessageSent,
+  rejectAiRevenueAction,
   type AiRevenueActionQuery,
   type AiRevenueSummaryQuery,
 } from "../../../../api/aiRevenueAgent";
@@ -30,6 +34,7 @@ import { AiRevenueDashboardTab } from "./AiRevenueDashboardTab";
 import { AiFollowUpSnapshot, isSameCustomerAction, myanmarReason } from "./AiRevenueFollowUpInsights";
 import { AiRevenueOpportunitiesTab } from "./AiRevenueOpportunitiesTab";
 import { AiRevenueRevenueTab } from "./AiRevenueRevenueTab";
+import { AiRevenueResolveControls } from "./AiRevenueResolveControls";
 import { AiRevenueTimeline } from "./AiRevenueTimeline";
 
 type RevenueAgentTab =
@@ -208,20 +213,74 @@ function actorName(actor: { name?: string | null; email?: string | null; userId?
   return actor?.name || actor?.email || actor?.userId || "Not recorded";
 }
 
+function isWorkflowLocked(action: AiRevenueAction) {
+  return Boolean(action.resolution || ["closed", "skipped", "sent"].includes(action.status));
+}
+
+function nextStepLabel(action: AiRevenueAction) {
+  if (action.resolution || ["closed", "skipped"].includes(action.status)) {
+    return "This opportunity is already resolved.";
+  }
+  if (!action.message.draftText && !action.message.approvedText) {
+    return "Generate a friendly Myanmar draft message.";
+  }
+  if (!action.message.approvedText && action.message.draftText) {
+    return "Review the draft, edit in the queue if needed, then approve.";
+  }
+  if (action.status === "approved") {
+    return "Mark the approved outreach as sent after staff contacts the customer.";
+  }
+  if (action.status === "sent") {
+    return "Record the customer reply or move the conversation toward booking.";
+  }
+  if (["customer_replied", "human_takeover"].includes(action.status)) {
+    return "Request a booking or let staff take over the conversation.";
+  }
+  if (["appointment_requested", "appointment_created", "appointment_confirmed", "reminder_sent"].includes(action.status)) {
+    return "Track appointment outcome and record revenue only after checkout/payment.";
+  }
+  return "Review the customer context and choose the next staff action.";
+}
+
 function ActionDetailPanel({
   action,
   actions,
   clinicId,
+  onWorkflowChanged,
+  onError,
   onClose,
 }: {
   action: AiRevenueAction;
   actions: AiRevenueAction[];
   clinicId: string;
+  onWorkflowChanged: (message: string) => Promise<void>;
+  onError: (message: string) => void;
   onClose: () => void;
 }) {
   const [auditLogs, setAuditLogs] = useState<AiRevenueAuditLog[]>([]);
   const [auditLoading, setAuditLoading] = useState(true);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
   const relatedActions = actions.filter((item) => item.id !== action.id && isSameCustomerAction(item, action));
+  const draftText = action.message.draftText ?? action.message.approvedText ?? "";
+  const approvedText = action.message.approvedText ?? "";
+  const locked = isWorkflowLocked(action);
+  const canApproveDraft = Boolean(draftText.trim()) && !approvedText && !locked;
+  const canMarkSent = action.status === "approved" && approvedText.trim().length > 0;
+
+  async function runQuickAction(actionName: string, work: () => Promise<string>) {
+    setBusyAction(actionName);
+    onError("");
+
+    try {
+      const message = await work();
+      await onWorkflowChanged(message);
+      onClose();
+    } catch (error) {
+      onError(getApiErrorMessage(error, "AI Revenue action could not be updated."));
+    } finally {
+      setBusyAction(null);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -273,6 +332,85 @@ function ActionDetailPanel({
           <div>
             <span className={`status-pill status-pill--${action.priority}`}>{action.priority}</span>
             <strong>Score {action.priorityScore}</strong>
+          </div>
+        </div>
+
+        <div className="ai-revenue-detail__quick-actions">
+          <div>
+            <strong>Action controls</strong>
+            <span>{nextStepLabel(action)}</span>
+          </div>
+          <div className="ai-revenue-action-card__controls">
+            <button
+              type="button"
+              className="button telegram-settings__button telegram-settings__button--secondary"
+              disabled={locked || busyAction !== null}
+              onClick={() =>
+                void runQuickAction("draft", async () => {
+                  await generateAiRevenueMessage(action.id, { clinicId });
+                  return `Draft generated for ${action.customer.customerName ?? action.title}.`;
+                })
+              }
+            >
+              {busyAction === "draft" ? "Generating..." : "Generate Draft"}
+            </button>
+
+            <button
+              type="button"
+              className="button telegram-settings__button telegram-settings__button--primary"
+              disabled={!canApproveDraft || busyAction !== null}
+              onClick={() =>
+                void runQuickAction("approve", async () => {
+                  await approveAiRevenueMessage(action.id, { clinicId, approvedText: draftText });
+                  return `Message approved for ${action.customer.customerName ?? action.title}.`;
+                })
+              }
+            >
+              {busyAction === "approve" ? "Approving..." : "Approve Draft"}
+            </button>
+
+            <button
+              type="button"
+              className="button telegram-settings__button telegram-settings__button--secondary"
+              disabled={!canMarkSent || busyAction !== null}
+              onClick={() =>
+                void runQuickAction("sent", async () => {
+                  await markAiRevenueMessageSent(action.id, {
+                    clinicId,
+                    channel: "manual",
+                    messageText: approvedText,
+                  });
+                  return `Message marked sent for ${action.customer.customerName ?? action.title}.`;
+                })
+              }
+            >
+              {busyAction === "sent" ? "Marking..." : "Mark Sent"}
+            </button>
+
+            <button
+              type="button"
+              className="button telegram-settings__button telegram-settings__button--danger"
+              disabled={locked || busyAction !== null}
+              onClick={() =>
+                void runQuickAction("reject", async () => {
+                  await rejectAiRevenueAction(action.id, { clinicId, note: "Rejected from action detail." });
+                  return `Action rejected for ${action.customer.customerName ?? action.title}.`;
+                })
+              }
+            >
+              {busyAction === "reject" ? "Rejecting..." : "Reject"}
+            </button>
+
+            <AiRevenueResolveControls
+              clinicId={clinicId}
+              action={action}
+              disabled={busyAction !== null}
+              onResolved={async (message) => {
+                await onWorkflowChanged(message);
+                onClose();
+              }}
+              onError={onError}
+            />
           </div>
         </div>
 
@@ -340,17 +478,20 @@ function ActionDetailPanel({
           <p>{action.recommendedAction}</p>
         </div>
 
-        <div className="ai-revenue-evidence-grid">
-          {action.evidence.map((item) => (
-            <div key={`${action.id}-detail-${item.label}`} className="ai-revenue-evidence-item">
-              <span>{item.label}</span>
-              <strong>
-                {item.value}
-                {item.comparison ? ` (${item.comparison})` : ""}
-              </strong>
-            </div>
-          ))}
-        </div>
+        <details className="ai-revenue-detail__disclosure">
+          <summary>Source evidence used by AI</summary>
+          <div className="ai-revenue-evidence-grid">
+            {action.evidence.map((item) => (
+              <div key={`${action.id}-detail-${item.label}`} className="ai-revenue-evidence-item">
+                <span>{item.label}</span>
+                <strong>
+                  {item.value}
+                  {item.comparison ? ` (${item.comparison})` : ""}
+                </strong>
+              </div>
+            ))}
+          </div>
+        </details>
 
         <div className="ai-revenue-detail__section">
           <strong>Message draft</strong>
@@ -424,14 +565,14 @@ function ActionDetailPanel({
           </small>
         </div>
 
-        <div className="ai-revenue-detail__section">
-          <strong>Full timeline</strong>
+        <details className="ai-revenue-detail__disclosure">
+          <summary>Audit trail for manager/admin</summary>
           {auditLoading ? (
             <div className="inline-note inline-note--loading">Loading action timeline...</div>
           ) : (
             <AiRevenueTimeline logs={auditLogs} emptyLabel="No audit events have been recorded for this action yet." />
           )}
-        </div>
+        </details>
       </div>
     </Panel>
   );
@@ -824,6 +965,11 @@ export function AiRevenueAgentPage() {
               clinicId={clinic.id}
               actions={actions}
               action={selectedAction}
+              onWorkflowChanged={async (message) => {
+                setNotice(message);
+                await loadData(false);
+              }}
+              onError={(message) => setErrorMessage(message || null)}
               onClose={() => setSelectedAction(null)}
             />
           </section>

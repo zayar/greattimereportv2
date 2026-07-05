@@ -2376,6 +2376,40 @@ textarea:focus-visible,
   justify-content: flex-start;
 }
 
+.ai-revenue-detail__quick-actions {
+  position: sticky;
+  top: -1px;
+  z-index: 4;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(7, 65, 66, 0.14);
+  background:
+    linear-gradient(180deg, rgba(248, 252, 251, 0.96), rgba(242, 249, 248, 0.92)),
+    rgba(255, 255, 255, 0.94);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(10px);
+}
+
+.ai-revenue-detail__quick-actions > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 240px;
+}
+
+.ai-revenue-detail__quick-actions strong {
+  color: #0f3f3d;
+}
+
+.ai-revenue-detail__quick-actions span {
+  color: #64748b;
+  line-height: 1.45;
+  font-weight: 700;
+}
+
 .ai-revenue-funnel {
   display: grid;
   gap: 18px;
@@ -3262,6 +3296,35 @@ textarea:focus-visible,
   font-weight: 700;
 }
 
+.ai-revenue-detail__disclosure {
+  display: grid;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(248, 250, 252, 0.62);
+}
+
+.ai-revenue-detail__disclosure[open] {
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.ai-revenue-detail__disclosure summary {
+  cursor: pointer;
+  color: #334155;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.ai-revenue-detail__disclosure summary::marker {
+  color: #0d9488;
+}
+
+.ai-revenue-detail__disclosure .ai-revenue-evidence-grid,
+.ai-revenue-detail__disclosure .ai-revenue-timeline {
+  margin-top: 12px;
+}
+
 .ai-revenue-source-breakdown,
 .ai-revenue-action-table-section,
 .ai-revenue-audit {
@@ -3484,6 +3547,15 @@ textarea:focus-visible,
   .ai-revenue-detail__header {
     display: flex;
     flex-direction: column;
+  }
+
+  .ai-revenue-detail__quick-actions {
+    position: static;
+    flex-direction: column;
+  }
+
+  .ai-revenue-detail__quick-actions > div:first-child {
+    min-width: 0;
   }
 
   .ai-revenue-action-card__controls {

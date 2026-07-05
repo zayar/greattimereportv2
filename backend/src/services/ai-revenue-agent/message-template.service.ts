@@ -8,6 +8,15 @@ function customerName(action: AiRevenueAction) {
   return cleanText(action.customer.customerName, "Customer");
 }
 
+function customerHonorificName(action: AiRevenueAction) {
+  const name = customerName(action);
+  return /^(မ|ဒေါ်|ဦး|ကို|မောင်|ဆရာမ|ဆရာ)\s/.test(name) ? name : `မ ${name}`;
+}
+
+function customerPossessive(action: AiRevenueAction) {
+  return customerHonorificName(action).startsWith("မ ") ? "မရဲ့" : `${customerHonorificName(action)} ရဲ့`;
+}
+
 function serviceName(action: AiRevenueAction) {
   return cleanText(action.service.serviceName, "ဝန်ဆောင်မှု");
 }
@@ -23,6 +32,14 @@ function evidenceValue(action: AiRevenueAction, labels: string[]) {
 
 function packageName(action: AiRevenueAction) {
   return cleanText(action.packageInfo.packageName);
+}
+
+function treatmentName(action: AiRevenueAction) {
+  const packageBaseName = packageName(action)
+    .replace(/\s+\d+\s*(?:times?|time|ကြိမ်)\b.*$/i, "")
+    .trim();
+
+  return packageBaseName || serviceName(action);
 }
 
 function packageOrServiceName(action: AiRevenueAction) {
@@ -60,14 +77,20 @@ function durationParts(days: number) {
   return [{ value: safeDays, myanmarUnit: "ရက်" }];
 }
 
+function formatMyanmarNumber(value: number) {
+  return Math.round(value)
+    .toLocaleString("en-US")
+    .replace(/\d/g, (digit) => "၀၁၂၃၄၅၆၇၈၉"[Number(digit)] ?? digit);
+}
+
 function formatDurationMyanmar(days: number | null | undefined) {
   if (days == null) {
     return "";
   }
 
   return durationParts(days)
-    .map((part) => `${part.value.toLocaleString("en-US")} ${part.myanmarUnit}`)
-    .join(" ");
+    .map((part) => `(${formatMyanmarNumber(part.value)}) ${part.myanmarUnit}`)
+    .join("နဲ့ ");
 }
 
 function appointmentDateTime(action: AiRevenueAction) {
@@ -121,14 +144,11 @@ function contextSentence(action: AiRevenueAction) {
 }
 
 function greeting(action: AiRevenueAction) {
-  return `မင်္ဂလာပါ ${customerName(action)} ရှင့်။ `;
+  return `မင်္ဂလာပါ ${customerHonorificName(action)} ရှင့် ✨`;
 }
 
 function lastTreatmentCheckSentence(action: AiRevenueAction) {
-  const service = serviceName(action);
-  return hasServiceName(action)
-    ? `နောက်ဆုံးလုပ်ခဲ့တဲ့ ${service} ဝန်ဆောင်မှု အဆင်ပြေလားရှင့်`
-    : "နောက်ဆုံးလာရောက်ခဲ့တဲ့ treatment အဆင်ပြေလားရှင့်";
+  return `အရင်တစ်ခေါက်က လာရောက်လုပ်ဆောင်သွားတဲ့ ${treatmentName(action)} treatment လေး အဆင်ပြေရဲ့လားရှင့်။`;
 }
 
 function remainingBalanceSentence(action: AiRevenueAction) {
@@ -137,7 +157,7 @@ function remainingBalanceSentence(action: AiRevenueAction) {
     return null;
   }
 
-  return `${packageOrServiceName(action)} အတွက် session ${remaining} ကြိမ် ကျန်ရှိနေပါတယ်`;
+  return `${customerPossessive(action)} ${packageOrServiceName(action)} package လေးက ကျန်ရှိ session (${formatMyanmarNumber(remaining)}) ကြိမ် ရှိပါသေးတယ်ရှင့်။`;
 }
 
 function lastVisitSentence(action: AiRevenueAction) {
@@ -146,24 +166,24 @@ function lastVisitSentence(action: AiRevenueAction) {
     return null;
   }
 
-  return `နောက်ဆုံးလာရောက်ပြီး ${formatDurationMyanmar(days)} ခန့်ရှိပါပြီ`;
+  return `လာမပြဖြစ်တာ ${formatDurationMyanmar(days)}ခန့် ရှိပြီမို့ treatment အဆက်ပြတ်မသွားအောင်လို့ပါရှင့်။`;
 }
 
 function bookingAskSentence(action: AiRevenueAction) {
-  const service = serviceName(action);
-  return hasServiceName(action)
-    ? `${service} နောက်တစ်ကြိမ် treatment ဒီအပတ်အတွင်း အဆင်ပြေတဲ့အချိန်ကို ချိန်းပေးရမလား ရှင့်`
-    : "နောက်တစ်ကြိမ် treatment အတွက် ဒီအပတ်အတွင်း အဆင်ပြေတဲ့အချိန်ကို ချိန်းပေးရမလား ရှင့်";
+  return "ဒီအပတ်ထဲ အဆင်ပြေမယ့်အချိန်လေး ရှိရင် treatment အတွက် အချိန်လေး ကြိုတင် Booking ယူပေးရမလားရှင့်။";
 }
 
 function personalFollowUpDraft(action: AiRevenueAction) {
-  const middleSentences = [
-    lastTreatmentCheckSentence(action),
-    remainingBalanceSentence(action),
-    lastVisitSentence(action),
-  ].filter((item): item is string => Boolean(item));
+  const remaining = remainingBalanceSentence(action);
+  const lastVisit = lastVisitSentence(action);
+  const packageContext = [remaining, lastVisit].filter((item): item is string => Boolean(item)).join(" ");
 
-  return `${greeting(action)}${middleSentences.join("၊ ")}။ ${bookingAskSentence(action)}။`;
+  return [
+    greeting(action),
+    lastTreatmentCheckSentence(action),
+    packageContext || "Treatment အဆက်ပြတ်မသွားအောင် ဆက်လက်လာရောက်ဖို့ အချိန်လေး ကြိုချိန်းပေးနိုင်ပါတယ်ရှင့်။",
+    bookingAskSentence(action),
+  ].join("\n\n");
 }
 
 export function buildAiRevenueMessageDraft(action: AiRevenueAction) {
