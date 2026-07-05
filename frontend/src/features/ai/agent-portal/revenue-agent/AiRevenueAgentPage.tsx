@@ -805,12 +805,29 @@ export function AiRevenueAgentPage() {
       )}
 
       {selectedAction ? (
-        <ActionDetailPanel
-          clinicId={clinic.id}
-          actions={actions}
-          action={selectedAction}
-          onClose={() => setSelectedAction(null)}
-        />
+        <div
+          className="ai-revenue-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setSelectedAction(null);
+            }
+          }}
+        >
+          <section
+            className="ai-revenue-modal ai-revenue-modal--wide"
+            role="dialog"
+            aria-modal="true"
+            aria-label="AI Revenue action detail"
+          >
+            <ActionDetailPanel
+              clinicId={clinic.id}
+              actions={actions}
+              action={selectedAction}
+              onClose={() => setSelectedAction(null)}
+            />
+          </section>
+        </div>
       ) : null}
     </div>
   );

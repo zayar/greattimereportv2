@@ -2993,6 +2993,14 @@ textarea:focus-visible,
   line-height: 1.5;
 }
 
+.ai-revenue-action-card__controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+}
+
 .ai-revenue-approval-card__actions {
   justify-content: flex-start;
   flex-wrap: wrap;
@@ -3010,6 +3018,96 @@ textarea:focus-visible,
 .ai-revenue-resolve-controls--resolved {
   background: rgba(13, 122, 82, 0.06);
   border-color: rgba(13, 122, 82, 0.12);
+}
+
+.ai-revenue-resolve-status {
+  display: grid;
+  gap: 3px;
+  min-width: 180px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(13, 122, 82, 0.14);
+  background: rgba(13, 122, 82, 0.06);
+}
+
+.ai-revenue-resolve-status strong {
+  color: #0d5f49;
+}
+
+.ai-revenue-resolve-status span {
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.ai-revenue-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 48px 20px;
+  overflow-y: auto;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(8px);
+}
+
+.ai-revenue-modal {
+  width: min(100%, 720px);
+  max-height: calc(100vh - 96px);
+  overflow: auto;
+  border-radius: 16px;
+  background: var(--report-surface);
+  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.24);
+}
+
+.ai-revenue-modal--compact {
+  border: 1px solid var(--report-border);
+}
+
+.ai-revenue-modal--wide {
+  width: min(100%, 1180px);
+  background: transparent;
+  box-shadow: none;
+}
+
+.ai-revenue-modal--wide > .panel {
+  margin: 0;
+  width: 100%;
+}
+
+.ai-revenue-modal__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 20px 20px 0;
+}
+
+.ai-revenue-modal__header > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ai-revenue-modal__header strong {
+  color: #111827;
+  font-size: 1.08rem;
+}
+
+.ai-revenue-modal__header span {
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.ai-revenue-modal__header + .ai-revenue-resolve-controls {
+  margin: 16px 20px 0;
+}
+
+.ai-revenue-modal__primary-action {
+  width: calc(100% - 40px);
+  margin: 16px 20px 20px;
 }
 
 .ai-revenue-resolve-controls__header {
@@ -3388,6 +3486,10 @@ textarea:focus-visible,
     flex-direction: column;
   }
 
+  .ai-revenue-action-card__controls {
+    justify-content: flex-start;
+  }
+
   .ai-revenue-funnel__row {
     grid-template-columns: 1fr;
   }
@@ -3408,6 +3510,31 @@ textarea:focus-visible,
 
   .agent-hub-question {
     max-width: 100%;
+  }
+
+  .ai-revenue-modal-backdrop {
+    padding: 18px 12px;
+  }
+
+  .ai-revenue-modal {
+    max-height: calc(100vh - 36px);
+    border-radius: 12px;
+  }
+
+  .ai-revenue-modal__header,
+  .ai-revenue-resolve-controls__grid,
+  .ai-revenue-resolve-controls__checks {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .ai-revenue-modal__header + .ai-revenue-resolve-controls {
+    margin-inline: 12px;
+  }
+
+  .ai-revenue-modal__primary-action {
+    width: calc(100% - 24px);
+    margin-inline: 12px;
   }
 }
 

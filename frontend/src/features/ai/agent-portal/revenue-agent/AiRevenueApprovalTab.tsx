@@ -251,15 +251,15 @@ export function AiRevenueApprovalTab({
               >
                 Mark Sent
               </button>
-            </div>
 
-            <AiRevenueResolveControls
-              clinicId={clinicId}
-              action={action}
-              disabled={busy}
-              onResolved={onWorkflowChanged}
-              onError={onError}
-            />
+              <AiRevenueResolveControls
+                clinicId={clinicId}
+                action={action}
+                disabled={busy}
+                onResolved={onWorkflowChanged}
+                onError={onError}
+              />
+            </div>
           </article>
         );
       })}

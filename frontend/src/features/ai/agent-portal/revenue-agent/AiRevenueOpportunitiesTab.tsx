@@ -108,21 +108,22 @@ export function AiRevenueOpportunitiesTab({
 
             <div className="ai-revenue-action-card__footer">
               <span>{action.recommendedAction}</span>
-              <button
-                type="button"
-                className="button telegram-settings__button telegram-settings__button--secondary"
-                onClick={() => onOpenAction(action)}
-              >
-                Open Action Detail
-              </button>
+              <div className="ai-revenue-action-card__controls">
+                <button
+                  type="button"
+                  className="button telegram-settings__button telegram-settings__button--secondary"
+                  onClick={() => onOpenAction(action)}
+                >
+                  Open Action Detail
+                </button>
+                <AiRevenueResolveControls
+                  clinicId={clinicId}
+                  action={action}
+                  onResolved={onWorkflowChanged}
+                  onError={onError}
+                />
+              </div>
             </div>
-
-            <AiRevenueResolveControls
-              clinicId={clinicId}
-              action={action}
-              onResolved={onWorkflowChanged}
-              onError={onError}
-            />
           </article>
         );
       })}
