@@ -1,17 +1,17 @@
 import { EmptyState } from "../../../../components/StatusViews";
 import type { AiRevenueAction } from "../../../../types/domain";
+import {
+  AiFollowUpSnapshot,
+  getReturnScore,
+  quickAnswer,
+  titleCase,
+} from "./AiRevenueFollowUpInsights";
 
 type Props = {
   actions: AiRevenueAction[];
   loading: boolean;
   onOpenAction: (action: AiRevenueAction) => void;
 };
-
-function titleCase(value: string) {
-  return value
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
 
 function formatMoney(value: number | null | undefined) {
   if (!value || value <= 0) {
@@ -55,6 +55,7 @@ export function AiRevenueOpportunitiesTab({ actions, loading, onOpenAction }: Pr
       {actions.map((action) => {
         const packageBalance = packageBalanceLabel(action);
         const estimatedRevenue = formatMoney(action.revenue.actualRevenue ?? action.revenue.influencedRevenue);
+        const score = getReturnScore(action);
 
         return (
           <article key={action.id} className="ai-revenue-action-card">
@@ -63,7 +64,7 @@ export function AiRevenueOpportunitiesTab({ actions, loading, onOpenAction }: Pr
                 <span className={`status-pill status-pill--${action.priority}`}>{action.priority}</span>
                 <span className="ai-revenue-action-card__source">{titleCase(action.source)}</span>
               </div>
-              <strong>Score {action.priorityScore}</strong>
+              <strong>{score.label}</strong>
             </div>
 
             <div className="ai-revenue-action-card__main">
@@ -76,26 +77,16 @@ export function AiRevenueOpportunitiesTab({ actions, loading, onOpenAction }: Pr
 
             <div className="ai-revenue-action-card__body">
               <div>
-                <strong>{action.title}</strong>
+                <strong>{quickAnswer(action)}</strong>
                 <p>{action.summary}</p>
               </div>
 
-              <div className="ai-revenue-reason-box">
-                <span>Reason</span>
+              <div className="ai-revenue-reason-box ai-revenue-reason-box--business">
+                <span>AI reason</span>
                 <p>{action.reason}</p>
               </div>
 
-              <div className="ai-revenue-evidence-grid">
-                {action.evidence.slice(0, 6).map((item) => (
-                  <div key={`${action.id}-${item.label}`} className="ai-revenue-evidence-item">
-                    <span>{item.label}</span>
-                    <strong>
-                      {item.value}
-                      {item.comparison ? ` (${item.comparison})` : ""}
-                    </strong>
-                  </div>
-                ))}
-              </div>
+              <AiFollowUpSnapshot action={action} />
             </div>
 
             <div className="ai-revenue-action-card__meta">

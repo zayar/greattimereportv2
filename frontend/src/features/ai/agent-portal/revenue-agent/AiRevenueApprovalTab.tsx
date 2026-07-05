@@ -8,6 +8,11 @@ import {
 } from "../../../../api/aiRevenueAgent";
 import { EmptyState } from "../../../../components/StatusViews";
 import type { AiRevenueAction } from "../../../../types/domain";
+import {
+  AiFollowUpSnapshot,
+  quickAnswer,
+  titleCase,
+} from "./AiRevenueFollowUpInsights";
 
 type Props = {
   clinicId: string;
@@ -17,12 +22,6 @@ type Props = {
   onError: (message: string) => void;
   onOpenAction: (action: AiRevenueAction) => void;
 };
-
-function titleCase(value: string) {
-  return value
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
 
 function contactLabel(action: AiRevenueAction) {
   return action.customer.phoneNumber || action.customer.phoneMasked || action.customer.memberId || "No contact detail";
@@ -123,27 +122,18 @@ export function AiRevenueApprovalTab({
               </button>
             </div>
 
-            <div className="ai-revenue-reason-box">
-              <span>Reason</span>
-              <p>{action.reason}</p>
-            </div>
+            <AiFollowUpSnapshot action={action} />
 
-            <div className="ai-revenue-evidence-grid">
-              {action.evidence.slice(0, 4).map((item) => (
-                <div key={`${action.id}-${item.label}`} className="ai-revenue-evidence-item">
-                  <span>{item.label}</span>
-                  <strong>
-                    {item.value}
-                    {item.comparison ? ` (${item.comparison})` : ""}
-                  </strong>
-                </div>
-              ))}
+            <div className="ai-revenue-reason-box ai-revenue-reason-box--business">
+              <span>Why contact this customer?</span>
+              <p>{quickAnswer(action)}</p>
+              <small>{action.reason}</small>
             </div>
 
             <div className="ai-revenue-message-box">
               <div>
-                <strong>Draft message</strong>
-                <span>Staff can edit before approval. No sending happens here.</span>
+                <strong>Myanmar draft message</strong>
+                <span>Ready to send after staff approval. Edit only if needed.</span>
               </div>
               {isEditing ? (
                 <textarea

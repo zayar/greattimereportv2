@@ -12,6 +12,11 @@ function serviceName(action: AiRevenueAction) {
   return cleanText(action.service.serviceName, "your service");
 }
 
+function evidenceValue(action: AiRevenueAction, labels: string[]) {
+  const lookup = labels.map((label) => label.toLowerCase());
+  return action.evidence.find((item) => lookup.includes(item.label.toLowerCase()))?.value;
+}
+
 function packageOrServiceName(action: AiRevenueAction) {
   return cleanText(action.packageInfo.packageName) || cleanText(action.service.serviceName) || "your service package";
 }
@@ -25,27 +30,82 @@ function appointmentDateTime(action: AiRevenueAction) {
   return cleanText(action.appointment.appointmentDateTime, "your scheduled appointment time");
 }
 
+function lastVisitDate(action: AiRevenueAction) {
+  return cleanText(
+    action.service.lastVisitDate ??
+      action.packageInfo.lastUsedAt ??
+      evidenceValue(action, ["Last visit date", "Last usage date"]),
+  );
+}
+
+function daysSinceLastVisit(action: AiRevenueAction) {
+  const directValue = Number(evidenceValue(action, ["Days since last visit", "Days since activity"]));
+  if (Number.isFinite(directValue) && directValue > 0) {
+    return Math.round(directValue);
+  }
+
+  const dateText = lastVisitDate(action);
+  if (!dateText) {
+    return null;
+  }
+
+  const date = new Date(`${dateText.slice(0, 10)}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return Math.max(0, Math.round((Date.now() - date.getTime()) / 86_400_000));
+}
+
+function contextSentence(action: AiRevenueAction) {
+  const parts: string[] = [];
+  const service = serviceName(action);
+  const remaining = remainingUnits(action);
+  const days = daysSinceLastVisit(action);
+
+  if (service) {
+    parts.push(`နောက်ဆုံးပြုလုပ်ခဲ့သော ဝန်ဆောင်မှုမှာ ${service} ဖြစ်ပါတယ်`);
+  }
+  if (remaining > 0) {
+    parts.push(`${packageOrServiceName(action)} အတွက် session ${remaining} ကြိမ် ကျန်ရှိနေပါတယ်`);
+  }
+  if (days != null && days > 0) {
+    parts.push(`နောက်ဆုံးလာရောက်ပြီး ${days} ရက်ခန့်ရှိပါပြီ`);
+  }
+
+  return parts.length ? `${parts.join("၊ ")}။ ` : "";
+}
+
+function greeting(action: AiRevenueAction) {
+  return `မင်္ဂလာပါ ${customerName(action)} ရှင့်/ခင်ဗျာ။ `;
+}
+
 export function buildAiRevenueMessageDraft(action: AiRevenueAction) {
+  const context = contextSentence(action);
+  const service = serviceName(action);
+  const packageName = packageOrServiceName(action);
+  const remaining = remainingUnits(action);
+
   switch (action.actionType) {
     case "service_reminder_overdue":
-      return `Mingalar par ${customerName(action)}, your ${serviceName(action)} service reminder is overdue. Would you like us to help arrange an appointment this week?`;
+      return `${greeting(action)}${context}${service} follow-up အချိန်ကျော်နေပြီမို့ ဒီအပတ်အတွင်း အဆင်ပြေတဲ့အချိန်ကို ချိန်းပေးရမလား။`;
 
     case "service_reminder_follow_up":
-      return `Mingalar par ${customerName(action)}, your ${serviceName(action)} service reminder is due. Would you like to book a convenient appointment time?`;
+      return `${greeting(action)}${context}${service} follow-up အချိန်ရောက်နေပါပြီ။ အဆင်ပြေတဲ့ appointment အချိန်ကို ချိန်းပေးရမလား။`;
 
     case "unused_package_follow_up":
-      return `Mingalar par ${customerName(action)}, you still have ${remainingUnits(action)} remaining session(s) for ${packageOrServiceName(action)}. Would you like us to help book your next appointment?`;
+      return `${greeting(action)}${context}${packageName} အတွက် session ${remaining} ကြိမ် ကျန်ရှိနေသေးပါတယ်။ နောက်တစ်ကြိမ် လာရောက်အသုံးပြုဖို့ အဆင်ပြေတဲ့အချိန်ကို ချိန်းပေးရမလား။`;
 
     case "appointment_confirmation_reminder":
-      return `Reminder: your appointment is on ${appointmentDateTime(action)}. Please reply to confirm, reschedule, or cancel.`;
+      return `${greeting(action)}${appointmentDateTime(action)} တွင် appointment ရှိပါတယ်။ လာရောက်မည်ဆို confirm ပြန်ပေးပါ၊ အချိန်ပြောင်းရန် သို့မဟုတ် cancel လုပ်ရန်လည်း ပြန်ပြောနိုင်ပါတယ်။`;
 
     case "no_show_recovery":
-      return "We missed you at your appointment. Would you like us to help reschedule a convenient time?";
+      return `${greeting(action)}ယခင် appointment တွင် မလာရောက်ဖြစ်ခဲ့တာ တွေ့ရပါတယ်။ အဆင်ပြေတဲ့အချိန်အသစ် ပြန်ချိန်းပေးရမလား။`;
 
     case "cancelled_appointment_recovery":
-      return `Mingalar par ${customerName(action)}, we noticed your ${serviceName(action)} appointment was cancelled. Would you like us to help arrange another convenient time?`;
+      return `${greeting(action)}${service} appointment ကို cancel ဖြစ်ထားတာ တွေ့ရပါတယ်။ အဆင်ပြေတဲ့နေ့/အချိန်အသစ် ပြန်ချိန်းပေးရမလား။`;
 
     default:
-      return `Mingalar par ${customerName(action)}, ${action.recommendedAction}`;
+      return `${greeting(action)}${context}အဆင်ပြေတဲ့ appointment အချိန်ကို ချိန်းပေးရမလား။`;
   }
 }

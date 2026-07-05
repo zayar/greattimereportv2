@@ -27,6 +27,7 @@ import { AiRevenueApprovalTab } from "./AiRevenueApprovalTab";
 import { AiRevenueAppointmentsTab } from "./AiRevenueAppointmentsTab";
 import { AiRevenueConversationTab } from "./AiRevenueConversationTab";
 import { AiRevenueDashboardTab } from "./AiRevenueDashboardTab";
+import { AiFollowUpSnapshot } from "./AiRevenueFollowUpInsights";
 import { AiRevenueOpportunitiesTab } from "./AiRevenueOpportunitiesTab";
 import { AiRevenueRevenueTab } from "./AiRevenueRevenueTab";
 import { AiRevenueTimeline } from "./AiRevenueTimeline";
@@ -58,12 +59,12 @@ const TABS: Array<{ value: RevenueAgentTab; label: string; detail: string }> = [
   {
     value: "opportunities",
     label: "Opportunities",
-    detail: "AI recommendations from service reminders, unused package balance, no-show recovery, cancellations, and inactive VIPs.",
+    detail: "Customer follow-up recommendations with reason, purchase context, remaining balance, and chance-to-return score.",
   },
   {
     value: "message_approval",
     label: "Message Approval",
-    detail: "Human review queue for AI drafts. Staff must approve before any message is sent.",
+    detail: "Myanmar follow-up drafts with customer context. Staff can edit and approve before anything is sent.",
   },
   {
     value: "conversations",
@@ -321,6 +322,8 @@ function ActionDetailPanel({
             <strong>{formatNumber(action.revenue.packageSessionsRecovered)}</strong>
           </div>
         </div>
+
+        <AiFollowUpSnapshot action={action} />
 
         <div className="ai-revenue-detail__section">
           <strong>Reason</strong>
@@ -692,13 +695,13 @@ export function AiRevenueAgentPage() {
           onOpenAction={setSelectedAction}
         />
       ) : activeTab === "opportunities" ? (
-        <Panel title="Opportunity queue" subtitle="Every AI recommendation includes reason and evidence for human review.">
+        <Panel title="Customer follow-up opportunities" subtitle="See who to contact, why now, what they bought, and how likely they are to return.">
           <AiRevenueOpportunitiesTab actions={actions} loading={busyAction === "load"} onOpenAction={setSelectedAction} />
         </Panel>
       ) : activeTab === "message_approval" ? (
         <Panel
-          title="Message approval queue"
-          subtitle="Generate deterministic drafts, edit them, approve them, reject actions, or manually mark approved messages as sent."
+          title="Customer follow-up message queue"
+          subtitle="Generate Myanmar drafts, review customer purchase context, approve messages, or mark approved outreach as sent."
         >
           <AiRevenueApprovalTab
             clinicId={clinic.id}
