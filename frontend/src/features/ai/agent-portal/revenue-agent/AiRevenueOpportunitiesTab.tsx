@@ -4,7 +4,6 @@ import {
   AiFollowUpSnapshot,
   getReturnScore,
   isSameCustomerAction,
-  myanmarReason,
   quickAnswer,
   titleCase,
 } from "./AiRevenueFollowUpInsights";
@@ -82,12 +81,6 @@ export function AiRevenueOpportunitiesTab({ actions, loading, onOpenAction }: Pr
               <div>
                 <strong>{quickAnswer(action, relatedActions)}</strong>
                 <p>{action.summary}</p>
-              </div>
-
-              <div className="ai-revenue-reason-box ai-revenue-reason-box--business">
-                <span>AI reason (Myanmar)</span>
-                <p>{myanmarReason(action, relatedActions)}</p>
-                <small>{action.reason}</small>
               </div>
 
               <AiFollowUpSnapshot action={action} relatedActions={relatedActions} />

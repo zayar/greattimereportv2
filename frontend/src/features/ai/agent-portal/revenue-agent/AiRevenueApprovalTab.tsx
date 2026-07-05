@@ -11,8 +11,6 @@ import type { AiRevenueAction } from "../../../../types/domain";
 import {
   AiFollowUpSnapshot,
   isSameCustomerAction,
-  myanmarReason,
-  quickAnswer,
   titleCase,
 } from "./AiRevenueFollowUpInsights";
 
@@ -126,12 +124,6 @@ export function AiRevenueApprovalTab({
             </div>
 
             <AiFollowUpSnapshot action={action} relatedActions={relatedActions} />
-
-            <div className="ai-revenue-reason-box ai-revenue-reason-box--business">
-              <span>Why contact this customer?</span>
-              <p>{quickAnswer(action, relatedActions)}</p>
-              <small>{myanmarReason(action, relatedActions)}</small>
-            </div>
 
             <div className="ai-revenue-message-box">
               <div>

@@ -25,6 +25,11 @@ type ServiceBalance = {
   source: "focused" | "related" | "evidence";
 };
 
+type TreatmentBalanceRow = ServiceBalance & {
+  isFocused: boolean;
+  note: string;
+};
+
 function text(value: string | number | null | undefined) {
   if (value == null) {
     return "";
@@ -310,12 +315,72 @@ function balanceLabel(balance: Pick<ServiceBalance, "remaining" | "purchased" | 
   return `${formatNumber(balance.remaining)} sessions remaining`;
 }
 
+function inferredUsed(balance: Pick<ServiceBalance, "remaining" | "purchased" | "used">) {
+  if (balance.used != null) {
+    return balance.used;
+  }
+  if (balance.purchased != null && balance.remaining != null) {
+    return Math.max(0, balance.purchased - balance.remaining);
+  }
+  return null;
+}
+
+function balanceStatus(balance: TreatmentBalanceRow) {
+  if (balance.remaining == null) {
+    return { label: balance.isFocused ? "Focus" : "Review", tone: "neutral" };
+  }
+  if (balance.remaining <= 0) {
+    return { label: balance.isFocused ? "Focus" : "Completed", tone: "complete" };
+  }
+  if (balance.remaining <= 3) {
+    return { label: "Low remaining", tone: "low" };
+  }
+  return { label: "Active", tone: "active" };
+}
+
 function otherBalanceSentence(action: AiRevenueAction, relatedActions: AiRevenueAction[] = []) {
   const balances = otherRemainingBalances(action, relatedActions);
   if (balances.length === 0) {
     return "";
   }
   return balances.map((item) => `${item.serviceName} ${formatNumber(item.remaining)}`).join(", ");
+}
+
+function buildTreatmentBalanceRows(action: AiRevenueAction, relatedActions: AiRevenueAction[] = []): TreatmentBalanceRow[] {
+  const focus = focusedBalance(action, relatedActions);
+  const balances = collectServiceBalances(action, relatedActions);
+  const focusedMatch = balances.find((item) => serviceMatches(item.serviceName, focus.serviceName));
+  const focusedRow: TreatmentBalanceRow = {
+    key: `focused:${normalizeText(focus.serviceName)}`,
+    serviceName: focus.serviceName,
+    packageName: focusedMatch?.packageName ?? "",
+    remaining: focus.remaining ?? focusedMatch?.remaining ?? null,
+    purchased: focus.purchased ?? focusedMatch?.purchased ?? null,
+    used: focus.used ?? focusedMatch?.used ?? null,
+    lastUsedAt: focus.lastUsedAt || focusedMatch?.lastUsedAt || lastUsageDate(action),
+    source: "focused",
+    isFocused: true,
+    note:
+      (focus.remaining ?? focusedMatch?.remaining ?? 0) > 0
+        ? "Same treatment still has package balance"
+        : "Highlight as the last/preferred treatment",
+  };
+
+  const otherRows = balances
+    .filter((item) => !serviceMatches(item.serviceName, focus.serviceName))
+    .filter((item) => (item.remaining ?? 0) > 0)
+    .map<TreatmentBalanceRow>((item) => ({
+      ...item,
+      isFocused: false,
+      note: "Good package utilization follow-up",
+    }));
+
+  return [focusedRow, ...otherRows].sort((left, right) => {
+    if (left.isFocused !== right.isFocused) {
+      return left.isFocused ? -1 : 1;
+    }
+    return (right.remaining ?? -1) - (left.remaining ?? -1) || left.serviceName.localeCompare(right.serviceName);
+  });
 }
 
 export function getReturnScore(
@@ -653,6 +718,91 @@ export function AiFocusedServicePanel({
   );
 }
 
+export function AiCustomerContextStrip({
+  action,
+  relatedActions = [],
+}: {
+  action: AiRevenueAction;
+  relatedActions?: AiRevenueAction[];
+}) {
+  const focus = focusedBalance(action, relatedActions);
+  const inactiveDays = daysSinceLastVisit(action);
+  const spend = totalSpend(action);
+  const lastDate = lastUsageDate(action);
+
+  return (
+    <div className="ai-followup-context-strip">
+      <div>
+        <span>Follow-up service</span>
+        <strong>{focus.serviceName}</strong>
+        <small>{focus.remaining != null ? balanceLabel(focus) : "Use as the first contact topic"}</small>
+      </div>
+      <div>
+        <span>Last visit</span>
+        <strong>{lastDate || "Not available"}</strong>
+        <small>{inactiveDays != null ? `${formatNumber(inactiveDays)} days ago` : "Visit gap unavailable"}</small>
+      </div>
+      <div>
+        <span>Customer value</span>
+        <strong>{spend || formatMoney(action.revenue.actualRevenue || action.revenue.influencedRevenue)}</strong>
+        <small>{action.customer.phoneNumber || action.customer.phoneMasked || "Contact detail not available"}</small>
+      </div>
+    </div>
+  );
+}
+
+export function AiTreatmentBalanceTable({
+  action,
+  relatedActions = [],
+}: {
+  action: AiRevenueAction;
+  relatedActions?: AiRevenueAction[];
+}) {
+  const rows = buildTreatmentBalanceRows(action, relatedActions);
+
+  return (
+    <div className="ai-followup-treatment-table-wrap">
+      <table className="ai-followup-treatment-table">
+        <thead>
+          <tr>
+            <th>Service</th>
+            <th>Package Total</th>
+            <th>Used</th>
+            <th>Remaining</th>
+            <th>Latest Usage</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const status = balanceStatus(row);
+            const used = inferredUsed(row);
+            return (
+              <tr key={row.key} className={row.isFocused ? "ai-followup-treatment-table__focused-row" : undefined}>
+                <td>
+                  <strong>{row.serviceName}</strong>
+                  <small>{row.note}</small>
+                </td>
+                <td>{row.purchased != null ? formatNumber(row.purchased) : "—"}</td>
+                <td>{used != null ? formatNumber(used) : "—"}</td>
+                <td>
+                  <strong>{row.remaining != null ? formatNumber(row.remaining) : "—"}</strong>
+                </td>
+                <td>{row.lastUsedAt || "—"}</td>
+                <td>
+                  <span className={`ai-followup-balance-status ai-followup-balance-status--${status.tone}`}>
+                    {status.label}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function AiPurchaseSummary({
   action,
   relatedActions = [],
@@ -715,20 +865,13 @@ export function AiFollowUpSnapshot({
         <AiOpportunityScoreBadge action={action} relatedActions={relatedActions} />
       </div>
       <AiReasonChips action={action} relatedActions={relatedActions} />
-      <AiFocusedServicePanel action={action} relatedActions={relatedActions} />
+      <AiCustomerContextStrip action={action} relatedActions={relatedActions} />
       <div className="ai-followup-section">
         <div className="ai-followup-section__header">
-          <strong>Customer purchase summary</strong>
-          <span>What staff should know before contacting</span>
+          <strong>Service usage and remaining balance</strong>
+          <span>Clean package context for staff follow-up</span>
         </div>
-        <AiPurchaseSummary action={action} relatedActions={relatedActions} />
-      </div>
-      <div className="ai-followup-section">
-        <div className="ai-followup-section__header">
-          <strong>Package usage timeline</strong>
-          <span>Simple behavior pattern from available data</span>
-        </div>
-        <AiPackageUsageTimeline action={action} relatedActions={relatedActions} />
+        <AiTreatmentBalanceTable action={action} relatedActions={relatedActions} />
       </div>
     </section>
   );
