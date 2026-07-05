@@ -9,7 +9,11 @@ function customerName(action: AiRevenueAction) {
 }
 
 function serviceName(action: AiRevenueAction) {
-  return cleanText(action.service.serviceName, "your service");
+  return cleanText(action.service.serviceName, "ဝန်ဆောင်မှု");
+}
+
+function hasServiceName(action: AiRevenueAction) {
+  return Boolean(cleanText(action.service.serviceName));
 }
 
 function evidenceValue(action: AiRevenueAction, labels: string[]) {
@@ -17,8 +21,12 @@ function evidenceValue(action: AiRevenueAction, labels: string[]) {
   return action.evidence.find((item) => lookup.includes(item.label.toLowerCase()))?.value;
 }
 
+function packageName(action: AiRevenueAction) {
+  return cleanText(action.packageInfo.packageName);
+}
+
 function packageOrServiceName(action: AiRevenueAction) {
-  return cleanText(action.packageInfo.packageName) || cleanText(action.service.serviceName) || "your service package";
+  return packageName(action) || cleanText(action.service.serviceName) || "package/service";
 }
 
 function remainingUnits(action: AiRevenueAction) {
@@ -99,7 +107,7 @@ function contextSentence(action: AiRevenueAction) {
   const remaining = remainingUnits(action);
   const days = daysSinceLastVisit(action);
 
-  if (service) {
+  if (hasServiceName(action)) {
     parts.push(`နောက်ဆုံးပြုလုပ်ခဲ့သော ဝန်ဆောင်မှုမှာ ${service} ဖြစ်ပါတယ်`);
   }
   if (remaining > 0) {
@@ -113,24 +121,64 @@ function contextSentence(action: AiRevenueAction) {
 }
 
 function greeting(action: AiRevenueAction) {
-  return `မင်္ဂလာပါ ${customerName(action)} ရှင့်/ခင်ဗျာ။ `;
+  return `မင်္ဂလာပါ ${customerName(action)} ရှင့်။ `;
+}
+
+function lastTreatmentCheckSentence(action: AiRevenueAction) {
+  const service = serviceName(action);
+  return hasServiceName(action)
+    ? `နောက်ဆုံးလုပ်ခဲ့တဲ့ ${service} ဝန်ဆောင်မှု အဆင်ပြေလားရှင့်`
+    : "နောက်ဆုံးလာရောက်ခဲ့တဲ့ treatment အဆင်ပြေလားရှင့်";
+}
+
+function remainingBalanceSentence(action: AiRevenueAction) {
+  const remaining = remainingUnits(action);
+  if (remaining <= 0) {
+    return null;
+  }
+
+  return `${packageOrServiceName(action)} အတွက် session ${remaining} ကြိမ် ကျန်ရှိနေပါတယ်`;
+}
+
+function lastVisitSentence(action: AiRevenueAction) {
+  const days = daysSinceLastVisit(action);
+  if (days == null || days <= 0) {
+    return null;
+  }
+
+  return `နောက်ဆုံးလာရောက်ပြီး ${formatDurationMyanmar(days)} ခန့်ရှိပါပြီ`;
+}
+
+function bookingAskSentence(action: AiRevenueAction) {
+  const service = serviceName(action);
+  return hasServiceName(action)
+    ? `${service} နောက်တစ်ကြိမ် treatment ဒီအပတ်အတွင်း အဆင်ပြေတဲ့အချိန်ကို ချိန်းပေးရမလား ရှင့်`
+    : "နောက်တစ်ကြိမ် treatment အတွက် ဒီအပတ်အတွင်း အဆင်ပြေတဲ့အချိန်ကို ချိန်းပေးရမလား ရှင့်";
+}
+
+function personalFollowUpDraft(action: AiRevenueAction) {
+  const middleSentences = [
+    lastTreatmentCheckSentence(action),
+    remainingBalanceSentence(action),
+    lastVisitSentence(action),
+  ].filter((item): item is string => Boolean(item));
+
+  return `${greeting(action)}${middleSentences.join("၊ ")}။ ${bookingAskSentence(action)}။`;
 }
 
 export function buildAiRevenueMessageDraft(action: AiRevenueAction) {
   const context = contextSentence(action);
   const service = serviceName(action);
-  const packageName = packageOrServiceName(action);
-  const remaining = remainingUnits(action);
 
   switch (action.actionType) {
     case "service_reminder_overdue":
-      return `${greeting(action)}${context}${service} follow-up အချိန်ကျော်နေပြီမို့ ဒီအပတ်အတွင်း အဆင်ပြေတဲ့အချိန်ကို ချိန်းပေးရမလား။`;
+      return personalFollowUpDraft(action);
 
     case "service_reminder_follow_up":
-      return `${greeting(action)}${context}${service} follow-up အချိန်ရောက်နေပါပြီ။ အဆင်ပြေတဲ့ appointment အချိန်ကို ချိန်းပေးရမလား။`;
+      return personalFollowUpDraft(action);
 
     case "unused_package_follow_up":
-      return `${greeting(action)}${context}${packageName} အတွက် session ${remaining} ကြိမ် ကျန်ရှိနေသေးပါတယ်။ နောက်တစ်ကြိမ် လာရောက်အသုံးပြုဖို့ အဆင်ပြေတဲ့အချိန်ကို ချိန်းပေးရမလား။`;
+      return personalFollowUpDraft(action);
 
     case "appointment_confirmation_reminder":
       return `${greeting(action)}${appointmentDateTime(action)} တွင် appointment ရှိပါတယ်။ လာရောက်မည်ဆို confirm ပြန်ပေးပါ၊ အချိန်ပြောင်းရန် သို့မဟုတ် cancel လုပ်ရန်လည်း ပြန်ပြောနိုင်ပါတယ်။`;
