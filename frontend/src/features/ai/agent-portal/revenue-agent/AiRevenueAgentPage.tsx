@@ -27,7 +27,7 @@ import { AiRevenueApprovalTab } from "./AiRevenueApprovalTab";
 import { AiRevenueAppointmentsTab } from "./AiRevenueAppointmentsTab";
 import { AiRevenueConversationTab } from "./AiRevenueConversationTab";
 import { AiRevenueDashboardTab } from "./AiRevenueDashboardTab";
-import { AiFollowUpSnapshot } from "./AiRevenueFollowUpInsights";
+import { AiFollowUpSnapshot, isSameCustomerAction, myanmarReason } from "./AiRevenueFollowUpInsights";
 import { AiRevenueOpportunitiesTab } from "./AiRevenueOpportunitiesTab";
 import { AiRevenueRevenueTab } from "./AiRevenueRevenueTab";
 import { AiRevenueTimeline } from "./AiRevenueTimeline";
@@ -209,15 +209,18 @@ function actorName(actor: { name?: string | null; email?: string | null; userId?
 
 function ActionDetailPanel({
   action,
+  actions,
   clinicId,
   onClose,
 }: {
   action: AiRevenueAction;
+  actions: AiRevenueAction[];
   clinicId: string;
   onClose: () => void;
 }) {
   const [auditLogs, setAuditLogs] = useState<AiRevenueAuditLog[]>([]);
   const [auditLoading, setAuditLoading] = useState(true);
+  const relatedActions = actions.filter((item) => item.id !== action.id && isSameCustomerAction(item, action));
 
   useEffect(() => {
     let cancelled = false;
@@ -323,11 +326,12 @@ function ActionDetailPanel({
           </div>
         </div>
 
-        <AiFollowUpSnapshot action={action} />
+        <AiFollowUpSnapshot action={action} relatedActions={relatedActions} />
 
         <div className="ai-revenue-detail__section">
-          <strong>Reason</strong>
-          <p>{action.reason}</p>
+          <strong>AI reason (Myanmar)</strong>
+          <p>{myanmarReason(action, relatedActions)}</p>
+          <small>Source reason: {action.reason}</small>
         </div>
 
         <div className="ai-revenue-detail__section">
@@ -789,7 +793,14 @@ export function AiRevenueAgentPage() {
         </Panel>
       )}
 
-      {selectedAction ? <ActionDetailPanel clinicId={clinic.id} action={selectedAction} onClose={() => setSelectedAction(null)} /> : null}
+      {selectedAction ? (
+        <ActionDetailPanel
+          clinicId={clinic.id}
+          actions={actions}
+          action={selectedAction}
+          onClose={() => setSelectedAction(null)}
+        />
+      ) : null}
     </div>
   );
 }

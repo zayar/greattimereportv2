@@ -3,6 +3,8 @@ import type { AiRevenueAction } from "../../../../types/domain";
 import {
   AiFollowUpSnapshot,
   getReturnScore,
+  isSameCustomerAction,
+  myanmarReason,
   quickAnswer,
   titleCase,
 } from "./AiRevenueFollowUpInsights";
@@ -53,9 +55,10 @@ export function AiRevenueOpportunitiesTab({ actions, loading, onOpenAction }: Pr
   return (
     <div className="ai-revenue-action-list">
       {actions.map((action) => {
+        const relatedActions = actions.filter((item) => item.id !== action.id && isSameCustomerAction(item, action));
         const packageBalance = packageBalanceLabel(action);
         const estimatedRevenue = formatMoney(action.revenue.actualRevenue ?? action.revenue.influencedRevenue);
-        const score = getReturnScore(action);
+        const score = getReturnScore(action, relatedActions);
 
         return (
           <article key={action.id} className="ai-revenue-action-card">
@@ -77,16 +80,17 @@ export function AiRevenueOpportunitiesTab({ actions, loading, onOpenAction }: Pr
 
             <div className="ai-revenue-action-card__body">
               <div>
-                <strong>{quickAnswer(action)}</strong>
+                <strong>{quickAnswer(action, relatedActions)}</strong>
                 <p>{action.summary}</p>
               </div>
 
               <div className="ai-revenue-reason-box ai-revenue-reason-box--business">
-                <span>AI reason</span>
-                <p>{action.reason}</p>
+                <span>AI reason (Myanmar)</span>
+                <p>{myanmarReason(action, relatedActions)}</p>
+                <small>{action.reason}</small>
               </div>
 
-              <AiFollowUpSnapshot action={action} />
+              <AiFollowUpSnapshot action={action} relatedActions={relatedActions} />
             </div>
 
             <div className="ai-revenue-action-card__meta">

@@ -10,6 +10,8 @@ import { EmptyState } from "../../../../components/StatusViews";
 import type { AiRevenueAction } from "../../../../types/domain";
 import {
   AiFollowUpSnapshot,
+  isSameCustomerAction,
+  myanmarReason,
   quickAnswer,
   titleCase,
 } from "./AiRevenueFollowUpInsights";
@@ -97,6 +99,7 @@ export function AiRevenueApprovalTab({
         const approvedText = action.message.approvedText ?? "";
         const locked = action.status === "closed" || action.status === "sent";
         const canMarkSent = action.status === "approved" && approvedText.trim().length > 0;
+        const relatedActions = actions.filter((item) => item.id !== action.id && isSameCustomerAction(item, action));
 
         return (
           <article key={action.id} className="ai-revenue-action-card ai-revenue-approval-card">
@@ -122,12 +125,12 @@ export function AiRevenueApprovalTab({
               </button>
             </div>
 
-            <AiFollowUpSnapshot action={action} />
+            <AiFollowUpSnapshot action={action} relatedActions={relatedActions} />
 
             <div className="ai-revenue-reason-box ai-revenue-reason-box--business">
               <span>Why contact this customer?</span>
-              <p>{quickAnswer(action)}</p>
-              <small>{action.reason}</small>
+              <p>{quickAnswer(action, relatedActions)}</p>
+              <small>{myanmarReason(action, relatedActions)}</small>
             </div>
 
             <div className="ai-revenue-message-box">

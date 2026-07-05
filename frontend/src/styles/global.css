@@ -2611,6 +2611,70 @@ textarea:focus-visible,
   font-weight: 800;
 }
 
+.ai-followup-balance-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 12px;
+}
+
+.ai-followup-focus-treatment,
+.ai-followup-other-services {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 118, 110, 0.16);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.ai-followup-focus-treatment {
+  border-color: rgba(15, 118, 110, 0.28);
+  background: rgba(15, 118, 110, 0.08);
+}
+
+.ai-followup-focus-treatment span,
+.ai-followup-other-services > span {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ai-followup-focus-treatment strong {
+  color: #0f3f42;
+  font-size: 1.05rem;
+  line-height: 1.35;
+}
+
+.ai-followup-focus-treatment small,
+.ai-followup-other-services small,
+.ai-followup-other-services p {
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.ai-followup-other-services > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-followup-other-services strong {
+  display: inline-grid;
+  gap: 2px;
+  min-width: min(100%, 190px);
+  padding: 9px 10px;
+  border-radius: 8px;
+  color: #111827;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(248, 250, 252, 0.92);
+  line-height: 1.25;
+}
+
 .ai-followup-section {
   display: grid;
   gap: 10px;
@@ -3110,6 +3174,7 @@ textarea:focus-visible,
   .ai-revenue-message-box > div,
   .ai-revenue-message-thread,
   .ai-followup-snapshot__intro,
+  .ai-followup-balance-panel,
   .ai-revenue-detail__header {
     display: flex;
     flex-direction: column;

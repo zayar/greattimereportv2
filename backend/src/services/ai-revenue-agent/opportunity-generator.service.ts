@@ -48,6 +48,22 @@ type Candidate = {
   source: AiRevenueAction["source"];
 };
 
+type PackageFollowUpRow = {
+  id: string;
+  packageId: string;
+  customerName: string;
+  customerPhone: string;
+  memberId: string;
+  packageName: string;
+  serviceNames: string[];
+  purchasedUnits: number;
+  usedUnits: number;
+  remainingUnits: number;
+  lastVisitDate: string | null;
+  daysSinceActivity: number;
+  needsFollowUp: boolean;
+};
+
 const ACTIVE_APPOINTMENT_STATUSES = new Set(["BOOKED", "REQUEST", "CHECKIN", "CHECKED_IN"]);
 const PENDING_REMINDER_APPOINTMENT_STATUSES = new Set(["BOOKED", "REQUEST"]);
 const COMPLETED_APPOINTMENT_STATUSES = new Set(["CHECKOUT", "CHECKED_OUT", "COMPLETED"]);
@@ -191,6 +207,51 @@ function isSameCustomer(left: AiRevenueCustomer, right: AiRevenueCustomer) {
   const leftPhone = normalizePhone(left.phoneNumber);
   const rightPhone = normalizePhone(right.phoneNumber);
   return Boolean(leftPhone && rightPhone && leftPhone === rightPhone);
+}
+
+function packageRowCustomer(row: Pick<PackageFollowUpRow, "memberId" | "customerPhone" | "customerName">): AiRevenueCustomer {
+  return {
+    customerKey: customerKey({ memberId: row.memberId, phone: row.customerPhone, customerName: row.customerName }),
+    memberId: cleanText(row.memberId) || null,
+    customerName: row.customerName,
+    phoneNumber: cleanText(row.customerPhone) || null,
+    phoneMasked: maskPhone(row.customerPhone),
+  };
+}
+
+function serviceNameMatches(left: unknown, right: unknown) {
+  const leftName = normalizeNameKey(left);
+  const rightName = normalizeNameKey(right);
+  return Boolean(leftName && rightName && (leftName === rightName || leftName.includes(rightName) || rightName.includes(leftName)));
+}
+
+function packageServiceLabel(row: Pick<PackageFollowUpRow, "serviceNames" | "packageName">) {
+  return row.serviceNames.filter(Boolean).join(", ") || row.packageName || "Unknown service";
+}
+
+function packageBalanceText(row: Pick<PackageFollowUpRow, "remainingUnits" | "purchasedUnits" | "serviceNames" | "packageName">) {
+  return `${row.remainingUnits}/${row.purchasedUnits} ${packageServiceLabel(row)}`;
+}
+
+function buildCustomerPackageContext(input: {
+  customer: AiRevenueCustomer;
+  serviceName: string;
+  packageRows: PackageFollowUpRow[];
+}) {
+  const rows = input.packageRows
+    .filter((row) => row.remainingUnits > 0)
+    .filter((row) => isSameCustomer(input.customer, packageRowCustomer(row)));
+  const sameTreatmentRows = rows.filter((row) => row.serviceNames.some((service) => serviceNameMatches(service, input.serviceName)));
+  const sameTreatmentRemaining = sameTreatmentRows.reduce((sum, row) => sum + row.remainingUnits, 0);
+  const otherRows = rows.filter((row) => !sameTreatmentRows.some((sameRow) => sameRow.id === row.id));
+
+  return {
+    rows,
+    sameTreatmentRows,
+    sameTreatmentRemaining,
+    otherRows,
+    totalRemaining: rows.reduce((sum, row) => sum + row.remainingUnits, 0),
+  };
 }
 
 async function fetchAppointmentHistory(input: {
@@ -343,6 +404,7 @@ function createServiceReminderCandidates(input: {
     healthScore: number;
   }>;
   dateKey: string;
+  packageRows: PackageFollowUpRow[];
 }) {
   return input.rows.flatMap<Candidate>((row) => {
     if (row.rebookingStatus !== "overdue" && row.rebookingStatus !== "dueSoon") {
@@ -373,22 +435,43 @@ function createServiceReminderCandidates(input: {
     const expectedGap = risk.expectedReturnGapDays ?? null;
     const patternReminderDate =
       row.lastVisitDate && expectedGap != null ? addDays(row.lastVisitDate, expectedGap) : null;
+    const packageContext = buildCustomerPackageContext({
+      customer,
+      serviceName,
+      packageRows: input.packageRows,
+    });
+    const sameTreatmentRows = packageContext.sameTreatmentRows;
+    const sameTreatmentRow = sameTreatmentRows[0];
+    const otherRemainingText = packageContext.otherRows.map(packageBalanceText).join(", ");
+    const basePriorityScore = Math.min(
+      100,
+      (overdue ? 90 : 80) +
+        (packageContext.sameTreatmentRemaining > 0 ? 15 : 0) +
+        (packageContext.sameTreatmentRemaining === 0 && packageContext.totalRemaining > 0 ? 5 : 0),
+    );
 
     return [
       {
         source: "bigquery",
         sourceRefId: `pattern:${customer.customerKey}:${serviceName}:${row.lastVisitDate ?? "unknown"}`,
         actionType: overdue ? "service_reminder_overdue" : "service_reminder_follow_up",
-        basePriorityScore: overdue ? 90 : 80,
+        basePriorityScore,
         title: overdue ? "Pattern-based service reminder overdue" : "Pattern-based service follow-up",
         summary: `${row.customerName} may be ready to return for ${serviceName}.`,
-        reason: overdue
-          ? "Customer visit pattern indicates the expected return window is overdue. Exact service interval_day was not available from APICORE."
-          : "Customer visit pattern indicates the customer is close to the expected return window. Exact service interval_day was not available from APICORE.",
+        reason:
+          packageContext.sameTreatmentRemaining > 0
+            ? "Customer last visited for this treatment and still has remaining sessions for the same treatment, which makes return likelihood high."
+            : overdue
+              ? "Customer visit pattern indicates the expected return window is overdue. Exact service interval_day was not available from APICORE."
+              : "Customer visit pattern indicates the customer is close to the expected return window. Exact service interval_day was not available from APICORE.",
         recommendedAction: "Review customer history, confirm the service, then prepare a staff-approved follow-up message.",
         evidence: [
           { label: "Reminder type", value: "Pattern-based reminder" },
           { label: "Last service", value: serviceName },
+          { label: "Focused treatment", value: serviceName },
+          { label: "Focused treatment remaining", value: packageContext.sameTreatmentRemaining },
+          ...(otherRemainingText ? [{ label: "Other remaining services", value: otherRemainingText }] : []),
+          ...(packageContext.totalRemaining > 0 ? [{ label: "Total remaining sessions", value: packageContext.totalRemaining }] : []),
           ...(row.lastVisitDate ? [{ label: "Last visit date", value: row.lastVisitDate }] : []),
           ...(patternReminderDate ? [{ label: "Pattern reminder date", value: patternReminderDate }] : []),
           ...(row.daysSinceLastVisit != null ? [{ label: "Days since last visit", value: row.daysSinceLastVisit }] : []),
@@ -401,26 +484,22 @@ function createServiceReminderCandidates(input: {
           lastVisitDate: row.lastVisitDate,
           reminderDate: patternReminderDate,
         },
+        packageInfo: sameTreatmentRow
+          ? {
+              packageId: sameTreatmentRow.packageId,
+              packageName: sameTreatmentRow.packageName,
+              remainingUnits: packageContext.sameTreatmentRemaining,
+              purchasedUnits: sameTreatmentRows.reduce((sum, item) => sum + item.purchasedUnits, 0),
+              usedUnits: sameTreatmentRows.reduce((sum, item) => sum + item.usedUnits, 0),
+              lastUsedAt: sameTreatmentRow.lastVisitDate,
+            }
+          : undefined,
       },
     ];
   });
 }
 
-function createPackageCandidates(rows: Array<{
-  id: string;
-  packageId: string;
-  customerName: string;
-  customerPhone: string;
-  memberId: string;
-  packageName: string;
-  serviceNames: string[];
-  purchasedUnits: number;
-  usedUnits: number;
-  remainingUnits: number;
-  lastVisitDate: string | null;
-  daysSinceActivity: number;
-  needsFollowUp: boolean;
-}>) {
+function createPackageCandidates(rows: PackageFollowUpRow[]) {
   return rows.flatMap<Candidate>((row) => {
     if (row.remainingUnits <= 0 || (!row.needsFollowUp && row.daysSinceActivity < 21)) {
       return [];
@@ -732,6 +811,7 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
     ...createServiceReminderCandidates({
       rows: customerRows,
       dateKey: input.dateKey,
+      packageRows,
     }),
     ...createPackageCandidates(packageRows),
     ...createAppointmentCandidates({

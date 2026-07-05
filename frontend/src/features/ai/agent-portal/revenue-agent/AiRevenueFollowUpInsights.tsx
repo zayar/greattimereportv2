@@ -14,6 +14,17 @@ type TimelineItem = {
   helper?: string;
 };
 
+type ServiceBalance = {
+  key: string;
+  serviceName: string;
+  packageName: string;
+  remaining: number | null;
+  purchased: number | null;
+  used: number | null;
+  lastUsedAt: string;
+  source: "focused" | "related" | "evidence";
+};
+
 function text(value: string | number | null | undefined) {
   if (value == null) {
     return "";
@@ -21,8 +32,14 @@ function text(value: string | number | null | undefined) {
   return String(value).trim();
 }
 
-function numberValue(value: number | null | undefined) {
-  return Number.isFinite(Number(value)) ? Number(value) : 0;
+function numberValue(value: number | string | null | undefined) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function nullableNumber(value: number | string | null | undefined) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
 }
 
 function formatNumber(value: number | null | undefined) {
@@ -40,9 +57,48 @@ function titleCase(value: string | null | undefined) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function normalizeText(value: string | number | null | undefined) {
+  return text(value).toLowerCase().replace(/\s+/g, " ");
+}
+
+function normalizePhone(value: string | null | undefined) {
+  return text(value).replace(/\D/g, "");
+}
+
 function findEvidence(action: AiRevenueAction, labels: string[]) {
   const normalizedLabels = labels.map((label) => label.toLowerCase());
   return action.evidence.find((item) => normalizedLabels.includes(item.label.toLowerCase()))?.value;
+}
+
+function evidenceNumber(action: AiRevenueAction, labels: string[]) {
+  return nullableNumber(findEvidence(action, labels));
+}
+
+function serviceMatches(left: string | null | undefined, right: string | null | undefined) {
+  const normalizedLeft = normalizeText(left);
+  const normalizedRight = normalizeText(right);
+  return Boolean(normalizedLeft && normalizedRight && (normalizedLeft === normalizedRight || normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft)));
+}
+
+export function isSameCustomerAction(left: AiRevenueAction, right: AiRevenueAction) {
+  const leftPhone = normalizePhone(left.customer.phoneNumber || left.customer.phoneMasked);
+  const rightPhone = normalizePhone(right.customer.phoneNumber || right.customer.phoneMasked);
+  return Boolean(
+    (left.customer.customerKey && right.customer.customerKey && left.customer.customerKey === right.customer.customerKey) ||
+      (left.customer.memberId && right.customer.memberId && left.customer.memberId === right.customer.memberId) ||
+      (leftPhone && rightPhone && leftPhone === rightPhone) ||
+      (left.customer.customerName &&
+        right.customer.customerName &&
+        normalizeText(left.customer.customerName) === normalizeText(right.customer.customerName)),
+  );
+}
+
+function focusedServiceName(action: AiRevenueAction) {
+  return (
+    text(findEvidence(action, ["Focused treatment"])) ||
+    text(action.service.serviceName) ||
+    text(findEvidence(action, ["Last service", "Service", "Service(s)"]))
+  );
 }
 
 function daysSinceLastVisit(action: AiRevenueAction) {
@@ -69,15 +125,21 @@ function daysSinceLastVisit(action: AiRevenueAction) {
 }
 
 function purchasedUnits(action: AiRevenueAction) {
-  return numberValue(action.packageInfo.purchasedUnits) || Number(findEvidence(action, ["Purchased sessions"]) ?? 0);
+  return (
+    numberValue(action.packageInfo.purchasedUnits) ||
+    numberValue(findEvidence(action, ["Purchased sessions", "Focused treatment purchased"]))
+  );
 }
 
 function usedUnits(action: AiRevenueAction) {
-  return numberValue(action.packageInfo.usedUnits) || Number(findEvidence(action, ["Used sessions"]) ?? 0);
+  return numberValue(action.packageInfo.usedUnits) || numberValue(findEvidence(action, ["Used sessions", "Focused treatment used"]));
 }
 
 function remainingUnits(action: AiRevenueAction) {
-  return numberValue(action.packageInfo.remainingUnits) || Number(findEvidence(action, ["Remaining sessions", "Remaining package sessions"]) ?? 0);
+  return (
+    numberValue(action.packageInfo.remainingUnits) ||
+    numberValue(findEvidence(action, ["Remaining sessions", "Remaining package sessions", "Focused treatment remaining"]))
+  );
 }
 
 function purchaseDate(action: AiRevenueAction) {
@@ -94,19 +156,192 @@ function totalSpend(action: AiRevenueAction) {
   return text(lifetimeSpend || averageSpend);
 }
 
-export function getReturnScore(action: AiRevenueAction): {
+function actionServiceBalance(action: AiRevenueAction, source: ServiceBalance["source"]): ServiceBalance | null {
+  const serviceName = text(action.service.serviceName) || text(findEvidence(action, ["Service(s)", "Last service", "Service"]));
+  const packageName = text(action.packageInfo.packageName || findEvidence(action, ["Package"]));
+  const remaining = nullableNumber(action.packageInfo.remainingUnits ?? findEvidence(action, ["Remaining sessions", "Remaining package sessions"]));
+  const purchased = nullableNumber(action.packageInfo.purchasedUnits ?? findEvidence(action, ["Purchased sessions"]));
+  const used = nullableNumber(action.packageInfo.usedUnits ?? findEvidence(action, ["Used sessions"]));
+
+  if (!serviceName && !packageName && remaining == null && purchased == null) {
+    return null;
+  }
+
+  const label = serviceName || packageName || "Package balance";
+  return {
+    key: `${normalizeText(label)}:${normalizeText(packageName)}`,
+    serviceName: label,
+    packageName,
+    remaining,
+    purchased,
+    used,
+    lastUsedAt: text(action.packageInfo.lastUsedAt ?? action.service.lastVisitDate ?? findEvidence(action, ["Last usage date", "Last visit date"])),
+    source,
+  };
+}
+
+function parseOtherBalanceEvidence(action: AiRevenueAction): ServiceBalance[] {
+  const raw = text(findEvidence(action, ["Other remaining services", "Remaining services", "Other service balances"]));
+  if (!raw) {
+    return [];
+  }
+
+  return raw
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const serviceFirst = part.match(/^(.+):\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+      if (serviceFirst) {
+        const serviceName = serviceFirst[1].trim();
+        return {
+          key: `${normalizeText(serviceName)}:evidence`,
+          serviceName,
+          packageName: "",
+          remaining: numberValue(serviceFirst[2]),
+          purchased: numberValue(serviceFirst[3]),
+          used: numberValue(serviceFirst[3]) - numberValue(serviceFirst[2]),
+          lastUsedAt: "",
+          source: "evidence" as const,
+        };
+      }
+
+      const withPurchased = part.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s+(.+)$/);
+      if (withPurchased) {
+        const serviceName = withPurchased[3].trim();
+        return {
+          key: `${normalizeText(serviceName)}:evidence`,
+          serviceName,
+          packageName: "",
+          remaining: numberValue(withPurchased[1]),
+          purchased: numberValue(withPurchased[2]),
+          used: numberValue(withPurchased[2]) - numberValue(withPurchased[1]),
+          lastUsedAt: "",
+          source: "evidence" as const,
+        };
+      }
+
+      const remainingOnly = part.match(/^(\d+(?:\.\d+)?)\s+(.+)$/);
+      if (remainingOnly) {
+        const serviceName = remainingOnly[2].trim();
+        return {
+          key: `${normalizeText(serviceName)}:evidence`,
+          serviceName,
+          packageName: "",
+          remaining: numberValue(remainingOnly[1]),
+          purchased: null,
+          used: null,
+          lastUsedAt: "",
+          source: "evidence" as const,
+        };
+      }
+
+      return {
+        key: `${normalizeText(part)}:evidence`,
+        serviceName: part,
+        packageName: "",
+        remaining: null,
+        purchased: null,
+        used: null,
+        lastUsedAt: "",
+        source: "evidence" as const,
+      };
+    });
+}
+
+export function collectServiceBalances(action: AiRevenueAction, relatedActions: AiRevenueAction[] = []) {
+  const balances = new Map<string, ServiceBalance>();
+  const addBalance = (balance: ServiceBalance | null) => {
+    if (!balance) {
+      return;
+    }
+    const current = balances.get(balance.key);
+    if (!current || (balance.remaining ?? -1) > (current.remaining ?? -1)) {
+      balances.set(balance.key, balance);
+    }
+  };
+
+  addBalance(actionServiceBalance(action, "focused"));
+  parseOtherBalanceEvidence(action).forEach(addBalance);
+  relatedActions
+    .filter((item) => item.id !== action.id && isSameCustomerAction(item, action))
+    .map((item) => actionServiceBalance(item, "related"))
+    .forEach(addBalance);
+
+  return [...balances.values()].sort((left, right) => {
+    const leftRemaining = left.remaining ?? -1;
+    const rightRemaining = right.remaining ?? -1;
+    return rightRemaining - leftRemaining || left.serviceName.localeCompare(right.serviceName);
+  });
+}
+
+function focusedBalance(action: AiRevenueAction, relatedActions: AiRevenueAction[] = []) {
+  const serviceName = focusedServiceName(action);
+  const evidenceRemaining = evidenceNumber(action, ["Focused treatment remaining"]);
+  const balances = collectServiceBalances(action, relatedActions);
+  const matched = balances.find((item) => serviceMatches(item.serviceName, serviceName));
+
+  return {
+    serviceName: serviceName || matched?.serviceName || "Treatment",
+    remaining: evidenceRemaining ?? matched?.remaining ?? null,
+    purchased: matched?.purchased ?? null,
+    used: matched?.used ?? null,
+    lastUsedAt: matched?.lastUsedAt || lastUsageDate(action),
+  };
+}
+
+function otherRemainingBalances(action: AiRevenueAction, relatedActions: AiRevenueAction[] = []) {
+  const focus = focusedServiceName(action);
+  return collectServiceBalances(action, relatedActions).filter(
+    (item) => (item.remaining ?? 0) > 0 && !serviceMatches(item.serviceName, focus),
+  );
+}
+
+function balanceLabel(balance: Pick<ServiceBalance, "remaining" | "purchased" | "used">) {
+  if (balance.remaining == null) {
+    return "Remaining count unknown";
+  }
+  if (balance.purchased != null && balance.purchased > 0) {
+    return `${formatNumber(balance.remaining)} / ${formatNumber(balance.purchased)} sessions remaining`;
+  }
+  if (balance.used != null && balance.used > 0) {
+    return `${formatNumber(balance.remaining)} sessions remaining, ${formatNumber(balance.used)} used`;
+  }
+  return `${formatNumber(balance.remaining)} sessions remaining`;
+}
+
+function otherBalanceSentence(action: AiRevenueAction, relatedActions: AiRevenueAction[] = []) {
+  const balances = otherRemainingBalances(action, relatedActions);
+  if (balances.length === 0) {
+    return "";
+  }
+  return balances.map((item) => `${item.serviceName} ${formatNumber(item.remaining)}`).join(", ");
+}
+
+export function getReturnScore(
+  action: AiRevenueAction,
+  relatedActions: AiRevenueAction[] = [],
+): {
   band: ScoreBand;
   label: string;
   description: string;
 } {
+  const focus = focusedBalance(action, relatedActions);
   const remaining = remainingUnits(action);
+  const otherBalances = otherRemainingBalances(action, relatedActions);
   const inactiveDays = daysSinceLastVisit(action) ?? 0;
   const purchased = purchasedUnits(action);
-  const hasPackageHistory = remaining > 0 || purchased > 0;
+  const hasSameTreatmentRemaining = (focus.remaining ?? 0) > 0;
+  const hasOtherRemaining = otherBalances.some((item) => (item.remaining ?? 0) > 0);
+  const hasPackageHistory = remaining > 0 || purchased > 0 || hasSameTreatmentRemaining || hasOtherRemaining;
   const customerValue = totalSpend(action);
   let score = action.priorityScore;
 
-  if (remaining > 0) {
+  if (hasSameTreatmentRemaining) {
+    score += 25;
+  } else if (hasOtherRemaining) {
+    score += 14;
+  } else if (remaining > 0) {
     score += remaining >= 3 ? 18 : 12;
   }
   if (hasPackageHistory) {
@@ -115,8 +350,8 @@ export function getReturnScore(action: AiRevenueAction): {
   if (inactiveDays >= 30 && inactiveDays <= 180) {
     score += 8;
   }
-  if (inactiveDays > 365) {
-    score -= 12;
+  if (inactiveDays > 365 && !hasSameTreatmentRemaining && !hasOtherRemaining) {
+    score -= 8;
   }
   if (customerValue) {
     score += 6;
@@ -125,64 +360,113 @@ export function getReturnScore(action: AiRevenueAction): {
   if (score >= 82) {
     return {
       band: "high",
-      label: "High chance to return",
-      description: "Strong follow-up candidate based on remaining balance, timing, or customer value.",
+      label: "ပြန်လာနိုင်ချေ မြင့်",
+      description: "Session ကျန်ရှိမှု၊ မလာရောက်သေးသောရက်၊ ဝယ်ယူမှုမှတ်တမ်းအပေါ်မူတည်သည်။",
     };
   }
 
   if (score >= 55) {
     return {
       band: "medium",
-      label: "Medium chance",
-      description: "Worth contacting after checking customer context.",
+      label: "ပြန်လာနိုင်ချေ အသင့်အတင့်",
+      description: "Customer history ကိုစစ်ပြီး follow-up လုပ်ရန်သင့်သည်။",
     };
   }
 
   return {
     band: "low",
-    label: "Low chance",
-    description: "Use a softer follow-up or wait for a better timing signal.",
+    label: "ပြန်လာနိုင်ချေ နည်း",
+    description: "ပေါ့ပေါ့ပါးပါး follow-up သို့မဟုတ် အချိန်ကောင်းကိုစောင့်ရန်သင့်သည်။",
   };
 }
 
-export function buildBusinessReasons(action: AiRevenueAction) {
+export function buildBusinessReasons(action: AiRevenueAction, relatedActions: AiRevenueAction[] = []) {
   const reasons = new Set<string>();
   const remaining = remainingUnits(action);
   const inactiveDays = daysSinceLastVisit(action);
+  const focus = focusedBalance(action, relatedActions);
+  const hasOtherRemaining = otherRemainingBalances(action, relatedActions).length > 0;
 
   if (action.actionType === "service_reminder_overdue" || action.actionType === "service_reminder_follow_up") {
-    reasons.add("Treatment due");
+    reasons.add("ကုသမှု follow-up အချိန်ရောက်");
   }
-  if (action.actionType === "unused_package_follow_up" || remaining > 0) {
-    reasons.add("Still has remaining sessions");
+  if ((focus.remaining ?? 0) > 0) {
+    reasons.add("နောက်ဆုံးကုသမှု session ကျန်ရှိ");
+  }
+  if (action.actionType === "unused_package_follow_up" || remaining > 0 || hasOtherRemaining) {
+    reasons.add("Package/session ကျန်ရှိ");
+  }
+  if (hasOtherRemaining) {
+    reasons.add("အခြားဝန်ဆောင်မှု balance ရှိ");
   }
   if (action.actionType === "appointment_confirmation_reminder") {
-    reasons.add("Appointment reminder");
+    reasons.add("Appointment reminder လိုအပ်");
   }
   if (action.actionType === "no_show_recovery") {
-    reasons.add("No-show recovery");
+    reasons.add("No-show ပြန်ခေါ်ရန်");
   }
   if (action.actionType === "cancelled_appointment_recovery") {
-    reasons.add("Cancelled appointment recovery");
+    reasons.add("Cancel ပြီး ပြန်ချိန်းရန်");
   }
   if (action.actionType === "inactive_vip_recovery") {
-    reasons.add("High-value customer");
+    reasons.add("တန်ဖိုးမြင့် customer");
   }
   if ((inactiveDays ?? 0) >= 30) {
-    reasons.add("Has not visited for 30+ days");
+    reasons.add("ရက် ၃၀ ကျော် မလာရောက်");
   }
-  if (action.priority === "high" || action.priorityScore >= 75) {
-    reasons.add("Likely to repurchase");
+  if (action.priority === "high" || action.priorityScore >= 75 || (focus.remaining ?? 0) > 0) {
+    reasons.add("ပြန်ဝယ်/ပြန်လာနိုင်ချေရှိ");
   }
   if (text(findEvidence(action, ["Expiry date", "Package expiry date", "Expired date"]))) {
-    reasons.add("Package about to expire");
+    reasons.add("Package expire နီး");
   }
 
   return [...reasons];
 }
 
-export function buildPurchaseSummary(action: AiRevenueAction): InsightRow[] {
+export function myanmarReason(action: AiRevenueAction, relatedActions: AiRevenueAction[] = []) {
+  const customerName = action.customer.customerName ?? "ဒီ customer";
+  const focus = focusedBalance(action, relatedActions);
+  const otherText = otherBalanceSentence(action, relatedActions);
+  const inactiveDays = daysSinceLastVisit(action);
+  const daysText = inactiveDays != null ? `${formatNumber(inactiveDays)} ရက်` : "အချိန်အတော်ကြာ";
+
+  if ((focus.remaining ?? 0) > 0) {
+    return `${customerName} သည် နောက်ဆုံး ${focus.serviceName} ကုသမှုလာရောက်ထားပြီး ${balanceLabel(focus)} ရှိနေသေးပါတယ်။ ${daysText} မလာရောက်သေးသောကြောင့် appointment ပြန်ချိန်းပေးရန် အကောင်းဆုံး follow-up ဖြစ်ပါတယ်။`;
+  }
+
+  if (otherText) {
+    return `${customerName} သည် နောက်ဆုံး ${focus.serviceName} အတွက်လာရောက်ပြီး ${daysText} ရှိပါပြီ။ ${otherText} session များ ကျန်ရှိနေသောကြောင့် package အသုံးပြုရန် ပြန်ခေါ်သင့်ပါတယ်။`;
+  }
+
+  if (action.actionType === "unused_package_follow_up") {
+    const remaining = remainingUnits(action);
+    return `${customerName} တွင် ဝယ်ထားသော package/service session ${formatNumber(remaining)} ခု ကျန်ရှိနေပြီး မကြာသေးမီက အသုံးမပြုထားသောကြောင့် appointment ပြန်ချိန်းပေးရန် သင့်ပါတယ်။`;
+  }
+
+  if (action.actionType === "appointment_confirmation_reminder") {
+    return `${customerName} ၏ appointment ကို confirm/reschedule/cancel လုပ်နိုင်ရန် human-approved reminder ပို့ရန်လိုအပ်ပါတယ်။`;
+  }
+
+  if (action.actionType === "no_show_recovery") {
+    return `${customerName} သည် appointment မလာရောက်ခဲ့သောကြောင့် အဆင်ပြေသောအချိန်အသစ် ပြန်ချိန်းပေးနိုင်ရန် follow-up လုပ်သင့်ပါတယ်။`;
+  }
+
+  if (action.actionType === "cancelled_appointment_recovery") {
+    return `${customerName} ၏ appointment cancel ဖြစ်ထားသောကြောင့် future booking မရှိပါက ပြန်ချိန်းပေးရန် ဆက်သွယ်သင့်ပါတယ်။`;
+  }
+
+  if (action.actionType === "inactive_vip_recovery") {
+    return `${customerName} သည် တန်ဖိုးမြင့် customer ဖြစ်ပြီး မကြာသေးမီက မလာရောက်ထားသောကြောင့် owner/staff မှ personal follow-up လုပ်ရန်သင့်ပါတယ်။`;
+  }
+
+  return `${customerName} အတွက် available data အရ follow-up လုပ်ရန် အခွင့်အလမ်းရှိပါတယ်။ ${action.reason}`;
+}
+
+export function buildPurchaseSummary(action: AiRevenueAction, relatedActions: AiRevenueAction[] = []): InsightRow[] {
   const rows: InsightRow[] = [];
+  const focus = focusedBalance(action, relatedActions);
+  const otherBalances = otherRemainingBalances(action, relatedActions);
   const packageName = text(action.packageInfo.packageName);
   const serviceName = text(action.service.serviceName);
   const remaining = remainingUnits(action);
@@ -193,12 +477,21 @@ export function buildPurchaseSummary(action: AiRevenueAction): InsightRow[] {
   const purchasedOn = purchaseDate(action);
 
   rows.push({
-    label: "Purchased services",
-    value: serviceName || text(findEvidence(action, ["Service(s)", "Last service", "Service"])) || "Not available",
+    label: "Focused treatment",
+    value: focus.serviceName || serviceName || "Not available",
+    helper: focus.remaining != null ? balanceLabel(focus) : "Highlighted from last treatment or AI source",
+  });
+  rows.push({
+    label: "Other remaining services",
+    value:
+      otherBalances.length > 0
+        ? otherBalances.map((item) => `${item.serviceName}: ${formatNumber(item.remaining)}`).join(", ")
+        : "No other balance found",
+    helper: otherBalances.length > 0 ? "Useful for package utilization follow-up" : "Depends on loaded package data",
   });
   rows.push({
     label: "Purchased packages",
-    value: packageName || "Not available",
+    value: packageName || (otherBalances.length > 0 ? "Multiple package balances" : "Not available"),
   });
   rows.push({
     label: "Remaining sessions",
@@ -222,8 +515,10 @@ export function buildPurchaseSummary(action: AiRevenueAction): InsightRow[] {
   return rows;
 }
 
-export function buildUsageTimeline(action: AiRevenueAction): TimelineItem[] {
+export function buildUsageTimeline(action: AiRevenueAction, relatedActions: AiRevenueAction[] = []): TimelineItem[] {
   const timeline: TimelineItem[] = [];
+  const focus = focusedBalance(action, relatedActions);
+  const otherBalances = otherRemainingBalances(action, relatedActions);
   const purchased = purchasedUnits(action);
   const used = usedUnits(action);
   const remaining = remainingUnits(action);
@@ -245,6 +540,20 @@ export function buildUsageTimeline(action: AiRevenueAction): TimelineItem[] {
       helper: inactiveDays != null ? `${formatNumber(inactiveDays)} days since last usage` : undefined,
     });
   }
+  if (focus.serviceName) {
+    timeline.push({
+      label: "Focused treatment",
+      value: focus.serviceName,
+      helper: focus.remaining != null ? balanceLabel(focus) : "Use this as the first follow-up topic",
+    });
+  }
+  if (otherBalances.length > 0) {
+    timeline.push({
+      label: "Other balance",
+      value: otherBalances.map((item) => `${item.serviceName} ${formatNumber(item.remaining)}`).join(", "),
+      helper: "Can be mentioned if customer is interested in using remaining sessions",
+    });
+  }
   if (purchased > 0 || used > 0 || remaining > 0) {
     timeline.push({
       label: "Current balance",
@@ -256,22 +565,31 @@ export function buildUsageTimeline(action: AiRevenueAction): TimelineItem[] {
   return timeline;
 }
 
-export function quickAnswer(action: AiRevenueAction) {
-  const remaining = remainingUnits(action);
-  const serviceName = text(action.service.serviceName) || text(findEvidence(action, ["Last service", "Service"])) || "their service";
+export function quickAnswer(action: AiRevenueAction, relatedActions: AiRevenueAction[] = []) {
+  const focus = focusedBalance(action, relatedActions);
   const inactiveDays = daysSinceLastVisit(action);
+  const otherText = otherBalanceSentence(action, relatedActions);
 
-  if (remaining > 0) {
-    return `Contact now: ${action.customer.customerName ?? "this customer"} still has ${formatNumber(remaining)} session(s) remaining for ${serviceName}.`;
+  if ((focus.remaining ?? 0) > 0) {
+    return `အခုဆက်သွယ်ပါ: ${focus.serviceName} အတွက် ${balanceLabel(focus)} ရှိနေသေးပါတယ်။`;
+  }
+  if (otherText) {
+    return `အခုဆက်သွယ်ပါ: ${focus.serviceName} ကို highlight လုပ်ပြီး ${otherText} ကျန်ရှိနေကြောင်း ပြောနိုင်ပါတယ်။`;
   }
   if (inactiveDays != null && inactiveDays >= 30) {
-    return `Contact now: last visit was ${formatNumber(inactiveDays)} days ago for ${serviceName}.`;
+    return `အခုဆက်သွယ်ပါ: ${focus.serviceName} အတွက် နောက်ဆုံးလာရောက်ပြီး ${formatNumber(inactiveDays)} ရက်ရှိပါပြီ။`;
   }
-  return action.summary || `Contact about ${serviceName}.`;
+  return action.summary || `${focus.serviceName} အတွက် follow-up လုပ်ရန်သင့်ပါတယ်။`;
 }
 
-export function AiOpportunityScoreBadge({ action }: { action: AiRevenueAction }) {
-  const score = getReturnScore(action);
+export function AiOpportunityScoreBadge({
+  action,
+  relatedActions = [],
+}: {
+  action: AiRevenueAction;
+  relatedActions?: AiRevenueAction[];
+}) {
+  const score = getReturnScore(action, relatedActions);
 
   return (
     <div className={`ai-followup-score ai-followup-score--${score.band}`}>
@@ -281,8 +599,14 @@ export function AiOpportunityScoreBadge({ action }: { action: AiRevenueAction })
   );
 }
 
-export function AiReasonChips({ action }: { action: AiRevenueAction }) {
-  const reasons = buildBusinessReasons(action);
+export function AiReasonChips({
+  action,
+  relatedActions = [],
+}: {
+  action: AiRevenueAction;
+  relatedActions?: AiRevenueAction[];
+}) {
+  const reasons = buildBusinessReasons(action, relatedActions);
 
   return (
     <div className="ai-followup-reasons" aria-label="AI recommendation reasons">
@@ -293,10 +617,52 @@ export function AiReasonChips({ action }: { action: AiRevenueAction }) {
   );
 }
 
-export function AiPurchaseSummary({ action }: { action: AiRevenueAction }) {
+export function AiFocusedServicePanel({
+  action,
+  relatedActions = [],
+}: {
+  action: AiRevenueAction;
+  relatedActions?: AiRevenueAction[];
+}) {
+  const focus = focusedBalance(action, relatedActions);
+  const otherBalances = otherRemainingBalances(action, relatedActions);
+
+  return (
+    <div className="ai-followup-balance-panel">
+      <div className="ai-followup-focus-treatment">
+        <span>အဓိက follow-up ဝန်ဆောင်မှု</span>
+        <strong>{focus.serviceName}</strong>
+        <small>{focus.remaining != null ? balanceLabel(focus) : "နောက်ဆုံးလာရောက်ထားသော treatment ကို highlight လုပ်ထားသည်"}</small>
+      </div>
+      <div className="ai-followup-other-services">
+        <span>အခြားကျန်ရှိနေသော services</span>
+        {otherBalances.length > 0 ? (
+          <div>
+            {otherBalances.map((item) => (
+              <strong key={item.key}>
+                {item.serviceName}
+                <small>{balanceLabel(item)}</small>
+              </strong>
+            ))}
+          </div>
+        ) : (
+          <p>No other remaining service balance found in loaded data.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function AiPurchaseSummary({
+  action,
+  relatedActions = [],
+}: {
+  action: AiRevenueAction;
+  relatedActions?: AiRevenueAction[];
+}) {
   return (
     <div className="ai-followup-summary-grid">
-      {buildPurchaseSummary(action).map((row) => (
+      {buildPurchaseSummary(action, relatedActions).map((row) => (
         <div key={row.label} className="ai-followup-summary-item">
           <span>{row.label}</span>
           <strong>{row.value}</strong>
@@ -307,8 +673,14 @@ export function AiPurchaseSummary({ action }: { action: AiRevenueAction }) {
   );
 }
 
-export function AiPackageUsageTimeline({ action }: { action: AiRevenueAction }) {
-  const timeline = buildUsageTimeline(action);
+export function AiPackageUsageTimeline({
+  action,
+  relatedActions = [],
+}: {
+  action: AiRevenueAction;
+  relatedActions?: AiRevenueAction[];
+}) {
+  const timeline = buildUsageTimeline(action, relatedActions);
   if (timeline.length === 0) {
     return null;
   }
@@ -326,30 +698,37 @@ export function AiPackageUsageTimeline({ action }: { action: AiRevenueAction }) 
   );
 }
 
-export function AiFollowUpSnapshot({ action }: { action: AiRevenueAction }) {
+export function AiFollowUpSnapshot({
+  action,
+  relatedActions = [],
+}: {
+  action: AiRevenueAction;
+  relatedActions?: AiRevenueAction[];
+}) {
   return (
     <section className="ai-followup-snapshot">
       <div className="ai-followup-snapshot__intro">
         <div>
-          <span>AI follow-up recommendation</span>
-          <strong>{quickAnswer(action)}</strong>
+          <span>AI အကြံပြုချက် (Myanmar)</span>
+          <strong>{myanmarReason(action, relatedActions)}</strong>
         </div>
-        <AiOpportunityScoreBadge action={action} />
+        <AiOpportunityScoreBadge action={action} relatedActions={relatedActions} />
       </div>
-      <AiReasonChips action={action} />
+      <AiReasonChips action={action} relatedActions={relatedActions} />
+      <AiFocusedServicePanel action={action} relatedActions={relatedActions} />
       <div className="ai-followup-section">
         <div className="ai-followup-section__header">
           <strong>Customer purchase summary</strong>
           <span>What staff should know before contacting</span>
         </div>
-        <AiPurchaseSummary action={action} />
+        <AiPurchaseSummary action={action} relatedActions={relatedActions} />
       </div>
       <div className="ai-followup-section">
         <div className="ai-followup-section__header">
           <strong>Package usage timeline</strong>
           <span>Simple behavior pattern from available data</span>
         </div>
-        <AiPackageUsageTimeline action={action} />
+        <AiPackageUsageTimeline action={action} relatedActions={relatedActions} />
       </div>
     </section>
   );
