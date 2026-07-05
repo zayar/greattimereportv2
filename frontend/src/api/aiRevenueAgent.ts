@@ -60,6 +60,7 @@ export async function generateAiRevenueActions(payload: AiRevenueGeneratePayload
     dateKey: string;
     generatedCount: number;
     skippedExistingCount: number;
+    refreshedExistingCount: number;
     actions: AiRevenueAction[];
     sourceStatus: Record<string, string>;
     summary: AiRevenueSummary;

@@ -10,7 +10,7 @@ import type {
   AiRevenueServiceInfo,
 } from "../../types/ai-revenue-agent.js";
 import { calculateCustomerRiskSignals } from "../ai/customer-risk.service.js";
-import { getCustomerPortalList } from "../reports/customer-portal.service.js";
+import { getCustomerPortalList, getCustomerPortalPackages } from "../reports/customer-portal.service.js";
 import { getPackagePortalReport } from "../reports/package-portal.service.js";
 import { getTodayAppointmentsForClinic } from "../telegram/report.service.js";
 import { fetchApicoreBookingDetails, type ApicoreBookingDetailsRow } from "../apicore.service.js";
@@ -71,6 +71,7 @@ const CANCELLED_APPOINTMENT_STATUSES = new Set(["MEMBER_CANCEL", "MERCHANT_CANCE
 const NO_SHOW_APPOINTMENT_STATUSES = new Set(["NO_SHOW", "NOSHOW"]);
 const APPOINTMENT_HISTORY_PAGE_SIZE = 200;
 const APPOINTMENT_HISTORY_MAX_ROWS = 1000;
+const CUSTOMER_PACKAGE_LOOKUP_CONCURRENCY = 6;
 
 function nowIso() {
   return new Date().toISOString();
@@ -88,6 +89,20 @@ function addDays(dateKey: string, days: number) {
   const date = new Date(`${dateKey}T00:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
+}
+
+function daysBetweenDateKeys(laterDateKey: string, earlierDateKey: string | null | undefined) {
+  if (!earlierDateKey) {
+    return 999;
+  }
+
+  const later = new Date(`${laterDateKey.slice(0, 10)}T00:00:00.000Z`);
+  const earlier = new Date(`${earlierDateKey.slice(0, 10)}T00:00:00.000Z`);
+  if (Number.isNaN(later.getTime()) || Number.isNaN(earlier.getTime())) {
+    return 999;
+  }
+
+  return Math.max(0, Math.round((later.getTime() - earlier.getTime()) / 86_400_000));
 }
 
 function cleanText(value: unknown, fallback = "") {
@@ -254,6 +269,113 @@ function buildCustomerPackageContext(input: {
   };
 }
 
+function packageContextKey(row: Pick<PackageFollowUpRow, "memberId" | "customerPhone" | "customerName" | "serviceNames" | "packageName">) {
+  const customer = packageRowCustomer(row);
+  const serviceKey = normalizeNameKey(row.serviceNames.join("|") || row.packageName);
+  return `${customer.customerKey || customer.memberId || normalizePhone(customer.phoneNumber) || normalizeNameKey(customer.customerName)}::${serviceKey}`;
+}
+
+function mergePackageRows(rows: PackageFollowUpRow[]) {
+  const byKey = new Map<string, PackageFollowUpRow>();
+
+  for (const row of rows) {
+    const key = packageContextKey(row);
+    const current = byKey.get(key);
+    if (
+      !current ||
+      row.remainingUnits > current.remainingUnits ||
+      (row.remainingUnits === current.remainingUnits && (row.lastVisitDate ?? "") > (current.lastVisitDate ?? ""))
+    ) {
+      byKey.set(key, row);
+    }
+  }
+
+  return [...byKey.values()];
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<R>,
+) {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  return results;
+}
+
+async function fetchCustomerPackageFallbackRows(input: {
+  clinicCode: string;
+  dateKey: string;
+  rows: Array<{
+    customerName: string;
+    phoneNumber: string;
+    memberId: string;
+    rebookingStatus: string;
+    remainingSessions: number;
+  }>;
+}) {
+  const candidates = input.rows.filter((row) => {
+    if (row.rebookingStatus !== "overdue" && row.rebookingStatus !== "dueSoon") {
+      return false;
+    }
+
+    const customer: AiRevenueCustomer = {
+      customerKey: customerKey({ memberId: row.memberId, phone: row.phoneNumber, customerName: row.customerName }),
+      memberId: cleanText(row.memberId) || null,
+      customerName: row.customerName,
+      phoneNumber: cleanText(row.phoneNumber) || null,
+      phoneMasked: maskPhone(row.phoneNumber),
+    };
+
+    return row.remainingSessions > 0 && hasUsableIdentity(customer);
+  });
+
+  const nestedRows = await mapWithConcurrency(candidates, CUSTOMER_PACKAGE_LOOKUP_CONCURRENCY, async (row) => {
+    try {
+      const result = await getCustomerPortalPackages({
+        clinicCode: input.clinicCode,
+        fromDate: addDays(input.dateKey, -730),
+        toDate: input.dateKey,
+        customerName: row.customerName,
+        customerPhone: row.phoneNumber,
+        memberId: row.memberId,
+      });
+
+      return result.packages
+        .filter((entry) => entry.remainingCount > 0)
+        .map<PackageFollowUpRow>((entry) => ({
+          id: `customer_package:${customerKey({ memberId: row.memberId, phone: row.phoneNumber, customerName: row.customerName })}:${entry.id}`,
+          packageId: entry.id,
+          customerName: row.customerName,
+          customerPhone: row.phoneNumber,
+          memberId: row.memberId,
+          packageName: entry.packageName || entry.serviceName || "Package balance",
+          serviceNames: entry.serviceName ? [entry.serviceName] : [],
+          purchasedUnits: entry.packageTotal,
+          usedUnits: entry.usedCount,
+          remainingUnits: entry.remainingCount,
+          lastVisitDate: entry.latestUsageDate,
+          daysSinceActivity: daysBetweenDateKeys(input.dateKey, entry.latestUsageDate),
+          needsFollowUp: true,
+        }));
+    } catch {
+      return [];
+    }
+  });
+
+  return nestedRows.flat();
+}
+
 async function fetchAppointmentHistory(input: {
   clinicCode: string;
   fromDate: string;
@@ -358,6 +480,80 @@ function baseAction(input: GenerateInput, candidate: Candidate, score: number): 
     lastStatusAt: null,
     lastStatusBy: null,
   };
+}
+
+function mergeOptionalObject<T extends object>(generated: T, existing: T) {
+  const generatedRecord = generated as Record<string, unknown>;
+  const existingRecord = existing as Record<string, unknown>;
+  return Object.fromEntries(
+    Array.from(new Set([...Object.keys(generatedRecord), ...Object.keys(existingRecord)])).map((key) => {
+      const existingValue = existingRecord[key];
+      const generatedValue = generatedRecord[key];
+      return [key, existingValue == null || existingValue === "" ? generatedValue : existingValue];
+    }),
+  ) as T;
+}
+
+function mergeGeneratedActionContext(existing: AiRevenueAction, generated: AiRevenueAction): AiRevenueAction {
+  return {
+    ...existing,
+    clinicCode: generated.clinicCode || existing.clinicCode,
+    source: generated.source,
+    sourceRefId: generated.sourceRefId,
+    actionType: generated.actionType,
+    priority: generated.priority,
+    priorityScore: generated.priorityScore,
+    title: generated.title,
+    summary: generated.summary,
+    reason: generated.reason,
+    evidence: generated.evidence,
+    recommendedAction: generated.recommendedAction,
+    customer: {
+      ...existing.customer,
+      ...generated.customer,
+    },
+    service: mergeOptionalObject(generated.service, existing.service),
+    packageInfo: {
+      ...existing.packageInfo,
+      ...generated.packageInfo,
+    },
+    appointment: mergeOptionalObject(generated.appointment, existing.appointment),
+    updatedAt: nowIso(),
+  };
+}
+
+function didGeneratedContextChange(existing: AiRevenueAction, generated: AiRevenueAction) {
+  const currentContext = {
+    priority: existing.priority,
+    priorityScore: existing.priorityScore,
+    title: existing.title,
+    summary: existing.summary,
+    reason: existing.reason,
+    evidence: existing.evidence,
+    recommendedAction: existing.recommendedAction,
+    customer: existing.customer,
+    service: existing.service,
+    packageInfo: existing.packageInfo,
+    appointment: existing.appointment,
+  };
+  const nextContext = {
+    priority: generated.priority,
+    priorityScore: generated.priorityScore,
+    title: generated.title,
+    summary: generated.summary,
+    reason: generated.reason,
+    evidence: generated.evidence,
+    recommendedAction: generated.recommendedAction,
+    customer: generated.customer,
+    service: mergeOptionalObject(generated.service, existing.service),
+    packageInfo: {
+      ...existing.packageInfo,
+      ...generated.packageInfo,
+    },
+    appointment: mergeOptionalObject(generated.appointment, existing.appointment),
+  };
+
+  return JSON.stringify(currentContext) !== JSON.stringify(nextContext);
 }
 
 function applyPriorityAdjustments(input: {
@@ -720,7 +916,8 @@ function uniqueCandidates(candidates: Candidate[]) {
 }
 
 export async function generateAiRevenueOpportunities(input: GenerateInput) {
-  const packageFromDate = addDays(input.dateKey, -180);
+  // Remaining package balances can stay actionable long after purchase.
+  const packageFromDate = addDays(input.dateKey, -730);
   const customerFromDate = addDays(input.dateKey, -365);
   const appointmentHistoryFromDate = addDays(input.dateKey, -90);
   const tomorrowDateKey = addDays(input.dateKey, 1);
@@ -788,12 +985,21 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
       }),
     ]);
 
-  const packageRows = packageResult.status === "fulfilled" ? packageResult.value.followUpRows : [];
   const customerRows = customerResult.status === "fulfilled" ? customerResult.value.rows : [];
   const vipRows = vipResult.status === "fulfilled" ? vipResult.value.rows : [];
   const todayRows = todayAppointmentsResult.status === "fulfilled" ? todayAppointmentsResult.value.rows : [];
   const tomorrowRows = tomorrowAppointmentsResult.status === "fulfilled" ? tomorrowAppointmentsResult.value.rows : [];
   const appointmentHistoryRows = appointmentHistoryResult.status === "fulfilled" ? appointmentHistoryResult.value : [];
+  const packagePortalRows = packageResult.status === "fulfilled" ? packageResult.value.followUpRows : [];
+  const customerPackageRows =
+    customerRows.length > 0
+      ? await fetchCustomerPackageFallbackRows({
+          clinicCode: input.clinicCode,
+          dateKey: input.dateKey,
+          rows: customerRows,
+        })
+      : [];
+  const packageRows = mergePackageRows([...packagePortalRows, ...customerPackageRows]);
 
   const highRiskCustomers = buildHighRiskAppointmentCustomerSet(appointmentHistoryRows);
   const upcomingCustomers = [...todayRows, ...tomorrowRows]
@@ -824,6 +1030,7 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
   ]);
   const saved: AiRevenueAction[] = [];
   const skippedExisting: AiRevenueAction[] = [];
+  const refreshedExisting: AiRevenueAction[] = [];
 
   for (const candidate of candidates) {
     const score = applyPriorityAdjustments({
@@ -840,7 +1047,32 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
     if (existingIds.has(action.id) && !input.forceRefresh) {
       const existing = existingActions.find((item) => item.id === action.id);
       if (existing) {
-        skippedExisting.push(existing);
+        if (didGeneratedContextChange(existing, action)) {
+          const refreshedAction = await upsertAction(mergeGeneratedActionContext(existing, action));
+          await createAuditLog({
+            clinicId: input.clinicId,
+            actionId: refreshedAction.id,
+            actorType: "system",
+            actorId: "ai_revenue_generator",
+            action: "opportunity_refreshed",
+            description: "Refreshed AI Revenue opportunity evidence from latest source data.",
+            beforeValue: {
+              reason: existing.reason,
+              evidence: existing.evidence,
+              packageInfo: existing.packageInfo,
+              priorityScore: existing.priorityScore,
+            },
+            afterValue: {
+              reason: refreshedAction.reason,
+              evidence: refreshedAction.evidence,
+              packageInfo: refreshedAction.packageInfo,
+              priorityScore: refreshedAction.priorityScore,
+            },
+          });
+          refreshedExisting.push(refreshedAction);
+        } else {
+          skippedExisting.push(existing);
+        }
       }
       continue;
     }
@@ -866,7 +1098,8 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
     dateKey: input.dateKey,
     generatedCount: saved.length,
     skippedExistingCount: skippedExisting.length,
-    actions: [...saved, ...skippedExisting].sort(
+    refreshedExistingCount: refreshedExisting.length,
+    actions: [...saved, ...refreshedExisting, ...skippedExisting].sort(
       (left, right) => right.priorityScore - left.priorityScore || left.title.localeCompare(right.title),
     ),
     sourceStatus: {

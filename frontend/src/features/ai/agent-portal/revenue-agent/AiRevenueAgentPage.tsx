@@ -512,7 +512,7 @@ export function AiRevenueAgentPage() {
         forceRefresh: false,
       });
       setNotice(
-        `Generated ${result.generatedCount.toLocaleString("en-US")} action(s), ${result.skippedExistingCount.toLocaleString("en-US")} already existed.`,
+        `Generated ${result.generatedCount.toLocaleString("en-US")} action(s), refreshed ${result.refreshedExistingCount.toLocaleString("en-US")} existing action(s), ${result.skippedExistingCount.toLocaleString("en-US")} already up to date.`,
       );
       await loadData(false, nextFilters);
     } catch (error) {

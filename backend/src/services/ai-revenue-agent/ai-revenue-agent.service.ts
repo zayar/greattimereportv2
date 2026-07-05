@@ -330,6 +330,7 @@ export async function generateAiRevenueActions(input: {
     dateKey,
     generatedCount: generated.generatedCount,
     skippedExistingCount: generated.skippedExistingCount,
+    refreshedExistingCount: generated.refreshedExistingCount,
     actions: generated.actions,
     sourceStatus: generated.sourceStatus,
     summary,
