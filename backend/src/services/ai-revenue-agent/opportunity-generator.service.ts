@@ -62,6 +62,7 @@ type PackageFollowUpRow = {
   lastVisitDate: string | null;
   daysSinceActivity: number;
   needsFollowUp: boolean;
+  sourcePriority?: number;
 };
 
 const ACTIVE_APPOINTMENT_STATUSES = new Set(["BOOKED", "REQUEST", "CHECKIN", "CHECKED_IN"]);
@@ -72,6 +73,7 @@ const NO_SHOW_APPOINTMENT_STATUSES = new Set(["NO_SHOW", "NOSHOW"]);
 const APPOINTMENT_HISTORY_PAGE_SIZE = 200;
 const APPOINTMENT_HISTORY_MAX_ROWS = 1000;
 const CUSTOMER_PACKAGE_LOOKUP_CONCURRENCY = 6;
+const CUSTOMER_FOCUS_LIMIT = 100;
 
 function nowIso() {
   return new Date().toISOString();
@@ -281,10 +283,15 @@ function mergePackageRows(rows: PackageFollowUpRow[]) {
   for (const row of rows) {
     const key = packageContextKey(row);
     const current = byKey.get(key);
+    const rowPriority = row.sourcePriority ?? 1;
+    const currentPriority = current?.sourcePriority ?? 1;
     if (
       !current ||
-      row.remainingUnits > current.remainingUnits ||
-      (row.remainingUnits === current.remainingUnits && (row.lastVisitDate ?? "") > (current.lastVisitDate ?? ""))
+      rowPriority > currentPriority ||
+      (rowPriority === currentPriority && row.remainingUnits > current.remainingUnits) ||
+      (rowPriority === currentPriority &&
+        row.remainingUnits === current.remainingUnits &&
+        (row.lastVisitDate ?? "") > (current.lastVisitDate ?? ""))
     ) {
       byKey.set(key, row);
     }
@@ -367,6 +374,7 @@ async function fetchCustomerPackageFallbackRows(input: {
           lastVisitDate: entry.latestUsageDate,
           daysSinceActivity: daysBetweenDateKeys(input.dateKey, entry.latestUsageDate),
           needsFollowUp: true,
+          sourcePriority: 2,
         }));
     } catch {
       return [];
@@ -638,6 +646,14 @@ function createServiceReminderCandidates(input: {
     });
     const sameTreatmentRows = packageContext.sameTreatmentRows;
     const sameTreatmentRow = sameTreatmentRows[0];
+    const sameTreatmentPurchased = sameTreatmentRows.reduce((sum, item) => sum + item.purchasedUnits, 0);
+    const sameTreatmentUsed = sameTreatmentRows.reduce((sum, item) => sum + item.usedUnits, 0);
+    const sameTreatmentLastUsedAt =
+      sameTreatmentRows
+        .map((item) => item.lastVisitDate)
+        .filter((value): value is string => Boolean(value))
+        .sort()
+        .at(-1) ?? sameTreatmentRow?.lastVisitDate ?? null;
     const otherRemainingText = packageContext.otherRows.map(packageBalanceText).join(", ");
     const basePriorityScore = Math.min(
       100,
@@ -666,6 +682,13 @@ function createServiceReminderCandidates(input: {
           { label: "Last service", value: serviceName },
           { label: "Focused treatment", value: serviceName },
           { label: "Focused treatment remaining", value: packageContext.sameTreatmentRemaining },
+          ...(sameTreatmentRows.length > 0
+            ? [
+                { label: "Focused treatment purchased", value: sameTreatmentPurchased },
+                { label: "Focused treatment used", value: sameTreatmentUsed },
+              ]
+            : []),
+          ...(sameTreatmentLastUsedAt ? [{ label: "Focused treatment last usage", value: sameTreatmentLastUsedAt }] : []),
           ...(otherRemainingText ? [{ label: "Other remaining services", value: otherRemainingText }] : []),
           ...(packageContext.totalRemaining > 0 ? [{ label: "Total remaining sessions", value: packageContext.totalRemaining }] : []),
           ...(row.lastVisitDate ? [{ label: "Last visit date", value: row.lastVisitDate }] : []),
@@ -685,9 +708,9 @@ function createServiceReminderCandidates(input: {
               packageId: sameTreatmentRow.packageId,
               packageName: sameTreatmentRow.packageName,
               remainingUnits: packageContext.sameTreatmentRemaining,
-              purchasedUnits: sameTreatmentRows.reduce((sum, item) => sum + item.purchasedUnits, 0),
-              usedUnits: sameTreatmentRows.reduce((sum, item) => sum + item.usedUnits, 0),
-              lastUsedAt: sameTreatmentRow.lastVisitDate,
+              purchasedUnits: sameTreatmentPurchased,
+              usedUnits: sameTreatmentUsed,
+              lastUsedAt: sameTreatmentLastUsedAt,
             }
           : undefined,
       },
@@ -915,6 +938,53 @@ function uniqueCandidates(candidates: Candidate[]) {
   return [...byKey.values()];
 }
 
+function candidateFocusKey(candidate: Candidate) {
+  return (
+    candidate.customer.customerKey ||
+    cleanText(candidate.customer.memberId) ||
+    normalizePhone(candidate.customer.phoneNumber) ||
+    normalizeNameKey(candidate.customer.customerName) ||
+    candidate.sourceRefId
+  );
+}
+
+function selectTopFocusCandidates(input: {
+  candidates: Candidate[];
+  existingActions: AiRevenueAction[];
+  upcomingCustomers: AiRevenueCustomer[];
+  limit: number;
+}) {
+  const scoredCandidates = input.candidates
+    .map((candidate) => ({
+      candidate,
+      score: applyPriorityAdjustments({
+        candidate,
+        existingActions: input.existingActions,
+        upcomingCustomers: input.upcomingCustomers,
+      }),
+    }))
+    .filter((item) => item.score > 0 && hasUsableIdentity(item.candidate.customer))
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        right.candidate.basePriorityScore - left.candidate.basePriorityScore ||
+        left.candidate.title.localeCompare(right.candidate.title),
+    );
+
+  const byCustomer = new Map<string, { candidate: Candidate; score: number }>();
+  for (const item of scoredCandidates) {
+    const key = candidateFocusKey(item.candidate);
+    if (!byCustomer.has(key)) {
+      byCustomer.set(key, item);
+    }
+    if (byCustomer.size >= input.limit) {
+      break;
+    }
+  }
+
+  return [...byCustomer.values()];
+}
+
 export async function generateAiRevenueOpportunities(input: GenerateInput) {
   // Remaining package balances can stay actionable long after purchase.
   const packageFromDate = addDays(input.dateKey, -730);
@@ -948,7 +1018,7 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
         serviceCategory: "",
         sortBy: "lastVisitDate",
         sortDirection: "asc",
-        limit: 150,
+        limit: CUSTOMER_FOCUS_LIMIT,
         offset: 0,
       }),
       getCustomerPortalList({
@@ -1028,21 +1098,17 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
     }),
     ...createInactiveVipCandidates(vipRows),
   ]);
+  const focusCandidates = selectTopFocusCandidates({
+    candidates,
+    existingActions,
+    upcomingCustomers,
+    limit: CUSTOMER_FOCUS_LIMIT,
+  });
   const saved: AiRevenueAction[] = [];
   const skippedExisting: AiRevenueAction[] = [];
   const refreshedExisting: AiRevenueAction[] = [];
 
-  for (const candidate of candidates) {
-    const score = applyPriorityAdjustments({
-      candidate,
-      existingActions,
-      upcomingCustomers,
-    });
-
-    if (score <= 0 || !hasUsableIdentity(candidate.customer)) {
-      continue;
-    }
-
+  for (const { candidate, score } of focusCandidates) {
     const action = baseAction(input, candidate, score);
     if (existingIds.has(action.id) && !input.forceRefresh) {
       const existing = existingActions.find((item) => item.id === action.id);

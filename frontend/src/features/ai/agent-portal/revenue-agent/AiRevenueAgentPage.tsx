@@ -175,7 +175,7 @@ function buildActionParams(clinicId: string, filters: FilterState): AiRevenueAct
     actionType: filters.actionType || undefined,
     status: filters.status || undefined,
     priority: filters.priority || undefined,
-    limit: 200,
+    limit: 100,
   };
 }
 

@@ -312,6 +312,7 @@ export async function listActions(params: {
   limit?: number;
 }) {
   const limit = Math.min(Math.max(params.limit ?? 100, 1), 500);
+  const fetchLimit = Math.min(Math.max(limit * 5, limit), 500);
   let query: FirebaseFirestore.Query<FirebaseFirestore.DocumentData> = actionCollection()
     .where("clinicId", "==", params.clinicId);
 
@@ -319,7 +320,7 @@ export async function listActions(params: {
     query = query.where("dateKey", "==", params.dateKey);
   }
 
-  const snapshot = await query.limit(limit).get();
+  const snapshot = await query.limit(fetchLimit).get();
 
   return snapshot.docs
     .map((doc) => normalizeAction(doc.id, doc.data()))
@@ -328,7 +329,8 @@ export async function listActions(params: {
     .filter((action) => !params.source || action.source === params.source)
     .filter((action) => !params.actionType || action.actionType === params.actionType)
     .filter((action) => !params.priority || action.priority === params.priority)
-    .sort((left, right) => right.priorityScore - left.priorityScore || right.updatedAt.localeCompare(left.updatedAt));
+    .sort((left, right) => right.priorityScore - left.priorityScore || right.updatedAt.localeCompare(left.updatedAt))
+    .slice(0, limit);
 }
 
 export async function getAction(clinicId: string, actionId: string) {

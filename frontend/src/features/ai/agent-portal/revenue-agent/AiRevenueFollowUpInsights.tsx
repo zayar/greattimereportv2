@@ -152,7 +152,11 @@ function purchaseDate(action: AiRevenueAction) {
 }
 
 function lastUsageDate(action: AiRevenueAction) {
-  return text(action.packageInfo.lastUsedAt ?? action.service.lastVisitDate ?? findEvidence(action, ["Last usage date", "Last visit date"]));
+  return text(
+    action.packageInfo.lastUsedAt ??
+      action.service.lastVisitDate ??
+      findEvidence(action, ["Focused treatment last usage", "Last usage date", "Last visit date"]),
+  );
 }
 
 function totalSpend(action: AiRevenueAction) {
@@ -164,9 +168,14 @@ function totalSpend(action: AiRevenueAction) {
 function actionServiceBalance(action: AiRevenueAction, source: ServiceBalance["source"]): ServiceBalance | null {
   const serviceName = text(action.service.serviceName) || text(findEvidence(action, ["Service(s)", "Last service", "Service"]));
   const packageName = text(action.packageInfo.packageName || findEvidence(action, ["Package"]));
-  const remaining = nullableNumber(action.packageInfo.remainingUnits ?? findEvidence(action, ["Remaining sessions", "Remaining package sessions"]));
-  const purchased = nullableNumber(action.packageInfo.purchasedUnits ?? findEvidence(action, ["Purchased sessions"]));
-  const used = nullableNumber(action.packageInfo.usedUnits ?? findEvidence(action, ["Used sessions"]));
+  const remaining = nullableNumber(
+    action.packageInfo.remainingUnits ??
+      findEvidence(action, ["Focused treatment remaining", "Remaining sessions", "Remaining package sessions"]),
+  );
+  const purchased = nullableNumber(
+    action.packageInfo.purchasedUnits ?? findEvidence(action, ["Focused treatment purchased", "Purchased sessions"]),
+  );
+  const used = nullableNumber(action.packageInfo.usedUnits ?? findEvidence(action, ["Focused treatment used", "Used sessions"]));
 
   if (!serviceName && !packageName && remaining == null && purchased == null) {
     return null;
@@ -180,7 +189,11 @@ function actionServiceBalance(action: AiRevenueAction, source: ServiceBalance["s
     remaining,
     purchased,
     used,
-    lastUsedAt: text(action.packageInfo.lastUsedAt ?? action.service.lastVisitDate ?? findEvidence(action, ["Last usage date", "Last visit date"])),
+    lastUsedAt: text(
+      action.packageInfo.lastUsedAt ??
+        action.service.lastVisitDate ??
+        findEvidence(action, ["Focused treatment last usage", "Last usage date", "Last visit date"]),
+    ),
     source,
   };
 }
@@ -283,15 +296,18 @@ export function collectServiceBalances(action: AiRevenueAction, relatedActions: 
 function focusedBalance(action: AiRevenueAction, relatedActions: AiRevenueAction[] = []) {
   const serviceName = focusedServiceName(action);
   const evidenceRemaining = evidenceNumber(action, ["Focused treatment remaining"]);
+  const evidencePurchased = evidenceNumber(action, ["Focused treatment purchased"]);
+  const evidenceUsed = evidenceNumber(action, ["Focused treatment used"]);
+  const evidenceLastUsedAt = text(findEvidence(action, ["Focused treatment last usage"]));
   const balances = collectServiceBalances(action, relatedActions);
   const matched = balances.find((item) => serviceMatches(item.serviceName, serviceName));
 
   return {
     serviceName: serviceName || matched?.serviceName || "Treatment",
-    remaining: evidenceRemaining ?? matched?.remaining ?? null,
-    purchased: matched?.purchased ?? null,
-    used: matched?.used ?? null,
-    lastUsedAt: matched?.lastUsedAt || lastUsageDate(action),
+    remaining: matched?.remaining ?? evidenceRemaining ?? null,
+    purchased: matched?.purchased ?? evidencePurchased ?? null,
+    used: matched?.used ?? evidenceUsed ?? null,
+    lastUsedAt: matched?.lastUsedAt || evidenceLastUsedAt || lastUsageDate(action),
   };
 }
 
