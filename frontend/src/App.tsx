@@ -53,6 +53,8 @@ import { CommissionRuleEditorPage } from "./features/settings/commission/Commiss
 import { AiControlPanelPage } from "./features/settings/ai-control-panel/AiControlPanelPage";
 import { AiAgentMonitoringPage } from "./features/settings/ai-agent-monitoring/AiAgentMonitoringPage";
 import { AgentHubPage } from "./features/ai/agent-hub/AgentHubPage";
+import { AiAgentPortalPage } from "./features/ai/agent-portal/AiAgentPortalPage";
+import { AiRevenueAgentPage } from "./features/ai/agent-portal/revenue-agent/AiRevenueAgentPage";
 
 export default function App() {
   return (
@@ -112,6 +114,8 @@ export default function App() {
                     <Route path="analytics/customers-by-salesperson" element={<CustomersBySalespersonPage />} />
                     <Route path="analytics/customers" element={<CustomerPortalPage />} />
                     <Route path="analytics/customers/:customerSlug" element={<CustomerDetailPage />} />
+                    <Route path="ai/agent-portal" element={<AiAgentPortalPage />} />
+                    <Route path="ai/agent-portal/revenue-agent" element={<AiRevenueAgentPage />} />
                     <Route path="ai/agent-hub" element={<AgentHubPage />} />
                     <Route path="ai/gt-growth-ai-sales-assistant" element={<Navigate to="/ai/agent-hub" replace />} />
                     <Route path="ai/customer-relationship-agent" element={<Navigate to="/ai/agent-hub" replace />} />

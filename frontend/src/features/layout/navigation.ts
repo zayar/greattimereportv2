@@ -59,7 +59,8 @@ export const navigationSections: NavigationSection[] = [
   {
     title: "AI",
     items: [
-      { to: "/ai/agent-hub", label: "Agent workspace", icon: "ai" },
+      { to: "/ai/agent-portal", label: "AI Agent Portal", icon: "ai" },
+      { to: "/ai/agent-hub", label: "Agent workspace", icon: "activity" },
     ],
   },
   {

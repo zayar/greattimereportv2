@@ -2250,6 +2250,643 @@ textarea:focus-visible,
   color: #66758a;
 }
 
+.ai-agent-portal,
+.ai-revenue-agent-shell {
+  gap: 20px;
+}
+
+.ai-agent-portal__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.ai-agent-portal__card {
+  display: grid;
+  gap: 12px;
+  min-height: 184px;
+  padding: 18px;
+  border: 1px solid var(--luxe-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.66);
+  box-shadow: var(--luxe-shadow-soft);
+}
+
+.ai-agent-portal__card:hover {
+  border-color: rgba(7, 65, 66, 0.18);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.ai-agent-portal__card-header {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.ai-agent-portal__card strong {
+  color: var(--ink);
+  font-size: 1.08rem;
+}
+
+.ai-agent-portal__card p {
+  margin: 0;
+  color: var(--ink-muted);
+  line-height: 1.55;
+}
+
+.ai-agent-portal__card-action {
+  align-self: end;
+  color: var(--brand);
+  font-weight: 800;
+}
+
+.ai-agent-portal__badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.ai-agent-portal__badge--ready {
+  color: var(--success);
+  background: rgba(13, 122, 82, 0.12);
+}
+
+.ai-agent-portal__badge--planned {
+  color: #8a5b13;
+  background: rgba(250, 205, 118, 0.2);
+}
+
+.ai-agent-portal__badge--admin {
+  color: #225a8f;
+  background: rgba(58, 132, 205, 0.13);
+}
+
+.ai-revenue-agent-shell__tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px;
+  border: 1px solid var(--luxe-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.ai-revenue-agent-shell__tab {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.ai-revenue-agent-shell__tab--active {
+  border-color: rgba(7, 65, 66, 0.18);
+  background: rgba(7, 65, 66, 0.1);
+  color: var(--brand);
+}
+
+.ai-revenue-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+  align-items: end;
+}
+
+.ai-revenue-filter-grid__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ai-revenue-dashboard,
+.ai-revenue-action-list,
+.ai-revenue-detail {
+  display: grid;
+  gap: 18px;
+}
+
+.ai-revenue-dashboard__actions {
+  justify-content: flex-start;
+}
+
+.ai-revenue-funnel {
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+  border-radius: 8px;
+  border: 1px solid var(--report-border);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(248, 250, 250, 0.76)),
+    radial-gradient(circle at top left, rgba(7, 65, 66, 0.08), transparent 42%);
+  box-shadow: var(--report-shadow-soft);
+}
+
+.ai-revenue-funnel header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+}
+
+.ai-revenue-funnel h3,
+.ai-revenue-section-heading h3,
+.ai-revenue-action-card h3,
+.ai-revenue-action-card h4,
+.ai-revenue-detail h3 {
+  margin: 0;
+  color: #111827;
+}
+
+.ai-revenue-funnel p,
+.ai-revenue-section-heading span,
+.ai-revenue-action-card p,
+.ai-revenue-detail p {
+  margin: 0;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.ai-revenue-funnel__rows {
+  display: grid;
+  gap: 12px;
+}
+
+.ai-revenue-funnel__row {
+  display: grid;
+  grid-template-columns: minmax(100px, 150px) minmax(0, 1fr) minmax(48px, auto);
+  gap: 12px;
+  align-items: center;
+}
+
+.ai-revenue-funnel__row span {
+  color: #334155;
+  font-weight: 700;
+}
+
+.ai-revenue-funnel__bar-track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(7, 65, 66, 0.08);
+}
+
+.ai-revenue-funnel__bar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #224a4b, #5d8884);
+}
+
+.ai-revenue-owner-summary {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: linear-gradient(135deg, rgba(34, 74, 75, 0.1), rgba(255, 255, 255, 0.84));
+}
+
+.ai-revenue-owner-summary strong {
+  color: #111827;
+  font-size: 1.12rem;
+  line-height: 1.5;
+}
+
+.ai-revenue-owner-summary span {
+  color: #64748b;
+  font-weight: 700;
+}
+
+.ai-revenue-conversion-grid,
+.ai-revenue-action-grid,
+.ai-revenue-evidence-grid,
+.ai-revenue-detail__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.ai-revenue-conversion-card,
+.ai-revenue-evidence-item,
+.ai-revenue-detail__grid > div,
+.ai-revenue-reason-box {
+  display: grid;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.ai-revenue-conversion-card span,
+.ai-revenue-evidence-item span,
+.ai-revenue-reason-box span,
+.ai-revenue-detail__grid span {
+  color: #64748b;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ai-revenue-conversion-card strong {
+  color: #111827;
+  font-size: 1.35rem;
+}
+
+.ai-revenue-conversion-card small,
+.ai-revenue-action-card small {
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.ai-revenue-top-actions,
+.ai-revenue-section-heading {
+  display: grid;
+  gap: 12px;
+}
+
+.ai-revenue-action-card {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 8px;
+  border: 1px solid var(--report-border);
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: var(--report-shadow-soft);
+}
+
+.ai-revenue-action-card--compact {
+  align-content: start;
+}
+
+.ai-revenue-action-card__top,
+.ai-revenue-action-card__main,
+.ai-revenue-action-card__footer,
+.ai-revenue-detail__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.ai-revenue-action-card__top > div,
+.ai-revenue-action-card__main > div,
+.ai-revenue-detail__header > div {
+  display: grid;
+  gap: 6px;
+}
+
+.ai-revenue-action-card__source {
+  color: #64748b;
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.ai-revenue-action-card__main span,
+.ai-revenue-detail__header span {
+  color: #64748b;
+}
+
+.ai-revenue-action-card__body {
+  display: grid;
+  gap: 14px;
+}
+
+.ai-revenue-action-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-revenue-action-card__meta span {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: #334155;
+  background: rgba(15, 23, 42, 0.06);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.ai-revenue-action-card__footer > span {
+  color: #334155;
+  line-height: 1.5;
+}
+
+.ai-revenue-approval-card__actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.ai-revenue-message-box {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.54);
+}
+
+.ai-revenue-message-box--approved {
+  background: rgba(13, 122, 82, 0.06);
+  border-color: rgba(13, 122, 82, 0.12);
+}
+
+.ai-revenue-message-box--inbound {
+  background: rgba(91, 140, 137, 0.08);
+  border-color: rgba(91, 140, 137, 0.14);
+}
+
+.ai-revenue-message-box > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.ai-revenue-message-box strong {
+  color: #111827;
+}
+
+.ai-revenue-message-box span {
+  color: #64748b;
+  font-size: 0.84rem;
+}
+
+.ai-revenue-message-box p {
+  margin: 0;
+  color: #334155;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.ai-revenue-message-thread {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ai-revenue-reply-box {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(248, 250, 250, 0.62);
+}
+
+.ai-revenue-reply-box .field {
+  margin: 0;
+}
+
+.ai-revenue-mode-note {
+  margin: 0;
+}
+
+.ai-revenue-appointment-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(248, 250, 250, 0.62);
+}
+
+.ai-revenue-appointment-form .field {
+  margin: 0;
+}
+
+.ai-revenue-appointment-form__wide {
+  grid-column: 1 / -1;
+}
+
+.ai-revenue-detail__section {
+  display: grid;
+  gap: 6px;
+  padding-top: 2px;
+}
+
+.ai-revenue-detail__section > strong {
+  color: #111827;
+}
+
+.ai-revenue-detail__section small {
+  color: #64748b;
+  font-weight: 700;
+}
+
+.ai-revenue-source-breakdown,
+.ai-revenue-action-table-section,
+.ai-revenue-audit {
+  display: grid;
+  gap: 14px;
+}
+
+.ai-revenue-table-wrap {
+  overflow-x: auto;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.76);
+}
+
+.ai-revenue-action-table {
+  width: 100%;
+  min-width: 1080px;
+  border-collapse: collapse;
+}
+
+.ai-revenue-action-table th,
+.ai-revenue-action-table td {
+  padding: 12px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
+  text-align: left;
+  vertical-align: top;
+}
+
+.ai-revenue-action-table th {
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(248, 250, 250, 0.8);
+}
+
+.ai-revenue-action-table td {
+  color: #111827;
+  font-size: 0.88rem;
+}
+
+.ai-revenue-action-table td span {
+  display: block;
+  color: #64748b;
+  font-size: 0.78rem;
+  margin-top: 3px;
+}
+
+.ai-revenue-audit__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: rgba(248, 250, 250, 0.78);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.ai-revenue-audit__summary span {
+  color: #64748b;
+  font-weight: 700;
+}
+
+.ai-revenue-audit__events {
+  display: grid;
+  gap: 12px;
+}
+
+.ai-revenue-audit-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.ai-revenue-audit-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai-revenue-audit-card__header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.ai-revenue-audit-card__header span {
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.ai-revenue-timeline {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-revenue-timeline__item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.ai-revenue-timeline__dot {
+  width: 10px;
+  height: 10px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: #37cfe3;
+  box-shadow: 0 0 0 4px rgba(55, 207, 227, 0.14);
+}
+
+.ai-revenue-timeline__body {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.ai-revenue-timeline__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai-revenue-timeline__header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.ai-revenue-timeline__header span,
+.ai-revenue-timeline__header small,
+.ai-revenue-timeline__empty {
+  color: #64748b;
+  font-weight: 700;
+}
+
+.ai-revenue-timeline__body p {
+  margin: 0;
+  color: #334155;
+}
+
+.ai-revenue-timeline__values {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.ai-revenue-timeline__values div {
+  display: grid;
+  gap: 5px;
+}
+
+.ai-revenue-timeline__values span {
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ai-revenue-timeline__values pre {
+  max-height: 180px;
+  overflow: auto;
+  margin: 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.05);
+  color: #111827;
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.status-pill--high {
+  background: rgba(178, 71, 45, 0.1);
+  border-color: rgba(178, 71, 45, 0.16);
+  color: #a23b24;
+}
+
+.status-pill--medium {
+  background: rgba(182, 135, 33, 0.12);
+  border-color: rgba(182, 135, 33, 0.16);
+  color: #875f12;
+}
+
+.status-pill--low {
+  background: rgba(13, 122, 82, 0.1);
+  border-color: rgba(13, 122, 82, 0.14);
+  color: #0d6b4a;
+}
+
 @media (max-width: 1100px) {
   .agent-hub-toolbar,
   .agent-hub-layout {
@@ -2258,6 +2895,19 @@ textarea:focus-visible,
 
   .agent-hub-toolbar {
     flex-direction: column;
+  }
+
+  .ai-revenue-action-card__main,
+  .ai-revenue-action-card__footer,
+  .ai-revenue-message-box > div,
+  .ai-revenue-message-thread,
+  .ai-revenue-detail__header {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .ai-revenue-funnel__row {
+    grid-template-columns: 1fr;
   }
 
   .agent-hub-side {

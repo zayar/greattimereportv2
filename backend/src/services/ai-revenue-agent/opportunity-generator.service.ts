@@ -1,0 +1,801 @@
+import { createHash } from "node:crypto";
+import { env } from "../../config/env.js";
+import type {
+  AiRevenueAction,
+  AiRevenueActionType,
+  AiRevenueCustomer,
+  AiRevenueEvidenceItem,
+  AiRevenuePackageInfo,
+  AiRevenuePriority,
+  AiRevenueServiceInfo,
+} from "../../types/ai-revenue-agent.js";
+import { calculateCustomerRiskSignals } from "../ai/customer-risk.service.js";
+import { getCustomerPortalList } from "../reports/customer-portal.service.js";
+import { getPackagePortalReport } from "../reports/package-portal.service.js";
+import { getTodayAppointmentsForClinic } from "../telegram/report.service.js";
+import { fetchApicoreBookingDetails, type ApicoreBookingDetailsRow } from "../apicore.service.js";
+import {
+  buildApicoreBookingDetailsDateRange,
+  isApicoreBookingWallClockDateInRange,
+} from "../apicore-booking-details-range.js";
+import {
+  createAuditLog,
+  listActions,
+  upsertAction,
+} from "./ai-revenue-agent.repository.js";
+
+type GenerateInput = {
+  clinicId: string;
+  clinicCode: string;
+  dateKey: string;
+  forceRefresh?: boolean;
+  authorizationHeader?: string;
+};
+
+type Candidate = {
+  sourceRefId: string;
+  actionType: AiRevenueActionType;
+  basePriorityScore: number;
+  title: string;
+  summary: string;
+  reason: string;
+  evidence: AiRevenueEvidenceItem[];
+  recommendedAction: string;
+  customer: AiRevenueCustomer;
+  service?: AiRevenueServiceInfo;
+  packageInfo?: AiRevenuePackageInfo;
+  appointment?: AiRevenueAction["appointment"];
+  source: AiRevenueAction["source"];
+};
+
+const ACTIVE_APPOINTMENT_STATUSES = new Set(["BOOKED", "REQUEST", "CHECKIN", "CHECKED_IN"]);
+const PENDING_REMINDER_APPOINTMENT_STATUSES = new Set(["BOOKED", "REQUEST"]);
+const COMPLETED_APPOINTMENT_STATUSES = new Set(["CHECKOUT", "CHECKED_OUT", "COMPLETED"]);
+const CANCELLED_APPOINTMENT_STATUSES = new Set(["MEMBER_CANCEL", "MERCHANT_CANCEL", "CANCEL", "CANCELLED"]);
+const NO_SHOW_APPOINTMENT_STATUSES = new Set(["NO_SHOW", "NOSHOW"]);
+const APPOINTMENT_HISTORY_PAGE_SIZE = 200;
+const APPOINTMENT_HISTORY_MAX_ROWS = 1000;
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function hashId(value: string) {
+  return createHash("sha1").update(value).digest("hex").slice(0, 24);
+}
+
+function buildActionId(dedupeKey: string) {
+  return `air_${hashId(dedupeKey)}`;
+}
+
+function addDays(dateKey: string, days: number) {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function cleanText(value: unknown, fallback = "") {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function normalizePhone(value: unknown) {
+  return cleanText(value).replace(/\D/g, "");
+}
+
+function maskPhone(value: unknown) {
+  const digits = normalizePhone(value);
+  if (!digits) {
+    return null;
+  }
+  return `***${digits.slice(-4)}`;
+}
+
+function normalizeNameKey(value: unknown) {
+  return cleanText(value).replace(/\s+/g, " ").toLowerCase();
+}
+
+function customerKey(input: { memberId?: unknown; phone?: unknown; customerName?: unknown }) {
+  const memberId = cleanText(input.memberId);
+  if (memberId) {
+    return `member:${memberId}`;
+  }
+
+  const phone = normalizePhone(input.phone);
+  if (phone) {
+    return `phone:${hashId(phone)}`;
+  }
+
+  const name = normalizeNameKey(input.customerName);
+  return name && !/^unknown(?: customer)?$/.test(name) ? `name:${name}` : "";
+}
+
+function hasUsableIdentity(customer: AiRevenueCustomer) {
+  return Boolean(
+    cleanText(customer.memberId) ||
+      normalizePhone(customer.phoneNumber) ||
+      (cleanText(customer.customerName) && !/^unknown(?: customer)?$/i.test(cleanText(customer.customerName))),
+  );
+}
+
+function normalizeStatus(value: unknown) {
+  return cleanText(value).toUpperCase().replace(/[\s-]+/g, "_");
+}
+
+function isActiveAppointment(row: ApicoreBookingDetailsRow) {
+  return ACTIVE_APPOINTMENT_STATUSES.has(normalizeStatus(row.status));
+}
+
+function isPendingReminderAppointment(row: ApicoreBookingDetailsRow) {
+  const status = normalizeStatus(row.status);
+  return !status || PENDING_REMINDER_APPOINTMENT_STATUSES.has(status);
+}
+
+function isCompletedAppointment(row: ApicoreBookingDetailsRow) {
+  return COMPLETED_APPOINTMENT_STATUSES.has(normalizeStatus(row.status));
+}
+
+function isCancelledAppointment(row: ApicoreBookingDetailsRow) {
+  return CANCELLED_APPOINTMENT_STATUSES.has(normalizeStatus(row.status));
+}
+
+function isNoShowAppointment(row: ApicoreBookingDetailsRow) {
+  return NO_SHOW_APPOINTMENT_STATUSES.has(normalizeStatus(row.status));
+}
+
+function priorityFromScore(score: number): AiRevenuePriority {
+  if (score >= 75) {
+    return "high";
+  }
+  if (score >= 45) {
+    return "medium";
+  }
+  return "low";
+}
+
+function moneyLabel(value: number | null | undefined) {
+  if (value == null || value <= 0) {
+    return null;
+  }
+  return `${Math.round(value).toLocaleString("en-US")} MMK`;
+}
+
+function buildAppointmentCustomer(row: ApicoreBookingDetailsRow): AiRevenueCustomer {
+  const name = cleanText(row.MemberName, "Customer");
+  const phone = cleanText(row.MemberPhoneNumber);
+  return {
+    customerKey: customerKey({ customerName: name, phone }),
+    memberId: null,
+    customerName: name,
+    phoneNumber: phone || null,
+    phoneMasked: maskPhone(phone),
+  };
+}
+
+function appointmentEvidence(row: ApicoreBookingDetailsRow): AiRevenueEvidenceItem[] {
+  return [
+    { label: "Booking ID", value: row.bookingid },
+    { label: "Appointment time", value: row.FromTime },
+    { label: "Service", value: cleanText(row.ServiceName, "Unknown service") },
+    { label: "Practitioner", value: cleanText(row.PractitionerName, "Unassigned") },
+    { label: "Booking status", value: cleanText(row.status, "Unknown") },
+  ];
+}
+
+function isSameCustomer(left: AiRevenueCustomer, right: AiRevenueCustomer) {
+  if (left.customerKey && right.customerKey && left.customerKey === right.customerKey) {
+    return true;
+  }
+  if (left.memberId && right.memberId && left.memberId === right.memberId) {
+    return true;
+  }
+  const leftPhone = normalizePhone(left.phoneNumber);
+  const rightPhone = normalizePhone(right.phoneNumber);
+  return Boolean(leftPhone && rightPhone && leftPhone === rightPhone);
+}
+
+async function fetchAppointmentHistory(input: {
+  clinicCode: string;
+  fromDate: string;
+  toDate: string;
+  authorizationHeader?: string;
+}) {
+  const rows: ApicoreBookingDetailsRow[] = [];
+  const range = buildApicoreBookingDetailsDateRange({
+    fromDate: input.fromDate,
+    toDate: input.toDate,
+  });
+  let skip = 0;
+  let totalCount = Number.POSITIVE_INFINITY;
+
+  while (skip < totalCount && rows.length < APPOINTMENT_HISTORY_MAX_ROWS) {
+    const result = await fetchApicoreBookingDetails({
+      clinicCode: input.clinicCode,
+      startDate: range.startIso,
+      endDate: range.endIso,
+      skip,
+      take: APPOINTMENT_HISTORY_PAGE_SIZE,
+      authorizationHeader: input.authorizationHeader,
+      readOnly: true,
+    });
+
+    totalCount = result.totalCount;
+    if (result.data.length === 0) {
+      break;
+    }
+
+    rows.push(
+      ...result.data.filter((row) =>
+        isApicoreBookingWallClockDateInRange(row.FromTime, input.fromDate, input.toDate),
+      ),
+    );
+    skip += result.data.length;
+  }
+
+  return rows;
+}
+
+function buildHighRiskAppointmentCustomerSet(rows: ApicoreBookingDetailsRow[]) {
+  const riskyCustomers = new Set<string>();
+
+  rows
+    .filter((row) => isNoShowAppointment(row) || isCancelledAppointment(row))
+    .map(buildAppointmentCustomer)
+    .filter(hasUsableIdentity)
+    .forEach((customer) => {
+      if (customer.customerKey) {
+        riskyCustomers.add(customer.customerKey);
+      }
+    });
+
+  return riskyCustomers;
+}
+
+function baseAction(input: GenerateInput, candidate: Candidate, score: number): AiRevenueAction {
+  const timestamp = nowIso();
+  const dedupeKey = [
+    input.clinicId,
+    input.dateKey,
+    candidate.actionType,
+    candidate.customer.customerKey || candidate.customer.memberId || candidate.customer.phoneNumber || candidate.customer.customerName,
+    candidate.sourceRefId,
+  ].join("|");
+
+  return {
+    id: buildActionId(dedupeKey),
+    clinicId: input.clinicId,
+    clinicCode: input.clinicCode,
+    dateKey: input.dateKey,
+    source: candidate.source,
+    sourceRefId: candidate.sourceRefId,
+    actionType: candidate.actionType,
+    priority: priorityFromScore(score),
+    priorityScore: score,
+    title: candidate.title,
+    summary: candidate.summary,
+    reason: candidate.reason,
+    evidence: candidate.evidence,
+    recommendedAction: candidate.recommendedAction,
+    customer: candidate.customer,
+    service: candidate.service ?? {},
+    packageInfo: candidate.packageInfo ?? {},
+    appointment: candidate.appointment ?? {},
+    message: {},
+    revenue: {
+      actualRevenue: 0,
+      influencedRevenue: 0,
+      packageSessionsRecovered: 0,
+      attributionType: "unknown",
+    },
+    status: "new",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    createdBy: {
+      userId: "ai_revenue_agent",
+      email: null,
+      name: "AI Revenue Agent",
+    },
+    lastStatusAt: null,
+    lastStatusBy: null,
+  };
+}
+
+function applyPriorityAdjustments(input: {
+  candidate: Candidate;
+  existingActions: AiRevenueAction[];
+  upcomingCustomers: AiRevenueCustomer[];
+}) {
+  let score = input.candidate.basePriorityScore;
+  const hasPhone = Boolean(normalizePhone(input.candidate.customer.phoneNumber));
+
+  if (!hasPhone) {
+    score -= 30;
+  }
+
+  const recentlyContacted = input.existingActions.some(
+    (action) =>
+      isSameCustomer(action.customer, input.candidate.customer) &&
+      ["sent", "customer_replied", "appointment_requested", "appointment_created", "appointment_confirmed"].includes(action.status),
+  );
+  if (recentlyContacted) {
+    score -= 40;
+  }
+
+  const hasUpcomingAppointment = input.upcomingCustomers.some((customer) => isSameCustomer(customer, input.candidate.customer));
+  if (hasUpcomingAppointment && input.candidate.actionType !== "appointment_confirmation_reminder") {
+    score -= 80;
+  }
+
+  return Math.max(0, Math.min(100, score));
+}
+
+function createServiceReminderCandidates(input: {
+  rows: Array<{
+    customerName: string;
+    phoneNumber: string;
+    memberId: string;
+    lastVisitDate: string | null;
+    daysSinceLastVisit: number | null;
+    visitCount: number;
+    lastService: string;
+    averageSpend: number;
+    remainingSessions: number;
+    rebookingStatus: string;
+    healthScore: number;
+  }>;
+  dateKey: string;
+}) {
+  return input.rows.flatMap<Candidate>((row) => {
+    if (row.rebookingStatus !== "overdue" && row.rebookingStatus !== "dueSoon") {
+      return [];
+    }
+
+    const customer: AiRevenueCustomer = {
+      customerKey: customerKey({ memberId: row.memberId, phone: row.phoneNumber, customerName: row.customerName }),
+      memberId: cleanText(row.memberId) || null,
+      customerName: row.customerName,
+      phoneNumber: cleanText(row.phoneNumber) || null,
+      phoneMasked: maskPhone(row.phoneNumber),
+    };
+    if (!hasUsableIdentity(customer)) {
+      return [];
+    }
+
+    const risk = calculateCustomerRiskSignals({
+      totalVisits: row.visitCount,
+      daysSinceLastVisit: row.daysSinceLastVisit,
+      avgVisitGapDays: null,
+      remainingSessions: row.remainingSessions,
+      recent3MonthVisits: 0,
+      previous3MonthVisits: 0,
+    });
+    const overdue = row.rebookingStatus === "overdue";
+    const serviceName = cleanText(row.lastService, "recent service");
+    const expectedGap = risk.expectedReturnGapDays ?? null;
+    const patternReminderDate =
+      row.lastVisitDate && expectedGap != null ? addDays(row.lastVisitDate, expectedGap) : null;
+
+    return [
+      {
+        source: "bigquery",
+        sourceRefId: `pattern:${customer.customerKey}:${serviceName}:${row.lastVisitDate ?? "unknown"}`,
+        actionType: overdue ? "service_reminder_overdue" : "service_reminder_follow_up",
+        basePriorityScore: overdue ? 90 : 80,
+        title: overdue ? "Pattern-based service reminder overdue" : "Pattern-based service follow-up",
+        summary: `${row.customerName} may be ready to return for ${serviceName}.`,
+        reason: overdue
+          ? "Customer visit pattern indicates the expected return window is overdue. Exact service interval_day was not available from APICORE."
+          : "Customer visit pattern indicates the customer is close to the expected return window. Exact service interval_day was not available from APICORE.",
+        recommendedAction: "Review customer history, confirm the service, then prepare a staff-approved follow-up message.",
+        evidence: [
+          { label: "Reminder type", value: "Pattern-based reminder" },
+          { label: "Last service", value: serviceName },
+          ...(row.lastVisitDate ? [{ label: "Last visit date", value: row.lastVisitDate }] : []),
+          ...(patternReminderDate ? [{ label: "Pattern reminder date", value: patternReminderDate }] : []),
+          ...(row.daysSinceLastVisit != null ? [{ label: "Days since last visit", value: row.daysSinceLastVisit }] : []),
+          ...(expectedGap != null ? [{ label: "Expected return gap", value: `${expectedGap} days` }] : []),
+          ...(moneyLabel(row.averageSpend) ? [{ label: "Average spend", value: moneyLabel(row.averageSpend)! }] : []),
+        ],
+        customer,
+        service: {
+          serviceName,
+          lastVisitDate: row.lastVisitDate,
+          reminderDate: patternReminderDate,
+        },
+      },
+    ];
+  });
+}
+
+function createPackageCandidates(rows: Array<{
+  id: string;
+  packageId: string;
+  customerName: string;
+  customerPhone: string;
+  memberId: string;
+  packageName: string;
+  serviceNames: string[];
+  purchasedUnits: number;
+  usedUnits: number;
+  remainingUnits: number;
+  lastVisitDate: string | null;
+  daysSinceActivity: number;
+  needsFollowUp: boolean;
+}>) {
+  return rows.flatMap<Candidate>((row) => {
+    if (row.remainingUnits <= 0 || (!row.needsFollowUp && row.daysSinceActivity < 21)) {
+      return [];
+    }
+
+    const customer: AiRevenueCustomer = {
+      customerKey: customerKey({ memberId: row.memberId, phone: row.customerPhone, customerName: row.customerName }),
+      memberId: cleanText(row.memberId) || null,
+      customerName: row.customerName,
+      phoneNumber: cleanText(row.customerPhone) || null,
+      phoneMasked: maskPhone(row.customerPhone),
+    };
+    if (!hasUsableIdentity(customer)) {
+      return [];
+    }
+
+    return [
+      {
+        source: "package_portal",
+        sourceRefId: row.id,
+        actionType: "unused_package_follow_up",
+        basePriorityScore: 75,
+        title: "Recover unused package balance",
+        summary: `${row.customerName} has ${row.remainingUnits} remaining session(s) in ${row.packageName}.`,
+        reason: "Customer has prepaid/package service balance remaining and has not used it recently.",
+        recommendedAction: "Contact the customer and help book the next remaining package session.",
+        evidence: [
+          { label: "Package", value: row.packageName },
+          { label: "Remaining sessions", value: row.remainingUnits },
+          { label: "Purchased sessions", value: row.purchasedUnits },
+          { label: "Used sessions", value: row.usedUnits },
+          { label: "Service(s)", value: row.serviceNames.join(", ") || "Unknown" },
+          ...(row.lastVisitDate ? [{ label: "Last usage date", value: row.lastVisitDate }] : []),
+          { label: "Days since activity", value: row.daysSinceActivity },
+        ],
+        customer,
+        service: {
+          serviceName: row.serviceNames[0] ?? null,
+          lastVisitDate: row.lastVisitDate,
+        },
+        packageInfo: {
+          packageId: row.packageId,
+          packageName: row.packageName,
+          remainingUnits: row.remainingUnits,
+          purchasedUnits: row.purchasedUnits,
+          usedUnits: row.usedUnits,
+          lastUsedAt: row.lastVisitDate,
+        },
+      },
+    ];
+  });
+}
+
+function createAppointmentCandidates(params: {
+  todayRows: ApicoreBookingDetailsRow[];
+  tomorrowRows: ApicoreBookingDetailsRow[];
+  dateKey: string;
+  highRiskCustomers: Set<string>;
+}) {
+  const todayReminderRows = params.todayRows.filter((row) => isPendingReminderAppointment(row) && !isCompletedAppointment(row));
+  const tomorrowReminderRows = params.tomorrowRows.filter(isActiveAppointment);
+  const recoveryRows = params.todayRows.filter((row) => isNoShowAppointment(row) || isCancelledAppointment(row));
+
+  const reminderCandidates = [...todayReminderRows, ...tomorrowReminderRows].flatMap<Candidate>((row) => {
+    const customer = buildAppointmentCustomer(row);
+    if (!hasUsableIdentity(customer)) {
+      return [];
+    }
+
+    const isTomorrow = row.FromTime.slice(0, 10) > params.dateKey;
+    const highRisk = customer.customerKey ? params.highRiskCustomers.has(customer.customerKey) : false;
+
+    return [
+      {
+        source: "appointment_report",
+        sourceRefId: row.bookingid,
+        actionType: "appointment_confirmation_reminder",
+        basePriorityScore: highRisk ? 80 : 70,
+        title: isTomorrow ? "Tomorrow appointment reminder" : "Same-day appointment reminder",
+        summary: `${customer.customerName ?? "Customer"} has an upcoming ${cleanText(row.ServiceName, "service")} appointment.`,
+        reason: highRisk
+          ? "Customer has prior no-show/cancel pattern and should receive a human-approved appointment reminder."
+          : isTomorrow
+            ? "Customer has an appointment tomorrow and should receive a confirmation reminder."
+            : "Customer has an appointment today and has not checked in yet.",
+        recommendedAction: "Confirm appointment time with the customer and record reply or staff follow-up.",
+        evidence: [
+          ...appointmentEvidence(row),
+          ...(highRisk ? [{ label: "Risk signal", value: "Prior no-show/cancel pattern" }] : []),
+        ],
+        customer,
+        service: {
+          serviceName: cleanText(row.ServiceName, "Unknown service"),
+        },
+        appointment: {
+          bookingId: row.bookingid,
+          appointmentDateTime: row.FromTime,
+          bookingStatus: row.status,
+        },
+      },
+    ];
+  });
+
+  const recoveryCandidates = recoveryRows.flatMap<Candidate>((row) => {
+    const customer = buildAppointmentCustomer(row);
+    if (!hasUsableIdentity(customer)) {
+      return [];
+    }
+
+    const noShow = isNoShowAppointment(row);
+    return [
+      {
+        source: "appointment_report",
+        sourceRefId: row.bookingid,
+        actionType: noShow ? "no_show_recovery" : "cancelled_appointment_recovery",
+        basePriorityScore: noShow ? 65 : 60,
+        title: noShow ? "No-show recovery" : "Cancelled appointment recovery",
+        summary: `${customer.customerName ?? "Customer"} ${noShow ? "missed" : "cancelled"} an appointment for ${cleanText(row.ServiceName, "service")}.`,
+        reason: noShow
+          ? "Appointment status is NO_SHOW and no same-day AI Revenue recovery action exists yet."
+          : "Appointment was cancelled and customer should be helped to reschedule if no future appointment exists.",
+        recommendedAction: "Ask whether the customer wants help rescheduling at a convenient time.",
+        evidence: appointmentEvidence(row),
+        customer,
+        service: {
+          serviceName: cleanText(row.ServiceName, "Unknown service"),
+        },
+        appointment: {
+          bookingId: row.bookingid,
+          appointmentDateTime: row.FromTime,
+          bookingStatus: row.status,
+          noShowAt: noShow ? params.dateKey : null,
+          cancelledAt: noShow ? null : params.dateKey,
+        },
+      },
+    ];
+  });
+
+  return [...reminderCandidates, ...recoveryCandidates];
+}
+
+function createInactiveVipCandidates(rows: Array<{
+  customerName: string;
+  phoneNumber: string;
+  memberId: string;
+  lifetimeSpend: number;
+  averageSpend: number;
+  visitCount: number;
+  lastVisitDate: string | null;
+  daysSinceLastVisit: number | null;
+  lastService: string;
+  primaryTherapist: string;
+  remainingSessions: number;
+  healthScore: number;
+}>) {
+  return rows.flatMap<Candidate>((row) => {
+    if ((row.daysSinceLastVisit ?? 0) < 60 || row.lifetimeSpend < 1_000_000) {
+      return [];
+    }
+
+    const customer: AiRevenueCustomer = {
+      customerKey: customerKey({ memberId: row.memberId, phone: row.phoneNumber, customerName: row.customerName }),
+      memberId: cleanText(row.memberId) || null,
+      customerName: row.customerName,
+      phoneNumber: cleanText(row.phoneNumber) || null,
+      phoneMasked: maskPhone(row.phoneNumber),
+    };
+    if (!hasUsableIdentity(customer)) {
+      return [];
+    }
+
+    return [
+      {
+        source: "bigquery",
+        sourceRefId: `vip:${customer.customerKey}:${row.lastVisitDate ?? "unknown"}`,
+        actionType: "inactive_vip_recovery",
+        basePriorityScore: 85,
+        title: "Recover inactive VIP customer",
+        summary: `${row.customerName} is a high-value customer who has not visited recently.`,
+        reason: "Customer has high lifetime spend and no recent visit, so personal follow-up may recover future revenue.",
+        recommendedAction: "Owner or senior staff should personally contact this customer and offer help booking a suitable service.",
+        evidence: [
+          { label: "Lifetime spend", value: moneyLabel(row.lifetimeSpend) ?? row.lifetimeSpend },
+          { label: "Visit count", value: row.visitCount },
+          ...(row.lastVisitDate ? [{ label: "Last visit date", value: row.lastVisitDate }] : []),
+          ...(row.daysSinceLastVisit != null ? [{ label: "Days since last visit", value: row.daysSinceLastVisit }] : []),
+          { label: "Last service", value: cleanText(row.lastService, "Unknown") },
+          { label: "Primary therapist", value: cleanText(row.primaryTherapist, "Unknown") },
+          { label: "Remaining package sessions", value: row.remainingSessions },
+          { label: "Customer health score", value: row.healthScore },
+        ],
+        customer,
+        service: {
+          serviceName: cleanText(row.lastService, "Unknown service"),
+          lastVisitDate: row.lastVisitDate,
+        },
+      },
+    ];
+  });
+}
+
+function uniqueCandidates(candidates: Candidate[]) {
+  const byKey = new Map<string, Candidate>();
+
+  for (const candidate of candidates) {
+    const key = [
+      candidate.actionType,
+      candidate.customer.customerKey || candidate.customer.memberId || candidate.customer.phoneNumber || candidate.customer.customerName,
+      candidate.sourceRefId,
+    ].join("|");
+    const current = byKey.get(key);
+    if (!current || candidate.basePriorityScore > current.basePriorityScore) {
+      byKey.set(key, candidate);
+    }
+  }
+
+  return [...byKey.values()];
+}
+
+export async function generateAiRevenueOpportunities(input: GenerateInput) {
+  const packageFromDate = addDays(input.dateKey, -180);
+  const customerFromDate = addDays(input.dateKey, -365);
+  const appointmentHistoryFromDate = addDays(input.dateKey, -90);
+  const tomorrowDateKey = addDays(input.dateKey, 1);
+
+  const [packageResult, customerResult, vipResult, todayAppointmentsResult, tomorrowAppointmentsResult, appointmentHistoryResult] =
+    await Promise.allSettled([
+      getPackagePortalReport({
+        clinicId: input.clinicId,
+        fromDate: packageFromDate,
+        toDate: input.dateKey,
+        packageId: "",
+        category: "",
+        therapist: "",
+        salesperson: "",
+        status: "",
+        inactivityBucket: "",
+        onlyRemaining: true,
+        authorizationHeader: input.authorizationHeader,
+      }),
+      getCustomerPortalList({
+        clinicCode: input.clinicCode,
+        fromDate: customerFromDate,
+        toDate: input.dateKey,
+        search: "",
+        status: "",
+        spendTier: "",
+        therapist: "",
+        serviceCategory: "",
+        sortBy: "lastVisitDate",
+        sortDirection: "asc",
+        limit: 150,
+        offset: 0,
+      }),
+      getCustomerPortalList({
+        clinicCode: input.clinicCode,
+        fromDate: customerFromDate,
+        toDate: input.dateKey,
+        search: "",
+        status: "",
+        spendTier: "VIP",
+        therapist: "",
+        serviceCategory: "",
+        sortBy: "lifetimeSpend",
+        sortDirection: "desc",
+        limit: 80,
+        offset: 0,
+      }),
+      getTodayAppointmentsForClinic({
+        clinicCode: input.clinicCode,
+        dateKey: input.dateKey,
+        timezone: env.DEFAULT_TIMEZONE,
+        authorizationHeader: input.authorizationHeader,
+      }),
+      getTodayAppointmentsForClinic({
+        clinicCode: input.clinicCode,
+        dateKey: tomorrowDateKey,
+        timezone: env.DEFAULT_TIMEZONE,
+        authorizationHeader: input.authorizationHeader,
+      }),
+      fetchAppointmentHistory({
+        clinicCode: input.clinicCode,
+        fromDate: appointmentHistoryFromDate,
+        toDate: addDays(input.dateKey, -1),
+        authorizationHeader: input.authorizationHeader,
+      }),
+    ]);
+
+  const packageRows = packageResult.status === "fulfilled" ? packageResult.value.followUpRows : [];
+  const customerRows = customerResult.status === "fulfilled" ? customerResult.value.rows : [];
+  const vipRows = vipResult.status === "fulfilled" ? vipResult.value.rows : [];
+  const todayRows = todayAppointmentsResult.status === "fulfilled" ? todayAppointmentsResult.value.rows : [];
+  const tomorrowRows = tomorrowAppointmentsResult.status === "fulfilled" ? tomorrowAppointmentsResult.value.rows : [];
+  const appointmentHistoryRows = appointmentHistoryResult.status === "fulfilled" ? appointmentHistoryResult.value : [];
+
+  const highRiskCustomers = buildHighRiskAppointmentCustomerSet(appointmentHistoryRows);
+  const upcomingCustomers = [...todayRows, ...tomorrowRows]
+    .filter(isActiveAppointment)
+    .map(buildAppointmentCustomer)
+    .filter(hasUsableIdentity);
+  const existingActions = await listActions({
+    clinicId: input.clinicId,
+    dateKey: input.dateKey,
+    limit: 500,
+  });
+  const existingIds = new Set(existingActions.map((action) => action.id));
+
+  const candidates = uniqueCandidates([
+    ...createServiceReminderCandidates({
+      rows: customerRows,
+      dateKey: input.dateKey,
+    }),
+    ...createPackageCandidates(packageRows),
+    ...createAppointmentCandidates({
+      todayRows,
+      tomorrowRows,
+      dateKey: input.dateKey,
+      highRiskCustomers,
+    }),
+    ...createInactiveVipCandidates(vipRows),
+  ]);
+  const saved: AiRevenueAction[] = [];
+  const skippedExisting: AiRevenueAction[] = [];
+
+  for (const candidate of candidates) {
+    const score = applyPriorityAdjustments({
+      candidate,
+      existingActions,
+      upcomingCustomers,
+    });
+
+    if (score <= 0 || !hasUsableIdentity(candidate.customer)) {
+      continue;
+    }
+
+    const action = baseAction(input, candidate, score);
+    if (existingIds.has(action.id) && !input.forceRefresh) {
+      const existing = existingActions.find((item) => item.id === action.id);
+      if (existing) {
+        skippedExisting.push(existing);
+      }
+      continue;
+    }
+
+    const nextAction = await upsertAction(action);
+    await createAuditLog({
+      clinicId: input.clinicId,
+      actionId: nextAction.id,
+      actorType: "system",
+      actorId: "ai_revenue_generator",
+      action: "opportunity_created",
+      description: `Created from ${candidate.source} opportunity generation.`,
+      afterValue: {
+        actionType: nextAction.actionType,
+        sourceRefId: nextAction.sourceRefId,
+        priorityScore: nextAction.priorityScore,
+      },
+    });
+    saved.push(nextAction);
+  }
+
+  return {
+    dateKey: input.dateKey,
+    generatedCount: saved.length,
+    skippedExistingCount: skippedExisting.length,
+    actions: [...saved, ...skippedExisting].sort(
+      (left, right) => right.priorityScore - left.priorityScore || left.title.localeCompare(right.title),
+    ),
+    sourceStatus: {
+      packagePortal: packageResult.status,
+      customerPortal: customerResult.status,
+      vipCustomers: vipResult.status,
+      todayAppointments: todayAppointmentsResult.status,
+      tomorrowAppointments: tomorrowAppointmentsResult.status,
+      appointmentHistory: appointmentHistoryResult.status,
+    },
+  };
+}
