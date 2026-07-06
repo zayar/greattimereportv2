@@ -191,12 +191,30 @@ function lastVisitDate(action: AiRevenueAction) {
   );
 }
 
-function daysSinceLastVisit(action: AiRevenueAction) {
-  if (typeof action.service.lastVisitSinceDays === "number" && Number.isFinite(action.service.lastVisitSinceDays)) {
-    return Math.max(0, Math.round(action.service.lastVisitSinceDays));
+function daysBetweenDateKeys(laterDateKey: string, earlierDateKey: string) {
+  const later = new Date(`${laterDateKey.slice(0, 10)}T00:00:00.000Z`);
+  const earlier = new Date(`${earlierDateKey.slice(0, 10)}T00:00:00.000Z`);
+
+  if (Number.isNaN(later.getTime()) || Number.isNaN(earlier.getTime())) {
+    return null;
   }
 
-  return insightDaysSinceLastVisit(action);
+  return Math.max(0, Math.round((later.getTime() - earlier.getTime()) / 86_400_000));
+}
+
+function daysSinceLastVisit(action: AiRevenueAction) {
+  const storedDays =
+    typeof action.service.lastVisitSinceDays === "number" && Number.isFinite(action.service.lastVisitSinceDays)
+      ? Math.max(0, Math.round(action.service.lastVisitSinceDays))
+      : null;
+  const visitDateKey = dateKeyFromValue(lastVisitDate(action));
+  const daysFromDate = visitDateKey ? daysBetweenDateKeys(todayDateKey(), visitDateKey) : null;
+
+  if (daysFromDate != null) {
+    return storedDays != null && Math.abs(storedDays - daysFromDate) <= 1 ? storedDays : daysFromDate;
+  }
+
+  return storedDays ?? insightDaysSinceLastVisit(action);
 }
 
 function therapistLabel(action: AiRevenueAction) {

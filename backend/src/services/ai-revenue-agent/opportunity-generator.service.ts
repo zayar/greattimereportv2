@@ -115,6 +115,20 @@ function daysBetweenDateKeys(laterDateKey: string, earlierDateKey: string | null
   return Math.max(0, Math.round((later.getTime() - earlier.getTime()) / 86_400_000));
 }
 
+function resolveDaysSinceVisit(dateKey: string, lastVisitDate: string | null | undefined, sourceDays: number | null | undefined) {
+  const sourceValue = sourceDays == null || !Number.isFinite(sourceDays) ? null : Math.max(0, Math.round(sourceDays));
+  if (!lastVisitDate) {
+    return sourceValue;
+  }
+
+  const daysFromDate = daysBetweenDateKeys(dateKey, lastVisitDate);
+  if (daysFromDate === 999) {
+    return sourceValue;
+  }
+
+  return sourceValue != null && Math.abs(sourceValue - daysFromDate) <= 1 ? sourceValue : daysFromDate;
+}
+
 function cleanText(value: unknown, fallback = "") {
   return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }
@@ -851,6 +865,7 @@ function createServiceReminderCandidates(input: {
         (packageContext.sameTreatmentRemaining > 0 ? 15 : 0) +
         (packageContext.sameTreatmentRemaining === 0 && packageContext.totalRemaining > 0 ? 5 : 0),
     );
+    const lastVisitSinceDays = resolveDaysSinceVisit(input.dateKey, row.lastVisitDate, row.daysSinceLastVisit);
 
     return [
       {
@@ -883,7 +898,7 @@ function createServiceReminderCandidates(input: {
           ...(packageContext.totalRemaining > 0 ? [{ label: "Total remaining sessions", value: packageContext.totalRemaining }] : []),
           ...(row.lastVisitDate ? [{ label: "Last visit date", value: row.lastVisitDate }] : []),
           ...(patternReminderDate ? [{ label: "Pattern reminder date", value: patternReminderDate }] : []),
-          ...(row.daysSinceLastVisit != null ? [{ label: "Days since last visit", value: row.daysSinceLastVisit }] : []),
+          ...(lastVisitSinceDays != null ? [{ label: "Days since last visit", value: lastVisitSinceDays }] : []),
           ...(expectedGap != null ? [{ label: "Expected return gap", value: `${expectedGap} days` }] : []),
           ...(moneyLabel(row.averageSpend) ? [{ label: "Average spend", value: moneyLabel(row.averageSpend)! }] : []),
         ],
@@ -891,7 +906,7 @@ function createServiceReminderCandidates(input: {
         service: {
           serviceName,
           lastVisitDate: row.lastVisitDate,
-          lastVisitSinceDays: row.daysSinceLastVisit,
+          lastVisitSinceDays,
           lastTreatmentTherapist: cleanText(row.primaryTherapist) || packageRowTherapist(sameTreatmentRow) || null,
           preferredTherapist: cleanText(row.primaryTherapist) || null,
           reminderDate: patternReminderDate,
@@ -912,7 +927,7 @@ function createServiceReminderCandidates(input: {
   });
 }
 
-function createPackageCandidates(rows: PackageFollowUpRow[]) {
+function createPackageCandidates(rows: PackageFollowUpRow[], dateKey: string) {
   return rows.flatMap<Candidate>((row) => {
     if (row.remainingUnits <= 0 || (!row.needsFollowUp && row.daysSinceActivity < 21)) {
       return [];
@@ -945,6 +960,7 @@ function createPackageCandidates(rows: PackageFollowUpRow[]) {
       focusRows,
       otherRows,
     });
+    const lastVisitSinceDays = resolveDaysSinceVisit(dateKey, row.lastVisitDate, row.daysSinceLastVisit ?? row.daysSinceActivity);
 
     return [
       {
@@ -963,13 +979,13 @@ function createPackageCandidates(rows: PackageFollowUpRow[]) {
           { label: "Used sessions", value: row.usedUnits },
           { label: "Service(s)", value: row.serviceNames.join(", ") || "Unknown" },
           ...(row.lastVisitDate ? [{ label: "Last usage date", value: row.lastVisitDate }] : []),
-          { label: "Days since activity", value: row.daysSinceActivity },
+          ...(lastVisitSinceDays != null ? [{ label: "Days since activity", value: lastVisitSinceDays }] : []),
         ],
         customer,
         service: {
           serviceName,
           lastVisitDate: row.lastVisitDate,
-          lastVisitSinceDays: row.daysSinceLastVisit ?? row.daysSinceActivity,
+          lastVisitSinceDays,
           lastTreatmentTherapist: packageRowTherapist(row),
           preferredTherapist: packageRowTherapist(row),
         },
@@ -1094,9 +1110,11 @@ function createInactiveVipCandidates(rows: Array<{
   primaryTherapist: string;
   remainingSessions: number;
   healthScore: number;
-}>) {
+}>, dateKey: string) {
   return rows.flatMap<Candidate>((row) => {
-    if ((row.daysSinceLastVisit ?? 0) < 60 || row.lifetimeSpend < 1_000_000) {
+    const lastVisitSinceDays = resolveDaysSinceVisit(dateKey, row.lastVisitDate, row.daysSinceLastVisit);
+
+    if ((lastVisitSinceDays ?? 0) < 60 || row.lifetimeSpend < 1_000_000) {
       return [];
     }
 
@@ -1132,7 +1150,7 @@ function createInactiveVipCandidates(rows: Array<{
           { label: "Lifetime spend", value: moneyLabel(row.lifetimeSpend) ?? row.lifetimeSpend },
           { label: "Visit count", value: row.visitCount },
           ...(row.lastVisitDate ? [{ label: "Last visit date", value: row.lastVisitDate }] : []),
-          ...(row.daysSinceLastVisit != null ? [{ label: "Days since last visit", value: row.daysSinceLastVisit }] : []),
+          ...(lastVisitSinceDays != null ? [{ label: "Days since last visit", value: lastVisitSinceDays }] : []),
           { label: "Last service", value: cleanText(row.lastService, "Unknown") },
           { label: "Primary therapist", value: cleanText(row.primaryTherapist, "Unknown") },
           { label: "Remaining package sessions", value: row.remainingSessions },
@@ -1142,7 +1160,7 @@ function createInactiveVipCandidates(rows: Array<{
         service: {
           serviceName,
           lastVisitDate: row.lastVisitDate,
-          lastVisitSinceDays: row.daysSinceLastVisit,
+          lastVisitSinceDays,
           lastTreatmentTherapist: cleanText(row.primaryTherapist) || null,
           preferredTherapist: cleanText(row.primaryTherapist) || null,
         },
@@ -1333,14 +1351,14 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
       dateKey: input.dateKey,
       packageRows,
     }),
-    ...createPackageCandidates(packageRows),
+    ...createPackageCandidates(packageRows, input.dateKey),
     ...createAppointmentCandidates({
       todayRows,
       tomorrowRows,
       dateKey: input.dateKey,
       highRiskCustomers,
     }),
-    ...createInactiveVipCandidates(vipRows),
+    ...createInactiveVipCandidates(vipRows, input.dateKey),
   ]).filter(
     (candidate) =>
       !isOpportunitySuppressed(

@@ -162,6 +162,41 @@ function focusedServiceName(action: AiRevenueAction) {
   );
 }
 
+function focusUsageDate(action: AiRevenueAction) {
+  return text(action.serviceUsage?.find((item) => item.isFocusService)?.latestUsageDate) || text(action.serviceUsage?.[0]?.latestUsageDate);
+}
+
+function dateKeyFromValue(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+    return trimmed.slice(0, 10);
+  }
+
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+}
+
+function todayDateKey() {
+  const date = new Date();
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return localDate.toISOString().slice(0, 10);
+}
+
+function daysBetweenDateKeys(laterDateKey: string, earlierDateKey: string) {
+  const later = new Date(`${laterDateKey.slice(0, 10)}T00:00:00.000Z`);
+  const earlier = new Date(`${earlierDateKey.slice(0, 10)}T00:00:00.000Z`);
+
+  if (Number.isNaN(later.getTime()) || Number.isNaN(earlier.getTime())) {
+    return null;
+  }
+
+  return Math.max(0, Math.round((later.getTime() - earlier.getTime()) / 86_400_000));
+}
+
 function daysSinceLastVisit(action: AiRevenueAction) {
   const directValue =
     findEvidence(action, ["Days since last visit", "Days since activity", "Days since last usage"]) ??
@@ -171,18 +206,13 @@ function daysSinceLastVisit(action: AiRevenueAction) {
     return Math.round(numeric);
   }
 
-  const lastDate = action.service.lastVisitDate ?? action.packageInfo.lastUsedAt;
-  if (!lastDate) {
+  const lastDate = action.service.lastVisitDate ?? focusUsageDate(action) ?? action.packageInfo.lastUsedAt;
+  const lastDateKey = dateKeyFromValue(lastDate);
+  if (!lastDateKey) {
     return null;
   }
 
-  const parsed = new Date(`${lastDate.slice(0, 10)}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-
-  const today = new Date();
-  return Math.max(0, Math.round((today.getTime() - parsed.getTime()) / 86_400_000));
+  return daysBetweenDateKeys(todayDateKey(), lastDateKey);
 }
 
 function purchasedUnits(action: AiRevenueAction) {

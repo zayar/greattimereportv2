@@ -142,6 +142,17 @@ function addDays(dateKey: string, days: number) {
   return date.toISOString().slice(0, 10);
 }
 
+function daysBetweenDateKeys(laterDateKey: string, earlierDateKey: string) {
+  const later = new Date(`${laterDateKey.slice(0, 10)}T00:00:00.000Z`);
+  const earlier = new Date(`${earlierDateKey.slice(0, 10)}T00:00:00.000Z`);
+
+  if (Number.isNaN(later.getTime()) || Number.isNaN(earlier.getTime())) {
+    return null;
+  }
+
+  return Math.max(0, Math.round((later.getTime() - earlier.getTime()) / 86_400_000));
+}
+
 function dateKeyFromIso(value: unknown) {
   return typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value) ? value.slice(0, 10) : null;
 }
@@ -159,6 +170,18 @@ function numberOrNull(value: unknown) {
 function numberOrZero(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeLastVisitSinceDays(rawDays: unknown, rawLastVisitDate: unknown) {
+  const storedDays = numberOrNull(rawDays);
+  const lastVisitDateKey = dateKeyFromIso(rawLastVisitDate);
+  const daysFromDate = lastVisitDateKey ? daysBetweenDateKeys(todayDateKey(), lastVisitDateKey) : null;
+
+  if (daysFromDate != null) {
+    return storedDays != null && Math.abs(storedDays - daysFromDate) <= 1 ? Math.max(0, Math.round(storedDays)) : daysFromDate;
+  }
+
+  return storedDays == null ? null : Math.max(0, Math.round(storedDays));
 }
 
 function stripUndefinedDeep(value: unknown): unknown {
@@ -738,7 +761,7 @@ function normalizeAction(id: string, data: FirebaseFirestore.DocumentData | unde
     serviceId: nullableText(service.serviceId),
     serviceName: nullableText(service.serviceName),
     lastVisitDate: nullableText(service.lastVisitDate),
-    lastVisitSinceDays: numberOrNull(service.lastVisitSinceDays),
+    lastVisitSinceDays: normalizeLastVisitSinceDays(service.lastVisitSinceDays, service.lastVisitDate),
     lastTreatmentTherapist: nullableText(service.lastTreatmentTherapist),
     preferredTherapist: nullableText(service.preferredTherapist),
     reminderDate: nullableText(service.reminderDate),
