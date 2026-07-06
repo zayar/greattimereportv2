@@ -8,6 +8,7 @@ import type {
   AiRevenuePackageInfo,
   AiRevenuePriority,
   AiRevenueServiceInfo,
+  AiRevenueServiceUsageSnapshot,
 } from "../../types/ai-revenue-agent.js";
 import { calculateCustomerRiskSignals } from "../ai/customer-risk.service.js";
 import { getCustomerPortalList, getCustomerPortalPackages } from "../reports/customer-portal.service.js";
@@ -19,8 +20,9 @@ import {
   isApicoreBookingWallClockDateInRange,
 } from "../apicore-booking-details-range.js";
 import {
+  buildOpportunityKey,
   createAuditLog,
-  isCustomerSuppressed,
+  isOpportunitySuppressed,
   listActiveCustomerSuppressions,
   listActions,
   upsertAction,
@@ -45,6 +47,7 @@ type Candidate = {
   recommendedAction: string;
   customer: AiRevenueCustomer;
   service?: AiRevenueServiceInfo;
+  serviceUsage?: AiRevenueServiceUsageSnapshot[];
   packageInfo?: AiRevenuePackageInfo;
   appointment?: AiRevenueAction["appointment"];
   source: AiRevenueAction["source"];
@@ -62,8 +65,11 @@ type PackageFollowUpRow = {
   usedUnits: number;
   remainingUnits: number;
   lastVisitDate: string | null;
+  daysSinceLastVisit?: number | null;
   daysSinceActivity: number;
   needsFollowUp: boolean;
+  therapist?: string | null;
+  latestTherapist?: string | null;
   sourcePriority?: number;
 };
 
@@ -252,6 +258,109 @@ function packageBalanceText(row: Pick<PackageFollowUpRow, "remainingUnits" | "pu
   return `${row.remainingUnits}/${row.purchasedUnits} ${packageServiceLabel(row)}`;
 }
 
+function packageRowTherapist(row?: PackageFollowUpRow | null) {
+  return cleanText(row?.latestTherapist) || cleanText(row?.therapist) || null;
+}
+
+function serviceUsageStatus(remaining: number | null | undefined): AiRevenueServiceUsageSnapshot["status"] {
+  if (remaining == null) {
+    return "unknown";
+  }
+  if (remaining <= 0) {
+    return "completed";
+  }
+  if (remaining <= 2) {
+    return "low_remaining";
+  }
+  return "active";
+}
+
+function serviceUsageFromPackageRow(
+  row: PackageFollowUpRow,
+  isFocusService: boolean,
+): AiRevenueServiceUsageSnapshot {
+  const serviceName = packageServiceLabel(row);
+  return {
+    serviceId: null,
+    serviceName,
+    packageId: row.packageId,
+    packageName: row.packageName,
+    packageTotal: row.purchasedUnits,
+    used: row.usedUnits,
+    remaining: row.remainingUnits,
+    latestUsageDate: row.lastVisitDate,
+    status: serviceUsageStatus(row.remainingUnits),
+    isFocusService,
+    note: `${row.remainingUnits}/${row.purchasedUnits} session(s) remaining`,
+  };
+}
+
+function buildServiceUsageSnapshots(input: {
+  focusServiceName: string;
+  focusRows: PackageFollowUpRow[];
+  otherRows: PackageFollowUpRow[];
+  fallbackRemainingSessions?: number | null;
+}) {
+  const focusSnapshots = input.focusRows.map((row) => serviceUsageFromPackageRow(row, true));
+  const otherSnapshots = input.otherRows.map((row) => serviceUsageFromPackageRow(row, false));
+  if (focusSnapshots.length > 0 || otherSnapshots.length > 0) {
+    return [...focusSnapshots, ...otherSnapshots].slice(0, 8);
+  }
+
+  const fallbackRemaining = input.fallbackRemainingSessions ?? null;
+  if (fallbackRemaining != null && fallbackRemaining > 0) {
+    return [
+      {
+        serviceName: input.focusServiceName || "Package balance",
+        packageId: null,
+        packageName: null,
+        packageTotal: null,
+        used: null,
+        remaining: fallbackRemaining,
+        latestUsageDate: null,
+        status: serviceUsageStatus(fallbackRemaining),
+        isFocusService: true,
+        note: "Remaining sessions from customer profile",
+      },
+    ] satisfies AiRevenueServiceUsageSnapshot[];
+  }
+
+  return [];
+}
+
+function firstSentence(value: string, maxLength: number) {
+  const sentence = cleanText(value).split(/(?<=[.!?])\s+/)[0] ?? "";
+  if (sentence.length <= maxLength) {
+    return sentence;
+  }
+  return `${sentence.slice(0, Math.max(0, maxLength - 1)).trimEnd()}...`;
+}
+
+function isOpenWorkflowAction(action: AiRevenueAction) {
+  const visibilityState = action.visibilityState ?? "active";
+  const workflowState = action.workflowState ?? "new";
+  return (
+    (visibilityState === "active" || visibilityState === "scheduled") &&
+    workflowState !== "completed" &&
+    workflowState !== "closed" &&
+    !action.resolution
+  );
+}
+
+function isCompletedOrSuppressedWorkflowAction(action: AiRevenueAction) {
+  return (
+    Boolean(action.resolution) ||
+    action.visibilityState === "completed" ||
+    action.visibilityState === "suppressed" ||
+    action.workflowState === "completed" ||
+    action.workflowState === "closed" ||
+    action.status === "completed" ||
+    action.status === "closed" ||
+    action.status === "skipped" ||
+    action.status === "not_interested"
+  );
+}
+
 function buildCustomerPackageContext(input: {
   customer: AiRevenueCustomer;
   serviceName: string;
@@ -374,8 +483,10 @@ async function fetchCustomerPackageFallbackRows(input: {
           usedUnits: entry.usedCount,
           remainingUnits: entry.remainingCount,
           lastVisitDate: entry.latestUsageDate,
+          daysSinceLastVisit: daysBetweenDateKeys(input.dateKey, entry.latestUsageDate),
           daysSinceActivity: daysBetweenDateKeys(input.dateKey, entry.latestUsageDate),
           needsFollowUp: true,
+          latestTherapist: entry.latestTherapist,
           sourcePriority: 2,
         }));
     } catch {
@@ -445,6 +556,15 @@ function buildHighRiskAppointmentCustomerSet(rows: ApicoreBookingDetailsRow[]) {
 
 function baseAction(input: GenerateInput, candidate: Candidate, score: number): AiRevenueAction {
   const timestamp = nowIso();
+  const service = candidate.service ?? {};
+  const packageInfo = candidate.packageInfo ?? {};
+  const opportunityKey = buildOpportunityKey({
+    clinicId: input.clinicId,
+    actionType: candidate.actionType,
+    customer: candidate.customer,
+    service,
+    packageInfo,
+  });
   const dedupeKey = [
     input.clinicId,
     input.dateKey,
@@ -458,19 +578,28 @@ function baseAction(input: GenerateInput, candidate: Candidate, score: number): 
     clinicId: input.clinicId,
     clinicCode: input.clinicCode,
     dateKey: input.dateKey,
+    opportunityKey,
+    originalDateKey: input.dateKey,
+    dueDateKey: input.dateKey,
     source: candidate.source,
     sourceRefId: candidate.sourceRefId,
     actionType: candidate.actionType,
+    workflowState: "new",
+    visibilityState: "active",
+    attemptCount: 0,
     priority: priorityFromScore(score),
     priorityScore: score,
     title: candidate.title,
     summary: candidate.summary,
     reason: candidate.reason,
+    displayReason: firstSentence(candidate.reason, 160),
     evidence: candidate.evidence,
     recommendedAction: candidate.recommendedAction,
+    aiSuggestion: firstSentence(candidate.recommendedAction, 160),
     customer: candidate.customer,
-    service: candidate.service ?? {},
-    packageInfo: candidate.packageInfo ?? {},
+    service,
+    serviceUsage: candidate.serviceUsage ?? [],
+    packageInfo,
     appointment: candidate.appointment ?? {},
     message: {},
     revenue: {
@@ -478,6 +607,35 @@ function baseAction(input: GenerateInput, candidate: Candidate, score: number): 
       influencedRevenue: 0,
       packageSessionsRecovered: 0,
       attributionType: "unknown",
+    },
+    followUp: {
+      status: "open",
+      dueDate: input.dateKey,
+      nextFollowUpDate: input.dateKey,
+      lastAttemptId: null,
+      lastContactedAt: null,
+      lastChannel: null,
+      lastResult: null,
+      lastNote: null,
+      lastHandledBy: null,
+      attemptCount: 0,
+      completedAt: null,
+      completedBy: null,
+      suppressedAt: null,
+      suppressionId: null,
+      outcome: {
+        appointmentBookingId: null,
+        appointmentBookedAt: null,
+        appointmentDateTime: null,
+        customerCameAt: null,
+        treatmentCompletedAt: null,
+        packageSessionUsedAt: null,
+        packageSessionsRecovered: 0,
+        repurchaseInvoiceNumber: null,
+        repurchaseRevenue: 0,
+        revenueAttributedAt: null,
+        attributionType: "unknown",
+      },
     },
     status: "new",
     createdAt: timestamp,
@@ -504,6 +662,18 @@ function mergeOptionalObject<T extends object>(generated: T, existing: T) {
   ) as T;
 }
 
+function mergeGeneratedSourceObject<T extends object>(existing: T, generated: T) {
+  const generatedRecord = generated as Record<string, unknown>;
+  const existingRecord = existing as Record<string, unknown>;
+  return Object.fromEntries(
+    Array.from(new Set([...Object.keys(existingRecord), ...Object.keys(generatedRecord)])).map((key) => {
+      const existingValue = existingRecord[key];
+      const generatedValue = generatedRecord[key];
+      return [key, generatedValue == null || generatedValue === "" ? existingValue : generatedValue];
+    }),
+  ) as T;
+}
+
 function mergeGeneratedActionContext(existing: AiRevenueAction, generated: AiRevenueAction): AiRevenueAction {
   return {
     ...existing,
@@ -516,13 +686,18 @@ function mergeGeneratedActionContext(existing: AiRevenueAction, generated: AiRev
     title: generated.title,
     summary: generated.summary,
     reason: generated.reason,
+    displayReason: generated.displayReason ?? existing.displayReason ?? null,
     evidence: generated.evidence,
     recommendedAction: generated.recommendedAction,
+    aiSuggestion: generated.aiSuggestion ?? existing.aiSuggestion ?? null,
+    opportunityKey: existing.opportunityKey ?? generated.opportunityKey ?? buildOpportunityKey(generated),
+    originalDateKey: existing.originalDateKey ?? generated.originalDateKey ?? existing.dateKey,
     customer: {
       ...existing.customer,
       ...generated.customer,
     },
-    service: mergeOptionalObject(generated.service, existing.service),
+    service: mergeGeneratedSourceObject(existing.service, generated.service),
+    serviceUsage: generated.serviceUsage ?? existing.serviceUsage ?? [],
     packageInfo: {
       ...existing.packageInfo,
       ...generated.packageInfo,
@@ -541,8 +716,11 @@ function didGeneratedContextChange(existing: AiRevenueAction, generated: AiReven
     reason: existing.reason,
     evidence: existing.evidence,
     recommendedAction: existing.recommendedAction,
+    displayReason: existing.displayReason,
+    aiSuggestion: existing.aiSuggestion,
     customer: existing.customer,
     service: existing.service,
+    serviceUsage: existing.serviceUsage ?? [],
     packageInfo: existing.packageInfo,
     appointment: existing.appointment,
   };
@@ -554,8 +732,11 @@ function didGeneratedContextChange(existing: AiRevenueAction, generated: AiReven
     reason: generated.reason,
     evidence: generated.evidence,
     recommendedAction: generated.recommendedAction,
+    displayReason: generated.displayReason,
+    aiSuggestion: generated.aiSuggestion,
     customer: generated.customer,
-    service: mergeOptionalObject(generated.service, existing.service),
+    service: mergeGeneratedSourceObject(existing.service, generated.service),
+    serviceUsage: generated.serviceUsage ?? [],
     packageInfo: {
       ...existing.packageInfo,
       ...generated.packageInfo,
@@ -604,6 +785,7 @@ function createServiceReminderCandidates(input: {
     daysSinceLastVisit: number | null;
     visitCount: number;
     lastService: string;
+    primaryTherapist?: string | null;
     averageSpend: number;
     remainingSessions: number;
     rebookingStatus: string;
@@ -648,6 +830,12 @@ function createServiceReminderCandidates(input: {
     });
     const sameTreatmentRows = packageContext.sameTreatmentRows;
     const sameTreatmentRow = sameTreatmentRows[0];
+    const serviceUsage = buildServiceUsageSnapshots({
+      focusServiceName: serviceName,
+      focusRows: sameTreatmentRows,
+      otherRows: packageContext.otherRows,
+      fallbackRemainingSessions: row.remainingSessions,
+    });
     const sameTreatmentPurchased = sameTreatmentRows.reduce((sum, item) => sum + item.purchasedUnits, 0);
     const sameTreatmentUsed = sameTreatmentRows.reduce((sum, item) => sum + item.usedUnits, 0);
     const sameTreatmentLastUsedAt =
@@ -703,8 +891,12 @@ function createServiceReminderCandidates(input: {
         service: {
           serviceName,
           lastVisitDate: row.lastVisitDate,
+          lastVisitSinceDays: row.daysSinceLastVisit,
+          lastTreatmentTherapist: cleanText(row.primaryTherapist) || packageRowTherapist(sameTreatmentRow) || null,
+          preferredTherapist: cleanText(row.primaryTherapist) || null,
           reminderDate: patternReminderDate,
         },
+        serviceUsage,
         packageInfo: sameTreatmentRow
           ? {
               packageId: sameTreatmentRow.packageId,
@@ -736,6 +928,23 @@ function createPackageCandidates(rows: PackageFollowUpRow[]) {
     if (!hasUsableIdentity(customer)) {
       return [];
     }
+    const serviceName = row.serviceNames[0] ?? row.packageName ?? "Package balance";
+    const packageContext = buildCustomerPackageContext({
+      customer,
+      serviceName,
+      packageRows: rows,
+    });
+    const focusRows = [
+      row,
+      ...packageContext.sameTreatmentRows.filter((item) => item.id !== row.id),
+    ];
+    const focusRowIds = new Set(focusRows.map((item) => item.id));
+    const otherRows = packageContext.rows.filter((item) => !focusRowIds.has(item.id));
+    const serviceUsage = buildServiceUsageSnapshots({
+      focusServiceName: serviceName,
+      focusRows,
+      otherRows,
+    });
 
     return [
       {
@@ -758,9 +967,13 @@ function createPackageCandidates(rows: PackageFollowUpRow[]) {
         ],
         customer,
         service: {
-          serviceName: row.serviceNames[0] ?? null,
+          serviceName,
           lastVisitDate: row.lastVisitDate,
+          lastVisitSinceDays: row.daysSinceLastVisit ?? row.daysSinceActivity,
+          lastTreatmentTherapist: packageRowTherapist(row),
+          preferredTherapist: packageRowTherapist(row),
         },
+        serviceUsage,
         packageInfo: {
           packageId: row.packageId,
           packageName: row.packageName,
@@ -814,6 +1027,8 @@ function createAppointmentCandidates(params: {
         customer,
         service: {
           serviceName: cleanText(row.ServiceName, "Unknown service"),
+          lastTreatmentTherapist: cleanText(row.PractitionerName) || null,
+          preferredTherapist: cleanText(row.PractitionerName) || null,
         },
         appointment: {
           bookingId: row.bookingid,
@@ -847,6 +1062,10 @@ function createAppointmentCandidates(params: {
         customer,
         service: {
           serviceName: cleanText(row.ServiceName, "Unknown service"),
+          lastVisitDate: params.dateKey,
+          lastVisitSinceDays: 0,
+          lastTreatmentTherapist: cleanText(row.PractitionerName) || null,
+          preferredTherapist: cleanText(row.PractitionerName) || null,
         },
         appointment: {
           bookingId: row.bookingid,
@@ -891,6 +1110,13 @@ function createInactiveVipCandidates(rows: Array<{
     if (!hasUsableIdentity(customer)) {
       return [];
     }
+    const serviceName = cleanText(row.lastService, "Unknown service");
+    const serviceUsage = buildServiceUsageSnapshots({
+      focusServiceName: serviceName,
+      focusRows: [],
+      otherRows: [],
+      fallbackRemainingSessions: row.remainingSessions,
+    });
 
     return [
       {
@@ -914,9 +1140,13 @@ function createInactiveVipCandidates(rows: Array<{
         ],
         customer,
         service: {
-          serviceName: cleanText(row.lastService, "Unknown service"),
+          serviceName,
           lastVisitDate: row.lastVisitDate,
+          lastVisitSinceDays: row.daysSinceLastVisit,
+          lastTreatmentTherapist: cleanText(row.primaryTherapist) || null,
+          preferredTherapist: cleanText(row.primaryTherapist) || null,
         },
+        serviceUsage,
       },
     ];
   });
@@ -1080,11 +1310,18 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
     .filter(hasUsableIdentity);
   const existingActions = await listActions({
     clinicId: input.clinicId,
-    dateKey: input.dateKey,
     limit: 500,
     includeResolved: true,
+    includeHidden: true,
   });
   const existingIds = new Set(existingActions.map((action) => action.id));
+  const existingByOpportunityKey = new Map<string, AiRevenueAction[]>();
+  for (const action of existingActions) {
+    const key = action.opportunityKey ?? buildOpportunityKey(action);
+    const actions = existingByOpportunityKey.get(key) ?? [];
+    actions.push(action);
+    existingByOpportunityKey.set(key, actions);
+  }
   const activeSuppressions = await listActiveCustomerSuppressions({
     clinicId: input.clinicId,
     dateKey: input.dateKey,
@@ -1104,7 +1341,17 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
       highRiskCustomers,
     }),
     ...createInactiveVipCandidates(vipRows),
-  ]).filter((candidate) => !isCustomerSuppressed(candidate.customer, activeSuppressions, input.dateKey));
+  ]).filter(
+    (candidate) =>
+      !isOpportunitySuppressed(
+        {
+          customer: candidate.customer,
+          service: candidate.service,
+        },
+        activeSuppressions,
+        input.dateKey,
+      ),
+  );
   const focusCandidates = selectTopFocusCandidates({
     candidates,
     existingActions,
@@ -1117,35 +1364,59 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
 
   for (const { candidate, score } of focusCandidates) {
     const action = baseAction(input, candidate, score);
+    const sameOpportunityActions = existingByOpportunityKey.get(action.opportunityKey ?? buildOpportunityKey(action)) ?? [];
+    const openAction = sameOpportunityActions.find(isOpenWorkflowAction);
+    if (openAction) {
+      const contextChanged = didGeneratedContextChange(openAction, action);
+      const refreshedAction = await upsertAction(mergeGeneratedActionContext(openAction, action));
+      if (contextChanged) {
+        await createAuditLog({
+          clinicId: input.clinicId,
+          actionId: refreshedAction.id,
+          actorType: "system",
+          actorId: "ai_revenue_generator",
+          action: "opportunity_refreshed",
+          description: "Refreshed AI Revenue opportunity evidence from latest source data without resetting staff follow-up workflow.",
+          beforeValue: {
+            reason: openAction.reason,
+            evidence: openAction.evidence,
+            packageInfo: openAction.packageInfo,
+            serviceUsage: openAction.serviceUsage ?? [],
+            priorityScore: openAction.priorityScore,
+            dueDateKey: openAction.dueDateKey,
+            nextFollowUpAt: openAction.nextFollowUpAt,
+            workflowState: openAction.workflowState,
+            attemptCount: openAction.attemptCount,
+            lastContactResult: openAction.lastContactResult,
+          },
+          afterValue: {
+            reason: refreshedAction.reason,
+            evidence: refreshedAction.evidence,
+            packageInfo: refreshedAction.packageInfo,
+            serviceUsage: refreshedAction.serviceUsage ?? [],
+            priorityScore: refreshedAction.priorityScore,
+            dueDateKey: refreshedAction.dueDateKey,
+            nextFollowUpAt: refreshedAction.nextFollowUpAt,
+            workflowState: refreshedAction.workflowState,
+            attemptCount: refreshedAction.attemptCount,
+            lastContactResult: refreshedAction.lastContactResult,
+          },
+        });
+      }
+      refreshedExisting.push(refreshedAction);
+      continue;
+    }
+
+    const closedAction = sameOpportunityActions.find(isCompletedOrSuppressedWorkflowAction);
+    if (closedAction && !input.forceRefresh) {
+      skippedExisting.push(closedAction);
+      continue;
+    }
+
     if (existingIds.has(action.id) && !input.forceRefresh) {
       const existing = existingActions.find((item) => item.id === action.id);
       if (existing) {
-        if (didGeneratedContextChange(existing, action)) {
-          const refreshedAction = await upsertAction(mergeGeneratedActionContext(existing, action));
-          await createAuditLog({
-            clinicId: input.clinicId,
-            actionId: refreshedAction.id,
-            actorType: "system",
-            actorId: "ai_revenue_generator",
-            action: "opportunity_refreshed",
-            description: "Refreshed AI Revenue opportunity evidence from latest source data.",
-            beforeValue: {
-              reason: existing.reason,
-              evidence: existing.evidence,
-              packageInfo: existing.packageInfo,
-              priorityScore: existing.priorityScore,
-            },
-            afterValue: {
-              reason: refreshedAction.reason,
-              evidence: refreshedAction.evidence,
-              packageInfo: refreshedAction.packageInfo,
-              priorityScore: refreshedAction.priorityScore,
-            },
-          });
-          refreshedExisting.push(refreshedAction);
-        } else {
-          skippedExisting.push(existing);
-        }
+        skippedExisting.push(existing);
       }
       continue;
     }

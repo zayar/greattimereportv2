@@ -81,6 +81,7 @@ function dateKeyFromIso(value?: string | null) {
 function attributionStartDate(action: AiRevenueAction) {
   return (
     dateKeyFromIso(action.message.sentAt) ??
+    dateKeyFromIso(action.followUp.lastContactedAt) ??
     dateKeyFromIso(action.message.lastInboundAt) ??
     dateKeyFromIso(action.appointment.cameAt) ??
     action.dateKey

@@ -10,6 +10,8 @@ import {
   generateAiRevenueMessage,
   getAiRevenueAuditLogs,
   getAiRevenueActions,
+  getAiRevenueFollowUpAttempts,
+  getAiRevenueOutcomeLinks,
   getAiRevenueSummary,
   markAiRevenueMessageSent,
   rejectAiRevenueAction,
@@ -23,15 +25,20 @@ import type {
   AiRevenueActionStatus,
   AiRevenueActionType,
   AiRevenuePriority,
+  AiRevenueContactAttempt,
+  AiRevenueContactChannel,
+  AiRevenueContactResult,
+  AiRevenueOutcomeLink,
+  AiRevenueOutcomeType,
   AiRevenueSummary,
 } from "../../../../types/domain";
 import { useAccess } from "../../../access/AccessProvider";
 import { AiRevenueAuditTab } from "./AiRevenueAuditTab";
-import { AiRevenueApprovalTab } from "./AiRevenueApprovalTab";
 import { AiRevenueAppointmentsTab } from "./AiRevenueAppointmentsTab";
 import { AiRevenueConversationTab } from "./AiRevenueConversationTab";
 import { AiRevenueDashboardTab } from "./AiRevenueDashboardTab";
-import { AiFollowUpSnapshot, isSameCustomerAction, myanmarReason } from "./AiRevenueFollowUpInsights";
+import { AiStaffFollowUpSnapshot, isSameCustomerAction, myanmarReason } from "./AiRevenueFollowUpInsights";
+import { AiRevenueFollowUpAttemptModal, AiRevenueFollowUpTab } from "./AiRevenueFollowUpTab";
 import { AiRevenueOpportunitiesTab } from "./AiRevenueOpportunitiesTab";
 import { AiRevenueRevenueTab } from "./AiRevenueRevenueTab";
 import { AiRevenueResolveControls } from "./AiRevenueResolveControls";
@@ -40,7 +47,7 @@ import { AiRevenueTimeline } from "./AiRevenueTimeline";
 type RevenueAgentTab =
   | "dashboard"
   | "opportunities"
-  | "message_approval"
+  | "follow_up"
   | "conversations"
   | "appointments"
   | "revenue"
@@ -55,6 +62,12 @@ type FilterState = {
   priority: "" | AiRevenuePriority;
 };
 
+type DetailFollowUpModalState = {
+  channel: AiRevenueContactChannel;
+  result?: AiRevenueContactResult;
+  scheduleOption?: "none" | "tomorrow" | "three_days" | "one_week" | "next_month" | "custom";
+};
+
 const TABS: Array<{ value: RevenueAgentTab; label: string; detail: string }> = [
   {
     value: "dashboard",
@@ -67,9 +80,9 @@ const TABS: Array<{ value: RevenueAgentTab; label: string; detail: string }> = [
     detail: "Customer follow-up recommendations with reason, purchase context, remaining balance, and chance-to-return score.",
   },
   {
-    value: "message_approval",
-    label: "Message Approval",
-    detail: "Myanmar follow-up drafts with customer context. Staff can edit and approve before anything is sent.",
+    value: "follow_up",
+    label: "Follow Up",
+    detail: "AI finds customers to follow up. Staff can call, send manual Viber, record result, schedule next follow-up, or close.",
   },
   {
     value: "conversations",
@@ -213,33 +226,53 @@ function actorName(actor: { name?: string | null; email?: string | null; userId?
   return actor?.name || actor?.email || actor?.userId || "Not recorded";
 }
 
+function attemptActorName(attempt: AiRevenueContactAttempt) {
+  return attempt.agentName || actorName(attempt.createdBy);
+}
+
+function formatDateTime(value: string | null | undefined) {
+  return value ? value.replace("T", " ").slice(0, 16) : "Not set";
+}
+
+const OUTCOME_TYPES: Array<{ type: AiRevenueOutcomeType; label: string }> = [
+  { type: "appointment_booked", label: "Appointment booked" },
+  { type: "customer_came", label: "Customer came" },
+  { type: "treatment_completed", label: "Treatment completed" },
+  { type: "package_session_used", label: "Package session used" },
+  { type: "repurchase", label: "Repurchase" },
+  { type: "revenue_attributed", label: "Revenue attributed" },
+];
+
+function outcomePrimaryDetail(outcomeLink: AiRevenueOutcomeLink) {
+  const details = [
+    outcomeLink.bookingId ? `Booking ${outcomeLink.bookingId}` : null,
+    outcomeLink.treatmentId ? `Treatment ${outcomeLink.treatmentId}` : null,
+    outcomeLink.invoiceNumber ? `Invoice ${outcomeLink.invoiceNumber}` : null,
+    outcomeLink.orderId ? `Order ${outcomeLink.orderId}` : null,
+    outcomeLink.serviceName ? outcomeLink.serviceName : null,
+  ].filter(Boolean);
+
+  return details.length > 0 ? details.join(" · ") : "No external source record linked yet";
+}
+
+function outcomeMetricDetail(outcomeLink: AiRevenueOutcomeLink) {
+  const details = [
+    outcomeLink.revenueAmount != null ? formatMoney(outcomeLink.revenueAmount) : null,
+    outcomeLink.packageSessionsRecovered != null
+      ? `${formatNumber(outcomeLink.packageSessionsRecovered)} package sessions`
+      : null,
+    formatLabel(outcomeLink.attributionType),
+  ].filter(Boolean);
+
+  return details.join(" · ");
+}
+
 function isWorkflowLocked(action: AiRevenueAction) {
   return Boolean(action.resolution || ["closed", "skipped", "sent"].includes(action.status));
 }
 
-function nextStepLabel(action: AiRevenueAction) {
-  if (action.resolution || ["closed", "skipped"].includes(action.status)) {
-    return "This opportunity is already resolved.";
-  }
-  if (!action.message.draftText && !action.message.approvedText) {
-    return "Generate a friendly Myanmar draft message.";
-  }
-  if (!action.message.approvedText && action.message.draftText) {
-    return "Review the draft, edit in the queue if needed, then approve.";
-  }
-  if (action.status === "approved") {
-    return "Mark the approved outreach as sent after staff contacts the customer.";
-  }
-  if (action.status === "sent") {
-    return "Record the customer reply or move the conversation toward booking.";
-  }
-  if (["customer_replied", "human_takeover"].includes(action.status)) {
-    return "Request a booking or let staff take over the conversation.";
-  }
-  if (["appointment_requested", "appointment_created", "appointment_confirmed", "reminder_sent"].includes(action.status)) {
-    return "Track appointment outcome and record revenue only after checkout/payment.";
-  }
-  return "Review the customer context and choose the next staff action.";
+function areStaffActionsLocked(action: AiRevenueAction) {
+  return Boolean(action.resolution || ["closed", "skipped"].includes(action.status));
 }
 
 function ActionDetailPanel({
@@ -259,13 +292,54 @@ function ActionDetailPanel({
 }) {
   const [auditLogs, setAuditLogs] = useState<AiRevenueAuditLog[]>([]);
   const [auditLoading, setAuditLoading] = useState(true);
+  const [followUpAttempts, setFollowUpAttempts] = useState<AiRevenueContactAttempt[]>([]);
+  const [followUpLoading, setFollowUpLoading] = useState(true);
+  const [outcomeLinks, setOutcomeLinks] = useState<AiRevenueOutcomeLink[]>([]);
+  const [outcomeLoading, setOutcomeLoading] = useState(true);
+  const [followUpModal, setFollowUpModal] = useState<DetailFollowUpModalState | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const relatedActions = actions.filter((item) => item.id !== action.id && isSameCustomerAction(item, action));
   const draftText = action.message.draftText ?? action.message.approvedText ?? "";
   const approvedText = action.message.approvedText ?? "";
   const locked = isWorkflowLocked(action);
+  const staffActionsLocked = areStaffActionsLocked(action);
   const canApproveDraft = Boolean(draftText.trim()) && !approvedText && !locked;
   const canMarkSent = action.status === "approved" && approvedText.trim().length > 0;
+  const outcomeCounts = OUTCOME_TYPES.map((outcomeType) => ({
+    ...outcomeType,
+    count: outcomeLinks.filter((outcomeLink) => outcomeLink.outcomeType === outcomeType.type).length,
+  }));
+
+  const loadFollowUpAttempts = useCallback(async () => {
+    setFollowUpLoading(true);
+    try {
+      const attempts = await getAiRevenueFollowUpAttempts(action.id, {
+        clinicId,
+        limit: 100,
+      });
+      setFollowUpAttempts(attempts);
+    } catch {
+      setFollowUpAttempts([]);
+    } finally {
+      setFollowUpLoading(false);
+    }
+  }, [action.id, clinicId]);
+
+  const loadOutcomeLinks = useCallback(async () => {
+    setOutcomeLoading(true);
+    try {
+      const links = await getAiRevenueOutcomeLinks({
+        clinicId,
+        actionId: action.id,
+        limit: 100,
+      });
+      setOutcomeLinks(links);
+    } catch {
+      setOutcomeLinks([]);
+    } finally {
+      setOutcomeLoading(false);
+    }
+  }, [action.id, clinicId]);
 
   async function runQuickAction(actionName: string, work: () => Promise<string>) {
     setBusyAction(actionName);
@@ -313,6 +387,14 @@ function ActionDetailPanel({
     };
   }, [action.id, clinicId]);
 
+  useEffect(() => {
+    void loadFollowUpAttempts();
+  }, [loadFollowUpAttempts]);
+
+  useEffect(() => {
+    void loadOutcomeLinks();
+  }, [loadOutcomeLinks]);
+
   return (
     <Panel
       title="Action detail"
@@ -337,10 +419,241 @@ function ActionDetailPanel({
 
         <div className="ai-revenue-detail__quick-actions">
           <div>
-            <strong>Action controls</strong>
-            <span>{nextStepLabel(action)}</span>
+            <strong>Staff follow-up actions</strong>
+            <span>Record the human contact result, schedule the next touch, book, or close this customer follow-up.</span>
           </div>
           <div className="ai-revenue-action-card__controls">
+            <button
+              type="button"
+              className="button telegram-settings__button telegram-settings__button--secondary"
+              disabled={staffActionsLocked || busyAction !== null}
+              onClick={() => setFollowUpModal({ channel: "phone", result: "no_answer" })}
+            >
+              Log Call
+            </button>
+
+            <button
+              type="button"
+              className="button telegram-settings__button telegram-settings__button--primary"
+              disabled={staffActionsLocked || busyAction !== null}
+              onClick={() => setFollowUpModal({ channel: "viber_manual", result: "message_sent" })}
+            >
+              Log Viber Sent
+            </button>
+
+            <button
+              type="button"
+              className="button telegram-settings__button telegram-settings__button--secondary"
+              disabled={staffActionsLocked || busyAction !== null}
+              onClick={() => setFollowUpModal({ channel: "phone", result: "call_later", scheduleOption: "tomorrow" })}
+            >
+              Schedule Follow-up
+            </button>
+
+            <button
+              type="button"
+              className="button telegram-settings__button telegram-settings__button--secondary"
+              disabled={staffActionsLocked || busyAction !== null}
+              onClick={() => setFollowUpModal({ channel: "phone", result: "appointment_booked" })}
+            >
+              Book Appointment
+            </button>
+
+            <button
+              type="button"
+              className="button telegram-settings__button telegram-settings__button--danger"
+              disabled={staffActionsLocked || busyAction !== null}
+              onClick={() => setFollowUpModal({ channel: "phone", result: "do_not_contact" })}
+            >
+              Close / Do Not Contact
+            </button>
+          </div>
+        </div>
+
+        <div className="ai-revenue-detail__grid">
+          <div>
+            <span>Type</span>
+            <strong>{formatLabel(action.actionType)}</strong>
+          </div>
+          <div>
+            <span>Status</span>
+            <strong>{formatLabel(action.status)}</strong>
+          </div>
+          <div>
+            <span>Workflow state</span>
+            <strong>{formatLabel(action.workflowState)}</strong>
+          </div>
+          <div>
+            <span>Visibility state</span>
+            <strong>{formatLabel(action.visibilityState)}</strong>
+          </div>
+          <div>
+            <span>Source</span>
+            <strong>{formatLabel(action.source)}</strong>
+          </div>
+          <div>
+            <span>Date</span>
+            <strong>{action.dateKey}</strong>
+          </div>
+          <div>
+            <span>Service</span>
+            <strong>{action.service.serviceName ?? "Not set"}</strong>
+          </div>
+          <div>
+            <span>Package balance</span>
+            <strong>
+              {action.packageInfo.remainingUnits == null
+                ? "Not set"
+                : `${formatNumber(action.packageInfo.remainingUnits)} remaining`}
+            </strong>
+          </div>
+          <div>
+            <span>AI-generated revenue</span>
+            <strong>{formatMoney(action.revenue.actualRevenue)}</strong>
+          </div>
+          <div>
+            <span>Booking ID</span>
+            <strong>{action.appointment.bookingId ?? "Not linked"}</strong>
+          </div>
+          <div>
+            <span>Appointment time</span>
+            <strong>{action.appointment.appointmentDateTime ?? "Not requested"}</strong>
+          </div>
+          <div>
+            <span>Practitioner</span>
+            <strong>{action.appointment.practitionerName ?? "Not set"}</strong>
+          </div>
+          <div>
+            <span>Package sessions recovered</span>
+            <strong>{formatNumber(action.revenue.packageSessionsRecovered)}</strong>
+          </div>
+          <div>
+            <span>Follow-up due</span>
+            <strong>{action.dueDateKey ?? action.followUp.nextFollowUpDate ?? action.followUp.dueDate ?? action.dateKey}</strong>
+          </div>
+          <div>
+            <span>Due date key</span>
+            <strong>{action.dueDateKey ?? action.dateKey}</strong>
+          </div>
+          <div>
+            <span>Next follow-up at</span>
+            <strong>{formatDateTime(action.nextFollowUpAt ?? action.followUp.nextFollowUpDate)}</strong>
+          </div>
+          <div>
+            <span>Attempt count</span>
+            <strong>{formatNumber(action.attemptCount ?? action.followUp.attemptCount)}</strong>
+          </div>
+          <div>
+            <span>Assigned to</span>
+            <strong>{action.assignedToName ?? action.assignedToUserId ?? "Unassigned"}</strong>
+          </div>
+          <div>
+            <span>Last follow-up</span>
+            <strong>{formatDateTime(action.lastContactAt ?? action.followUp.lastContactedAt)}</strong>
+          </div>
+          <div>
+            <span>Last contact result</span>
+            <strong>{formatLabel(action.lastContactResult ?? action.followUp.lastResult)}</strong>
+          </div>
+          <div>
+            <span>Last follow-up note</span>
+            <strong>{action.lastFollowUpNote ?? action.followUp.lastNote ?? "No note"}</strong>
+          </div>
+        </div>
+
+        <AiStaffFollowUpSnapshot action={action} relatedActions={relatedActions} />
+
+        <div className="ai-revenue-detail__section">
+          <strong>Follow-up history</strong>
+          {followUpLoading ? (
+            <div className="inline-note inline-note--loading">Loading staff/customer contact history...</div>
+          ) : followUpAttempts.length > 0 ? (
+            <div className="ai-revenue-followup-history">
+              {followUpAttempts.map((attempt) => (
+                <div key={attempt.id} className="ai-revenue-followup-history__item">
+                  <div>
+                    <strong>{formatLabel(attempt.channel)} - {formatLabel(attempt.result)}</strong>
+                    <span>
+                      {formatDateTime(attempt.createdAt)} by {attemptActorName(attempt)}
+                    </span>
+                  </div>
+                  {attempt.note ? <p>{attempt.note}</p> : <p>No note recorded.</p>}
+                  <small>
+                    Next follow-up: {formatDateTime(attempt.nextFollowUpAt ?? attempt.nextFollowUpDateKey)}
+                    {attempt.messageText ? ` · Message: ${attempt.messageText}` : ""}
+                  </small>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <small>No staff/customer contact history has been recorded for this action yet.</small>
+          )}
+        </div>
+
+        <div className="ai-revenue-detail__section">
+          <strong>Human follow-up</strong>
+          <p>
+            {formatLabel(action.followUp.status)} · Attempts {formatNumber(action.followUp.attemptCount)} · Channel{" "}
+            {formatLabel(action.followUp.lastChannel)}
+          </p>
+          <small>
+            Last note: {action.followUp.lastNote ?? "not recorded"} · Next:{" "}
+            {action.followUp.nextFollowUpDate ?? "not scheduled"}
+          </small>
+        </div>
+
+        <div className="ai-revenue-detail__section">
+          <strong>Outcome history</strong>
+          {outcomeLoading ? (
+            <div className="inline-note inline-note--loading">Loading structured outcome links...</div>
+          ) : (
+            <>
+              <div className="ai-revenue-outcome-summary">
+                {outcomeCounts.map((outcomeType) => (
+                  <div key={outcomeType.type} className="ai-revenue-outcome-summary__item">
+                    <span>{outcomeType.label}</span>
+                    <strong>{formatNumber(outcomeType.count)}</strong>
+                  </div>
+                ))}
+              </div>
+
+              {outcomeLinks.length > 0 ? (
+                <div className="ai-revenue-outcome-history">
+                  {outcomeLinks.map((outcomeLink) => (
+                    <div key={outcomeLink.id} className="ai-revenue-outcome-history__item">
+                      <div>
+                        <strong>{formatLabel(outcomeLink.outcomeType)}</strong>
+                        <span>{formatDateTime(outcomeLink.eventAt)}</span>
+                      </div>
+                      <p>{outcomePrimaryDetail(outcomeLink)}</p>
+                      <small>{outcomeMetricDetail(outcomeLink)}</small>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <small>No structured outcome links have been recorded for this action yet.</small>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="ai-revenue-detail__section">
+          <strong>AI reason (Myanmar)</strong>
+          <p>{myanmarReason(action, relatedActions)}</p>
+          <small>Source reason: {action.reason}</small>
+        </div>
+
+        <div className="ai-revenue-detail__section">
+          <strong>Recommended action</strong>
+          <p>{action.recommendedAction}</p>
+        </div>
+
+        <details className="ai-revenue-detail__disclosure">
+          <summary>Advanced message approval actions</summary>
+          <p className="inline-note">
+            Legacy draft approval tools are kept here for compatibility. They record approval workflow only and do not send real Viber messages.
+          </p>
+          <div className="ai-revenue-action-card__controls ai-revenue-detail__advanced-actions">
             <button
               type="button"
               className="button telegram-settings__button telegram-settings__button--secondary"
@@ -412,71 +725,7 @@ function ActionDetailPanel({
               onError={onError}
             />
           </div>
-        </div>
-
-        <div className="ai-revenue-detail__grid">
-          <div>
-            <span>Type</span>
-            <strong>{formatLabel(action.actionType)}</strong>
-          </div>
-          <div>
-            <span>Status</span>
-            <strong>{formatLabel(action.status)}</strong>
-          </div>
-          <div>
-            <span>Source</span>
-            <strong>{formatLabel(action.source)}</strong>
-          </div>
-          <div>
-            <span>Date</span>
-            <strong>{action.dateKey}</strong>
-          </div>
-          <div>
-            <span>Service</span>
-            <strong>{action.service.serviceName ?? "Not set"}</strong>
-          </div>
-          <div>
-            <span>Package balance</span>
-            <strong>
-              {action.packageInfo.remainingUnits == null
-                ? "Not set"
-                : `${formatNumber(action.packageInfo.remainingUnits)} remaining`}
-            </strong>
-          </div>
-          <div>
-            <span>AI-generated revenue</span>
-            <strong>{formatMoney(action.revenue.actualRevenue)}</strong>
-          </div>
-          <div>
-            <span>Booking ID</span>
-            <strong>{action.appointment.bookingId ?? "Not linked"}</strong>
-          </div>
-          <div>
-            <span>Appointment time</span>
-            <strong>{action.appointment.appointmentDateTime ?? "Not requested"}</strong>
-          </div>
-          <div>
-            <span>Practitioner</span>
-            <strong>{action.appointment.practitionerName ?? "Not set"}</strong>
-          </div>
-          <div>
-            <span>Package sessions recovered</span>
-            <strong>{formatNumber(action.revenue.packageSessionsRecovered)}</strong>
-          </div>
-        </div>
-
-        <AiFollowUpSnapshot action={action} relatedActions={relatedActions} />
-
-        <div className="ai-revenue-detail__section">
-          <strong>AI reason (Myanmar)</strong>
-          <p>{myanmarReason(action, relatedActions)}</p>
-          <small>Source reason: {action.reason}</small>
-        </div>
-
-        <div className="ai-revenue-detail__section">
-          <strong>Recommended action</strong>
-          <p>{action.recommendedAction}</p>
-        </div>
+        </details>
 
         <details className="ai-revenue-detail__disclosure">
           <summary>Source evidence used by AI</summary>
@@ -573,6 +822,23 @@ function ActionDetailPanel({
             <AiRevenueTimeline logs={auditLogs} emptyLabel="No audit events have been recorded for this action yet." />
           )}
         </details>
+
+        {followUpModal ? (
+          <AiRevenueFollowUpAttemptModal
+            clinicId={clinicId}
+            action={action}
+            relatedActions={relatedActions}
+            initialChannel={followUpModal.channel}
+            initialResult={followUpModal.result}
+            initialScheduleOption={followUpModal.scheduleOption}
+            onClose={() => setFollowUpModal(null)}
+            onSaved={async (message) => {
+              await Promise.all([loadFollowUpAttempts(), loadOutcomeLinks()]);
+              await onWorkflowChanged(message);
+            }}
+            onError={onError}
+          />
+        ) : null}
       </div>
     </Panel>
   );
@@ -590,6 +856,7 @@ export function AiRevenueAgentPage() {
     priority: "",
   });
   const [actions, setActions] = useState<AiRevenueAction[]>([]);
+  const [followUpActions, setFollowUpActions] = useState<AiRevenueAction[]>([]);
   const [summary, setSummary] = useState<AiRevenueSummary | null>(null);
   const [selectedAction, setSelectedAction] = useState<AiRevenueAction | null>(null);
   const [busyAction, setBusyAction] = useState<"load" | "generate" | null>("load");
@@ -600,6 +867,7 @@ export function AiRevenueAgentPage() {
     async (showLoader = true, overrideFilters?: FilterState) => {
       if (!clinic) {
         setActions([]);
+        setFollowUpActions([]);
         setSummary(null);
         setBusyAction(null);
         return;
@@ -612,11 +880,17 @@ export function AiRevenueAgentPage() {
       setErrorMessage(null);
 
       try {
-        const [actionResponse, summaryResponse] = await Promise.all([
+        const [actionResponse, followUpResponse, summaryResponse] = await Promise.all([
           getAiRevenueActions(buildActionParams(clinic.id, nextFilters)),
+          getAiRevenueActions({
+            clinicId: clinic.id,
+            limit: 500,
+            includeResolved: true,
+          }),
           getAiRevenueSummary(buildSummaryParams(clinic.id, nextFilters)),
         ]);
         setActions(actionResponse.actions);
+        setFollowUpActions(followUpResponse.actions);
         setSummary(summaryResponse);
       } catch (error) {
         setErrorMessage(getApiErrorMessage(error, "AI Revenue Agent data could not be loaded."));
@@ -854,14 +1128,14 @@ export function AiRevenueAgentPage() {
             onOpenAction={setSelectedAction}
           />
         </Panel>
-      ) : activeTab === "message_approval" ? (
+      ) : activeTab === "follow_up" ? (
         <Panel
-          title="Customer follow-up message queue"
-          subtitle="Generate Myanmar drafts, review customer purchase context, approve messages, or mark approved outreach as sent."
+          title="Follow-up workbench"
+          subtitle="AI finds customers to follow up. Staff can call, send manual Viber, record result, schedule next follow-up, or close."
         >
-          <AiRevenueApprovalTab
+          <AiRevenueFollowUpTab
             clinicId={clinic.id}
-            actions={actions}
+            actions={followUpActions}
             loading={busyAction === "load"}
             onWorkflowChanged={async (message) => {
               setNotice(message);
@@ -963,7 +1237,10 @@ export function AiRevenueAgentPage() {
           >
             <ActionDetailPanel
               clinicId={clinic.id}
-              actions={actions}
+              actions={[
+                ...actions,
+                ...followUpActions.filter((followUpAction) => !actions.some((action) => action.id === followUpAction.id)),
+              ]}
               action={selectedAction}
               onWorkflowChanged={async (message) => {
                 setNotice(message);

@@ -153,6 +153,18 @@ export function AiRevenueDashboardTab({
     { label: "Active Opportunities", value: numberLabel(summary?.activeOpportunities ?? summary?.opportunitiesFound), hint: "Visible actionable queue" },
     { label: "Resolved Actions", value: numberLabel(summary?.resolvedActions), hint: "Closed with full audit history" },
     { label: "Suppressed Customers", value: numberLabel(summary?.suppressedActions), hint: "Hidden from future AI generation" },
+    { label: "Follow-ups Contacted", value: numberLabel(summary?.followUpAttempts), hint: "Staff-recorded calls, manual messages, and visits" },
+    {
+      label: "Bookings from Follow-up",
+      value: numberLabel(summary?.appointmentBookedFromFollowUp ?? summary?.followUpBooked),
+      hint: "Appointments linked to staff follow-up",
+    },
+    { label: "Repurchases", value: numberLabel(summary?.repurchasesAttributed ?? summary?.followUpRepurchased), hint: "Repurchase outcomes recorded" },
+    {
+      label: "Revenue Attributed",
+      value: moneyLabel((summary?.aiGeneratedRevenue ?? 0) + (summary?.aiInfluencedRevenue ?? 0)),
+      hint: "Generated plus influenced revenue",
+    },
     { label: "High Priority", value: numberLabel(summary?.highPriority), hint: "Needs manager attention first" },
     { label: "Drafts Ready", value: numberLabel(summary?.draftsReady), hint: "Messages prepared for approval" },
     { label: "Approved Messages", value: numberLabel(summary?.approvedMessages), hint: "Human-approved outreach" },

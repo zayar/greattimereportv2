@@ -949,4 +949,44 @@ export function AiFollowUpSnapshot({
   );
 }
 
+export function AiStaffFollowUpSnapshot({
+  action,
+  relatedActions = [],
+}: {
+  action: AiRevenueAction;
+  relatedActions?: AiRevenueAction[];
+}) {
+  const suggestion = action.aiSuggestion || action.recommendedAction || action.summary || "Follow up with the customer.";
+
+  return (
+    <section className="ai-followup-snapshot ai-followup-snapshot--staff">
+      <div className="ai-followup-section">
+        <div className="ai-followup-section__header">
+          <strong>Why follow up</strong>
+          <span>Staff-ready reason</span>
+        </div>
+        <p>{myanmarReason(action, relatedActions)}</p>
+      </div>
+
+      <AiCustomerContextStrip action={action} relatedActions={relatedActions} />
+
+      <div className="ai-followup-section">
+        <div className="ai-followup-section__header">
+          <strong>Service usage and remaining balance</strong>
+          <span>Package/session context for the conversation</span>
+        </div>
+        <AiTreatmentBalanceTable action={action} relatedActions={relatedActions} />
+      </div>
+
+      <div className="ai-followup-section">
+        <div className="ai-followup-section__header">
+          <strong>AI suggestion</strong>
+          <span>Suggested staff action</span>
+        </div>
+        <p>{suggestion}</p>
+      </div>
+    </section>
+  );
+}
+
 export { daysSinceLastVisit, remainingUnits, titleCase };

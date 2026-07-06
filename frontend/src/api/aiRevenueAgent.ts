@@ -8,13 +8,25 @@ import type {
   AiRevenueAuditActorType,
   AiRevenueAuditLog,
   AiRevenueAttributionType,
+  AiRevenueContactAttempt,
+  AiRevenueContactChannel,
+  AiRevenueContactResult,
+  AiRevenueCustomerTimelineEvent,
   AiRevenueCustomerSuppression,
+  AiRevenueFollowUpAttempt,
+  AiRevenueFollowUpChannel,
+  AiRevenueFollowUpResult,
+  AiRevenueFollowUpScheduleOption,
   AiRevenueMessageEvent,
+  AiRevenueOutcomeLink,
+  AiRevenueOutcomeType,
   AiRevenuePriority,
   AiRevenueResolutionReason,
   AiRevenueSettings,
   AiRevenueSummary,
   AiRevenueSuppressionScope,
+  AiRevenueVisibilityState,
+  AiRevenueWorkflowState,
 } from "../types/domain";
 
 type ApiEnvelope<T> = {
@@ -25,12 +37,21 @@ type ApiEnvelope<T> = {
 export type AiRevenueActionQuery = {
   clinicId: string;
   dateKey?: string;
+  dueDateKey?: string;
+  dueStartDateKey?: string;
+  dueEndDateKey?: string;
   source?: AiRevenueActionSource;
   actionType?: AiRevenueActionType;
   status?: AiRevenueActionStatus;
+  workflowState?: AiRevenueWorkflowState;
+  visibilityState?: AiRevenueVisibilityState;
+  assignedToUserId?: string;
+  lastContactResult?: AiRevenueContactResult;
+  queueView?: "today" | "overdue" | "tomorrow" | "next_7_days" | "all_open" | "completed" | "suppressed";
   priority?: AiRevenuePriority;
   limit?: number;
   includeResolved?: boolean;
+  includeHidden?: boolean;
 };
 
 export type AiRevenueSummaryQuery = {
@@ -229,6 +250,132 @@ export async function recordAiRevenueReply(actionId: string, payload: {
   }>>(`/ai-revenue-agent/actions/${encodeURIComponent(actionId)}/record-reply`, payload);
 
   return response.data.data;
+}
+
+export async function recordAiRevenueFollowUp(actionId: string, payload: {
+  clinicId: string;
+  channel: AiRevenueFollowUpChannel;
+  result: AiRevenueFollowUpResult;
+  note?: string | null;
+  contactedAt?: string | null;
+  scheduleOption?: AiRevenueFollowUpScheduleOption;
+  nextFollowUpDate?: string | null;
+  suppressionScope?: AiRevenueSuppressionScope | null;
+  bookingId?: string | null;
+  appointmentDateTime?: string | null;
+  treatmentCompletedAt?: string | null;
+  packageSessionUsedAt?: string | null;
+  packageSessionsRecovered?: number | null;
+  repurchaseInvoiceNumber?: string | null;
+  repurchaseRevenue?: number | null;
+  revenueAttributedAt?: string | null;
+}) {
+  const response = await apiClient.post<ApiEnvelope<{
+    action: AiRevenueAction;
+    attempt: AiRevenueFollowUpAttempt;
+  }>>(`/ai-revenue-agent/actions/${encodeURIComponent(actionId)}/record-follow-up`, payload);
+
+  return response.data.data;
+}
+
+export async function recordAiRevenueFollowUpAttempt(actionId: string, payload: {
+  clinicId: string;
+  channel: AiRevenueContactChannel;
+  result: AiRevenueContactResult;
+  note?: string | null;
+  messageText?: string | null;
+  nextFollowUpAt?: string | null;
+  nextFollowUpDateKey?: string | null;
+  suppressCustomer?: boolean;
+  suppressionScope?: AiRevenueSuppressionScope;
+  suppressionUntil?: string | null;
+  permanentSuppression?: boolean;
+  appointment?: {
+    bookingId?: string | null;
+    appointmentDateTime?: string | null;
+    serviceId?: string | null;
+    serviceName?: string | null;
+    practitionerId?: string | null;
+    practitionerName?: string | null;
+    note?: string | null;
+  };
+  outcome?: {
+    outcomeType?: AiRevenueOutcomeType;
+    bookingId?: string | null;
+    treatmentId?: string | null;
+    orderId?: string | null;
+    invoiceNumber?: string | null;
+    serviceId?: string | null;
+    serviceName?: string | null;
+    revenueAmount?: number | null;
+    packageSessionsRecovered?: number | null;
+    attributionType?: AiRevenueAttributionType;
+    eventAt?: string | null;
+  };
+}) {
+  const response = await apiClient.post<ApiEnvelope<{
+    action: AiRevenueAction;
+    attempt: AiRevenueContactAttempt;
+    timelineEvent: AiRevenueCustomerTimelineEvent;
+    suppression: AiRevenueCustomerSuppression | null;
+    outcomeLink: AiRevenueOutcomeLink | null;
+  }>>(`/ai-revenue-agent/actions/${encodeURIComponent(actionId)}/follow-up-attempt`, payload);
+
+  return response.data.data;
+}
+
+export async function getAiRevenueFollowUpAttempts(actionId: string, params: {
+  clinicId: string;
+  limit?: number;
+}) {
+  const response = await apiClient.get<ApiEnvelope<{ attempts: AiRevenueContactAttempt[] }>>(
+    `/ai-revenue-agent/actions/${encodeURIComponent(actionId)}/follow-up-attempts`,
+    { params },
+  );
+
+  return response.data.data.attempts;
+}
+
+export async function getAiRevenueOutcomeLinks(params: {
+  clinicId: string;
+  actionId?: string;
+  outcomeType?: AiRevenueOutcomeType;
+  startDateKey?: string;
+  endDateKey?: string;
+  limit?: number;
+}) {
+  const response = await apiClient.get<ApiEnvelope<{ outcomeLinks: AiRevenueOutcomeLink[] }>>(
+    "/ai-revenue-agent/outcome-links",
+    { params },
+  );
+
+  return response.data.data.outcomeLinks;
+}
+
+export async function createAiRevenueOutcomeLink(payload: {
+  clinicId: string;
+  actionId: string;
+  outcomeType: AiRevenueOutcomeType;
+  contactAttemptId?: string | null;
+  bookingId?: string | null;
+  treatmentId?: string | null;
+  orderId?: string | null;
+  invoiceNumber?: string | null;
+  serviceId?: string | null;
+  serviceName?: string | null;
+  revenueAmount?: number | null;
+  packageSessionsRecovered?: number | null;
+  attributionType?: AiRevenueAttributionType | null;
+  attributionWindowDays?: number | null;
+  confidence?: number | null;
+  eventAt?: string | null;
+}) {
+  const response = await apiClient.post<ApiEnvelope<{ outcomeLink: AiRevenueOutcomeLink }>>(
+    "/ai-revenue-agent/outcome-links",
+    payload,
+  );
+
+  return response.data.data.outcomeLink;
 }
 
 export async function requestAiRevenueBooking(actionId: string, payload: {
