@@ -14,6 +14,17 @@ type Props = {
   data: CustomerUsageHeatmapData;
 };
 
+function heatmapCellBackground(count: number, maxValue: number) {
+  if (count <= 0) {
+    return "#eef4f7";
+  }
+
+  const intensity = Math.min(1, count / maxValue);
+  const lightness = 86 - intensity * 28;
+  const saturation = 72 + intensity * 10;
+  return `hsl(218 ${saturation}% ${lightness}%)`;
+}
+
 export function CustomerUsageHeatmap({ data }: Props) {
   if (data.services.length === 0) {
     return (
@@ -50,10 +61,7 @@ export function CustomerUsageHeatmap({ data }: Props) {
                 className="customer-detail__usage-cell"
                 title={`${service.serviceName} - ${data.months[index]} - ${count} use${count === 1 ? "" : "s"}`}
                 style={{
-                  backgroundColor:
-                    count === 0
-                      ? "rgba(29, 110, 242, 0.06)"
-                      : `rgba(29, 110, 242, ${0.18 + (count / maxValue) * 0.42})`,
+                  backgroundColor: heatmapCellBackground(count, maxValue),
                 }}
               >
                 {count > 0 ? count : ""}

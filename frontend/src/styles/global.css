@@ -2386,12 +2386,9 @@ textarea:focus-visible,
   gap: 14px;
   padding: 14px;
   border-radius: 10px;
-  border: 1px solid rgba(7, 65, 66, 0.14);
-  background:
-    linear-gradient(180deg, rgba(248, 252, 251, 0.96), rgba(242, 249, 248, 0.92)),
-    rgba(255, 255, 255, 0.94);
-  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
-  backdrop-filter: blur(10px);
+  border: 1px solid #d3e2dc;
+  background: #f8fcfa;
+  box-shadow: 0 14px 34px rgba(22, 53, 48, 0.1);
 }
 
 .ai-revenue-detail__quick-actions > div:first-child {
@@ -2401,11 +2398,11 @@ textarea:focus-visible,
 }
 
 .ai-revenue-detail__quick-actions strong {
-  color: #0f3f3d;
+  color: #0b4a42;
 }
 
 .ai-revenue-detail__quick-actions span {
-  color: #64748b;
+  color: #5b6c7d;
   line-height: 1.45;
   font-weight: 700;
 }
@@ -2545,8 +2542,8 @@ textarea:focus-visible,
   gap: 14px;
   padding: 14px;
   border-radius: 8px;
-  border: 1px solid rgba(7, 65, 66, 0.12);
-  background: rgba(248, 252, 251, 0.82);
+  border: 1px solid #d8e4e3;
+  background: #f9fbfa;
 }
 
 .ai-followup-snapshot__intro {
@@ -2578,7 +2575,7 @@ textarea:focus-visible,
 }
 
 .ai-followup-snapshot--staff {
-  background: rgba(255, 255, 255, 0.72);
+  background: #ffffff;
 }
 
 .ai-followup-snapshot--staff .ai-followup-section p {
@@ -2670,13 +2667,13 @@ textarea:focus-visible,
   min-width: 0;
   padding: 14px;
   border-radius: 8px;
-  border: 1px solid rgba(15, 118, 110, 0.16);
-  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid #d8e4e3;
+  background: #ffffff;
 }
 
 .ai-followup-focus-treatment {
-  border-color: rgba(15, 118, 110, 0.28);
-  background: rgba(15, 118, 110, 0.08);
+  border-color: #b9d8d3;
+  background: #edf7f5;
 }
 
 .ai-followup-focus-treatment span,
@@ -2716,8 +2713,8 @@ textarea:focus-visible,
   padding: 9px 10px;
   border-radius: 8px;
   color: #111827;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  background: rgba(248, 250, 252, 0.92);
+  border: 1px solid #dbe3e8;
+  background: #f8fafc;
   line-height: 1.25;
 }
 
@@ -2733,13 +2730,13 @@ textarea:focus-visible,
   min-width: 0;
   padding: 12px;
   border-radius: 8px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid #dbe3e8;
+  background: #ffffff;
 }
 
 .ai-followup-context-strip > div:first-child {
-  border-color: rgba(15, 118, 110, 0.22);
-  background: rgba(15, 118, 110, 0.07);
+  border-color: #b9d8d3;
+  background: #edf7f5;
 }
 
 .ai-followup-context-strip span {
@@ -2768,8 +2765,8 @@ textarea:focus-visible,
 .ai-followup-treatment-table-wrap {
   overflow-x: auto;
   border-radius: 8px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid #dbe3e8;
+  background: #ffffff;
 }
 
 .ai-followup-treatment-table {
@@ -2782,17 +2779,17 @@ textarea:focus-visible,
 .ai-followup-treatment-table td {
   padding: 12px 14px;
   text-align: left;
-  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+  border-bottom: 1px solid #e4eaf0;
   vertical-align: middle;
 }
 
 .ai-followup-treatment-table th {
-  color: #64748b;
+  color: #52657a;
   font-size: 0.72rem;
   font-weight: 900;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  background: rgba(248, 250, 252, 0.82);
+  background: #f3f6f8;
 }
 
 .ai-followup-treatment-table tbody tr:last-child td {
@@ -2827,11 +2824,11 @@ textarea:focus-visible,
 }
 
 .ai-followup-treatment-table__focused-row {
-  background: rgba(15, 118, 110, 0.055);
+  background: #f1faf7;
 }
 
 .ai-followup-treatment-table__focused-row td:first-child {
-  box-shadow: inset 4px 0 0 rgba(15, 118, 110, 0.3);
+  box-shadow: inset 4px 0 0 #61b8a7;
 }
 
 .ai-followup-balance-status {
@@ -3008,7 +3005,7 @@ textarea:focus-visible,
 
 .ai-revenue-action-card__main span,
 .ai-revenue-detail__header span {
-  color: #64748b;
+  color: #52657a;
 }
 
 .ai-revenue-action-card__body {
@@ -3514,8 +3511,8 @@ textarea:focus-visible,
   justify-content: center;
   padding: 48px 20px;
   overflow-y: auto;
-  background: rgba(15, 23, 42, 0.42);
-  backdrop-filter: blur(8px);
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(3px);
 }
 
 .ai-revenue-modal {
@@ -3535,13 +3532,18 @@ textarea:focus-visible,
 
 .ai-revenue-modal--wide {
   width: min(100%, 1180px);
-  background: transparent;
-  box-shadow: none;
+  border: 1px solid #d7ded8;
+  background: #f7f9f6;
+  box-shadow: 0 32px 90px rgba(15, 23, 42, 0.28);
 }
 
 .ai-revenue-modal--wide > .panel {
   margin: 0;
   width: 100%;
+  border: 0;
+  background: #f7f9f6;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .ai-revenue-modal__header {
@@ -3732,7 +3734,10 @@ textarea:focus-visible,
 .ai-revenue-usage-over-time {
   gap: 14px;
   min-width: 0;
-  padding-top: 6px;
+  padding: 16px;
+  border: 1px solid #d8e4e3;
+  border-radius: 12px;
+  background: #f4f8f7;
 }
 
 .ai-revenue-usage-over-time__header {
@@ -3751,7 +3756,7 @@ textarea:focus-visible,
 
 .ai-revenue-usage-over-time__header p {
   margin: 0;
-  color: #64748b;
+  color: #52657a;
   line-height: 1.5;
 }
 
@@ -13659,10 +13664,11 @@ a {
 
 .customer-detail__usage-header span {
   text-align: center;
-  color: #667085;
+  color: #51627a;
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+  font-weight: 700;
 }
 
 .customer-detail__usage-body {
@@ -13674,14 +13680,15 @@ a {
 .customer-detail__usage-service {
   padding: 12px 14px;
   border-radius: 16px;
-  background: rgba(248, 250, 252, 0.88);
-  border: 1px solid rgba(17, 24, 39, 0.06);
+  background: #ffffff;
+  border: 1px solid #dbe5e2;
   display: grid;
   gap: 4px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .customer-detail__usage-service span {
-  color: #667085;
+  color: #5f6f83;
   font-size: 0.84rem;
 }
 
@@ -13692,8 +13699,9 @@ a {
   place-items: center;
   font-size: 0.86rem;
   font-weight: 600;
-  color: #16345c;
-  border: 1px solid rgba(29, 110, 242, 0.08);
+  color: #0f2948;
+  border: 1px solid #cddbf0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.58);
 }
 
 .service-portal {
