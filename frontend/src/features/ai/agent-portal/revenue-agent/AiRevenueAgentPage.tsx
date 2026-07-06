@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { isAxiosError } from "axios";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { PageHeader } from "../../../../components/PageHeader";
 import { Panel } from "../../../../components/Panel";
@@ -1089,6 +1090,44 @@ export function AiRevenueAgentPage() {
     );
   }
 
+  const actionDetailModal = selectedAction ? (
+    <div
+      className="ai-revenue-modal-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          setSelectedAction(null);
+        }
+      }}
+    >
+      <section
+        className="ai-revenue-modal ai-revenue-modal--wide"
+        role="dialog"
+        aria-modal="true"
+        aria-label="AI Revenue action detail"
+      >
+        <ActionDetailPanel
+          clinicId={clinic.id}
+          clinicCode={clinic.code}
+          actions={[
+            ...actions,
+            ...followUpActions.filter((followUpAction) => !actions.some((action) => action.id === followUpAction.id)),
+          ]}
+          action={selectedAction}
+          onWorkflowChanged={async (message) => {
+            setNotice(message);
+            await loadData(false);
+          }}
+          onError={(message) => setErrorMessage(message || null)}
+          onDraftMessage={handleDraftMessage}
+          draftingActionId={draftingActionId}
+          onActionUpdated={setSelectedAction}
+          onClose={() => setSelectedAction(null)}
+        />
+      </section>
+    </div>
+  ) : null;
+
   return (
     <div className="page-stack page-stack--workspace analytics-report ai-revenue-agent-shell">
       <PageHeader
@@ -1357,43 +1396,7 @@ export function AiRevenueAgentPage() {
         </Panel>
       )}
 
-      {selectedAction ? (
-        <div
-          className="ai-revenue-modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              setSelectedAction(null);
-            }
-          }}
-        >
-          <section
-            className="ai-revenue-modal ai-revenue-modal--wide"
-            role="dialog"
-            aria-modal="true"
-            aria-label="AI Revenue action detail"
-          >
-            <ActionDetailPanel
-              clinicId={clinic.id}
-              clinicCode={clinic.code}
-              actions={[
-                ...actions,
-                ...followUpActions.filter((followUpAction) => !actions.some((action) => action.id === followUpAction.id)),
-              ]}
-              action={selectedAction}
-              onWorkflowChanged={async (message) => {
-                setNotice(message);
-                await loadData(false);
-              }}
-              onError={(message) => setErrorMessage(message || null)}
-              onDraftMessage={handleDraftMessage}
-              draftingActionId={draftingActionId}
-              onActionUpdated={setSelectedAction}
-              onClose={() => setSelectedAction(null)}
-            />
-          </section>
-        </div>
-      ) : null}
+      {actionDetailModal ? (typeof document === "undefined" ? actionDetailModal : createPortal(actionDetailModal, document.body)) : null}
     </div>
   );
 }

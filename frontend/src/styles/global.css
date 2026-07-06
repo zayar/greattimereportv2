@@ -3504,22 +3504,23 @@ textarea:focus-visible,
 .ai-revenue-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 5000;
+  z-index: 10000;
   isolation: isolate;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  padding: 48px 20px;
+  padding: clamp(14px, 2.5vh, 28px) clamp(14px, 3vw, 40px);
   overflow-y: auto;
-  background: rgba(15, 23, 42, 0.5);
-  backdrop-filter: blur(3px);
+  background: rgba(15, 23, 42, 0.56);
+  backdrop-filter: blur(4px);
 }
 
 .ai-revenue-modal {
   position: relative;
   z-index: 1;
-  width: min(100%, 720px);
-  max-height: calc(100vh - 96px);
+  width: min(calc(100vw - 40px), 720px);
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
   overflow: auto;
   border-radius: 16px;
   background: var(--report-surface);
@@ -3531,19 +3532,32 @@ textarea:focus-visible,
 }
 
 .ai-revenue-modal--wide {
-  width: min(100%, 1180px);
+  width: min(calc(100vw - 56px), 1120px);
   border: 1px solid #d7ded8;
   background: #f7f9f6;
   box-shadow: 0 32px 90px rgba(15, 23, 42, 0.28);
 }
 
 .ai-revenue-modal--wide > .panel {
+  padding: 20px;
   margin: 0;
   width: 100%;
   border: 0;
   background: #f7f9f6;
   box-shadow: none;
   backdrop-filter: none;
+}
+
+.ai-revenue-modal--wide > .panel > .panel__header {
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  align-items: center;
+  margin: -20px -20px 18px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #d7ded8;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
 }
 
 .ai-revenue-modal__header {
@@ -3762,6 +3776,21 @@ textarea:focus-visible,
 
 .ai-revenue-usage-over-time .customer-detail__table-tools {
   flex-shrink: 0;
+}
+
+.ai-revenue-modal--wide .ai-revenue-usage-over-time .customer-detail__usage-header,
+.ai-revenue-modal--wide .ai-revenue-usage-over-time .customer-detail__usage-row {
+  grid-template-columns: minmax(180px, 220px) repeat(12, minmax(48px, 1fr));
+  gap: 7px;
+}
+
+.ai-revenue-modal--wide .ai-revenue-usage-over-time .customer-detail__usage-service {
+  border-radius: 12px;
+}
+
+.ai-revenue-modal--wide .ai-revenue-usage-over-time .customer-detail__usage-cell {
+  min-height: 44px;
+  border-radius: 11px;
 }
 
 .ai-revenue-draft-editor {
