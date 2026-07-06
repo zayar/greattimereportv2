@@ -3507,7 +3507,8 @@ textarea:focus-visible,
 .ai-revenue-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 1200;
+  z-index: 5000;
+  isolation: isolate;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3518,6 +3519,8 @@ textarea:focus-visible,
 }
 
 .ai-revenue-modal {
+  position: relative;
+  z-index: 1;
   width: min(100%, 720px);
   max-height: calc(100vh - 96px);
   overflow: auto;

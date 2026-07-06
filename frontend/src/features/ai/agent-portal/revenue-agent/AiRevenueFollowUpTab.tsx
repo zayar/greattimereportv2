@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { isAxiosError } from "axios";
 import { recordAiRevenueFollowUpAttempt } from "../../../../api/aiRevenueAgent";
 import { EmptyState } from "../../../../components/StatusViews";
@@ -565,7 +566,7 @@ export function AiRevenueFollowUpAttemptModal({
     }
   }
 
-  return (
+  const modal = (
     <div className="ai-revenue-modal-backdrop" role="presentation">
       <section className="ai-revenue-modal ai-revenue-modal--compact ai-revenue-followup-modal" role="dialog" aria-modal="true" aria-labelledby="follow-up-modal-title">
         <div className="ai-revenue-modal__header">
@@ -793,6 +794,8 @@ export function AiRevenueFollowUpAttemptModal({
       </section>
     </div>
   );
+
+  return typeof document === "undefined" ? modal : createPortal(modal, document.body);
 }
 
 export function AiRevenueFollowUpTab({
