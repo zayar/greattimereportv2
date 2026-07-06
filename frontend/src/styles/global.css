@@ -15695,6 +15695,952 @@ a {
   }
 }
 
+/* Compact dashboard density for AI workspaces.
+   This intentionally changes real component dimensions instead of using page zoom or transforms. */
+.shell {
+  grid-template-columns: 228px minmax(0, 1fr);
+  font-size: 0.9rem;
+}
+
+.shell--sidebar-collapsed {
+  grid-template-columns: 62px minmax(0, 1fr);
+}
+
+.shell__sidebar {
+  width: 228px;
+  padding: 10px 10px;
+}
+
+.shell--sidebar-collapsed .shell__sidebar {
+  width: 62px;
+  padding-inline: 8px;
+}
+
+.sidebar-head {
+  gap: 7px;
+  padding: 2px 0 9px;
+}
+
+.brand__mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  font-size: 0.78rem;
+}
+
+.brand__title {
+  gap: 5px;
+  font-size: 0.88rem;
+}
+
+.brand__badge {
+  font-size: 0.58rem;
+  padding: 1px 6px;
+}
+
+.brand__subtitle {
+  font-size: 0.74rem;
+}
+
+.sidebar-collapse,
+.sidebar-close {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+}
+
+.sidebar-context {
+  margin: 2px 0 8px;
+  padding: 8px 9px;
+  border-radius: 10px;
+}
+
+.sidebar-context strong,
+.identity-chip strong {
+  font-size: 0.86rem;
+}
+
+.sidebar-context span,
+.sidebar-context small,
+.identity-chip span {
+  font-size: 0.7rem;
+}
+
+.nav-section {
+  gap: 3px;
+  margin-bottom: 10px;
+}
+
+.nav-section__title {
+  padding: 0 8px 2px;
+  font-size: 0.66rem;
+}
+
+.nav-link,
+.nav-group__button {
+  min-height: 32px;
+  gap: 8px;
+  border-radius: 9px;
+  padding: 6px 8px;
+  font-size: 0.82rem;
+  line-height: 1.2;
+}
+
+.nav-link--active::before {
+  height: 18px;
+}
+
+.nav-link--nested {
+  min-height: 30px;
+  padding-left: 30px;
+  font-size: 0.78rem;
+}
+
+.nav-link__icon,
+.sidebar-signout__icon,
+.menu-toggle svg,
+.sidebar-close svg {
+  width: 18px;
+  height: 18px;
+}
+
+.nav-group__children {
+  gap: 1px;
+  margin-left: 7px;
+  padding-left: 7px;
+}
+
+.sidebar-footer {
+  gap: 6px;
+  padding-top: 8px;
+}
+
+.identity-chip {
+  padding: 7px 9px;
+  border-radius: 10px;
+}
+
+.sidebar-signout {
+  min-height: 34px;
+}
+
+.topbar {
+  min-height: 52px;
+  gap: 12px;
+  padding: 7px 18px;
+}
+
+.topbar__left,
+.topbar__controls {
+  gap: 9px;
+}
+
+.topbar__left h2 {
+  margin-top: 2px;
+  font-size: 1.08rem;
+  letter-spacing: 0;
+}
+
+.topbar__eyebrow {
+  font-size: 0.66rem;
+}
+
+.topbar__title {
+  font-size: 0.88rem;
+}
+
+.topbar__ask {
+  min-height: 34px;
+  gap: 6px;
+  border-radius: 9px;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+}
+
+.topbar__ask svg {
+  width: 16px;
+  height: 16px;
+  flex-basis: 16px;
+}
+
+.topbar__controls .field {
+  gap: 4px;
+  min-width: 136px;
+}
+
+.topbar__controls .field input,
+.topbar__controls .field select {
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-size: 0.84rem;
+}
+
+.topbar__clinic-field {
+  min-width: min(330px, 100%);
+}
+
+.topbar__account,
+.topbar__context-pill {
+  max-width: 190px;
+  min-width: 0;
+  border-radius: 9px;
+  padding: 6px 9px;
+}
+
+.topbar__context-pill span {
+  font-size: 0.64rem;
+  letter-spacing: 0.06em;
+}
+
+.topbar__context-pill strong,
+.topbar__account span {
+  font-size: 0.8rem;
+}
+
+.page-content {
+  padding: 14px 18px 22px;
+}
+
+.page-stack,
+.page-stack--workspace,
+.ai-agent-portal,
+.ai-revenue-agent-shell {
+  gap: 14px;
+}
+
+.page-header {
+  gap: 7px;
+  margin-bottom: 10px;
+}
+
+.page-header__context {
+  gap: 7px;
+  min-height: 20px;
+}
+
+.page-header__title {
+  font-size: 0.88rem;
+  line-height: 1.15;
+}
+
+.page-header__eyebrow {
+  font-size: 0.64rem;
+  letter-spacing: 0.1em;
+}
+
+.page-header__description {
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.field {
+  gap: 5px;
+  min-width: 128px;
+}
+
+.field span {
+  font-size: 0.68rem;
+  letter-spacing: 0.07em;
+}
+
+.field input,
+.field select,
+.field textarea {
+  height: 38px;
+  padding: 0 11px;
+  border-radius: 10px;
+  font-size: 0.86rem;
+}
+
+.field textarea {
+  min-height: 104px;
+  padding: 10px 11px;
+  line-height: 1.45;
+}
+
+.field--search {
+  min-width: 210px;
+}
+
+.field--compact {
+  min-width: 138px;
+}
+
+.button,
+.telegram-settings__button {
+  min-height: 36px;
+  border-radius: 9px;
+  padding: 7px 12px;
+  font-size: 0.84rem;
+  line-height: 1.2;
+}
+
+.telegram-settings__button {
+  min-width: 116px;
+  box-shadow:
+    0 6px 14px rgba(15, 23, 42, 0.07),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+
+.telegram-settings__button--compact {
+  padding-inline: 10px;
+}
+
+.status-pill {
+  min-height: 24px;
+  padding: 3px 8px;
+  font-size: 0.72rem;
+}
+
+.panel {
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.panel__header {
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.panel__header h3 {
+  margin-bottom: 4px;
+  font-size: 1.05rem;
+  line-height: 1.2;
+}
+
+.panel__header p {
+  margin: 0;
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.panel-grid {
+  gap: 16px;
+}
+
+.ai-revenue-agent-shell__tabs {
+  gap: 5px;
+  padding: 5px;
+}
+
+.ai-revenue-agent-shell__tab {
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 0.84rem;
+}
+
+.ai-revenue-filter-grid {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+}
+
+.ai-revenue-filter-grid__actions {
+  gap: 7px;
+}
+
+.ai-revenue-dashboard,
+.ai-revenue-action-list,
+.ai-revenue-detail {
+  gap: 12px;
+}
+
+.ai-revenue-owner-summary {
+  gap: 6px;
+  padding: 12px 14px;
+}
+
+.ai-revenue-owner-summary strong {
+  font-size: 0.98rem;
+  line-height: 1.35;
+}
+
+.ai-revenue-owner-summary span {
+  font-size: 0.84rem;
+}
+
+.ai-revenue-dashboard__actions,
+.ai-revenue-top-actions,
+.ai-revenue-section-heading {
+  gap: 8px;
+}
+
+.ai-revenue-funnel {
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.ai-revenue-funnel header {
+  gap: 10px;
+}
+
+.ai-revenue-funnel h3,
+.ai-revenue-section-heading h3,
+.ai-revenue-action-card h3,
+.ai-revenue-action-card h4,
+.ai-revenue-detail h3 {
+  font-size: 1rem;
+  line-height: 1.2;
+}
+
+.ai-revenue-funnel p,
+.ai-revenue-section-heading span,
+.ai-revenue-action-card p,
+.ai-revenue-detail p {
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.ai-revenue-funnel__rows {
+  gap: 7px;
+}
+
+.ai-revenue-funnel__row {
+  grid-template-columns: minmax(92px, 132px) minmax(0, 1fr) minmax(42px, auto);
+  gap: 9px;
+  min-height: 22px;
+}
+
+.ai-revenue-funnel__row span {
+  font-size: 0.84rem;
+}
+
+.ai-revenue-funnel__bar-track {
+  height: 8px;
+}
+
+.ai-revenue-conversion-grid,
+.ai-revenue-action-grid,
+.ai-revenue-evidence-grid,
+.ai-revenue-detail__grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.ai-revenue-conversion-card,
+.ai-revenue-evidence-item,
+.ai-revenue-detail__grid > div,
+.ai-revenue-reason-box {
+  gap: 4px;
+  padding: 10px;
+}
+
+.ai-revenue-conversion-card span,
+.ai-revenue-evidence-item span,
+.ai-revenue-reason-box span,
+.ai-revenue-detail__grid span {
+  font-size: 0.68rem;
+  letter-spacing: 0.035em;
+}
+
+.ai-revenue-conversion-card strong {
+  font-size: 1.12rem;
+}
+
+.ai-revenue-action-card {
+  gap: 11px;
+  padding: 13px;
+}
+
+.ai-revenue-action-card__top,
+.ai-revenue-action-card__main,
+.ai-revenue-action-card__footer,
+.ai-revenue-detail__header {
+  gap: 10px;
+}
+
+.ai-revenue-action-card__top > div,
+.ai-revenue-action-card__main > div,
+.ai-revenue-detail__header > div {
+  gap: 4px;
+}
+
+.ai-revenue-action-card__source,
+.ai-revenue-action-card__main span,
+.ai-revenue-detail__header span {
+  font-size: 0.78rem;
+}
+
+.ai-revenue-action-card__body {
+  gap: 10px;
+}
+
+.ai-revenue-action-card__meta {
+  gap: 5px;
+}
+
+.ai-revenue-action-card__meta span {
+  min-height: 24px;
+  padding: 0 8px;
+  font-size: 0.74rem;
+}
+
+.ai-revenue-action-card__footer > span,
+.ai-revenue-action-card small {
+  font-size: 0.8rem;
+  line-height: 1.35;
+}
+
+.ai-revenue-action-card__controls {
+  gap: 7px;
+}
+
+.ai-revenue-followup-workbench {
+  gap: 12px;
+}
+
+.ai-revenue-followup-summary {
+  gap: 8px;
+}
+
+.ai-revenue-followup-summary__card {
+  gap: 5px;
+  min-height: 68px;
+  padding: 10px 11px;
+}
+
+.ai-revenue-followup-summary__card span {
+  font-size: 0.66rem;
+}
+
+.ai-revenue-followup-summary__card strong {
+  font-size: 1.28rem;
+}
+
+.ai-revenue-followup-queues {
+  gap: 6px;
+}
+
+.ai-revenue-followup-queue {
+  min-height: 32px;
+  gap: 8px;
+  padding: 0 10px;
+  font-size: 0.86rem;
+}
+
+.ai-revenue-followup-queue strong {
+  min-width: 23px;
+  padding: 2px 6px;
+  font-size: 0.7rem;
+}
+
+.ai-revenue-followup-layout {
+  grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.72fr);
+  gap: 12px;
+}
+
+.ai-revenue-followup-table {
+  min-width: 1720px;
+}
+
+.ai-revenue-followup-table th,
+.ai-revenue-followup-table td {
+  padding: 8px 10px;
+}
+
+.ai-revenue-followup-table th {
+  font-size: 0.66rem;
+  letter-spacing: 0.035em;
+}
+
+.ai-revenue-followup-table td {
+  font-size: 0.78rem;
+  line-height: 1.32;
+}
+
+.ai-revenue-followup-table td strong {
+  line-height: 1.25;
+}
+
+.ai-revenue-followup-table td span {
+  margin-top: 2px;
+  font-size: 0.7rem;
+  line-height: 1.25;
+}
+
+.ai-revenue-followup-table th:nth-child(1),
+.ai-revenue-followup-table td:nth-child(1) {
+  width: 78px;
+}
+
+.ai-revenue-followup-table th:nth-child(2),
+.ai-revenue-followup-table td:nth-child(2) {
+  width: 140px;
+}
+
+.ai-revenue-followup-table th:nth-child(3),
+.ai-revenue-followup-table td:nth-child(3) {
+  width: 118px;
+}
+
+.ai-revenue-followup-table th:nth-child(4),
+.ai-revenue-followup-table td:nth-child(4) {
+  width: 170px;
+}
+
+.ai-revenue-followup-table th:nth-child(8),
+.ai-revenue-followup-table td:nth-child(8),
+.ai-revenue-followup-table th:nth-child(9),
+.ai-revenue-followup-table td:nth-child(9),
+.ai-revenue-followup-table th:nth-child(12),
+.ai-revenue-followup-table td:nth-child(12),
+.ai-revenue-followup-table th:nth-child(13),
+.ai-revenue-followup-table td:nth-child(13) {
+  width: 190px;
+}
+
+.ai-revenue-followup-row-actions {
+  min-width: 160px;
+  gap: 6px;
+}
+
+.ai-revenue-followup-row-actions .telegram-settings__button {
+  min-height: 28px;
+  padding: 5px 8px;
+  font-size: 0.74rem;
+}
+
+.ai-revenue-detail__quick-actions {
+  gap: 10px;
+  padding: 10px;
+  border-radius: 9px;
+}
+
+.ai-revenue-detail__quick-actions > div:first-child {
+  gap: 2px;
+  min-width: 210px;
+}
+
+.ai-revenue-detail__quick-actions strong {
+  font-size: 0.9rem;
+}
+
+.ai-revenue-detail__quick-actions span {
+  font-size: 0.82rem;
+  line-height: 1.32;
+}
+
+.ai-followup-snapshot {
+  gap: 10px;
+  padding: 10px;
+}
+
+.ai-followup-snapshot__intro {
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 280px);
+}
+
+.ai-followup-snapshot__intro span,
+.ai-followup-section__header span,
+.ai-followup-context-strip span,
+.ai-followup-summary-item span,
+.ai-followup-timeline__item span {
+  font-size: 0.66rem;
+  letter-spacing: 0.035em;
+}
+
+.ai-followup-snapshot__intro strong,
+.ai-followup-focus-treatment strong {
+  font-size: 0.94rem;
+}
+
+.ai-followup-snapshot--staff .ai-followup-section p {
+  font-size: 0.84rem;
+  line-height: 1.42;
+}
+
+.ai-followup-context-strip {
+  gap: 8px;
+}
+
+.ai-followup-context-strip > div,
+.ai-followup-focus-treatment,
+.ai-followup-other-services {
+  gap: 3px;
+  padding: 9px;
+}
+
+.ai-followup-context-strip strong {
+  font-size: 0.9rem;
+}
+
+.ai-followup-context-strip small,
+.ai-followup-focus-treatment small,
+.ai-followup-other-services small,
+.ai-followup-other-services p {
+  font-size: 0.76rem;
+  line-height: 1.32;
+}
+
+.ai-followup-section {
+  gap: 7px;
+}
+
+.ai-followup-section__header {
+  gap: 8px;
+}
+
+.ai-followup-treatment-table {
+  min-width: 820px;
+}
+
+.ai-followup-treatment-table th,
+.ai-followup-treatment-table td {
+  padding: 8px 10px;
+}
+
+.ai-followup-treatment-table th {
+  font-size: 0.64rem;
+}
+
+.ai-followup-treatment-table td {
+  font-size: 0.8rem;
+}
+
+.ai-followup-treatment-table td:first-child {
+  min-width: 200px;
+}
+
+.ai-followup-treatment-table td:first-child small {
+  margin-top: 2px;
+  font-size: 0.74rem;
+}
+
+.ai-followup-balance-status {
+  min-height: 24px;
+  padding: 0 8px;
+  font-size: 0.72rem;
+}
+
+.ai-revenue-followup-panel {
+  top: 10px;
+  gap: 10px;
+  padding: 12px;
+}
+
+.ai-revenue-followup-form {
+  gap: 10px;
+  padding: 12px;
+}
+
+.ai-revenue-followup-form .field > span {
+  font-size: 0.72rem;
+}
+
+.ai-revenue-followup-form__grid {
+  gap: 8px;
+}
+
+.ai-revenue-followup-choice-grid {
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.ai-revenue-followup-choice {
+  min-height: 32px;
+  padding: 0 9px;
+  font-size: 0.76rem;
+}
+
+.ai-revenue-followup-suppression {
+  gap: 7px;
+  padding: 9px;
+}
+
+.ai-revenue-followup-modal__form {
+  margin: 12px 16px 16px;
+}
+
+.ai-revenue-followup-modal__snapshot {
+  margin: 12px 16px 0;
+}
+
+.ai-revenue-modal-backdrop {
+  padding: clamp(10px, 1.8vh, 20px) clamp(10px, 2.4vw, 30px);
+}
+
+.ai-revenue-modal {
+  max-height: calc(100vh - 24px);
+  max-height: calc(100dvh - 24px);
+  border-radius: 12px;
+}
+
+.ai-revenue-modal--wide {
+  width: min(calc(100vw - 40px), 1180px);
+}
+
+.ai-revenue-modal--wide > .panel {
+  padding: 14px;
+}
+
+.ai-revenue-modal--wide > .panel > .panel__header {
+  margin: -14px -14px 12px;
+  padding: 10px 14px;
+}
+
+.ai-revenue-usage-over-time {
+  padding: 10px;
+}
+
+.ai-revenue-usage-over-time__header {
+  gap: 10px;
+}
+
+.ai-revenue-draft-editor textarea {
+  min-height: 112px;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
+.agent-hub-toolbar,
+.agent-hub-chat,
+.agent-hub-side,
+.agent-hub-answer,
+.agent-selector-panel,
+.agent-context-panel,
+.agent-conversation {
+  border-radius: 8px;
+}
+
+.agent-hub-toolbar,
+.agent-hub-side,
+.agent-selector-panel,
+.agent-context-panel {
+  padding: 12px;
+}
+
+.agent-hub-layout,
+.agent-workspace-layout {
+  gap: 12px;
+}
+
+.agent-hub-chat {
+  min-height: 560px;
+}
+
+.agent-hub-suggestions,
+.agent-hub-turns,
+.agent-hub-composer,
+.agent-conversation__scroll,
+.agent-composer {
+  padding: 12px;
+}
+
+.agent-hub-turns,
+.agent-turn,
+.agent-message,
+.agent-answer,
+.agent-workspace-page {
+  gap: 10px;
+}
+
+.agent-message {
+  padding: 10px 12px;
+}
+
+.agent-table th,
+.agent-table td,
+.agent-hub-table th,
+.agent-hub-table td {
+  padding: 7px 9px;
+}
+
+.agent-table th,
+.agent-hub-table th {
+  font-size: 0.68rem;
+}
+
+.agent-table td,
+.agent-hub-table,
+.agent-hub-table td {
+  font-size: 0.78rem;
+}
+
+@media (max-width: 900px) {
+  .shell,
+  .shell--sidebar-collapsed {
+    display: block;
+    grid-template-columns: none;
+  }
+
+  .shell__sidebar,
+  .shell--sidebar-collapsed .shell__sidebar {
+    position: fixed;
+    inset: 0 auto 0 0;
+    width: min(86vw, 308px);
+    height: 100vh;
+    padding: 12px 10px;
+    transform: translateX(-105%);
+  }
+
+  .shell__sidebar--open {
+    transform: translateX(0);
+  }
+
+  .shell--sidebar-collapsed .brand__copy {
+    display: block;
+  }
+
+  .shell--sidebar-collapsed .sidebar-context,
+  .shell--sidebar-collapsed .identity-chip {
+    display: grid;
+  }
+
+  .shell--sidebar-collapsed .nav-section__title,
+  .shell--sidebar-collapsed .nav-link__text,
+  .shell--sidebar-collapsed .nav-group__chevron,
+  .shell--sidebar-collapsed .sidebar-signout__label {
+    display: inline;
+  }
+
+  .shell--sidebar-collapsed .nav-link,
+  .shell--sidebar-collapsed .nav-group__button,
+  .shell--sidebar-collapsed .sidebar-signout {
+    justify-content: flex-start;
+    padding-inline: 8px;
+  }
+
+  .shell--sidebar-collapsed .nav-link--nested {
+    padding-left: 30px;
+  }
+
+  .shell--sidebar-collapsed .nav-group__children {
+    display: grid;
+  }
+
+  .sidebar-collapse {
+    display: none;
+  }
+
+  .sidebar-close,
+  .menu-toggle {
+    display: inline-grid;
+  }
+
+  .topbar {
+    padding: 8px 12px;
+  }
+
+  .topbar__account {
+    display: none;
+  }
+
+  .topbar__clinic-field {
+    min-width: 150px;
+  }
+
+  .page-content {
+    padding: 14px 12px 22px;
+  }
+
+  .ai-revenue-followup-layout,
+  .agent-workspace-layout,
+  .agent-hub-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @media print {
   @page {
     size: A4 portrait;
