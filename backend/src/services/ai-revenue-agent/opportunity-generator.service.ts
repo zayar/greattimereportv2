@@ -453,13 +453,18 @@ async function fetchCustomerPackageFallbackRows(input: {
     customerName: string;
     phoneNumber: string;
     memberId: string;
-    rebookingStatus: string;
-    remainingSessions: number;
+    rebookingStatus?: string;
+    remainingSessions?: number;
   }>;
 }) {
-  const candidates = input.rows.filter((row) => {
-    if (row.rebookingStatus !== "overdue" && row.rebookingStatus !== "dueSoon") {
-      return false;
+  const candidatesByKey = new Map<string, (typeof input.rows)[number]>();
+
+  for (const row of input.rows) {
+    if (row.rebookingStatus && row.rebookingStatus !== "overdue" && row.rebookingStatus !== "dueSoon") {
+      continue;
+    }
+    if ((row.remainingSessions ?? 1) <= 0) {
+      continue;
     }
 
     const customer: AiRevenueCustomer = {
@@ -469,9 +474,14 @@ async function fetchCustomerPackageFallbackRows(input: {
       phoneNumber: cleanText(row.phoneNumber) || null,
       phoneMasked: maskPhone(row.phoneNumber),
     };
+    if (!hasUsableIdentity(customer)) {
+      continue;
+    }
 
-    return row.remainingSessions > 0 && hasUsableIdentity(customer);
-  });
+    candidatesByKey.set(customer.customerKey || customer.memberId || normalizePhone(customer.phoneNumber) || normalizeNameKey(customer.customerName), row);
+  }
+
+  const candidates = [...candidatesByKey.values()];
 
   const nestedRows = await mapWithConcurrency(candidates, CUSTOMER_PACKAGE_LOOKUP_CONCURRENCY, async (row) => {
     try {
@@ -1312,12 +1322,18 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
   const tomorrowRows = tomorrowAppointmentsResult.status === "fulfilled" ? tomorrowAppointmentsResult.value.rows : [];
   const appointmentHistoryRows = appointmentHistoryResult.status === "fulfilled" ? appointmentHistoryResult.value : [];
   const packagePortalRows = packageResult.status === "fulfilled" ? packageResult.value.followUpRows : [];
+  const packageCustomerLookupRows = packagePortalRows.map((row) => ({
+    customerName: row.customerName,
+    phoneNumber: row.customerPhone,
+    memberId: row.memberId,
+    remainingSessions: row.remainingUnits,
+  }));
   const customerPackageRows =
-    customerRows.length > 0
+    customerRows.length > 0 || packageCustomerLookupRows.length > 0
       ? await fetchCustomerPackageFallbackRows({
           clinicCode: input.clinicCode,
           dateKey: input.dateKey,
-          rows: customerRows,
+          rows: [...customerRows, ...packageCustomerLookupRows],
         })
       : [];
   const packageRows = mergePackageRows([...packagePortalRows, ...customerPackageRows]);

@@ -6,7 +6,7 @@ import { PageHeader } from "../../../../components/PageHeader";
 import { Panel } from "../../../../components/Panel";
 import { EmptyState, ErrorState } from "../../../../components/StatusViews";
 import { CustomerUsageHeatmap } from "../../../../components/CustomerUsageHeatmap";
-import { fetchCustomerPortalUsage } from "../../../../api/analytics";
+import { fetchCustomerPortalPackages, fetchCustomerPortalUsage } from "../../../../api/analytics";
 import {
   approveAiRevenueMessage,
   generateAiRevenueActions,
@@ -32,7 +32,9 @@ import type {
   AiRevenueContactResult,
   AiRevenueOutcomeLink,
   AiRevenueOutcomeType,
+  AiRevenueServiceUsageSnapshot,
   AiRevenueSummary,
+  CustomerPortalPackagesResponse,
   CustomerPortalUsageResponse,
 } from "../../../../types/domain";
 import { useAccess } from "../../../access/AccessProvider";
@@ -330,6 +332,37 @@ function customerUsageIdentity(action: AiRevenueAction) {
   };
 }
 
+function customerPackageServiceUsage(
+  packages: CustomerPortalPackagesResponse["packages"] | null | undefined,
+  action: AiRevenueAction,
+): AiRevenueServiceUsageSnapshot[] {
+  const focusName = action.service.serviceName || action.packageInfo.packageName || "";
+
+  return (packages ?? []).map((item) => ({
+    serviceId: null,
+    serviceName: item.serviceName || item.packageName || "Package balance",
+    packageId: item.id,
+    packageName: item.packageName,
+    packageTotal: item.packageTotal,
+    used: item.usedCount,
+    remaining: item.remainingCount,
+    latestUsageDate: item.latestUsageDate,
+    latestTherapist: item.latestTherapist,
+    status:
+      item.remainingCount <= 0
+        ? "completed"
+        : item.remainingCount <= 3 || item.status.toLowerCase().includes("low")
+          ? "low_remaining"
+          : "active",
+    isFocusService:
+      Boolean(focusName) &&
+      (item.serviceName.toLowerCase() === focusName.toLowerCase() ||
+        item.serviceName.toLowerCase().includes(focusName.toLowerCase()) ||
+        focusName.toLowerCase().includes(item.serviceName.toLowerCase())),
+    note: item.serviceCategory || item.status || null,
+  }));
+}
+
 function AiRevenueServiceUsageOverTime({
   action,
   clinicId,
@@ -478,10 +511,22 @@ function ActionDetailPanel({
   const [followUpLoading, setFollowUpLoading] = useState(true);
   const [outcomeLinks, setOutcomeLinks] = useState<AiRevenueOutcomeLink[]>([]);
   const [outcomeLoading, setOutcomeLoading] = useState(true);
+  const [packageState, setPackageState] = useState<{
+    data: CustomerPortalPackagesResponse | null;
+    loading: boolean;
+    error: string | null;
+  }>({
+    data: null,
+    loading: false,
+    error: null,
+  });
   const [followUpModal, setFollowUpModal] = useState<DetailFollowUpModalState | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [draftEditorText, setDraftEditorText] = useState(messageDraftText(action));
   const relatedActions = actions.filter((item) => item.id !== action.id && isSameCustomerAction(item, action));
+  const customerIdentity = customerUsageIdentity(action);
+  const canLoadCustomerPackages = Boolean(customerIdentity.name || customerIdentity.phone);
+  const supplementalServiceUsage = customerPackageServiceUsage(packageState.data?.packages, action);
   const draftText = action.message.draftText ?? action.message.approvedText ?? "";
   const approvedText = action.message.approvedText ?? "";
   const locked = isWorkflowLocked(action);
@@ -599,6 +644,46 @@ function ActionDetailPanel({
   }, [loadOutcomeLinks]);
 
   useEffect(() => {
+    if (!canLoadCustomerPackages) {
+      setPackageState({ data: null, loading: false, error: null });
+      return;
+    }
+
+    let active = true;
+    const actionYear = Number(action.dateKey.slice(0, 4));
+    const fromYear = Number.isFinite(actionYear) ? actionYear - 2 : new Date().getFullYear() - 2;
+
+    setPackageState((current) => ({ ...current, loading: true, error: null }));
+
+    fetchCustomerPortalPackages({
+      clinicId,
+      clinicCode,
+      fromDate: `${fromYear}-01-01`,
+      toDate: todayDateKey(),
+      customerName: customerIdentity.name,
+      customerPhone: customerIdentity.phone,
+    })
+      .then((data) => {
+        if (active) {
+          setPackageState({ data, loading: false, error: null });
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          setPackageState({
+            data: null,
+            loading: false,
+            error: getApiErrorMessage(error, "Customer Intelligence package details could not be loaded."),
+          });
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [action.dateKey, canLoadCustomerPackages, clinicCode, clinicId, customerIdentity.name, customerIdentity.phone]);
+
+  useEffect(() => {
     setDraftEditorText(messageDraftText(action));
   }, [action.id, action.message.approvedText, action.message.draftText]);
 
@@ -688,7 +773,19 @@ function ActionDetailPanel({
 
         <AiRevenueServiceUsageOverTime action={action} clinicId={clinicId} clinicCode={clinicCode} />
 
-        <AiStaffFollowUpSnapshot action={action} relatedActions={relatedActions} />
+        <AiStaffFollowUpSnapshot
+          action={action}
+          relatedActions={relatedActions}
+          supplementalServiceUsage={supplementalServiceUsage}
+        />
+        {packageState.loading ? (
+          <div className="inline-note inline-note--loading">Checking Customer Intelligence package details...</div>
+        ) : null}
+        {packageState.error ? (
+          <div className="inline-note">
+            Package therapist details are using the AI snapshot because Customer Intelligence did not return package details.
+          </div>
+        ) : null}
 
         <div className="ai-revenue-detail__section ai-revenue-draft-editor">
           <div className="ai-revenue-draft-editor__header">

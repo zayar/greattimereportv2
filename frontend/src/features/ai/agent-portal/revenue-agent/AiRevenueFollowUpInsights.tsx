@@ -1,4 +1,4 @@
-import type { AiRevenueAction } from "../../../../types/domain";
+import type { AiRevenueAction, AiRevenueServiceUsageSnapshot } from "../../../../types/domain";
 
 type ScoreBand = "high" | "medium" | "low";
 
@@ -359,8 +359,11 @@ function parseOtherBalanceEvidence(action: AiRevenueAction): ServiceBalance[] {
     });
 }
 
-function serviceUsageBalances(action: AiRevenueAction): ServiceBalance[] {
-  return (action.serviceUsage ?? [])
+function serviceUsageBalances(
+  usage: AiRevenueServiceUsageSnapshot[] | null | undefined,
+  fallbackSource: ServiceBalance["source"] = "related",
+): ServiceBalance[] {
+  return (usage ?? [])
     .filter((item) => text(item.serviceName) || text(item.packageName))
     .map((item, index) => ({
       key: `${normalizeText(item.serviceName || item.packageName)}:${normalizeText(item.packageName) || normalizeText(item.packageId) || index}`,
@@ -371,7 +374,7 @@ function serviceUsageBalances(action: AiRevenueAction): ServiceBalance[] {
       used: nullableNumber(item.used),
       lastUsedAt: text(item.latestUsageDate),
       latestTherapist: text(item.latestTherapist),
-      source: item.isFocusService ? "focused" : "related",
+      source: item.isFocusService ? "focused" : fallbackSource,
     }));
 }
 
@@ -379,7 +382,11 @@ function balanceCompletenessScore(balance: ServiceBalance) {
   return (balance.remaining ?? -1) + (balance.lastUsedAt ? 0.1 : 0) + (balance.latestTherapist ? 0.1 : 0);
 }
 
-export function collectServiceBalances(action: AiRevenueAction, relatedActions: AiRevenueAction[] = []) {
+export function collectServiceBalances(
+  action: AiRevenueAction,
+  relatedActions: AiRevenueAction[] = [],
+  supplementalServiceUsage: AiRevenueServiceUsageSnapshot[] = [],
+) {
   const balances = new Map<string, ServiceBalance>();
   const addBalance = (balance: ServiceBalance | null) => {
     if (!balance) {
@@ -404,7 +411,8 @@ export function collectServiceBalances(action: AiRevenueAction, relatedActions: 
     }
   };
 
-  serviceUsageBalances(action).forEach(addBalance);
+  serviceUsageBalances(supplementalServiceUsage).forEach(addBalance);
+  serviceUsageBalances(action.serviceUsage).forEach(addBalance);
   addBalance(actionServiceBalance(action, "focused"));
   parseOtherBalanceEvidence(action).forEach(addBalance);
   relatedActions
@@ -432,13 +440,17 @@ export function collectServiceBalances(action: AiRevenueAction, relatedActions: 
   });
 }
 
-function focusedBalance(action: AiRevenueAction, relatedActions: AiRevenueAction[] = []) {
+function focusedBalance(
+  action: AiRevenueAction,
+  relatedActions: AiRevenueAction[] = [],
+  supplementalServiceUsage: AiRevenueServiceUsageSnapshot[] = [],
+) {
   const serviceName = focusedServiceName(action);
   const evidenceRemaining = evidenceNumber(action, ["Focused treatment remaining"]);
   const evidencePurchased = evidenceNumber(action, ["Focused treatment purchased"]);
   const evidenceUsed = evidenceNumber(action, ["Focused treatment used"]);
   const evidenceLastUsedAt = text(findEvidence(action, ["Focused treatment last usage"]));
-  const balances = collectServiceBalances(action, relatedActions);
+  const balances = collectServiceBalances(action, relatedActions, supplementalServiceUsage);
   const matched = balances.find((item) => serviceMatches(item.serviceName, serviceName));
 
   return {
@@ -453,9 +465,13 @@ function focusedBalance(action: AiRevenueAction, relatedActions: AiRevenueAction
   };
 }
 
-function otherRemainingBalances(action: AiRevenueAction, relatedActions: AiRevenueAction[] = []) {
+function otherRemainingBalances(
+  action: AiRevenueAction,
+  relatedActions: AiRevenueAction[] = [],
+  supplementalServiceUsage: AiRevenueServiceUsageSnapshot[] = [],
+) {
   const focus = focusedServiceName(action);
-  return collectServiceBalances(action, relatedActions).filter(
+  return collectServiceBalances(action, relatedActions, supplementalServiceUsage).filter(
     (item) => (item.remaining ?? 0) > 0 && !serviceMatches(item.serviceName, focus),
   );
 }
@@ -504,9 +520,13 @@ function otherBalanceSentence(action: AiRevenueAction, relatedActions: AiRevenue
   return balances.map((item) => `${item.serviceName} ${formatNumber(item.remaining)}`).join(", ");
 }
 
-function buildTreatmentBalanceRows(action: AiRevenueAction, relatedActions: AiRevenueAction[] = []): TreatmentBalanceRow[] {
-  const focus = focusedBalance(action, relatedActions);
-  const balances = collectServiceBalances(action, relatedActions);
+function buildTreatmentBalanceRows(
+  action: AiRevenueAction,
+  relatedActions: AiRevenueAction[] = [],
+  supplementalServiceUsage: AiRevenueServiceUsageSnapshot[] = [],
+): TreatmentBalanceRow[] {
+  const focus = focusedBalance(action, relatedActions, supplementalServiceUsage);
+  const balances = collectServiceBalances(action, relatedActions, supplementalServiceUsage);
   const focusedMatch = balances.find((item) => serviceMatches(item.serviceName, focus.serviceName));
   const focusedRow: TreatmentBalanceRow = {
     key: `focused:${normalizeText(focus.serviceName)}`,
@@ -916,11 +936,13 @@ export function AiCustomerContextStrip({
 export function AiTreatmentBalanceTable({
   action,
   relatedActions = [],
+  supplementalServiceUsage = [],
 }: {
   action: AiRevenueAction;
   relatedActions?: AiRevenueAction[];
+  supplementalServiceUsage?: AiRevenueServiceUsageSnapshot[];
 }) {
-  const rows = buildTreatmentBalanceRows(action, relatedActions);
+  const rows = buildTreatmentBalanceRows(action, relatedActions, supplementalServiceUsage);
 
   return (
     <div className="ai-followup-treatment-table-wrap">
@@ -1044,9 +1066,11 @@ export function AiFollowUpSnapshot({
 export function AiStaffFollowUpSnapshot({
   action,
   relatedActions = [],
+  supplementalServiceUsage = [],
 }: {
   action: AiRevenueAction;
   relatedActions?: AiRevenueAction[];
+  supplementalServiceUsage?: AiRevenueServiceUsageSnapshot[];
 }) {
   const suggestion = action.aiSuggestion || action.recommendedAction || action.summary || "Follow up with the customer.";
 
@@ -1067,7 +1091,11 @@ export function AiStaffFollowUpSnapshot({
           <strong>Service usage and remaining balance</strong>
           <span>Package/session context for the conversation</span>
         </div>
-        <AiTreatmentBalanceTable action={action} relatedActions={relatedActions} />
+        <AiTreatmentBalanceTable
+          action={action}
+          relatedActions={relatedActions}
+          supplementalServiceUsage={supplementalServiceUsage}
+        />
       </div>
 
       <div className="ai-followup-section">
