@@ -435,6 +435,7 @@ function normalizeServiceUsage(value: unknown): AiRevenueServiceUsageSnapshot[] 
         used: numberOrNull(item.used),
         remaining: numberOrNull(item.remaining),
         latestUsageDate: nullableText(item.latestUsageDate),
+        latestTherapist: nullableText(item.latestTherapist),
         status,
         isFocusService: typeof item.isFocusService === "boolean" ? item.isFocusService : false,
         note: nullableText(item.note),

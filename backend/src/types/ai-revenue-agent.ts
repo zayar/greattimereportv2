@@ -233,6 +233,7 @@ export interface AiRevenueServiceUsageSnapshot {
   used?: number | null;
   remaining?: number | null;
   latestUsageDate?: string | null;
+  latestTherapist?: string | null;
   status?: "active" | "low_remaining" | "completed" | "unknown";
   isFocusService: boolean;
   note?: string | null;

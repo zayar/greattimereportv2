@@ -22,6 +22,7 @@ type ServiceBalance = {
   purchased: number | null;
   used: number | null;
   lastUsedAt: string;
+  latestTherapist: string;
   source: "focused" | "related" | "evidence";
 };
 
@@ -280,6 +281,7 @@ function actionServiceBalance(action: AiRevenueAction, source: ServiceBalance["s
         action.service.lastVisitDate ??
         findEvidence(action, ["Focused treatment last usage", "Last usage date", "Last visit date"]),
     ),
+    latestTherapist: text(action.service.lastTreatmentTherapist || action.service.preferredTherapist),
     source,
   };
 }
@@ -306,6 +308,7 @@ function parseOtherBalanceEvidence(action: AiRevenueAction): ServiceBalance[] {
           purchased: numberValue(serviceFirst[3]),
           used: numberValue(serviceFirst[3]) - numberValue(serviceFirst[2]),
           lastUsedAt: "",
+          latestTherapist: "",
           source: "evidence" as const,
         };
       }
@@ -321,6 +324,7 @@ function parseOtherBalanceEvidence(action: AiRevenueAction): ServiceBalance[] {
           purchased: numberValue(withPurchased[2]),
           used: numberValue(withPurchased[2]) - numberValue(withPurchased[1]),
           lastUsedAt: "",
+          latestTherapist: "",
           source: "evidence" as const,
         };
       }
@@ -336,6 +340,7 @@ function parseOtherBalanceEvidence(action: AiRevenueAction): ServiceBalance[] {
           purchased: null,
           used: null,
           lastUsedAt: "",
+          latestTherapist: "",
           source: "evidence" as const,
         };
       }
@@ -348,9 +353,30 @@ function parseOtherBalanceEvidence(action: AiRevenueAction): ServiceBalance[] {
         purchased: null,
         used: null,
         lastUsedAt: "",
+        latestTherapist: "",
         source: "evidence" as const,
       };
     });
+}
+
+function serviceUsageBalances(action: AiRevenueAction): ServiceBalance[] {
+  return (action.serviceUsage ?? [])
+    .filter((item) => text(item.serviceName) || text(item.packageName))
+    .map((item, index) => ({
+      key: `${normalizeText(item.serviceName || item.packageName)}:${normalizeText(item.packageName) || normalizeText(item.packageId) || index}`,
+      serviceName: text(item.serviceName) || text(item.packageName) || "Package balance",
+      packageName: text(item.packageName),
+      remaining: nullableNumber(item.remaining),
+      purchased: nullableNumber(item.packageTotal),
+      used: nullableNumber(item.used),
+      lastUsedAt: text(item.latestUsageDate),
+      latestTherapist: text(item.latestTherapist),
+      source: item.isFocusService ? "focused" : "related",
+    }));
+}
+
+function balanceCompletenessScore(balance: ServiceBalance) {
+  return (balance.remaining ?? -1) + (balance.lastUsedAt ? 0.1 : 0) + (balance.latestTherapist ? 0.1 : 0);
 }
 
 export function collectServiceBalances(action: AiRevenueAction, relatedActions: AiRevenueAction[] = []) {
@@ -360,11 +386,25 @@ export function collectServiceBalances(action: AiRevenueAction, relatedActions: 
       return;
     }
     const current = balances.get(balance.key);
-    if (!current || (balance.remaining ?? -1) > (current.remaining ?? -1)) {
-      balances.set(balance.key, balance);
+    const currentScore = current ? balanceCompletenessScore(current) : -1;
+    const nextScore = balanceCompletenessScore(balance);
+
+    if (!current || nextScore >= currentScore) {
+      balances.set(balance.key, {
+        ...balance,
+        lastUsedAt: balance.lastUsedAt || current?.lastUsedAt || "",
+        latestTherapist: balance.latestTherapist || current?.latestTherapist || "",
+      });
+    } else if ((!current.lastUsedAt && balance.lastUsedAt) || (!current.latestTherapist && balance.latestTherapist)) {
+      balances.set(balance.key, {
+        ...current,
+        lastUsedAt: current.lastUsedAt || balance.lastUsedAt,
+        latestTherapist: current.latestTherapist || balance.latestTherapist,
+      });
     }
   };
 
+  serviceUsageBalances(action).forEach(addBalance);
   addBalance(actionServiceBalance(action, "focused"));
   parseOtherBalanceEvidence(action).forEach(addBalance);
   relatedActions
@@ -372,7 +412,20 @@ export function collectServiceBalances(action: AiRevenueAction, relatedActions: 
     .map((item) => actionServiceBalance(item, "related"))
     .forEach(addBalance);
 
-  return [...balances.values()].sort((left, right) => {
+  const deduped = new Map<string, ServiceBalance>();
+  for (const balance of balances.values()) {
+    const key = normalizeText(balance.serviceName);
+    const current = deduped.get(key);
+    if (!current || balanceCompletenessScore(balance) >= balanceCompletenessScore(current)) {
+      deduped.set(key, {
+        ...balance,
+        lastUsedAt: balance.lastUsedAt || current?.lastUsedAt || "",
+        latestTherapist: balance.latestTherapist || current?.latestTherapist || "",
+      });
+    }
+  }
+
+  return [...deduped.values()].sort((left, right) => {
     const leftRemaining = left.remaining ?? -1;
     const rightRemaining = right.remaining ?? -1;
     return rightRemaining - leftRemaining || left.serviceName.localeCompare(right.serviceName);
@@ -394,6 +447,9 @@ function focusedBalance(action: AiRevenueAction, relatedActions: AiRevenueAction
     purchased: matched?.purchased ?? evidencePurchased ?? null,
     used: matched?.used ?? evidenceUsed ?? null,
     lastUsedAt: matched?.lastUsedAt || evidenceLastUsedAt || lastUsageDate(action),
+    latestTherapist:
+      matched?.latestTherapist ||
+      text(action.service.lastTreatmentTherapist || action.service.preferredTherapist),
   };
 }
 
@@ -460,6 +516,10 @@ function buildTreatmentBalanceRows(action: AiRevenueAction, relatedActions: AiRe
     purchased: focus.purchased ?? focusedMatch?.purchased ?? null,
     used: focus.used ?? focusedMatch?.used ?? null,
     lastUsedAt: focus.lastUsedAt || focusedMatch?.lastUsedAt || lastUsageDate(action),
+    latestTherapist:
+      focus.latestTherapist ||
+      focusedMatch?.latestTherapist ||
+      text(action.service.lastTreatmentTherapist || action.service.preferredTherapist),
     source: "focused",
     isFocused: true,
     note:
@@ -872,6 +932,7 @@ export function AiTreatmentBalanceTable({
             <th>Used</th>
             <th>Remaining</th>
             <th>Latest Usage</th>
+            <th>Last Therapist</th>
             <th>Status</th>
           </tr>
         </thead>
@@ -891,6 +952,7 @@ export function AiTreatmentBalanceTable({
                   <strong>{row.remaining != null ? formatNumber(row.remaining) : "—"}</strong>
                 </td>
                 <td>{row.lastUsedAt || "—"}</td>
+                <td>{row.latestTherapist || "—"}</td>
                 <td>
                   <span className={`ai-followup-balance-status ai-followup-balance-status--${status.tone}`}>
                     {status.label}

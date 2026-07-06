@@ -303,6 +303,7 @@ function serviceUsageFromPackageRow(
     used: row.usedUnits,
     remaining: row.remainingUnits,
     latestUsageDate: row.lastVisitDate,
+    latestTherapist: packageRowTherapist(row),
     status: serviceUsageStatus(row.remainingUnits),
     isFocusService,
     note: `${row.remainingUnits}/${row.purchasedUnits} session(s) remaining`,
