@@ -27,8 +27,6 @@ type Props = {
   onWorkflowChanged: (message: string) => Promise<void>;
   onError: (message: string) => void;
   onOpenAction: (action: AiRevenueAction) => void;
-  onDraftMessage: (action: AiRevenueAction) => Promise<void>;
-  draftingActionId?: string | null;
 };
 
 type QueueKey = "today" | "overdue" | "tomorrow" | "next_7_days" | "all_open" | "completed" | "suppressed";
@@ -807,8 +805,6 @@ export function AiRevenueFollowUpTab({
   onWorkflowChanged,
   onError,
   onOpenAction,
-  onDraftMessage,
-  draftingActionId,
 }: Props) {
   const today = todayDateKey();
   const [activeQueue, setActiveQueue] = useState<QueueKey>("today");
@@ -942,14 +938,6 @@ export function AiRevenueFollowUpTab({
                     <td>{lastNote(action)}</td>
                     <td>
                       <div className="ai-revenue-followup-row-actions">
-                        <button
-                          type="button"
-                          className="button telegram-settings__button telegram-settings__button--secondary telegram-settings__button--compact"
-                          disabled={draftingActionId === action.id}
-                          onClick={() => void onDraftMessage(action)}
-                        >
-                          {draftingActionId === action.id ? "Drafting..." : "Draft Message"}
-                        </button>
                         <button
                           type="button"
                           className="button telegram-settings__button telegram-settings__button--secondary telegram-settings__button--compact"

@@ -1224,8 +1224,6 @@ export function AiRevenueAgentPage() {
             }}
             onError={(message) => setErrorMessage(message || null)}
             onOpenAction={setSelectedAction}
-            onDraftMessage={handleDraftMessage}
-            draftingActionId={draftingActionId}
           />
         </Panel>
       ) : activeTab === "conversations" ? (
