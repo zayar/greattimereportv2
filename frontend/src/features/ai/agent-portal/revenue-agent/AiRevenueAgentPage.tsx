@@ -16,7 +16,6 @@ import {
   getAiRevenueOutcomeLinks,
   getAiRevenueSummary,
   markAiRevenueMessageSent,
-  rejectAiRevenueAction,
   type AiRevenueActionQuery,
   type AiRevenueSummaryQuery,
 } from "../../../../api/aiRevenueAgent";
@@ -40,11 +39,10 @@ import { AiRevenueAuditTab } from "./AiRevenueAuditTab";
 import { AiRevenueAppointmentsTab } from "./AiRevenueAppointmentsTab";
 import { AiRevenueConversationTab } from "./AiRevenueConversationTab";
 import { AiRevenueDashboardTab } from "./AiRevenueDashboardTab";
-import { AiStaffFollowUpSnapshot, isSameCustomerAction, myanmarReason } from "./AiRevenueFollowUpInsights";
+import { AiStaffFollowUpSnapshot, isSameCustomerAction } from "./AiRevenueFollowUpInsights";
 import { AiRevenueFollowUpAttemptModal, AiRevenueFollowUpTab } from "./AiRevenueFollowUpTab";
 import { AiRevenueOpportunitiesTab } from "./AiRevenueOpportunitiesTab";
 import { AiRevenueRevenueTab } from "./AiRevenueRevenueTab";
-import { AiRevenueResolveControls } from "./AiRevenueResolveControls";
 import { AiRevenueTimeline } from "./AiRevenueTimeline";
 
 type RevenueAgentTab =
@@ -459,6 +457,7 @@ function ActionDetailPanel({
   onError,
   onDraftMessage,
   draftingActionId,
+  onActionUpdated,
   onClose,
 }: {
   action: AiRevenueAction;
@@ -469,6 +468,7 @@ function ActionDetailPanel({
   onError: (message: string) => void;
   onDraftMessage: (action: AiRevenueAction) => Promise<void>;
   draftingActionId?: string | null;
+  onActionUpdated: (action: AiRevenueAction) => void;
   onClose: () => void;
 }) {
   const [auditLogs, setAuditLogs] = useState<AiRevenueAuditLog[]>([]);
@@ -479,6 +479,7 @@ function ActionDetailPanel({
   const [outcomeLoading, setOutcomeLoading] = useState(true);
   const [followUpModal, setFollowUpModal] = useState<DetailFollowUpModalState | null>(null);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [draftEditorText, setDraftEditorText] = useState(messageDraftText(action));
   const relatedActions = actions.filter((item) => item.id !== action.id && isSameCustomerAction(item, action));
   const draftText = action.message.draftText ?? action.message.approvedText ?? "";
   const approvedText = action.message.approvedText ?? "";
@@ -486,7 +487,9 @@ function ActionDetailPanel({
   const staffActionsLocked = areStaffActionsLocked(action);
   const draftActionBusy = draftingActionId === action.id;
   const draftButtonDisabled = busyAction !== null || draftActionBusy || (locked && !draftText.trim());
-  const canApproveDraft = Boolean(draftText.trim()) && !approvedText && !locked;
+  const editedDraftText = draftEditorText.trim();
+  const hasDraftEdits = editedDraftText !== draftText.trim();
+  const canApproveDraft = Boolean(editedDraftText) && !approvedText && !locked;
   const canMarkSent = action.status === "approved" && approvedText.trim().length > 0;
   const outcomeCounts = OUTCOME_TYPES.map((outcomeType) => ({
     ...outcomeType,
@@ -524,19 +527,35 @@ function ActionDetailPanel({
     }
   }, [action.id, clinicId]);
 
-  async function runQuickAction(actionName: string, work: () => Promise<string>) {
+  async function runDraftEditorAction(actionName: string, work: () => Promise<{ message: string; action?: AiRevenueAction }>) {
     setBusyAction(actionName);
     onError("");
 
     try {
-      const message = await work();
+      const { message, action: updatedAction } = await work();
+      if (updatedAction) {
+        onActionUpdated(updatedAction);
+        setDraftEditorText(messageDraftText(updatedAction));
+      }
       await onWorkflowChanged(message);
-      onClose();
     } catch (error) {
       onError(getApiErrorMessage(error, "AI Revenue action could not be updated."));
     } finally {
       setBusyAction(null);
     }
+  }
+
+  function handleCopyDraft() {
+    if (!editedDraftText) {
+      onError("No draft message to copy.");
+      return;
+    }
+
+    void copyMessageText(editedDraftText).then((copied) => {
+      if (!copied) {
+        onError("Draft message is ready, but the browser could not copy it automatically.");
+      }
+    });
   }
 
   useEffect(() => {
@@ -577,6 +596,10 @@ function ActionDetailPanel({
   useEffect(() => {
     void loadOutcomeLinks();
   }, [loadOutcomeLinks]);
+
+  useEffect(() => {
+    setDraftEditorText(messageDraftText(action));
+  }, [action.id, action.message.approvedText, action.message.draftText]);
 
   return (
     <Panel
@@ -666,6 +689,107 @@ function ActionDetailPanel({
 
         <AiStaffFollowUpSnapshot action={action} relatedActions={relatedActions} />
 
+        <div className="ai-revenue-detail__section ai-revenue-draft-editor">
+          <div className="ai-revenue-draft-editor__header">
+            <div>
+              <strong>Draft message</strong>
+              <span>Edit before copying, approving, or recording a manual Viber send.</span>
+            </div>
+            <span>{approvedText ? "Approved" : draftText ? "Draft ready" : "No draft yet"}</span>
+          </div>
+          <textarea
+            value={draftEditorText}
+            placeholder="Generate a draft or type a staff-approved message here."
+            onChange={(event) => setDraftEditorText(event.target.value)}
+          />
+          <div className="ai-revenue-action-card__controls ai-revenue-draft-editor__actions">
+            <button
+              type="button"
+              className="button telegram-settings__button telegram-settings__button--secondary"
+              disabled={locked || busyAction !== null}
+              onClick={() =>
+                void runDraftEditorAction("draft", async () => {
+                  const updatedAction = await generateAiRevenueMessage(action.id, { clinicId });
+                  return {
+                    action: updatedAction,
+                    message: `Draft generated for ${action.customer.customerName ?? action.title}.`,
+                  };
+                })
+              }
+            >
+              {busyAction === "draft" ? "Generating..." : "Generate Draft"}
+            </button>
+
+            <button
+              type="button"
+              className="button telegram-settings__button telegram-settings__button--secondary"
+              disabled={!editedDraftText || !hasDraftEdits || locked || busyAction !== null}
+              onClick={() =>
+                void runDraftEditorAction("save-draft", async () => {
+                  const updatedAction = await generateAiRevenueMessage(action.id, {
+                    clinicId,
+                    draftText: editedDraftText,
+                  });
+                  return {
+                    action: updatedAction,
+                    message: `Draft saved for ${action.customer.customerName ?? action.title}.`,
+                  };
+                })
+              }
+            >
+              {busyAction === "save-draft" ? "Saving..." : "Save Draft"}
+            </button>
+
+            <button
+              type="button"
+              className="button telegram-settings__button telegram-settings__button--secondary"
+              disabled={!editedDraftText || busyAction !== null}
+              onClick={handleCopyDraft}
+            >
+              Copy
+            </button>
+
+            <button
+              type="button"
+              className="button telegram-settings__button telegram-settings__button--primary"
+              disabled={!canApproveDraft || busyAction !== null}
+              onClick={() =>
+                void runDraftEditorAction("approve", async () => {
+                  const updatedAction = await approveAiRevenueMessage(action.id, { clinicId, approvedText: editedDraftText });
+                  return {
+                    action: updatedAction,
+                    message: `Draft approved for ${action.customer.customerName ?? action.title}.`,
+                  };
+                })
+              }
+            >
+              {busyAction === "approve" ? "Approving..." : "Approve Draft"}
+            </button>
+
+            <button
+              type="button"
+              className="button telegram-settings__button telegram-settings__button--secondary"
+              disabled={!canMarkSent || busyAction !== null}
+              onClick={() =>
+                void runDraftEditorAction("sent", async () => {
+                  const result = await markAiRevenueMessageSent(action.id, {
+                    clinicId,
+                    channel: "manual",
+                    messageText: approvedText || editedDraftText,
+                  });
+                  return {
+                    action: result.action,
+                    message: `Message marked sent for ${action.customer.customerName ?? action.title}.`,
+                  };
+                })
+              }
+            >
+              {busyAction === "sent" ? "Marking..." : "Mark Sent"}
+            </button>
+          </div>
+          <small>No automatic Viber message is sent from this MVP.</small>
+        </div>
+
         <div className="ai-revenue-detail__section">
           <strong>Follow-up history</strong>
           {followUpLoading ? (
@@ -740,96 +864,6 @@ function ActionDetailPanel({
           )}
         </div>
 
-        <div className="ai-revenue-detail__section">
-          <strong>AI reason (Myanmar)</strong>
-          <p>{myanmarReason(action, relatedActions)}</p>
-          <small>Source reason: {action.reason}</small>
-        </div>
-
-        <div className="ai-revenue-detail__section">
-          <strong>Recommended action</strong>
-          <p>{action.recommendedAction}</p>
-        </div>
-
-        <details className="ai-revenue-detail__disclosure">
-          <summary>Advanced message approval actions</summary>
-          <p className="inline-note">
-            Legacy draft approval tools are kept here for compatibility. They record approval workflow only and do not send real Viber messages.
-          </p>
-          <div className="ai-revenue-action-card__controls ai-revenue-detail__advanced-actions">
-            <button
-              type="button"
-              className="button telegram-settings__button telegram-settings__button--secondary"
-              disabled={locked || busyAction !== null}
-              onClick={() =>
-                void runQuickAction("draft", async () => {
-                  await generateAiRevenueMessage(action.id, { clinicId });
-                  return `Draft generated for ${action.customer.customerName ?? action.title}.`;
-                })
-              }
-            >
-              {busyAction === "draft" ? "Generating..." : "Generate Draft"}
-            </button>
-
-            <button
-              type="button"
-              className="button telegram-settings__button telegram-settings__button--primary"
-              disabled={!canApproveDraft || busyAction !== null}
-              onClick={() =>
-                void runQuickAction("approve", async () => {
-                  await approveAiRevenueMessage(action.id, { clinicId, approvedText: draftText });
-                  return `Message approved for ${action.customer.customerName ?? action.title}.`;
-                })
-              }
-            >
-              {busyAction === "approve" ? "Approving..." : "Approve Draft"}
-            </button>
-
-            <button
-              type="button"
-              className="button telegram-settings__button telegram-settings__button--secondary"
-              disabled={!canMarkSent || busyAction !== null}
-              onClick={() =>
-                void runQuickAction("sent", async () => {
-                  await markAiRevenueMessageSent(action.id, {
-                    clinicId,
-                    channel: "manual",
-                    messageText: approvedText,
-                  });
-                  return `Message marked sent for ${action.customer.customerName ?? action.title}.`;
-                })
-              }
-            >
-              {busyAction === "sent" ? "Marking..." : "Mark Sent"}
-            </button>
-
-            <button
-              type="button"
-              className="button telegram-settings__button telegram-settings__button--danger"
-              disabled={locked || busyAction !== null}
-              onClick={() =>
-                void runQuickAction("reject", async () => {
-                  await rejectAiRevenueAction(action.id, { clinicId, note: "Rejected from action detail." });
-                  return `Action rejected for ${action.customer.customerName ?? action.title}.`;
-                })
-              }
-            >
-              {busyAction === "reject" ? "Rejecting..." : "Reject"}
-            </button>
-
-            <AiRevenueResolveControls
-              clinicId={clinicId}
-              action={action}
-              disabled={busyAction !== null}
-              onResolved={async (message) => {
-                await onWorkflowChanged(message);
-                onClose();
-              }}
-              onError={onError}
-            />
-          </div>
-        </details>
-
         <details className="ai-revenue-detail__disclosure">
           <summary>Source evidence used by AI</summary>
           <div className="ai-revenue-evidence-grid">
@@ -844,31 +878,6 @@ function ActionDetailPanel({
             ))}
           </div>
         </details>
-
-        <div className="ai-revenue-detail__section">
-          <strong>Message draft</strong>
-          <p>{action.message.draftText ?? "No draft generated yet."}</p>
-        </div>
-
-        {action.message.approvedText ? (
-          <div className="ai-revenue-detail__section">
-            <strong>Approved message</strong>
-            <p>{action.message.approvedText}</p>
-            <small>
-              Approved by {actorName(action.message.approvedBy)}{action.message.approvedAt ? ` at ${action.message.approvedAt}` : ""}
-            </small>
-          </div>
-        ) : null}
-
-        {action.message.sentAt ? (
-          <div className="ai-revenue-detail__section">
-            <strong>Sent message</strong>
-            <p>{action.message.approvedText || action.message.draftText || "Message text not recorded."}</p>
-            <small>
-              Channel: {action.message.channel ?? "manual"} · Sent at {action.message.sentAt}
-            </small>
-          </div>
-        ) : null}
 
         {action.message.lastInboundText ? (
           <div className="ai-revenue-detail__section">
@@ -887,35 +896,12 @@ function ActionDetailPanel({
           </div>
         ) : null}
 
-        <div className="ai-revenue-detail__section">
-          <strong>Appointment status</strong>
-          <p>
-            {formatLabel(action.status)} · Booking {action.appointment.bookingId ?? "not linked"} ·{" "}
-            {action.appointment.appointmentDateTime ?? "time not requested"}
-          </p>
-          <small>
-            Came: {action.appointment.cameAt ?? "not marked"} · Cancelled: {action.appointment.cancelledAt ?? "not marked"} · No-show:{" "}
-            {action.appointment.noShowAt ?? "not marked"} · Completed: {action.appointment.completedAt ?? "not marked"}
-          </small>
-        </div>
-
         {action.revenue.revenueNote ? (
           <div className="ai-revenue-detail__section">
             <strong>Revenue attribution</strong>
             <p>{action.revenue.revenueNote}</p>
           </div>
         ) : null}
-
-        <div className="ai-revenue-detail__section">
-          <strong>Revenue result</strong>
-          <p>
-            Generated {formatMoney(action.revenue.actualRevenue)} · Influenced {formatMoney(action.revenue.influencedRevenue)} · Package sessions{" "}
-            {formatNumber(action.revenue.packageSessionsRecovered)}
-          </p>
-          <small>
-            Attribution: {formatLabel(action.revenue.attributionType)} · Invoice {action.revenue.invoiceNumber ?? "not linked"}
-          </small>
-        </div>
 
         <details className="ai-revenue-detail__disclosure">
           <summary>Audit trail for manager/admin</summary>
@@ -1402,6 +1388,7 @@ export function AiRevenueAgentPage() {
               onError={(message) => setErrorMessage(message || null)}
               onDraftMessage={handleDraftMessage}
               draftingActionId={draftingActionId}
+              onActionUpdated={setSelectedAction}
               onClose={() => setSelectedAction(null)}
             />
           </section>

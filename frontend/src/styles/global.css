@@ -3764,6 +3764,70 @@ textarea:focus-visible,
   flex-shrink: 0;
 }
 
+.ai-revenue-draft-editor {
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #d8e4e3;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.ai-revenue-draft-editor__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.ai-revenue-draft-editor__header > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ai-revenue-draft-editor__header span {
+  color: #52657a;
+  font-weight: 750;
+  line-height: 1.45;
+}
+
+.ai-revenue-draft-editor__header > span {
+  flex-shrink: 0;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: #0b4a42;
+  background: #e7f3ee;
+  border: 1px solid #c8e1d9;
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.ai-revenue-draft-editor textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid #cfd9dc;
+  background: #f8fafc;
+  color: #111827;
+  font: inherit;
+  line-height: 1.65;
+}
+
+.ai-revenue-draft-editor textarea:focus {
+  outline: none;
+  border-color: #0b5d49;
+  box-shadow: 0 0 0 3px rgba(11, 93, 73, 0.16);
+}
+
+.ai-revenue-draft-editor__actions {
+  justify-content: flex-start;
+}
+
 .ai-revenue-followup-history {
   position: relative;
   display: grid;
@@ -4179,6 +4243,10 @@ textarea:focus-visible,
 
   .ai-revenue-usage-over-time .customer-detail__table-tools {
     width: 100%;
+  }
+
+  .ai-revenue-draft-editor__header {
+    flex-direction: column;
   }
 
   .ai-revenue-action-card__controls {

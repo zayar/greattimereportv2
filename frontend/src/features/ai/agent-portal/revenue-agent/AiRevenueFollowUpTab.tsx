@@ -290,7 +290,7 @@ function lastNote(action: AiRevenueAction) {
 }
 
 function displayReason(action: AiRevenueAction, relatedActions: AiRevenueAction[]) {
-  return action.displayReason || action.reason || myanmarReason(action, relatedActions);
+  return myanmarReason(action, relatedActions);
 }
 
 function aiSuggestion(action: AiRevenueAction, relatedActions: AiRevenueAction[]) {
@@ -927,7 +927,6 @@ export function AiRevenueFollowUpTab({
                     <td>{therapistLabel(action)}</td>
                     <td>
                       <strong>{displayReason(action, relatedActions)}</strong>
-                      <span>{myanmarReason(action, relatedActions)}</span>
                     </td>
                     <td>{aiSuggestion(action, relatedActions)}</td>
                     <td>
