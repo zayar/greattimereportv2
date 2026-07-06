@@ -4176,6 +4176,70 @@ textarea:focus-visible,
   color: #334155;
 }
 
+.ai-revenue-timeline__highlights {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-revenue-timeline__value,
+.ai-revenue-timeline__change {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid #d7e6df;
+  background: #f6fbf9;
+  color: #243447;
+  font-size: 0.82rem;
+  font-weight: 760;
+  line-height: 1.35;
+}
+
+.ai-revenue-timeline__value strong,
+.ai-revenue-timeline__change strong {
+  flex-shrink: 0;
+  color: #0b4a42;
+  font-size: 0.72rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.ai-revenue-timeline__value span,
+.ai-revenue-timeline__change span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-revenue-timeline__change em {
+  color: #78909c;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.ai-revenue-timeline__technical {
+  display: grid;
+  gap: 8px;
+}
+
+.ai-revenue-timeline__technical summary {
+  width: max-content;
+  cursor: pointer;
+  color: #0b4a42;
+  font-size: 0.82rem;
+  font-weight: 850;
+}
+
+.ai-revenue-timeline__technical[open] {
+  padding-top: 4px;
+}
+
 .ai-revenue-timeline__values {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));

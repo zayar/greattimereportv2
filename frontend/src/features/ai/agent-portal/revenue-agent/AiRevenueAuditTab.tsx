@@ -31,9 +31,33 @@ function titleCase(value: string | null | undefined) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function shortIdentifier(value: string) {
+  if (value.length <= 22) {
+    return value;
+  }
+
+  return `${value.slice(0, 12)}...${value.slice(-6)}`;
+}
+
+function formatTimestamp(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
 function customerLabel(action: AiRevenueAction | undefined, actionId?: string | null) {
   if (!action) {
-    return actionId || "Unknown action";
+    return actionId ? `Action ${shortIdentifier(actionId)}` : "Unknown action";
   }
 
   return action.customer.customerName ?? action.title;
@@ -206,7 +230,7 @@ export function AiRevenueAuditTab({ clinicId, actions, loading, onOpenAction }: 
                   <div>
                     <strong>{customerLabel(action, log.actionId)}</strong>
                     <span>
-                      {titleCase(log.action)} · {log.createdAt}
+                      {titleCase(log.action)} · {formatTimestamp(log.createdAt)}
                     </span>
                   </div>
                   {action ? (
