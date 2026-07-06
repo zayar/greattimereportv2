@@ -275,12 +275,31 @@ function areStaffActionsLocked(action: AiRevenueAction) {
   return Boolean(action.resolution || ["closed", "skipped"].includes(action.status));
 }
 
+function messageDraftText(action: AiRevenueAction) {
+  return action.message.approvedText ?? action.message.draftText ?? "";
+}
+
+async function copyMessageText(text: string) {
+  if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+    return false;
+  }
+
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function ActionDetailPanel({
   action,
   actions,
   clinicId,
   onWorkflowChanged,
   onError,
+  onDraftMessage,
+  draftingActionId,
   onClose,
 }: {
   action: AiRevenueAction;
@@ -288,6 +307,8 @@ function ActionDetailPanel({
   clinicId: string;
   onWorkflowChanged: (message: string) => Promise<void>;
   onError: (message: string) => void;
+  onDraftMessage: (action: AiRevenueAction) => Promise<void>;
+  draftingActionId?: string | null;
   onClose: () => void;
 }) {
   const [auditLogs, setAuditLogs] = useState<AiRevenueAuditLog[]>([]);
@@ -303,6 +324,8 @@ function ActionDetailPanel({
   const approvedText = action.message.approvedText ?? "";
   const locked = isWorkflowLocked(action);
   const staffActionsLocked = areStaffActionsLocked(action);
+  const draftActionBusy = draftingActionId === action.id;
+  const draftButtonDisabled = busyAction !== null || draftActionBusy || (locked && !draftText.trim());
   const canApproveDraft = Boolean(draftText.trim()) && !approvedText && !locked;
   const canMarkSent = action.status === "approved" && approvedText.trim().length > 0;
   const outcomeCounts = OUTCOME_TYPES.map((outcomeType) => ({
@@ -423,6 +446,15 @@ function ActionDetailPanel({
             <span>Record the human contact result, schedule the next touch, book, or close this customer follow-up.</span>
           </div>
           <div className="ai-revenue-action-card__controls">
+            <button
+              type="button"
+              className="button telegram-settings__button telegram-settings__button--secondary"
+              disabled={draftButtonDisabled}
+              onClick={() => void onDraftMessage(action)}
+            >
+              {draftActionBusy ? "Drafting..." : "Draft Message"}
+            </button>
+
             <button
               type="button"
               className="button telegram-settings__button telegram-settings__button--secondary"
@@ -860,6 +892,7 @@ export function AiRevenueAgentPage() {
   const [summary, setSummary] = useState<AiRevenueSummary | null>(null);
   const [selectedAction, setSelectedAction] = useState<AiRevenueAction | null>(null);
   const [busyAction, setBusyAction] = useState<"load" | "generate" | null>("load");
+  const [draftingActionId, setDraftingActionId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -943,6 +976,52 @@ export function AiRevenueAgentPage() {
       ...current,
       ...patch,
     }));
+  }
+
+  async function handleDraftMessage(action: AiRevenueAction) {
+    if (!clinic) {
+      return;
+    }
+
+    const customerName = action.customer.customerName ?? action.title;
+
+    setDraftingActionId(action.id);
+    setNotice(null);
+    setErrorMessage(null);
+
+    try {
+      let nextAction = action;
+      let text = messageDraftText(action);
+      let generated = false;
+
+      if (!text.trim()) {
+        nextAction = await generateAiRevenueMessage(action.id, { clinicId: clinic.id });
+        text = messageDraftText(nextAction);
+        generated = true;
+
+        if (selectedAction?.id === action.id) {
+          setSelectedAction(nextAction);
+        }
+      }
+
+      const copied = text.trim() ? await copyMessageText(text) : false;
+
+      if (generated) {
+        await loadData(false);
+      }
+
+      if (text.trim() && copied) {
+        setNotice(`${generated ? "Draft generated and copied" : "Draft copied"} for ${customerName}.`);
+      } else if (text.trim()) {
+        setNotice(`${generated ? "Draft generated" : "Draft ready"} for ${customerName}. Open action detail to copy it.`);
+      } else {
+        setNotice(`Draft requested for ${customerName}. Open action detail to review it.`);
+      }
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error, "Message draft could not be generated."));
+    } finally {
+      setDraftingActionId(null);
+    }
   }
 
   if (!clinic) {
@@ -1126,6 +1205,8 @@ export function AiRevenueAgentPage() {
             }}
             onError={(message) => setErrorMessage(message || null)}
             onOpenAction={setSelectedAction}
+            onDraftMessage={handleDraftMessage}
+            draftingActionId={draftingActionId}
           />
         </Panel>
       ) : activeTab === "follow_up" ? (
@@ -1143,6 +1224,8 @@ export function AiRevenueAgentPage() {
             }}
             onError={(message) => setErrorMessage(message || null)}
             onOpenAction={setSelectedAction}
+            onDraftMessage={handleDraftMessage}
+            draftingActionId={draftingActionId}
           />
         </Panel>
       ) : activeTab === "conversations" ? (
@@ -1247,6 +1330,8 @@ export function AiRevenueAgentPage() {
                 await loadData(false);
               }}
               onError={(message) => setErrorMessage(message || null)}
+              onDraftMessage={handleDraftMessage}
+              draftingActionId={draftingActionId}
               onClose={() => setSelectedAction(null)}
             />
           </section>

@@ -16,6 +16,8 @@ type Props = {
   onWorkflowChanged: (message: string) => Promise<void>;
   onError: (message: string) => void;
   onOpenAction: (action: AiRevenueAction) => void;
+  onDraftMessage: (action: AiRevenueAction) => Promise<void>;
+  draftingActionId?: string | null;
 };
 
 function formatMoney(value: number | null | undefined) {
@@ -48,6 +50,8 @@ export function AiRevenueOpportunitiesTab({
   onWorkflowChanged,
   onError,
   onOpenAction,
+  onDraftMessage,
+  draftingActionId,
 }: Props) {
   if (loading && actions.length === 0) {
     return <div className="inline-note inline-note--loading">Loading AI Revenue opportunities...</div>;
@@ -109,6 +113,14 @@ export function AiRevenueOpportunitiesTab({
             <div className="ai-revenue-action-card__footer">
               <span>{action.recommendedAction}</span>
               <div className="ai-revenue-action-card__controls">
+                <button
+                  type="button"
+                  className="button telegram-settings__button telegram-settings__button--secondary"
+                  disabled={draftingActionId === action.id}
+                  onClick={() => void onDraftMessage(action)}
+                >
+                  {draftingActionId === action.id ? "Drafting..." : "Draft Message"}
+                </button>
                 <button
                   type="button"
                   className="button telegram-settings__button telegram-settings__button--secondary"
