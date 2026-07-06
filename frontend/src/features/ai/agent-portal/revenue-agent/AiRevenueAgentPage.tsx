@@ -4,6 +4,8 @@ import { Link } from "react-router-dom";
 import { PageHeader } from "../../../../components/PageHeader";
 import { Panel } from "../../../../components/Panel";
 import { EmptyState, ErrorState } from "../../../../components/StatusViews";
+import { CustomerUsageHeatmap } from "../../../../components/CustomerUsageHeatmap";
+import { fetchCustomerPortalUsage } from "../../../../api/analytics";
 import {
   approveAiRevenueMessage,
   generateAiRevenueActions,
@@ -31,6 +33,7 @@ import type {
   AiRevenueOutcomeLink,
   AiRevenueOutcomeType,
   AiRevenueSummary,
+  CustomerPortalUsageResponse,
 } from "../../../../types/domain";
 import { useAccess } from "../../../access/AccessProvider";
 import { AiRevenueAuditTab } from "./AiRevenueAuditTab";
@@ -292,10 +295,166 @@ async function copyMessageText(text: string) {
   }
 }
 
+function yearFromDateText(value: string | null | undefined) {
+  const match = value?.match(/^(\d{4})-/);
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  return Number.isFinite(year) ? year : null;
+}
+
+function defaultUsageYear(action: AiRevenueAction) {
+  const focusUsage = action.serviceUsage?.find((item) => item.isFocusService) ?? action.serviceUsage?.[0];
+  const year =
+    yearFromDateText(focusUsage?.latestUsageDate) ??
+    yearFromDateText(action.service.lastVisitDate) ??
+    yearFromDateText(action.packageInfo.lastUsedAt) ??
+    yearFromDateText(action.dateKey);
+
+  return year ?? new Date().getFullYear();
+}
+
+function usageYearOptions(defaultYear: number) {
+  const currentYear = new Date().getFullYear();
+  const newestYear = Math.max(currentYear, defaultYear);
+  const years = new Set(Array.from({ length: 6 }, (_, index) => newestYear - index));
+  years.add(defaultYear);
+  return [...years].sort((left, right) => right - left);
+}
+
+function customerUsageIdentity(action: AiRevenueAction) {
+  return {
+    name: action.customer.customerName ?? "",
+    phone: action.customer.phoneNumber ?? action.customer.phoneMasked ?? "",
+  };
+}
+
+function AiRevenueServiceUsageOverTime({
+  action,
+  clinicId,
+  clinicCode,
+}: {
+  action: AiRevenueAction;
+  clinicId: string;
+  clinicCode: string;
+}) {
+  const initialYear = defaultUsageYear(action);
+  const [usageYear, setUsageYear] = useState(initialYear);
+  const [usageCategory, setUsageCategory] = useState("");
+  const [usageState, setUsageState] = useState<{
+    data: CustomerPortalUsageResponse | null;
+    loading: boolean;
+    error: string | null;
+  }>({
+    data: null,
+    loading: false,
+    error: null,
+  });
+  const identity = customerUsageIdentity(action);
+  const canLoadUsage = Boolean(identity.name || identity.phone);
+  const categoryOptions = usageState.data?.categories ?? [];
+
+  useEffect(() => {
+    setUsageYear(initialYear);
+    setUsageCategory("");
+  }, [action.id, initialYear]);
+
+  useEffect(() => {
+    if (!canLoadUsage) {
+      setUsageState({
+        data: null,
+        loading: false,
+        error: null,
+      });
+      return;
+    }
+
+    let active = true;
+    setUsageState((current) => ({ ...current, loading: true, error: null }));
+
+    fetchCustomerPortalUsage({
+      clinicId,
+      clinicCode,
+      fromDate: `${usageYear}-01-01`,
+      toDate: `${usageYear}-12-31`,
+      customerName: identity.name,
+      customerPhone: identity.phone,
+      year: usageYear,
+      serviceCategory: usageCategory,
+    })
+      .then((data) => {
+        if (active) {
+          setUsageState({ data, loading: false, error: null });
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          setUsageState({
+            data: null,
+            loading: false,
+            error: getApiErrorMessage(error, "Service usage history could not be loaded."),
+          });
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [canLoadUsage, clinicCode, clinicId, identity.name, identity.phone, usageCategory, usageYear]);
+
+  return (
+    <div className="ai-revenue-detail__section ai-revenue-usage-over-time">
+      <div className="ai-revenue-usage-over-time__header">
+        <div>
+          <strong>Service usage over time</strong>
+          <p>A month-by-month heat map of this customer's treatment pattern.</p>
+        </div>
+        <div className="customer-detail__table-tools">
+          <label className="field field--compact">
+            <span>Year</span>
+            <select value={usageYear} onChange={(event) => setUsageYear(Number(event.target.value))}>
+              {usageYearOptions(initialYear).map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field field--compact">
+            <span>Category</span>
+            <select value={usageCategory} onChange={(event) => setUsageCategory(event.target.value)}>
+              <option value="">All categories</option>
+              {usageCategory && !categoryOptions.includes(usageCategory) ? <option value={usageCategory}>{usageCategory}</option> : null}
+              {categoryOptions.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
+
+      {!canLoadUsage ? (
+        <EmptyState label="No customer usage identity" detail="This action does not have enough customer identity to load usage history." />
+      ) : usageState.loading ? (
+        <div className="inline-note inline-note--loading">Loading usage heat map...</div>
+      ) : usageState.error ? (
+        <ErrorState label="Usage history could not be loaded" detail={usageState.error} />
+      ) : usageState.data ? (
+        <CustomerUsageHeatmap data={usageState.data} />
+      ) : null}
+    </div>
+  );
+}
+
 function ActionDetailPanel({
   action,
   actions,
   clinicId,
+  clinicCode,
   onWorkflowChanged,
   onError,
   onDraftMessage,
@@ -305,6 +464,7 @@ function ActionDetailPanel({
   action: AiRevenueAction;
   actions: AiRevenueAction[];
   clinicId: string;
+  clinicCode: string;
   onWorkflowChanged: (message: string) => Promise<void>;
   onError: (message: string) => void;
   onDraftMessage: (action: AiRevenueAction) => Promise<void>;
@@ -502,96 +662,7 @@ function ActionDetailPanel({
           </div>
         </div>
 
-        <div className="ai-revenue-detail__grid">
-          <div>
-            <span>Type</span>
-            <strong>{formatLabel(action.actionType)}</strong>
-          </div>
-          <div>
-            <span>Status</span>
-            <strong>{formatLabel(action.status)}</strong>
-          </div>
-          <div>
-            <span>Workflow state</span>
-            <strong>{formatLabel(action.workflowState)}</strong>
-          </div>
-          <div>
-            <span>Visibility state</span>
-            <strong>{formatLabel(action.visibilityState)}</strong>
-          </div>
-          <div>
-            <span>Source</span>
-            <strong>{formatLabel(action.source)}</strong>
-          </div>
-          <div>
-            <span>Date</span>
-            <strong>{action.dateKey}</strong>
-          </div>
-          <div>
-            <span>Service</span>
-            <strong>{action.service.serviceName ?? "Not set"}</strong>
-          </div>
-          <div>
-            <span>Package balance</span>
-            <strong>
-              {action.packageInfo.remainingUnits == null
-                ? "Not set"
-                : `${formatNumber(action.packageInfo.remainingUnits)} remaining`}
-            </strong>
-          </div>
-          <div>
-            <span>AI-generated revenue</span>
-            <strong>{formatMoney(action.revenue.actualRevenue)}</strong>
-          </div>
-          <div>
-            <span>Booking ID</span>
-            <strong>{action.appointment.bookingId ?? "Not linked"}</strong>
-          </div>
-          <div>
-            <span>Appointment time</span>
-            <strong>{action.appointment.appointmentDateTime ?? "Not requested"}</strong>
-          </div>
-          <div>
-            <span>Practitioner</span>
-            <strong>{action.appointment.practitionerName ?? "Not set"}</strong>
-          </div>
-          <div>
-            <span>Package sessions recovered</span>
-            <strong>{formatNumber(action.revenue.packageSessionsRecovered)}</strong>
-          </div>
-          <div>
-            <span>Follow-up due</span>
-            <strong>{action.dueDateKey ?? action.followUp.nextFollowUpDate ?? action.followUp.dueDate ?? action.dateKey}</strong>
-          </div>
-          <div>
-            <span>Due date key</span>
-            <strong>{action.dueDateKey ?? action.dateKey}</strong>
-          </div>
-          <div>
-            <span>Next follow-up at</span>
-            <strong>{formatDateTime(action.nextFollowUpAt ?? action.followUp.nextFollowUpDate)}</strong>
-          </div>
-          <div>
-            <span>Attempt count</span>
-            <strong>{formatNumber(action.attemptCount ?? action.followUp.attemptCount)}</strong>
-          </div>
-          <div>
-            <span>Assigned to</span>
-            <strong>{action.assignedToName ?? action.assignedToUserId ?? "Unassigned"}</strong>
-          </div>
-          <div>
-            <span>Last follow-up</span>
-            <strong>{formatDateTime(action.lastContactAt ?? action.followUp.lastContactedAt)}</strong>
-          </div>
-          <div>
-            <span>Last contact result</span>
-            <strong>{formatLabel(action.lastContactResult ?? action.followUp.lastResult)}</strong>
-          </div>
-          <div>
-            <span>Last follow-up note</span>
-            <strong>{action.lastFollowUpNote ?? action.followUp.lastNote ?? "No note"}</strong>
-          </div>
-        </div>
+        <AiRevenueServiceUsageOverTime action={action} clinicId={clinicId} clinicCode={clinicCode} />
 
         <AiStaffFollowUpSnapshot action={action} relatedActions={relatedActions} />
 
@@ -1318,6 +1389,7 @@ export function AiRevenueAgentPage() {
           >
             <ActionDetailPanel
               clinicId={clinic.id}
+              clinicCode={clinic.code}
               actions={[
                 ...actions,
                 ...followUpActions.filter((followUpAction) => !actions.some((action) => action.id === followUpAction.id)),

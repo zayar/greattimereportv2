@@ -3729,6 +3729,36 @@ textarea:focus-visible,
   font-weight: 700;
 }
 
+.ai-revenue-usage-over-time {
+  gap: 14px;
+  min-width: 0;
+  padding-top: 6px;
+}
+
+.ai-revenue-usage-over-time__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  min-width: 0;
+}
+
+.ai-revenue-usage-over-time__header > div:first-child {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ai-revenue-usage-over-time__header p {
+  margin: 0;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.ai-revenue-usage-over-time .customer-detail__table-tools {
+  flex-shrink: 0;
+}
+
 .ai-revenue-followup-history {
   position: relative;
   display: grid;
@@ -4136,6 +4166,14 @@ textarea:focus-visible,
 
   .ai-revenue-detail__quick-actions > div:first-child {
     min-width: 0;
+  }
+
+  .ai-revenue-usage-over-time__header {
+    flex-direction: column;
+  }
+
+  .ai-revenue-usage-over-time .customer-detail__table-tools {
+    width: 100%;
   }
 
   .ai-revenue-action-card__controls {
