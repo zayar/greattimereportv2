@@ -8,6 +8,7 @@ import {
   generateAiRevenueMessage,
   getAiRevenueAction,
   getAiRevenueRunSummary,
+  hasAiRevenueActionsForDate,
   listAiRevenueActions,
 } from "../ai-revenue-agent/ai-revenue-agent.service.js";
 import { getTelegramTargetByChatId } from "./storage.service.js";
@@ -650,6 +651,16 @@ function noDataMessage(dateKey: string) {
   ].join("\n");
 }
 
+async function hasLegacyRunEvidenceFromSameDayActions(input: {
+  clinicId: string;
+  dateKey: string;
+}) {
+  return hasAiRevenueActionsForDate({
+    clinicId: input.clinicId,
+    dateKey: input.dateKey,
+  });
+}
+
 async function buildSessionCommandReply(input: {
   clinicId: string;
   chatId: string;
@@ -741,7 +752,11 @@ export async function buildAiRevenueFollowUpTelegramReply(input: {
     clinicId: target.clinicId,
     dateKey,
   });
-  if (!runSummary) {
+  const hasRunData = runSummary || (await hasLegacyRunEvidenceFromSameDayActions({
+    clinicId: target.clinicId,
+    dateKey,
+  }));
+  if (!hasRunData) {
     return noDataMessage(dateKey);
   }
 

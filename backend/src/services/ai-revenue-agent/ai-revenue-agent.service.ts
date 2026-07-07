@@ -1062,6 +1062,17 @@ export async function getAiRevenueRunSummary(input: { clinicId: string; dateKey:
   return repository.getAiRevenueRunSummary(input);
 }
 
+export async function hasAiRevenueActionsForDate(input: { clinicId: string; dateKey: string }) {
+  const actions = await repository.listActions({
+    clinicId: input.clinicId,
+    dateKey: input.dateKey,
+    limit: 1,
+    includeResolved: true,
+  });
+
+  return actions.length > 0;
+}
+
 export async function generateAiRevenueActions(input: {
   clinicId: string;
   clinicCode: string;
