@@ -154,8 +154,11 @@ function buildAction(overrides: Partial<AiRevenueAction> = {}): AiRevenueAction 
 
 test("AI Revenue follow-up intent matches natural and prefixed Telegram questions", () => {
   assert.equal(isAiRevenueFollowUpTelegramText("Who should I follow up ?"), true);
+  assert.equal(isAiRevenueFollowUpTelegramText("who shoud i followup ?"), true);
+  assert.equal(isAiRevenueFollowUpTelegramText("Who should I followup?"), true);
   assert.equal(isAiRevenueFollowUpTelegramText("Who should I follow up today?"), true);
   assert.equal(isAiRevenueFollowUpTelegramText("/ask Who should I follow up ?"), true);
+  assert.equal(isAiRevenueFollowUpTelegramText("/ask who shoud i followup ?"), true);
   assert.equal(isAiRevenueFollowUpTelegramText("/ask Who should I follow up today?"), true);
   assert.equal(isAiRevenueFollowUpTelegramText("/gt who to follow up today"), true);
   assert.equal(isAiRevenueFollowUpTelegramText("ဘယ်သူကို ဆက်သွယ်ရမလဲ"), true);
