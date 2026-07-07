@@ -153,10 +153,17 @@ function buildAction(overrides: Partial<AiRevenueAction> = {}): AiRevenueAction 
 }
 
 test("AI Revenue follow-up intent matches natural and prefixed Telegram questions", () => {
+  assert.equal(isAiRevenueFollowUpTelegramText("Who should I follow up ?"), true);
   assert.equal(isAiRevenueFollowUpTelegramText("Who should I follow up today?"), true);
+  assert.equal(isAiRevenueFollowUpTelegramText("/ask Who should I follow up ?"), true);
   assert.equal(isAiRevenueFollowUpTelegramText("/ask Who should I follow up today?"), true);
   assert.equal(isAiRevenueFollowUpTelegramText("/gt who to follow up today"), true);
   assert.equal(isAiRevenueFollowUpTelegramText("ဘယ်သူကို ဆက်သွယ်ရမလဲ"), true);
+});
+
+test("AI Revenue follow-up intent avoids explanation-style follow-up questions", () => {
+  assert.equal(isAiRevenueFollowUpTelegramText("Explain why I should follow up this customer"), false);
+  assert.equal(isAiRevenueFollowUpTelegramText("Show follow up message detail for Aye Aye"), false);
 });
 
 test("AI Revenue follow-up session commands match detail and message shortcuts", () => {

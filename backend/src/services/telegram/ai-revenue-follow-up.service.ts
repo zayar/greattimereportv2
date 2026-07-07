@@ -172,8 +172,15 @@ export function isAiRevenueFollowUpTelegramText(text: string): boolean {
   }
 
   const phrases = [
+    "who should i follow up",
     "who should i follow up today",
+    "who to follow up",
     "who to follow up today",
+    "who do i follow up",
+    "which customer should i follow up",
+    "which customers should i follow up",
+    "follow up list",
+    "follow up queue",
     "follow up today",
     "today follow up",
     "today opportunity",
@@ -183,7 +190,19 @@ export function isAiRevenueFollowUpTelegramText(text: string): boolean {
     "ဘယ်သူကို ဆက်သွယ်ရမလဲ",
   ].map(normalizeIntentText);
 
-  return phrases.some((phrase) => normalized === phrase || normalized.includes(phrase));
+  if (phrases.some((phrase) => normalized === phrase || normalized.includes(phrase))) {
+    return true;
+  }
+
+  const asksWhoForFollowUp =
+    /\b(?:who|which customers?)\b/.test(normalized) &&
+    /\bfollow up\b/.test(normalized) &&
+    !/\b(?:why|explain|history|message|draft|detail|details)\b/.test(normalized);
+  if (asksWhoForFollowUp) {
+    return true;
+  }
+
+  return /\b(?:show|list|get|give me)\b.*\bfollow up(?:s)?\b.*\b(?:today|list|queue|customers?)\b/.test(normalized);
 }
 
 function parseSessionCommand(text: string): ParsedSessionCommand | null {
