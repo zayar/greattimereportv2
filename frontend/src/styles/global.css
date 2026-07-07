@@ -7089,7 +7089,7 @@ a {
 
 .ai-control-panel__meta-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -7109,6 +7109,22 @@ a {
   color: var(--ink);
   font-size: 0.78rem;
   text-transform: uppercase;
+}
+
+.ai-control-panel__clinic-id code {
+  color: #263443;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.ai-control-panel__copy-button {
+  justify-self: start;
+  min-width: 0;
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 0.78rem;
 }
 
 .ai-control-panel__callout,

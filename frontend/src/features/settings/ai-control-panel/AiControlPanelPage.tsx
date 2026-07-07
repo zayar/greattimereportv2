@@ -107,6 +107,7 @@ export function AiControlPanelPage() {
   const [agentStatusError, setAgentStatusError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [copiedClinicId, setCopiedClinicId] = useState<string | null>(null);
 
   const sortedClinics = useMemo(
     () =>
@@ -231,6 +232,24 @@ export function AiControlPanelPage() {
       setPageError(message);
     } finally {
       setClinicBusy(clinic.id, null);
+    }
+  }
+
+  async function handleCopyClinicId(clinic: Clinic) {
+    setNotice(null);
+    setPageError(null);
+
+    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+      setPageError("Clinic ID could not be copied by this browser.");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(clinic.id);
+      setCopiedClinicId(clinic.id);
+      setNotice(`${clinic.name} clinic ID copied.`);
+    } catch {
+      setPageError("Clinic ID could not be copied by this browser.");
     }
   }
 
@@ -360,6 +379,17 @@ export function AiControlPanelPage() {
                     <p>{busy === "load" && !status ? "Loading AI access status..." : getRowSummary(clinic, status)}</p>
 
                     <div className="ai-control-panel__meta-grid">
+                      <span className="ai-control-panel__clinic-id">
+                        <strong>Clinic ID</strong>
+                        <code>{clinic.id}</code>
+                        <button
+                          type="button"
+                          className="button ai-control-panel__button ai-control-panel__button--secondary ai-control-panel__copy-button"
+                          onClick={() => void handleCopyClinicId(clinic)}
+                        >
+                          {copiedClinicId === clinic.id ? "Copied" : "Copy clinic ID"}
+                        </button>
+                      </span>
                       <span>
                         <strong>Source</strong>
                         {formatAccessSource(status?.source)}

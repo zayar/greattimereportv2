@@ -26,6 +26,8 @@ router.get(
   "/gt-growth-ai",
   requireClinicAccess("query", "clinicId"),
   asyncHandler(async (req, res) => {
+    requireAiControlPanelAdmin(req);
+
     const params = clinicFeatureQuerySchema.parse(req.query);
     const gtGrowthAi = await getClinicGtGrowthAiAccess(params.clinicId);
 
