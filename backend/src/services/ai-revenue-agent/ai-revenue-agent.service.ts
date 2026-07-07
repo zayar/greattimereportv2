@@ -1084,6 +1084,7 @@ export async function generateAiRevenueActions(input: {
     generatedCount: generated.generatedCount,
     skippedExistingCount: generated.skippedExistingCount,
     refreshedExistingCount: generated.refreshedExistingCount,
+    suppressedSkippedCount: generated.suppressedSkippedCount,
     actions: generated.actions,
     sourceStatus: generated.sourceStatus,
     summary,

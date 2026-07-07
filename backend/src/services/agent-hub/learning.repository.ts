@@ -20,7 +20,8 @@ export type AgentLearningJobType =
   | "recommendation_outcome_observer"
   | "owner_insight_cards"
   | "weekly_business_review"
-  | "memory_maintenance";
+  | "memory_maintenance"
+  | "ai_revenue_generate_today_opportunities";
 
 export type AgentLearningRunCounts = {
   scanned: number;

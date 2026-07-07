@@ -1362,7 +1362,7 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
     dateKey: input.dateKey,
   });
 
-  const candidates = uniqueCandidates([
+  const candidatePool = uniqueCandidates([
     ...createServiceReminderCandidates({
       rows: customerRows,
       dateKey: input.dateKey,
@@ -1376,17 +1376,22 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
       highRiskCustomers,
     }),
     ...createInactiveVipCandidates(vipRows, input.dateKey),
-  ]).filter(
-    (candidate) =>
-      !isOpportunitySuppressed(
-        {
-          customer: candidate.customer,
-          service: candidate.service,
-        },
-        activeSuppressions,
-        input.dateKey,
-      ),
-  );
+  ]);
+  let suppressedSkippedCount = 0;
+  const candidates = candidatePool.filter((candidate) => {
+    const suppressed = isOpportunitySuppressed(
+      {
+        customer: candidate.customer,
+        service: candidate.service,
+      },
+      activeSuppressions,
+      input.dateKey,
+    );
+    if (suppressed) {
+      suppressedSkippedCount += 1;
+    }
+    return !suppressed;
+  });
   const focusCandidates = selectTopFocusCandidates({
     candidates,
     existingActions,
@@ -1478,6 +1483,7 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
     generatedCount: saved.length,
     skippedExistingCount: skippedExisting.length,
     refreshedExistingCount: refreshedExisting.length,
+    suppressedSkippedCount,
     actions: [...saved, ...refreshedExisting, ...skippedExisting].sort(
       (left, right) => right.priorityScore - left.priorityScore || left.title.localeCompare(right.title),
     ),

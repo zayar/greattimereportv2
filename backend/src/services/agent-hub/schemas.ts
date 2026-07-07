@@ -88,12 +88,13 @@ const agentLearningJobTypes = [
   "owner_insight_cards",
   "weekly_business_review",
   "memory_maintenance",
+  "ai_revenue_generate_today_opportunities",
 ] as const;
 
 export const agentLearningTickSchema = z.object({
   clinicIds: z.array(z.string().min(1)).max(100).optional(),
   clinicCodesById: z.record(z.string()).optional(),
-  jobTypes: z.array(z.enum(agentLearningJobTypes)).max(12).optional(),
+  jobTypes: z.array(z.enum(agentLearningJobTypes)).max(13).optional(),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   runAt: z.string().datetime().optional(),
   timezone: z.string().min(1).max(80).optional(),
@@ -103,6 +104,6 @@ export const agentLearningTickSchema = z.object({
 
 export const agentLearningRunAllSchema = z.object({
   clinicIds: z.array(z.string().min(1)).max(100).optional(),
-  jobTypes: z.array(z.enum(agentLearningJobTypes)).max(12).optional(),
+  jobTypes: z.array(z.enum(agentLearningJobTypes)).max(13).optional(),
   dryRun: z.boolean().optional(),
 });

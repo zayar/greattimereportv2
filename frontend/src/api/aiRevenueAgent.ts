@@ -86,6 +86,7 @@ export async function generateAiRevenueActions(payload: AiRevenueGeneratePayload
     generatedCount: number;
     skippedExistingCount: number;
     refreshedExistingCount: number;
+    suppressedSkippedCount: number;
     actions: AiRevenueAction[];
     sourceStatus: Record<string, string>;
     summary: AiRevenueSummary;
@@ -128,6 +129,13 @@ export async function getAiRevenueSettings(params: { clinicId: string }) {
 
 export async function saveAiRevenueSettings(payload: {
   clinicId: string;
+  clinicCode?: string | null;
+  clinicName?: string | null;
+  aiRevenueAgentEnabled?: boolean;
+  autoGenerateTodayOpportunities?: boolean;
+  timezone?: string;
+  dailyGenerateTime?: string;
+  runOrder?: number;
   language?: AiRevenueSettings["language"];
   messagingMode?: AiRevenueSettings["messagingMode"];
   approvalRequired?: boolean;

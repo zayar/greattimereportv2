@@ -9,6 +9,10 @@ import { getServiceBehaviorReport } from "../reports/service-behavior.service.js
 import { getTherapistPortalReport } from "../reports/therapist-portal.service.js";
 import { searchCustomerRelationshipProfiles } from "../reports/customer-relationship-profile.repository.js";
 import { fetchLiveAppointmentSnapshot, isCountableTodayAppointment } from "./appointment-live.service.js";
+import {
+  AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB,
+  runScheduledAiRevenueGeneration,
+} from "../ai-revenue-agent/scheduled-generation.service.js";
 import { listUnprocessedAgentFeedback, markAgentFeedbackProcessed } from "./feedback.repository.js";
 import {
   acquireAgentLearningLock,
@@ -36,6 +40,7 @@ export const DEFAULT_JOB_TYPES: AgentLearningJobType[] = [
   "owner_insight_cards",
   "weekly_business_review",
   "memory_maintenance",
+  AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB,
 ];
 
 type AgentLearningJobOutcome = {
@@ -53,6 +58,7 @@ const DAILY_JOBS = new Set<AgentLearningJobType>([
   "service_practitioner_profiles",
   "appointment_daily_profile",
   "owner_insight_cards",
+  AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB,
 ]);
 const HOURLY_JOBS = new Set<AgentLearningJobType>(["feedback_learning", "recommendation_outcome_observer"]);
 const WEEKLY_JOBS = new Set<AgentLearningJobType>(["weekly_business_review", "memory_maintenance"]);
@@ -66,6 +72,7 @@ const DEFAULT_DAILY_RUN_TIMES: Partial<Record<AgentLearningJobType, string>> = {
   practitioner_profiles: "02:30",
   service_practitioner_profiles: "02:45",
   owner_insight_cards: "08:00",
+  [AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB]: "06:00",
 };
 
 const DEFAULT_WEEKLY_RUNS: Partial<Record<AgentLearningJobType, { day: number; time: string }>> = {
@@ -807,6 +814,8 @@ export async function runAgentLearningTick(params: {
   const now = params.now ?? new Date();
   const dateKey = params.dateKey ?? formatDateKeyInTimeZone(now, timezone);
   const jobTypes = params.jobTypes?.length ? params.jobTypes : DEFAULT_JOB_TYPES;
+  const shouldRunAiRevenueGeneration = jobTypes.includes(AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB);
+  const clinicJobTypes = jobTypes.filter((jobType) => jobType !== AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB);
   const clinicIds = params.clinicIds ?? Object.keys(params.clinicCodesById ?? {});
   const perClinicResults = await mapWithConcurrency(
     clinicIds,
@@ -816,18 +825,38 @@ export async function runAgentLearningTick(params: {
         clinicId,
         clinicCode: params.clinicCodesById?.[clinicId],
         timezone,
-        jobTypes,
+        jobTypes: clinicJobTypes,
         dateKey,
         dryRun: Boolean(params.dryRun),
         operationalIntervalMinutes: params.operationalIntervalMinutes,
         now,
       }),
   );
+  const aiRevenue = shouldRunAiRevenueGeneration
+    ? await runScheduledAiRevenueGeneration({
+        now,
+        dateKey: params.dateKey,
+        timezone,
+        dryRun: params.dryRun,
+      })
+    : null;
 
   return {
     enabled: true,
     dryRun: Boolean(params.dryRun),
     results: perClinicResults.flat(),
+    aiRevenue,
+    ...(aiRevenue
+      ? {
+          totalClinics: aiRevenue.totalClinics,
+          processedClinics: aiRevenue.processedClinics,
+          skippedClinics: aiRevenue.skippedClinics,
+          failedClinics: aiRevenue.failedClinics,
+          totalCreated: aiRevenue.totalCreated,
+          totalDuplicateSkipped: aiRevenue.totalDuplicateSkipped,
+          totalSuppressedSkipped: aiRevenue.totalSuppressedSkipped,
+        }
+      : {}),
   };
 }
 
@@ -847,10 +876,14 @@ export async function runAgentLearningForSchedules(params?: {
 
   const now = params?.now ?? new Date();
   const schedules = await listAgentLearningSchedules({ clinicIds: params?.clinicIds });
+  const requestedJobTypes = params?.jobTypes?.length ? params.jobTypes : null;
+  const shouldRunAiRevenueGeneration = requestedJobTypes
+    ? requestedJobTypes.includes(AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB)
+    : false;
   const perScheduleResults = await mapWithConcurrency(schedules, env.AGENT_LEARNING_MAX_CLINIC_CONCURRENCY, async (schedule) => {
-    const jobTypes = (params?.jobTypes?.length ? params.jobTypes : schedule.enabledJobTypes).filter((jobType) =>
-      isScheduleDueForJob({ schedule, jobType, now }),
-    );
+    const jobTypes = (requestedJobTypes ?? schedule.enabledJobTypes)
+      .filter((jobType) => jobType !== AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB)
+      .filter((jobType) => isScheduleDueForJob({ schedule, jobType, now }));
 
     if (jobTypes.length === 0) {
       return [];
@@ -868,11 +901,29 @@ export async function runAgentLearningForSchedules(params?: {
       now,
     });
   });
+  const aiRevenue = shouldRunAiRevenueGeneration
+    ? await runScheduledAiRevenueGeneration({
+        now,
+        dryRun: params?.dryRun,
+      })
+    : null;
 
   return {
     enabled: true,
     dryRun: Boolean(params?.dryRun),
     schedules: schedules.length,
     results: perScheduleResults.flat(),
+    aiRevenue,
+    ...(aiRevenue
+      ? {
+          totalClinics: aiRevenue.totalClinics,
+          processedClinics: aiRevenue.processedClinics,
+          skippedClinics: aiRevenue.skippedClinics,
+          failedClinics: aiRevenue.failedClinics,
+          totalCreated: aiRevenue.totalCreated,
+          totalDuplicateSkipped: aiRevenue.totalDuplicateSkipped,
+          totalSuppressedSkipped: aiRevenue.totalSuppressedSkipped,
+        }
+      : {}),
   };
 }

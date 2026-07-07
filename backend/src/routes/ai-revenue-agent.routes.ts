@@ -314,6 +314,13 @@ const suppressionLiftSchema = z.object({
 
 const settingsSchema = z.object({
   clinicId: z.string().min(1),
+  clinicCode: z.string().min(1).nullable().optional(),
+  clinicName: z.string().min(1).nullable().optional(),
+  aiRevenueAgentEnabled: z.boolean().optional(),
+  autoGenerateTodayOpportunities: z.boolean().optional(),
+  timezone: z.string().min(1).max(80).optional(),
+  dailyGenerateTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  runOrder: z.number().int().min(0).max(10_000).optional(),
   language: z.enum(["my-MM", "en-US"]).optional(),
   messagingMode: z.enum(["manual", "mock", "provider"]).optional(),
   approvalRequired: z.boolean().optional(),
