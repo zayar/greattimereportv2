@@ -19,6 +19,11 @@ import type {
 import { buildTelegramSalesAssistantReply } from "../gt-growth-ai/sales-assistant.service.js";
 import { GT_GROWTH_AI_FEATURE_GATE } from "../../types/report-ai.js";
 import {
+  buildAiRevenueFollowUpTelegramReply,
+  isAiRevenueFollowUpSessionCommand,
+  isAiRevenueFollowUpTelegramText,
+} from "./ai-revenue-follow-up.service.js";
+import {
   buildGreatTimeAgentCsvCaption,
   buildGreatTimeAgentCsvExportFromTables,
 } from "./agent-csv-export.service.js";
@@ -3472,6 +3477,20 @@ export async function handleTelegramUpdate(update: TelegramUpdate) {
 
   if (/^\/start(?:@\w+)?$/i.test(text) || /^\/help(?:@\w+)?$/i.test(text)) {
     await sendUsageMessage(chatId);
+    return;
+  }
+
+  if (isAiRevenueFollowUpTelegramText(text) || isAiRevenueFollowUpSessionCommand(text)) {
+    const reply = await buildAiRevenueFollowUpTelegramReply({
+      chatId,
+      chatType: message.chat.type,
+      text,
+      telegramUserId: message.from?.id == null ? null : String(message.from.id),
+    });
+
+    if (reply) {
+      await sendTelegramMessage(chatId, reply);
+    }
     return;
   }
 

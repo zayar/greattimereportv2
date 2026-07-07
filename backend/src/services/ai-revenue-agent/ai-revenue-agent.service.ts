@@ -1058,6 +1058,10 @@ export async function getAiRevenueAction(input: { clinicId: string; actionId: st
   return repository.getAction(input.clinicId, input.actionId);
 }
 
+export async function getAiRevenueRunSummary(input: { clinicId: string; dateKey: string }) {
+  return repository.getAiRevenueRunSummary(input);
+}
+
 export async function generateAiRevenueActions(input: {
   clinicId: string;
   clinicCode: string;
@@ -1077,6 +1081,16 @@ export async function generateAiRevenueActions(input: {
     clinicId: input.clinicId,
     startDateKey: dateKey,
     endDateKey: dateKey,
+  });
+  await repository.saveAiRevenueRunSummary({
+    clinicId: input.clinicId,
+    clinicCode: input.clinicCode,
+    dateKey,
+    generatedCount: generated.generatedCount,
+    skippedExistingCount: generated.skippedExistingCount,
+    refreshedExistingCount: generated.refreshedExistingCount,
+    actionCount: generated.actions.length,
+    sourceStatus: generated.sourceStatus,
   });
 
   return {

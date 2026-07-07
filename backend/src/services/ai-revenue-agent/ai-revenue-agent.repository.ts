@@ -67,6 +67,7 @@ const SETTINGS_COLLECTION = "gt_ai_revenue_settings";
 const CUSTOMER_SUPPRESSIONS_COLLECTION = "gt_ai_revenue_customer_suppressions";
 const BATCH_RUNS_COLLECTION = "gt_ai_revenue_batch_runs";
 const CLINIC_RUNS_COLLECTION = "gt_ai_revenue_clinic_runs";
+const AI_REVENUE_RUNS_COLLECTION = "gt_ai_revenue_runs";
 const RESOLVED_STATUSES = new Set<AiRevenueActionStatus>(["closed", "skipped", "not_interested"]);
 
 export type AiRevenueScheduledRunStatus = "running" | "completed" | "skipped" | "failed";
@@ -97,6 +98,21 @@ export type AiRevenueBatchRunSummary = {
   totalCreated: number;
   totalDuplicateSkipped: number;
   totalSuppressedSkipped: number;
+};
+
+export type AiRevenueRunSummaryRecord = {
+  id: string;
+  clinicId: string;
+  clinicCode: string | null;
+  dateKey: string;
+  status: "completed";
+  generatedCount: number;
+  skippedExistingCount: number;
+  refreshedExistingCount: number;
+  actionCount: number;
+  sourceStatus: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
 };
 
 function nowIso() {
@@ -149,6 +165,10 @@ function batchRunCollection() {
 
 function clinicRunCollection() {
   return firestoreDb().collection(CLINIC_RUNS_COLLECTION);
+}
+
+function aiRevenueRunCollection() {
+  return firestoreDb().collection(AI_REVENUE_RUNS_COLLECTION);
 }
 
 function cleanText(value: unknown, fallback = "") {
@@ -2025,6 +2045,77 @@ export async function updateSettingsAutoGenerationStatus(params: {
     }) as Record<string, unknown>,
     { merge: true },
   );
+}
+
+function aiRevenueRunSummaryId(params: { clinicId: string; dateKey: string }) {
+  return `${encodeURIComponent(params.clinicId)}__${params.dateKey}`;
+}
+
+function normalizeAiRevenueRunSummary(
+  id: string,
+  data: FirebaseFirestore.DocumentData | undefined,
+): AiRevenueRunSummaryRecord | null {
+  if (!data || typeof data.clinicId !== "string" || typeof data.dateKey !== "string") {
+    return null;
+  }
+
+  return {
+    id,
+    clinicId: data.clinicId,
+    clinicCode: nullableText(data.clinicCode),
+    dateKey: data.dateKey,
+    status: "completed",
+    generatedCount: Math.max(0, Math.round(numberOrZero(data.generatedCount))),
+    skippedExistingCount: Math.max(0, Math.round(numberOrZero(data.skippedExistingCount))),
+    refreshedExistingCount: Math.max(0, Math.round(numberOrZero(data.refreshedExistingCount))),
+    actionCount: Math.max(0, Math.round(numberOrZero(data.actionCount))),
+    sourceStatus:
+      data.sourceStatus && typeof data.sourceStatus === "object"
+        ? (data.sourceStatus as Record<string, unknown>)
+        : {},
+    createdAt: cleanText(data.createdAt, nowIso()),
+    updatedAt: cleanText(data.updatedAt, nowIso()),
+  };
+}
+
+export async function saveAiRevenueRunSummary(input: {
+  clinicId: string;
+  clinicCode?: string | null;
+  dateKey: string;
+  generatedCount: number;
+  skippedExistingCount: number;
+  refreshedExistingCount: number;
+  actionCount: number;
+  sourceStatus: Record<string, unknown>;
+}) {
+  const id = aiRevenueRunSummaryId(input);
+  const ref = aiRevenueRunCollection().doc(id);
+  const snapshot = await ref.get();
+  const current = normalizeAiRevenueRunSummary(snapshot.id, snapshot.data());
+  const timestamp = nowIso();
+  const record: AiRevenueRunSummaryRecord = {
+    id,
+    clinicId: input.clinicId,
+    clinicCode: input.clinicCode ?? current?.clinicCode ?? null,
+    dateKey: input.dateKey,
+    status: "completed",
+    generatedCount: Math.max(0, Math.round(numberOrZero(input.generatedCount))),
+    skippedExistingCount: Math.max(0, Math.round(numberOrZero(input.skippedExistingCount))),
+    refreshedExistingCount: Math.max(0, Math.round(numberOrZero(input.refreshedExistingCount))),
+    actionCount: Math.max(0, Math.round(numberOrZero(input.actionCount))),
+    sourceStatus: input.sourceStatus ?? {},
+    createdAt: current?.createdAt ?? timestamp,
+    updatedAt: timestamp,
+  };
+
+  await ref.set(stripUndefinedDeep(record) as Record<string, unknown>, { merge: true });
+  return record;
+}
+
+export async function getAiRevenueRunSummary(params: { clinicId: string; dateKey: string }) {
+  const id = aiRevenueRunSummaryId(params);
+  const snapshot = await aiRevenueRunCollection().doc(id).get();
+  return normalizeAiRevenueRunSummary(snapshot.id, snapshot.data());
 }
 
 function scheduledRunId(parts: string[]) {
