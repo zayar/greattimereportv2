@@ -828,11 +828,6 @@ export async function fetchApicoreOrdersWithPayments(params: {
           status: {
             equals: "ACTIVE",
           },
-          order_id: {
-            not: {
-              startsWith: "CO-",
-            },
-          },
           payments: {
             some: {
               payment_date: {

@@ -65,12 +65,32 @@ function normalizePaymentMethod(value: string | null | undefined) {
   }
 }
 
+function isReportablePaymentMethod(value: string | null | undefined) {
+  return (value ?? "").trim().toUpperCase() !== "PASS";
+}
+
 function getCustomerName(order: ApicoreOrderWithPaymentsRow) {
   return order.member?.clinic_members?.[0]?.name?.trim() || order.member?.name?.trim() || "Unknown customer";
 }
 
 function getSellerName(order: ApicoreOrderWithPaymentsRow) {
   return order.seller?.display_name?.trim() || order.user?.name?.trim() || "Unknown seller";
+}
+
+function buildPaymentDedupeKey(input: {
+  invoiceNumber: string;
+  paymentMethod: string;
+  amount: number;
+  paymentTime: number;
+  paymentNote?: string | null;
+}) {
+  return [
+    input.invoiceNumber,
+    input.paymentMethod,
+    String(input.amount),
+    String(input.paymentTime),
+    input.paymentNote?.trim() ?? "",
+  ].join("|");
 }
 
 function buildFallbackPaymentRow(input: {
@@ -103,6 +123,10 @@ function buildFallbackPaymentRow(input: {
     return null;
   }
 
+  if (!isReportablePaymentMethod(input.order.payment_method)) {
+    return null;
+  }
+
   return {
     time: formatDisplayTimeInTimeZone(createdAt, input.timezone),
     customerName: getCustomerName(input.order),
@@ -123,23 +147,46 @@ function mapPaymentRows(input: {
   const startTime = new Date(input.startIso).getTime();
   const endTime = new Date(input.endIso).getTime();
   const rows: Array<TodayPaymentReportItem & { sortKey: number }> = [];
+  const seenPaymentKeys = new Set<string>();
 
   input.orders.forEach((order) => {
-    const matchedPayments = (order.payments ?? [])
+    const payments = order.payments ?? [];
+    const invoiceNumber = order.order_id?.trim() || "Unknown invoice";
+    const matchedPayments = payments
       .map((payment) => {
         const paymentDate = new Date(payment.payment_date);
         const paymentTime = paymentDate.getTime();
         const amount = parseNumber(payment.payment_amount);
 
-        if (Number.isNaN(paymentTime) || paymentTime < startTime || paymentTime > endTime || !(amount > 0)) {
+        if (
+          Number.isNaN(paymentTime) ||
+          paymentTime < startTime ||
+          paymentTime > endTime ||
+          !(amount > 0) ||
+          !isReportablePaymentMethod(payment.payment_method)
+        ) {
           return null;
         }
+
+        const paymentMethod = normalizePaymentMethod(payment.payment_method);
+        const dedupeKey = buildPaymentDedupeKey({
+          invoiceNumber,
+          paymentMethod,
+          amount,
+          paymentTime,
+          paymentNote: payment.payment_note,
+        });
+
+        if (seenPaymentKeys.has(dedupeKey)) {
+          return null;
+        }
+        seenPaymentKeys.add(dedupeKey);
 
         return {
           time: formatDisplayTimeInTimeZone(paymentDate, input.timezone),
           customerName: getCustomerName(order),
-          invoiceNumber: order.order_id?.trim() || "Unknown invoice",
-          paymentMethod: normalizePaymentMethod(payment.payment_method),
+          invoiceNumber,
+          paymentMethod,
           amount,
           sellerName: getSellerName(order),
           sortKey: paymentTime,
@@ -149,6 +196,10 @@ function mapPaymentRows(input: {
 
     if (matchedPayments.length > 0) {
       rows.push(...matchedPayments);
+      return;
+    }
+
+    if (payments.length > 0) {
       return;
     }
 
@@ -524,3 +575,8 @@ export async function sendTodayPaymentReport(input: {
     message,
   };
 }
+
+export const __test = {
+  buildPaymentSnapshot,
+  mapPaymentRows,
+};
