@@ -31,6 +31,7 @@ import type {
 import { useAccess } from "../../access/AccessProvider";
 
 type BusyAction = "load" | "link" | "save" | "unlink" | "test" | "resend" | "sales_test" | null;
+type ManualDateReportType = Extract<TelegramReportType, "appointment" | "payment">;
 
 type TargetDraft = {
   targetPurpose: GtGrowthAiTelegramTargetPurpose;
@@ -142,6 +143,32 @@ function getTimezoneOptions() {
   return [...new Set([currentZone, ...COMMON_TIMEZONES].filter(Boolean))].sort((left, right) =>
     left.localeCompare(right),
   );
+}
+
+function todayDateKey(timezone?: string) {
+  const timeZone = timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+    const getPart = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? "";
+
+    return `${getPart("year")}-${getPart("month")}-${getPart("day")}`;
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
+function isDateKey(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+function formatSendDateLabel(dateKey: string | undefined) {
+  return dateKey ? ` for ${dateKey}` : "";
 }
 
 function formatStatusLabel(status: TelegramIntegrationStatus | null) {
@@ -400,6 +427,13 @@ export function TelegramSettingsPage() {
   const [isQrOpen, setIsQrOpen] = useState(false);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
   const [qrError, setQrError] = useState<string | null>(null);
+  const [manualReportDates, setManualReportDates] = useState<Record<ManualDateReportType, string>>(() => {
+    const today = todayDateKey();
+    return {
+      appointment: today,
+      payment: today,
+    };
+  });
 
   const loadStatus = useCallback(
     async (showLoader = true) => {
@@ -483,6 +517,9 @@ export function TelegramSettingsPage() {
     status?.linkedTargets.find((target) => target.telegramChatId === selectedChatId) ?? status?.linkedTargets[0] ?? null;
   const selectedDraft =
     selectedTarget?.telegramChatId ? draftsByChatId[selectedTarget.telegramChatId] ?? buildTargetDraft(selectedTarget) : null;
+  const manualReportMaxDateKey = todayDateKey(selectedDraft?.timezone);
+  const appointmentManualDateKey = manualReportDates.appointment || manualReportMaxDateKey;
+  const paymentManualDateKey = manualReportDates.payment || manualReportMaxDateKey;
   const appointmentHistory = getReportHistory(selectedTarget, "appointment");
   const paymentHistory = getReportHistory(selectedTarget, "payment");
   const ownerAiHistory = getReportHistory(selectedTarget, "owner_ai");
@@ -637,6 +674,22 @@ export function TelegramSettingsPage() {
         ...patch,
       },
     }));
+  }
+
+  function updateManualReportDate(reportType: ManualDateReportType, dateKey: string) {
+    setManualReportDates((current) => ({
+      ...current,
+      [reportType]: dateKey,
+    }));
+  }
+
+  function getManualReportDateKey(reportType: TelegramReportType) {
+    if (reportType !== "appointment" && reportType !== "payment") {
+      return undefined;
+    }
+
+    const dateKey = manualReportDates[reportType];
+    return isDateKey(dateKey) ? dateKey : undefined;
   }
 
   function toggleOwnerAiFocusArea(focusArea: TelegramOwnerAiFocusArea, checked: boolean) {
@@ -800,6 +853,7 @@ export function TelegramSettingsPage() {
         chatId: selectedTarget.telegramChatId,
         timezone: selectedDraft.timezone,
         reportType,
+        dateKey: getManualReportDateKey(reportType),
         ownerAiLanguage: selectedDraft.ownerAiLanguage,
         ownerAiTone: selectedDraft.ownerAiTone,
         ownerAiFocusAreas: selectedDraft.ownerAiFocusAreas,
@@ -817,10 +871,10 @@ export function TelegramSettingsPage() {
         );
       } else if (reportType === "payment") {
         setNotice(
-          `Payment test sent to ${selectedTarget.targetLabel} (${result.paymentCount ?? 0} payment records, ${Math.round(result.totalPaymentAmount ?? 0).toLocaleString("en-US")} MMK).`,
+          `Payment test${formatSendDateLabel(result.dateKey)} sent to ${selectedTarget.targetLabel} (${result.paymentCount ?? 0} payment records, ${Math.round(result.totalPaymentAmount ?? 0).toLocaleString("en-US")} MMK).`,
         );
       } else {
-        setNotice(`Appointment test sent to ${selectedTarget.targetLabel} (${result.appointmentCount ?? 0} appointments).`);
+        setNotice(`Appointment test${formatSendDateLabel(result.dateKey)} sent to ${selectedTarget.targetLabel} (${result.appointmentCount ?? 0} appointments).`);
       }
       await loadStatus(false);
     } catch (error) {
@@ -847,6 +901,7 @@ export function TelegramSettingsPage() {
         chatId: selectedTarget.telegramChatId,
         timezone: selectedDraft.timezone,
         reportType,
+        dateKey: getManualReportDateKey(reportType),
         ownerAiLanguage: selectedDraft.ownerAiLanguage,
         ownerAiTone: selectedDraft.ownerAiTone,
         ownerAiFocusAreas: selectedDraft.ownerAiFocusAreas,
@@ -864,10 +919,10 @@ export function TelegramSettingsPage() {
         );
       } else if (reportType === "payment") {
         setNotice(
-          `Payment report resent to ${selectedTarget.targetLabel} (${result.paymentCount ?? 0} payment records, ${Math.round(result.totalPaymentAmount ?? 0).toLocaleString("en-US")} MMK).`,
+          `Payment report${formatSendDateLabel(result.dateKey)} resent to ${selectedTarget.targetLabel} (${result.paymentCount ?? 0} payment records, ${Math.round(result.totalPaymentAmount ?? 0).toLocaleString("en-US")} MMK).`,
         );
       } else {
-        setNotice(`Appointment report resent to ${selectedTarget.targetLabel} (${result.appointmentCount ?? 0} appointments).`);
+        setNotice(`Appointment report${formatSendDateLabel(result.dateKey)} resent to ${selectedTarget.targetLabel} (${result.appointmentCount ?? 0} appointments).`);
       }
       await loadStatus(false);
     } catch (error) {
@@ -1541,28 +1596,41 @@ export function TelegramSettingsPage() {
             </div>
           ) : null}
 
-          <div className="telegram-settings__button-row">
-            <button
-              className="button telegram-settings__button telegram-settings__button--primary"
-              onClick={() => void handleSaveSettings()}
-              disabled={busyAction !== null || !hasChanges || !selectedTarget}
-            >
-              {busyAction === "save" ? "Saving..." : "Save appointment schedule"}
-            </button>
-            <button
-              className="button telegram-settings__button telegram-settings__button--secondary"
-              onClick={() => void handleSendTest("appointment")}
-              disabled={!selectedTarget || busyAction !== null}
-            >
-              {busyAction === "test" ? "Sending..." : "Send appointment test"}
-            </button>
-            <button
-              className="button telegram-settings__button telegram-settings__button--secondary"
-              onClick={() => void handleResend("appointment")}
-              disabled={!selectedTarget || busyAction !== null || appointmentHistory.length === 0}
-            >
-              {busyAction === "resend" ? "Resending..." : appointmentResendLabel}
-            </button>
+          <div className="telegram-settings__manual-send">
+            <label className="field">
+              <span>Manual report date</span>
+              <input
+                type="date"
+                value={appointmentManualDateKey}
+                max={manualReportMaxDateKey}
+                onChange={(event) => updateManualReportDate("appointment", event.target.value)}
+                disabled={!selectedTarget || busyAction !== null}
+              />
+            </label>
+
+            <div className="telegram-settings__button-row">
+              <button
+                className="button telegram-settings__button telegram-settings__button--primary"
+                onClick={() => void handleSaveSettings()}
+                disabled={busyAction !== null || !hasChanges || !selectedTarget}
+              >
+                {busyAction === "save" ? "Saving..." : "Save appointment schedule"}
+              </button>
+              <button
+                className="button telegram-settings__button telegram-settings__button--secondary"
+                onClick={() => void handleSendTest("appointment")}
+                disabled={!selectedTarget || busyAction !== null}
+              >
+                {busyAction === "test" ? "Sending..." : "Send appointment test"}
+              </button>
+              <button
+                className="button telegram-settings__button telegram-settings__button--secondary"
+                onClick={() => void handleResend("appointment")}
+                disabled={!selectedTarget || busyAction !== null || appointmentHistory.length === 0}
+              >
+                {busyAction === "resend" ? "Resending..." : appointmentResendLabel}
+              </button>
+            </div>
           </div>
         </Panel>
 
@@ -1639,35 +1707,48 @@ export function TelegramSettingsPage() {
             </div>
           ) : null}
 
-          <div className="telegram-settings__button-row">
-            <button
-              className="button telegram-settings__button telegram-settings__button--primary"
-              onClick={() => void handleSaveSettings()}
-              disabled={busyAction !== null || !hasChanges || !selectedTarget}
-            >
-              {busyAction === "save" ? "Saving..." : "Save payment schedule"}
-            </button>
-            <button
-              className="button telegram-settings__button telegram-settings__button--secondary"
-              onClick={() => void handleSendTest("payment")}
-              disabled={!selectedTarget || busyAction !== null}
-            >
-              {busyAction === "test" ? "Sending..." : "Send payment test"}
-            </button>
-            <button
-              className="button telegram-settings__button telegram-settings__button--secondary"
-              onClick={() => void handleResend("payment")}
-              disabled={!selectedTarget || busyAction !== null || paymentHistory.length === 0}
-            >
-              {busyAction === "resend" ? "Resending..." : paymentResendLabel}
-            </button>
-            <button
-              className="button telegram-settings__button telegram-settings__button--danger"
-              onClick={() => void handleUnlink(selectedTarget)}
-              disabled={!selectedTarget || busyAction !== null}
-            >
-              {busyAction === "unlink" && unlinkingChatId === selectedTarget?.telegramChatId ? "Removing..." : "Remove selected target"}
-            </button>
+          <div className="telegram-settings__manual-send">
+            <label className="field">
+              <span>Manual report date</span>
+              <input
+                type="date"
+                value={paymentManualDateKey}
+                max={manualReportMaxDateKey}
+                onChange={(event) => updateManualReportDate("payment", event.target.value)}
+                disabled={!selectedTarget || busyAction !== null}
+              />
+            </label>
+
+            <div className="telegram-settings__button-row">
+              <button
+                className="button telegram-settings__button telegram-settings__button--primary"
+                onClick={() => void handleSaveSettings()}
+                disabled={busyAction !== null || !hasChanges || !selectedTarget}
+              >
+                {busyAction === "save" ? "Saving..." : "Save payment schedule"}
+              </button>
+              <button
+                className="button telegram-settings__button telegram-settings__button--secondary"
+                onClick={() => void handleSendTest("payment")}
+                disabled={!selectedTarget || busyAction !== null}
+              >
+                {busyAction === "test" ? "Sending..." : "Send payment test"}
+              </button>
+              <button
+                className="button telegram-settings__button telegram-settings__button--secondary"
+                onClick={() => void handleResend("payment")}
+                disabled={!selectedTarget || busyAction !== null || paymentHistory.length === 0}
+              >
+                {busyAction === "resend" ? "Resending..." : paymentResendLabel}
+              </button>
+              <button
+                className="button telegram-settings__button telegram-settings__button--danger"
+                onClick={() => void handleUnlink(selectedTarget)}
+                disabled={!selectedTarget || busyAction !== null}
+              >
+                {busyAction === "unlink" && unlinkingChatId === selectedTarget?.telegramChatId ? "Removing..." : "Remove selected target"}
+              </button>
+            </div>
           </div>
 
           <p className="telegram-settings__hint">

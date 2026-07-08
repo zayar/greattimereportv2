@@ -49,6 +49,13 @@ const clinicTargetSchema = clinicScopedBaseSchema.extend({
 });
 
 const telegramReportTypeSchema = z.enum(["appointment", "payment", "owner_ai", "weekly_summary"]);
+const dateKeySchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine((value) => {
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  }, "Use a valid YYYY-MM-DD date.");
 
 const ownerAiSettingsSchema = z.object({
   isOwnerAiReportEnabled: z.boolean().optional(),
@@ -91,6 +98,7 @@ const settingsSchema = clinicTargetSchema.extend({
 const sendTestSchema = clinicTargetSchema.extend({
   reportType: telegramReportTypeSchema.default("appointment"),
   timezone: z.string().optional(),
+  dateKey: dateKeySchema.optional(),
 }).merge(ownerAiSettingsSchema.pick({
   ownerAiLanguage: true,
   ownerAiTone: true,
@@ -125,6 +133,7 @@ function buildSendResponse(input: {
   return {
     sentAt: input.sentAt,
     reportType: input.reportType,
+    dateKey: typeof report.dateKey === "string" ? report.dateKey : undefined,
     appointmentCount:
       readNumber(report.totalAppointments) ??
       readNumber(appointmentReport.totalAppointments) ??
@@ -271,6 +280,7 @@ router.post(
 
     const reportType = params.reportType as TelegramReportType;
     const timezone = normalizeTimeZone(params.timezone ?? target.timezone);
+    const dateKey = reportType === "appointment" || reportType === "payment" ? params.dateKey : undefined;
     const sent = await sendTrackedTelegramReport({
       clinicId: target.clinicId || params.clinicId,
       clinicCode: target.clinicCode || params.clinicCode,
@@ -288,6 +298,7 @@ router.post(
           : params.ownerAiCustomInstruction,
       weeklySummarySections: params.weeklySummarySections ?? target.weeklySummarySections,
       authorizationHeader: req.headers.authorization,
+      dateKey,
     });
 
     res.json({
@@ -315,6 +326,7 @@ router.post(
 
     const reportType = params.reportType as TelegramReportType;
     const timezone = normalizeTimeZone(params.timezone ?? target.timezone);
+    const dateKey = reportType === "appointment" || reportType === "payment" ? params.dateKey : undefined;
     const sent = await sendTrackedTelegramReport({
       clinicId: target.clinicId || params.clinicId,
       clinicCode: target.clinicCode || params.clinicCode,
@@ -332,6 +344,7 @@ router.post(
           : params.ownerAiCustomInstruction,
       weeklySummarySections: params.weeklySummarySections ?? target.weeklySummarySections,
       authorizationHeader: req.headers.authorization,
+      dateKey,
     });
 
     res.json({

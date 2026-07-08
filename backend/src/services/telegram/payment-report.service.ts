@@ -261,11 +261,12 @@ async function fetchAllOrdersForTodayPayments(input: {
   timezone: string;
   authorizationHeader?: string;
   referenceDate?: Date;
+  dateKey?: string;
 }) {
   return fetchAllOrdersForPaymentDateKey({
     clinicId: input.clinicId,
     timezone: input.timezone,
-    dateKey: formatDateKeyInTimeZone(input.referenceDate ?? new Date(), input.timezone),
+    dateKey: input.dateKey ?? formatDateKeyInTimeZone(input.referenceDate ?? new Date(), input.timezone),
     authorizationHeader: input.authorizationHeader,
   });
 }
@@ -348,6 +349,7 @@ export async function buildTodayPaymentReport(input: {
   timezone?: string;
   authorizationHeader?: string;
   referenceDate?: Date;
+  dateKey?: string;
 }) {
   const timezone = normalizeTimeZone(input.timezone);
   const { dateKey, startIso, endIso, rows } = await fetchAllOrdersForTodayPayments({
@@ -355,6 +357,7 @@ export async function buildTodayPaymentReport(input: {
     timezone,
     authorizationHeader: input.authorizationHeader,
     referenceDate: input.referenceDate,
+    dateKey: input.dateKey,
   });
   const previousDayResult = await fetchOptionalPaymentComparison({
     clinicId: input.clinicId,
@@ -509,6 +512,7 @@ export async function sendTodayPaymentReport(input: {
   timezone?: string;
   authorizationHeader?: string;
   referenceDate?: Date;
+  dateKey?: string;
 }) {
   const report = await buildTodayPaymentReport(input);
   const message = formatTodayPaymentTelegramMessage(report);

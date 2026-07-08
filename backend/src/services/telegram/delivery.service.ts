@@ -36,10 +36,11 @@ export async function sendTrackedTelegramReport(input: {
   weeklySummarySections?: WeeklySummarySection[];
   authorizationHeader?: string;
   referenceDate?: Date;
+  dateKey?: string;
 }) {
   const timezone = normalizeTimeZone(input.timezone);
   const attemptedAt = new Date().toISOString();
-  const dateKey = formatDateKeyInTimeZone(input.referenceDate ?? new Date(), timezone);
+  const dateKey = input.dateKey ?? formatDateKeyInTimeZone(input.referenceDate ?? new Date(), timezone);
 
   try {
     if (input.reportType === "payment") {
@@ -51,6 +52,7 @@ export async function sendTrackedTelegramReport(input: {
         timezone,
         authorizationHeader: input.authorizationHeader,
         referenceDate: input.referenceDate,
+        dateKey: input.dateKey,
       });
 
       await markTelegramDeliverySent({
@@ -145,6 +147,7 @@ export async function sendTrackedTelegramReport(input: {
       timezone,
       authorizationHeader: input.authorizationHeader,
       referenceDate: input.referenceDate,
+      dateKey: input.dateKey,
     });
 
     await markTelegramDeliverySent({

@@ -75,6 +75,7 @@ export async function sendTelegramTestReport(
     chatId: string;
     timezone?: string;
     reportType?: TelegramReportType;
+    dateKey?: string;
     ownerAiLanguage?: AiLanguage;
     ownerAiTone?: TelegramOwnerAiTone;
     ownerAiFocusAreas?: TelegramOwnerAiFocusArea[];
@@ -86,6 +87,7 @@ export async function sendTelegramTestReport(
     ApiEnvelope<{
       sentAt: string;
       reportType: TelegramReportType;
+      dateKey?: string;
       appointmentCount?: number;
       paymentCount?: number;
       totalPaymentAmount?: number;
@@ -103,6 +105,7 @@ export async function resendTelegramReport(
     chatId: string;
     timezone?: string;
     reportType?: TelegramReportType;
+    dateKey?: string;
     ownerAiLanguage?: AiLanguage;
     ownerAiTone?: TelegramOwnerAiTone;
     ownerAiFocusAreas?: TelegramOwnerAiFocusArea[];
@@ -114,6 +117,7 @@ export async function resendTelegramReport(
     ApiEnvelope<{
       sentAt: string;
       reportType: TelegramReportType;
+      dateKey?: string;
       appointmentCount?: number;
       paymentCount?: number;
       totalPaymentAmount?: number;

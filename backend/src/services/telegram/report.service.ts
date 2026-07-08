@@ -561,6 +561,7 @@ export async function sendTodayAppointmentReport(input: {
   timezone?: string;
   authorizationHeader?: string;
   referenceDate?: Date;
+  dateKey?: string;
 }) {
   const report = await buildTodayAppointmentReport(input);
   const message = formatTodayAppointmentTelegramMessage(report);

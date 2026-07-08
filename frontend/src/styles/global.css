@@ -7618,6 +7618,17 @@ a {
   gap: 10px;
 }
 
+.telegram-settings__manual-send {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+  align-items: end;
+  gap: 14px;
+}
+
+.telegram-settings__manual-send .telegram-settings__button-row {
+  align-items: end;
+}
+
 .telegram-settings__steps {
   display: grid;
   gap: 12px;
@@ -8084,7 +8095,8 @@ a {
   .telegram-settings__layout,
   .telegram-settings__meta-grid,
   .telegram-settings__checkbox-grid,
-  .telegram-settings__two-up {
+  .telegram-settings__two-up,
+  .telegram-settings__manual-send {
     grid-template-columns: minmax(0, 1fr);
   }
 
