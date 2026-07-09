@@ -885,6 +885,218 @@ export async function getCustomerPortalPriorityCustomers(params: {
   };
 }
 
+export async function getCustomerPortalTopCustomersByRevenue(params: {
+  clinicCode: string;
+  fromDate: string;
+  toDate: string;
+  limit?: number;
+}) {
+  const limit = Math.min(Math.max(params.limit ?? 25, 1), 100);
+  const rows = await runAnalyticsQuery<{
+    customerIdentityKey: string;
+    customerName: string;
+    phoneNumber: string;
+    memberId: string;
+    totalSpent: number;
+    invoiceCount: number;
+    visitCount: number;
+    lastVisitDate: string | null;
+    topServiceName: string | null;
+    topPackageName: string | null;
+    lastInvoiceDate: string | null;
+    paymentMethods: string | null;
+  }>(
+    `
+      WITH
+        PaidSalesRows AS (
+          SELECT
+            COALESCE(NULLIF(TRIM(CustomerName), ''), 'Unknown customer') AS customerName,
+            COALESCE(CustomerPhoneNumber, '') AS phoneNumber,
+            COALESCE(CAST(MemberID AS STRING), '') AS memberId,
+            COALESCE(InvoiceNumber, '') AS invoiceNumber,
+            OrderCreatedDate AS orderCreatedDate,
+            COALESCE(PaymentMethod, 'Unknown') AS paymentMethod,
+            COALESCE(ServiceName, '') AS serviceName,
+            COALESCE(ServicePackageName, '') AS servicePackageName,
+            CAST(COALESCE(NetTotal, 0) AS FLOAT64) AS netAmount,
+            COALESCE(
+              NULLIF(REGEXP_REPLACE(COALESCE(CustomerPhoneNumber, ''), r'[^0-9]', ''), ''),
+              NULLIF(LOWER(TRIM(CAST(MemberID AS STRING))), ''),
+              LOWER(TRIM(COALESCE(CustomerName, 'Unknown customer')))
+            ) AS customerIdentityKey
+          FROM ${analyticsTables.mainPaymentView}
+          WHERE DATE(OrderCreatedDate) BETWEEN DATE(@fromDate) AND DATE(@toDate)
+            AND PaymentStatus = 'PAID'
+            AND COALESCE(PaymentMethod, '') != 'PASS'
+            AND LOWER(ClinicCode) = LOWER(@clinicCode)
+            AND (
+              COALESCE(CustomerName, '') != ''
+              OR COALESCE(CustomerPhoneNumber, '') != ''
+              OR COALESCE(CAST(MemberID AS STRING), '') != ''
+            )
+        ),
+        InvoiceRows AS (
+          SELECT
+            customerIdentityKey,
+            invoiceNumber,
+            ARRAY_AGG(customerName ORDER BY orderCreatedDate DESC LIMIT 1)[SAFE_OFFSET(0)] AS customerName,
+            COALESCE(ARRAY_AGG(NULLIF(phoneNumber, '') IGNORE NULLS ORDER BY orderCreatedDate DESC LIMIT 1)[SAFE_OFFSET(0)], '') AS phoneNumber,
+            COALESCE(ARRAY_AGG(NULLIF(memberId, '') IGNORE NULLS ORDER BY orderCreatedDate DESC LIMIT 1)[SAFE_OFFSET(0)], '') AS memberId,
+            MAX(orderCreatedDate) AS orderCreatedDate,
+            MAX(netAmount) AS invoiceNetTotal
+          FROM PaidSalesRows
+          GROUP BY customerIdentityKey, invoiceNumber
+        ),
+        CustomerRevenue AS (
+          SELECT
+            customerIdentityKey,
+            ARRAY_AGG(customerName ORDER BY orderCreatedDate DESC LIMIT 1)[SAFE_OFFSET(0)] AS customerName,
+            COALESCE(ARRAY_AGG(NULLIF(phoneNumber, '') IGNORE NULLS ORDER BY orderCreatedDate DESC LIMIT 1)[SAFE_OFFSET(0)], '') AS phoneNumber,
+            COALESCE(ARRAY_AGG(NULLIF(memberId, '') IGNORE NULLS ORDER BY orderCreatedDate DESC LIMIT 1)[SAFE_OFFSET(0)], '') AS memberId,
+            SUM(invoiceNetTotal) AS totalSpent,
+            COUNT(DISTINCT invoiceNumber) AS invoiceCount,
+            FORMAT_DATE('%Y-%m-%d', DATE(MAX(orderCreatedDate))) AS lastInvoiceDate
+          FROM InvoiceRows
+          GROUP BY customerIdentityKey
+        ),
+        CustomerPaymentMethods AS (
+          SELECT
+            customerIdentityKey,
+            STRING_AGG(DISTINCT NULLIF(paymentMethod, ''), ', ' ORDER BY NULLIF(paymentMethod, '')) AS paymentMethods
+          FROM PaidSalesRows
+          GROUP BY customerIdentityKey
+        ),
+        PaidServiceRank AS (
+          SELECT
+            customerIdentityKey,
+            NULLIF(serviceName, '') AS serviceName,
+            NULLIF(servicePackageName, '') AS servicePackageName,
+            SUM(netAmount) AS serviceRevenue,
+            COUNT(DISTINCT invoiceNumber) AS invoiceCount,
+            MAX(orderCreatedDate) AS latestInvoiceDate,
+            ROW_NUMBER() OVER (
+              PARTITION BY customerIdentityKey
+              ORDER BY
+                SUM(netAmount) DESC,
+                COUNT(DISTINCT invoiceNumber) DESC,
+                MAX(orderCreatedDate) DESC,
+                NULLIF(serviceName, '') ASC,
+                NULLIF(servicePackageName, '') ASC
+            ) AS rowNum
+          FROM PaidSalesRows
+          WHERE COALESCE(serviceName, '') != '' OR COALESCE(servicePackageName, '') != ''
+          GROUP BY customerIdentityKey, serviceName, servicePackageName
+        ),
+        ${buildDistinctVisitsCte("DATE(CheckInTime) BETWEEN DATE(@fromDate) AND DATE(@toDate)")}
+        ,
+        VisitRows AS (
+          SELECT
+            *,
+            COALESCE(
+              NULLIF(REGEXP_REPLACE(COALESCE(phoneNumber, ''), r'[^0-9]', ''), ''),
+              NULLIF(LOWER(TRIM(CAST(memberId AS STRING))), ''),
+              LOWER(TRIM(COALESCE(customerName, 'Unknown customer')))
+            ) AS customerIdentityKey
+          FROM DistinctVisits
+        ),
+        VisitAgg AS (
+          SELECT
+            customerIdentityKey,
+            COUNT(*) AS visitCount,
+            FORMAT_DATE('%Y-%m-%d', MAX(DATE(COALESCE(checkOutTime, checkInTime)))) AS lastVisitDate
+          FROM VisitRows
+          GROUP BY customerIdentityKey
+        ),
+        VisitServiceRank AS (
+          SELECT
+            customerIdentityKey,
+            NULLIF(serviceName, '') AS serviceName,
+            COUNT(*) AS usageCount,
+            MAX(checkInTime) AS latestVisitDate,
+            ROW_NUMBER() OVER (
+              PARTITION BY customerIdentityKey
+              ORDER BY COUNT(*) DESC, MAX(checkInTime) DESC, NULLIF(serviceName, '') ASC
+            ) AS rowNum
+          FROM VisitRows
+          WHERE COALESCE(serviceName, '') != ''
+          GROUP BY customerIdentityKey, serviceName
+        )
+      SELECT
+        revenue.customerIdentityKey,
+        revenue.customerName,
+        revenue.phoneNumber,
+        revenue.memberId,
+        revenue.totalSpent,
+        revenue.invoiceCount,
+        COALESCE(visits.visitCount, 0) AS visitCount,
+        visits.lastVisitDate,
+        COALESCE(paidService.serviceName, visitService.serviceName) AS topServiceName,
+        paidService.servicePackageName AS topPackageName,
+        revenue.lastInvoiceDate,
+        COALESCE(paymentMethods.paymentMethods, '') AS paymentMethods
+      FROM CustomerRevenue revenue
+      LEFT JOIN CustomerPaymentMethods paymentMethods USING (customerIdentityKey)
+      LEFT JOIN VisitAgg visits USING (customerIdentityKey)
+      LEFT JOIN PaidServiceRank paidService
+        ON revenue.customerIdentityKey = paidService.customerIdentityKey
+        AND paidService.rowNum = 1
+      LEFT JOIN VisitServiceRank visitService
+        ON revenue.customerIdentityKey = visitService.customerIdentityKey
+        AND visitService.rowNum = 1
+      ORDER BY
+        revenue.totalSpent DESC,
+        visitCount DESC,
+        visits.lastVisitDate DESC,
+        revenue.customerName ASC
+      LIMIT @limit
+    `,
+    {
+      clinicCode: params.clinicCode,
+      fromDate: params.fromDate,
+      toDate: params.toDate,
+      limit,
+    },
+  );
+
+  const mappedRows = rows
+    .map((row) => ({
+      customerKey: hashCustomerKey({
+        clinicCode: params.clinicCode,
+        phoneNumber: row.phoneNumber,
+        customerName: row.customerName,
+      }),
+      customerName: row.customerName,
+      phoneNumber: row.phoneNumber || "",
+      memberId: row.memberId || null,
+      totalSpent: parseNumber(row.totalSpent),
+      invoiceCount: parseNumber(row.invoiceCount),
+      visitCount: parseNumber(row.visitCount),
+      lastVisitDate: row.lastVisitDate ?? null,
+      topServiceName: row.topServiceName ?? null,
+      topPackageName: row.topPackageName ?? null,
+      lastInvoiceDate: row.lastInvoiceDate ?? null,
+      paymentMethods: row.paymentMethods ?? "",
+      customerIdentityKey: row.customerIdentityKey,
+    }))
+    .sort((left, right) => {
+      const spentDiff = right.totalSpent - left.totalSpent;
+      if (spentDiff !== 0) {
+        return spentDiff;
+      }
+
+      const visitDiff = right.visitCount - left.visitCount;
+      if (visitDiff !== 0) {
+        return visitDiff;
+      }
+
+      return (right.lastVisitDate ?? "").localeCompare(left.lastVisitDate ?? "");
+    });
+
+  return {
+    rows: mappedRows,
+  };
+}
+
 export async function resolveCustomerPortalCandidates(params: {
   clinicCode: string;
   search: string;

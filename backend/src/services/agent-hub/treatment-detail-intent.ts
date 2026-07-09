@@ -1,4 +1,5 @@
 import { hasPaymentMethodReference } from "./payment-method-intent.js";
+import { isTopCustomerQuestion } from "./top-customer-intent.js";
 
 export type TreatmentDetailFilters = {
   serviceName?: string;
@@ -196,6 +197,10 @@ export function hasNamedPractitionerInTreatmentQuestion(message: string): boolea
 }
 
 export function isTreatmentDetailQuestion(message: string): boolean {
+  if (isTopCustomerQuestion(message)) {
+    return false;
+  }
+
   if (hasPaymentMethodReference(message) || APPOINTMENT_LIFECYCLE_PATTERN.test(message)) {
     return false;
   }

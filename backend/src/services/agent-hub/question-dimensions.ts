@@ -18,7 +18,7 @@ export function parseQuestionDimensions(message: string): QuestionDimension {
     /therapists?|practitioners?|doctors?|staff|ဆရာဝန်|ဘယ်သူနဲ့|ဘယ်သူက|ဘယ်\s*staff|ဘယ်\s*ဆရာ/i.test(message);
   // Sales/revenue/income/turnover are invoice-side totals; payment/collection words ask about cash received.
   const wantsSales =
-    /sales?|revenue|income|turnover|amount|invoice|transactions?|payment|payment\s+method|collection|collected|received|kpay|kpaye|wavepay|wave|mmqr|\bqr\b|cbpay|ayapay|mpu|visa|master\s*card|mastercard|sale\s*ဘယ်လောက်|ရောင်းအား|ဝင်ငွေ|ငွေ|ကျသင့်|ပေးချေ|ဘယ်လောက်|ဝင်လဲ|ဝင်|ရလဲ|အသေးစိတ်|စာရင်း/i.test(
+    /sales?|revenue|income|turnover|amount|invoice|transactions?|payment|payment\s+method|collection|collected|received|spend|spent|spending|paying|kpay|kpaye|wavepay|wave|mmqr|\bqr\b|cbpay|ayapay|mpu|visa|master\s*card|mastercard|sale\s*ဘယ်လောက်|ရောင်းအား|ဝင်ငွေ|ငွေ|ကျသင့်|ပေးချေ|ဘယ်လောက်|ဝင်လဲ|ဝင်|ရလဲ|အသေးစိတ်|စာရင်း/i.test(
       message,
     );
   const wantsAppointments = /appointments?|bookings?|schedule|ချိန်း|ဘိုကင်/i.test(message);

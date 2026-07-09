@@ -7,6 +7,7 @@ import {
   getCustomerPortalPayments,
   getCustomerQuickView,
   getCustomerPortalPriorityCustomers,
+  getCustomerPortalTopCustomersByRevenue,
   resolveCustomerPortalPhonesByNames,
   getCustomerPortalUsage,
 } from "../../reports/customer-portal.service.js";
@@ -30,7 +31,10 @@ function profilePlan(intent: string, message: string) {
     return { intent: "follow_up_today" as const, sortBy: "priorityScore" as const };
   }
   if (intent === "top_customers") {
-    return { sortBy: "priorityScore" as const };
+    return { sortBy: "lifetimeSpend" as const };
+  }
+  if (intent === "top_customers_by_visits") {
+    return { sortBy: "totalVisits" as const };
   }
   if (intent === "unactivated_purchase") {
     return { intent: "unactivated_purchase" as const, segment: "unactivated_purchase" as const, sortBy: "priorityScore" as const };
@@ -98,7 +102,7 @@ function shouldUseBigQueryPriorityFallback(input: AgentToolInput, matchedCount: 
     return !extractExplicitCustomerSearchText(input.request.message);
   }
 
-  return ["follow_up_today", "top_customers"].includes(input.intent);
+  return ["follow_up_today", "top_customers_by_visits"].includes(input.intent);
 }
 
 function ownerCustomerSummary(params: {
@@ -134,8 +138,12 @@ function ownerCustomerSummary(params: {
       return `Package ဝယ်ထားပြီး အသုံးမပြုသေးတဲ့ customer ${count} ယောက်ကို တွေ့ပါတယ်။`;
     }
 
-    if (params.intent === "top_customers") {
-      return `Top customer ${count} ယောက်ကို visit relationship အရ တွေ့ပါတယ်။`;
+    if (params.intent === "top_customers" || params.intent === "top_customers_by_revenue") {
+      return `Spending အမြင့်ဆုံး customer ${count} ယောက်ကို paid sales data အရ တွေ့ပါတယ်။`;
+    }
+
+    if (params.intent === "top_customers_by_visits") {
+      return `လာရောက်မှုအများဆုံး customer ${count} ယောက်ကို visit data အရ တွေ့ပါတယ်။`;
     }
 
     return `Follow-up လုပ်သင့်တဲ့ customer ${count} ယောက်ကို တွေ့ပါတယ်။`;
@@ -165,8 +173,12 @@ function ownerCustomerSummary(params: {
     return `${count} customer${params.count === 1 ? "" : "s"} bought a package and have no confirmed package usage.`;
   }
 
-  if (params.intent === "top_customers") {
-    return `${count} top customer${params.count === 1 ? "" : "s"} matched by visit relationship.`;
+  if (params.intent === "top_customers" || params.intent === "top_customers_by_revenue") {
+    return `${count} top customer${params.count === 1 ? "" : "s"} ranked by paid sales revenue.`;
+  }
+
+  if (params.intent === "top_customers_by_visits") {
+    return `${count} top customer${params.count === 1 ? "" : "s"} ranked by visit count.`;
   }
 
   return `${count} customer${params.count === 1 ? "" : "s"} matched for follow-up review.`;
@@ -325,7 +337,7 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
       ? await getCustomerPortalPriorityCustomers({
           clinicCode: input.clinic.clinicCode,
           toDate: input.period.toDate,
-          mode: input.intent === "top_customers" ? "top_customers" : "follow_up",
+          mode: input.intent === "top_customers_by_visits" ? "top_customers" : "follow_up",
           lookbackDays: latestRun?.sourceLookbackDays ?? 365,
           limit: 25,
         })
@@ -499,6 +511,88 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
       displayName: profile.customerName,
       customerName: profile.customerName,
       customerPhone: profile.customerPhone,
+      rank: index + 1,
+    })),
+  };
+}
+
+function topCustomersNoDataSummary(language: AgentToolInput["request"]["aiLanguage"]) {
+  if (isMyanmarLanguage(language)) {
+    return "ဒီကာလအတွက် paid customer spending data မတွေ့သေးပါ။ Appointment/treatment records မဟုတ်ဘဲ payment/sales data အပေါ်မူတည်ပြီး စစ်ထားပါတယ်။";
+  }
+
+  return "No paid customer spending data was found for this period. I checked payment/sales data, not appointment or treatment records.";
+}
+
+async function getTopCustomersByRevenue(input: AgentToolInput): Promise<AgentToolResult> {
+  const data = await getCustomerPortalTopCustomersByRevenue({
+    clinicCode: input.clinic.clinicCode,
+    fromDate: input.period.fromDate,
+    toDate: input.period.toDate,
+    limit: 50,
+  });
+  const rows = limitRows(data.rows, 50);
+  const tableRows = rows.map((row) => ({
+    customerName: row.customerName,
+    phoneNumber: row.phoneNumber,
+    memberId: row.memberId,
+    totalSpent: row.totalSpent,
+    invoiceCount: row.invoiceCount,
+    visitCount: row.visitCount,
+    lastVisitDate: row.lastVisitDate,
+    topServiceName: row.topServiceName,
+    topPackageName: row.topPackageName,
+    paymentMethods: row.paymentMethods,
+    lastInvoiceDate: row.lastInvoiceDate,
+  }));
+  const totalSpent = rows.reduce((sum, row) => sum + row.totalSpent, 0);
+  const invoiceCount = rows.reduce((sum, row) => sum + row.invoiceCount, 0);
+  const summary = rows.length
+    ? isMyanmarLanguage(input.request.aiLanguage)
+      ? `Spending အမြင့်ဆုံး customer ${rows.length.toLocaleString("en-US")} ယောက်ကို paid sales data အရ တွေ့ပါတယ်။`
+      : `${rows.length.toLocaleString("en-US")} top customer${rows.length === 1 ? "" : "s"} ranked by paid sales revenue.`
+    : topCustomersNoDataSummary(input.request.aiLanguage);
+
+  return {
+    toolName: "get_top_customers_by_revenue",
+    sourceName: "BigQuery paid sales and customer visit data",
+    checkedAt: nowIso(),
+    period: periodLabel(input),
+    dataStatus: rows.length ? "ok" : "no_activity",
+    live: false,
+    summary,
+    metrics: [
+      { label: "Top customers", value: rows.length },
+      { label: "Top customers total revenue", value: totalSpent, unit: "amount" },
+      { label: "Invoice count", value: invoiceCount },
+    ],
+    tables: [
+      {
+        title: "Top customers by revenue",
+        columns: [
+          { key: "customerName", title: "Customer Name" },
+          { key: "phoneNumber", title: "Phone", pii: "phone", exportable: true },
+          { key: "memberId", title: "Member ID", pii: "id", exportable: true },
+          { key: "totalSpent", title: "Total Spent", unit: "amount" },
+          { key: "invoiceCount", title: "Invoice Count", unit: "count" },
+          { key: "visitCount", title: "Visit Count", unit: "count" },
+          { key: "lastVisitDate", title: "Last Visit" },
+          { key: "topServiceName", title: "Top Service" },
+          { key: "topPackageName", title: "Top Package" },
+          { key: "paymentMethods", title: "Payment Methods" },
+          { key: "lastInvoiceDate", title: "Last Invoice", exportable: false },
+        ],
+        rows: tableRows,
+      },
+    ],
+    entityRefs: rows.map((row, index) => ({
+      entityType: "customer",
+      entityId: row.customerKey,
+      customerKey: row.customerKey,
+      memberId: row.memberId || undefined,
+      displayName: row.customerName,
+      customerName: row.customerName,
+      customerPhone: row.phoneNumber || undefined,
       rank: index + 1,
     })),
   };
@@ -787,6 +881,17 @@ export function createCustomerTools(): AgentToolDefinition[] {
       maxRows: 25,
       timeoutMs: 10_000,
       execute: searchCustomerProfiles,
+    },
+    {
+      name: "get_top_customers_by_revenue",
+      agentId: "customer_relationship",
+      description: "Get top customers ranked by total spending/revenue for the selected period.",
+      inputSchema: toolInputSchema,
+      sourceName: "BigQuery paid sales and customer visit data",
+      live: false,
+      maxRows: 50,
+      timeoutMs: 20_000,
+      execute: getTopCustomersByRevenue,
     },
     {
       name: "get_customer_overview",

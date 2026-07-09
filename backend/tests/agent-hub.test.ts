@@ -44,7 +44,7 @@ const {
 } = await import("../src/services/agent-hub/read-only-guard.ts")
 const { buildAgentResponse } = await import("../src/services/agent-hub/response-builder.ts")
 const { sanitizeError } = await import("../src/services/agent-hub/safety.ts")
-const { resolveAgent } = await import("../src/services/agent-hub/supervisor.ts")
+const { isTopCustomerQuestion, resolveAgent } = await import("../src/services/agent-hub/supervisor.ts")
 const { assertToolAllowed, executeToolPlan } = await import("../src/services/agent-hub/tool-executor.ts")
 const { createAgentToolRegistry, getAgentToolAllowlist } = await import("../src/services/agent-hub/tool-registry.ts")
 const { extractInvoiceSearch } = await import("../src/services/agent-hub/tools/finance.tools.ts")
@@ -52,6 +52,7 @@ const { buildFinanceSnapshotSummaryResult, createFinanceTools } = await import("
 const { buildAppointmentCountResultFromSnapshot, buildAppointmentLedgerQueryRange, createAppointmentTools } = await import("../src/services/agent-hub/tools/appointment.tools.ts")
 const { buildOwnerDailyBriefFromSnapshots, createBusinessTools, selectOwnerDailyBriefDate } = await import("../src/services/agent-hub/tools/business.tools.ts")
 const { getTreatmentReportRange } = await import("../src/services/reports/daily-treatment.service.ts")
+const { getCustomerPortalTopCustomersByRevenue } = await import("../src/services/reports/customer-portal.service.ts")
 const { extractLikelyCustomerSearchText } = await import("../src/services/agent-hub/customer-query.ts")
 const {
   extractPaymentMethodFilter,
@@ -95,6 +96,7 @@ const {
   extractTelegramAgentQuestion,
   formatAgentHubTelegramReply,
 } = await import("../src/services/telegram/bot.service.ts")
+const { buildGreatTimeAgentCsvExportFromTables } = await import("../src/services/telegram/agent-csv-export.service.ts")
 
 function delay(ms: number) {
   return new Promise((resolve) => {
@@ -1887,6 +1889,7 @@ test("supervisor routes four agent domains and respects explicit override", () =
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "မနေ့က Queen Package service ကို ဘယ်သူတွေလုပ်လဲ?" }).resolvedAgent, "business")
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "မနေ့က Exion Face ဘယ်သူတွေလုပ်လဲ" }).resolvedAgent, "business")
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "who did Queen Package yesterday?" }).resolvedAgent, "business")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "Which customers did Exon Face this month?" }).resolvedAgent, "business")
   assert.equal(
     resolveAgent({ requestedAgent: "auto", message: "Which customers have unused package balance?" }).resolvedAgent,
     "customer_relationship",
@@ -1897,6 +1900,12 @@ test("supervisor routes four agent domains and respects explicit override", () =
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "Soe Moe Thu ( C )" }).resolvedAgent, "customer_relationship")
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "Tell me about Phyo Yee Thar" }).resolvedAgent, "customer_relationship")
   assert.equal(resolveAgent({ requestedAgent: "auto", message: "Tell me about Whitening Laser" }).resolvedAgent, "business")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "Who are the top customers this month?" }).resolvedAgent, "customer_relationship")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "ဒီလ top customers တွေကဘယ်သူလဲ?" }).resolvedAgent, "customer_relationship")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "ဒီလ spending အများဆုံး customer တွေပြပါ" }).resolvedAgent, "customer_relationship")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "ဒီလ အများဆုံးသုံးထားတဲ့ customer တွေပြပါ" }).resolvedAgent, "customer_relationship")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "ဒီလ spending အများဆုံး customer တွေဘယ်သူလဲ?" }).resolvedAgent, "customer_relationship")
+  assert.equal(resolveAgent({ requestedAgent: "auto", message: "Top services this month" }).resolvedAgent, "business")
 })
 
 test("payment method aliases are recognized without becoming customer search text", () => {
@@ -1952,6 +1961,13 @@ test("treatment detail aliases are recognized without becoming customer search t
   assert.equal(isTreatmentDetailQuestion("မနေ့က therapist details"), true)
   assert.equal(isTreatmentDetailQuestion("I want to know which customers doing witch service today?"), false)
   assert.equal(isTreatmentDetailQuestion("top services yesterday"), false)
+  assert.equal(isTreatmentDetailQuestion("Who are the top customers this month?"), false)
+  assert.equal(isTreatmentDetailQuestion("ဒီလ top customers တွေကဘယ်သူလဲ?"), false)
+  assert.equal(isTreatmentDetailQuestion("ဒီလ spending အများဆုံး customer တွေပြပါ"), false)
+  assert.equal(isTreatmentDetailQuestion("ဒီလ အများဆုံးသုံးထားတဲ့ customer တွေပြပါ"), false)
+  assert.equal(isTreatmentDetailQuestion("ဒီလ spending အများဆုံး customer တွေဘယ်သူလဲ?"), false)
+  assert.equal(isTopCustomerQuestion("Who are the top customers this month?"), true)
+  assert.equal(isTopCustomerQuestion("ဒီလ spending အများဆုံး customer တွေပြပါ"), true)
   assert.equal(isTreatmentDetailQuestion("service performance yesterday"), false)
   assert.equal(isTreatmentDetailQuestion("therapist performance yesterday"), false)
   assert.equal(isTreatmentDetailQuestion("မနေ့က လုပ်ထားတဲ့ appointment တွေပြပါ"), false)
@@ -2343,6 +2359,98 @@ test("read-only guard detects dangerous business mutations without blocking safe
     buildReadOnlyRefusalMessage(),
     "This Agent Hub is read-only. I can review sourced GreatTime data and prepare recommendations, but I cannot create, update, delete, drop, truncate, book, cancel, charge, refund, or message customers.",
   )
+})
+
+test("top customers by revenue report uses paid sales data and sorts mapped rows", async () => {
+  let capturedOptions: unknown
+
+  await withMockedBigQuery(async (options) => {
+    capturedOptions = options
+    return [[
+      {
+        customerIdentityKey: "customer-b",
+        customerName: "Nilar",
+        phoneNumber: "09980000002",
+        memberId: "M-2",
+        totalSpent: 980000,
+        invoiceCount: 2,
+        visitCount: 2,
+        lastVisitDate: "2026-07-09",
+        topServiceName: "Hair Removal",
+        topPackageName: null,
+        lastInvoiceDate: "2026-07-09",
+        paymentMethods: "Cash",
+      },
+      {
+        customerIdentityKey: "customer-a",
+        customerName: "Aye Aye",
+        phoneNumber: "09980000001",
+        memberId: "M-1",
+        totalSpent: 1250000,
+        invoiceCount: 3,
+        visitCount: 1,
+        lastVisitDate: "2026-07-07",
+        topServiceName: "Exosome Face",
+        topPackageName: "Queen Package",
+        lastInvoiceDate: "2026-07-08",
+        paymentMethods: "KPay",
+      },
+      {
+        customerIdentityKey: "customer-c",
+        customerName: "May",
+        phoneNumber: "09980000003",
+        memberId: "M-3",
+        totalSpent: 980000,
+        invoiceCount: 2,
+        visitCount: 4,
+        lastVisitDate: "2026-07-07",
+        topServiceName: "Facial",
+        topPackageName: null,
+        lastInvoiceDate: "2026-07-07",
+        paymentMethods: "WavePay",
+      },
+      {
+        customerIdentityKey: "customer-d",
+        customerName: "Su",
+        phoneNumber: "09980000004",
+        memberId: "M-4",
+        totalSpent: 980000,
+        invoiceCount: 2,
+        visitCount: 4,
+        lastVisitDate: "2026-07-08",
+        topServiceName: "Laser",
+        topPackageName: null,
+        lastInvoiceDate: "2026-07-08",
+        paymentMethods: "Cash",
+      },
+    ]]
+  }, async () => {
+    const result = await getCustomerPortalTopCustomersByRevenue({
+      clinicCode: "ABC",
+      fromDate: "2026-07-01",
+      toDate: "2026-07-09",
+      limit: 10,
+    })
+
+    assert.deepEqual(result.rows.map((row) => row.customerName), ["Aye Aye", "Su", "May", "Nilar"])
+    assert.equal(result.rows[0].totalSpent, 1250000)
+    assert.equal(result.rows[0].invoiceCount, 3)
+    assert.equal(result.rows[0].topPackageName, "Queen Package")
+  })
+
+  const queryText = String((capturedOptions as { query?: unknown }).query ?? "")
+  const queryParams = (capturedOptions as { params?: Record<string, unknown> }).params ?? {}
+
+  assert.match(queryText, /MainPaymentView/i)
+  assert.match(queryText, /PaymentStatus = 'PAID'/)
+  assert.match(queryText, /PaymentMethod/)
+  assert.match(queryText, /NetTotal/)
+  assert.match(queryText, /MAX\(netAmount\) AS invoiceNetTotal/)
+  assert.match(queryText, /ORDER BY\s+revenue\.totalSpent DESC,\s+visitCount DESC,\s+visits\.lastVisitDate DESC/is)
+  assert.equal(queryParams.clinicCode, "ABC")
+  assert.equal(queryParams.fromDate, "2026-07-01")
+  assert.equal(queryParams.toDate, "2026-07-09")
+  assert.equal(queryParams.limit, 10)
 })
 
 test("Agent Hub SQL and GraphQL read-only assertions reject mutation paths", async () => {
@@ -2785,8 +2893,98 @@ test("planner keeps generic show questions out of Customer 360 and includes usag
     },
   })
 
-  assert.equal(topCustomerPlan.intent, "top_customers")
-  assert.deepEqual(topCustomerPlan.toolNames, ["search_customer_profiles"])
+  assert.equal(topCustomerPlan.intent, "top_customers_by_revenue")
+  assert.deepEqual(topCustomerPlan.toolNames, ["get_top_customers_by_revenue"])
+
+  const topCustomerAutoPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "Who are the top customers this month?",
+      timezone: "UTC",
+    },
+    now: new Date("2026-07-09T12:00:00.000Z"),
+  })
+
+  assert.equal(topCustomerAutoPlan.resolvedAgent, "customer_relationship")
+  assert.equal(topCustomerAutoPlan.intent, "top_customers_by_revenue")
+  assert.deepEqual(topCustomerAutoPlan.toolNames, ["get_top_customers_by_revenue"])
+  assert.equal(topCustomerAutoPlan.period.fromDate, "2026-07-01")
+  assert.equal(topCustomerAutoPlan.period.toDate, "2026-07-09")
+
+  const topCustomerMyanmarPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "ဒီလ spending အများဆုံး customer တွေပြပါ",
+      timezone: "UTC",
+    },
+    now: new Date("2026-07-09T12:00:00.000Z"),
+  })
+
+  assert.equal(topCustomerMyanmarPlan.resolvedAgent, "customer_relationship")
+  assert.equal(topCustomerMyanmarPlan.intent, "top_customers_by_revenue")
+  assert.deepEqual(topCustomerMyanmarPlan.toolNames, ["get_top_customers_by_revenue"])
+
+  const topCustomerMixedMyanmarPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "ဒီလ top customers တွေကဘယ်သူလဲ?",
+      timezone: "UTC",
+    },
+    now: new Date("2026-07-09T12:00:00.000Z"),
+  })
+
+  assert.equal(topCustomerMixedMyanmarPlan.resolvedAgent, "customer_relationship")
+  assert.equal(topCustomerMixedMyanmarPlan.intent, "top_customers_by_revenue")
+  assert.deepEqual(topCustomerMixedMyanmarPlan.toolNames, ["get_top_customers_by_revenue"])
+
+  const topCustomerVisitPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "Customers with most visits this month",
+      timezone: "UTC",
+    },
+    now: new Date("2026-07-09T12:00:00.000Z"),
+  })
+
+  assert.equal(topCustomerVisitPlan.resolvedAgent, "customer_relationship")
+  assert.equal(topCustomerVisitPlan.intent, "top_customers_by_visits")
+
+  const treatmentDetailPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "Which customers did Exon Face this month?",
+      timezone: "UTC",
+    },
+    now: new Date("2026-07-09T12:00:00.000Z"),
+  })
+
+  assert.equal(treatmentDetailPlan.resolvedAgent, "business")
+  assert.equal(treatmentDetailPlan.intent, "service_treatment_detail")
+  assert.deepEqual(treatmentDetailPlan.toolNames, ["get_treatment_details"])
+
+  const topServicesPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "Top services this month",
+      timezone: "UTC",
+    },
+    now: new Date("2026-07-09T12:00:00.000Z"),
+  })
+
+  assert.equal(topServicesPlan.resolvedAgent, "business")
+  assert.equal(topServicesPlan.intent, "service_performance")
 
   const callPlan = planAgentRequest({
     request: {
@@ -4723,6 +4921,147 @@ test("Telegram formatter shows explicit month labels with exact date ranges", ()
     actions: [{ type: "read_only_agent_response" }],
   })
   assert.match(currentNamedMonthMessage, /ကာလ: July 2026 month to date \(2026-07-01 to 2026-07-03\)/)
+})
+
+test("Telegram formatter renders top customers by revenue and CSV headers", () => {
+  const response = {
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "customer_relationship",
+    autoMode: true,
+    intent: "top_customers_by_revenue",
+    period: {
+      fromDate: "2026-07-01",
+      toDate: "2026-07-09",
+      label: "this month",
+    },
+    assistantMessage: "Top customers by revenue.",
+    summary: "2 top customers ranked by paid sales revenue.",
+    metrics: [
+      { label: "Top customers", value: 2 },
+      { label: "Top customers total revenue", value: 2230000, unit: "amount" },
+    ],
+    tables: [
+      {
+        title: "Top customers by revenue",
+        columns: [
+          { key: "customerName", title: "Customer Name" },
+          { key: "phoneNumber", title: "Phone", pii: "phone", exportable: true },
+          { key: "memberId", title: "Member ID", pii: "id", exportable: true },
+          { key: "totalSpent", title: "Total Spent", unit: "amount" },
+          { key: "invoiceCount", title: "Invoice Count", unit: "count" },
+          { key: "visitCount", title: "Visit Count", unit: "count" },
+          { key: "lastVisitDate", title: "Last Visit" },
+          { key: "topServiceName", title: "Top Service" },
+          { key: "topPackageName", title: "Top Package" },
+          { key: "paymentMethods", title: "Payment Methods" },
+          { key: "lastInvoiceDate", title: "Last Invoice", exportable: false },
+        ],
+        rows: [
+          {
+            customerName: "Customer One",
+            phoneNumber: "09123456789",
+            memberId: "M-1",
+            totalSpent: 1250000,
+            invoiceCount: 3,
+            visitCount: 3,
+            lastVisitDate: "2026-07-08",
+            topServiceName: "Exosome Face",
+            topPackageName: "Queen Package",
+            paymentMethods: "KPay",
+            lastInvoiceDate: "2026-07-08",
+          },
+          {
+            customerName: "Customer Two",
+            phoneNumber: "09987654321",
+            memberId: "M-2",
+            totalSpent: 980000,
+            invoiceCount: 2,
+            visitCount: 2,
+            lastVisitDate: "2026-07-07",
+            topServiceName: "Hair Removal",
+            topPackageName: null,
+            paymentMethods: "Cash",
+            lastInvoiceDate: "2026-07-07",
+          },
+        ],
+      },
+    ],
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  } satisfies Parameters<typeof formatAgentHubTelegramReply>[0]
+
+  const message = formatAgentHubTelegramReply(response, {
+    viewerContext: { canViewFullCustomerPhone: true },
+    clinicCode: "ABC",
+  })
+
+  assert.match(message, /ဒီလ spending အများဆုံး customer များ/)
+  assert.match(message, /1\. Customer One/)
+  assert.match(message, /Phone: 09123456789/)
+  assert.match(message, /Total spent: 1,250,000 ကျပ်/)
+  assert.match(message, /Visits: 3/)
+  assert.match(message, /Last visit: 2026-07-08/)
+  assert.match(message, /Top service\/package: Exosome Face \/ Queen Package/)
+  assert.match(message, /Summary: Top 2 customers total revenue: 2,230,000 ကျပ်/)
+  assert.doesNotMatch(message, /Customer list ကို owner/)
+  assert.doesNotMatch(message, /package\/session လက်ကျန်/)
+  assert.doesNotMatch(message, /Closest services/)
+  assert.doesNotMatch(message, /treatment\/service detail records/)
+
+  const exportFile = buildGreatTimeAgentCsvExportFromTables({
+    tables: response.tables,
+    resolvedAgent: response.resolvedAgent,
+    intent: response.intent,
+    period: response.period,
+    originalMessage: "top customers this month export csv",
+    now: "2026-07-09T00:00:00.000Z",
+  })
+  const csvHeader = exportFile.csv.split("\r\n")[0]?.replace(/^\uFEFF/, "")
+
+  assert.equal(
+    csvHeader,
+    "Customer Name,Phone,Member ID,Total Spent,Invoice Count,Visit Count,Last Visit,Top Service,Top Package,Payment Methods",
+  )
+  assert.doesNotMatch(exportFile.csv, /Last Invoice/)
+})
+
+test("Telegram formatter explains no top-customer spending data cleanly", () => {
+  const message = formatAgentHubTelegramReply({
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "customer_relationship",
+    autoMode: true,
+    intent: "top_customers_by_revenue",
+    period: {
+      fromDate: "2026-07-01",
+      toDate: "2026-07-09",
+      label: "this month",
+    },
+    assistantMessage: "No paid customer spending data was found for this period.",
+    summary: "ဒီကာလအတွက် paid customer spending data မတွေ့သေးပါ။ Appointment/treatment records မဟုတ်ဘဲ payment/sales data အပေါ်မူတည်ပြီး စစ်ထားပါတယ်။",
+    metrics: [],
+    tables: [
+      {
+        title: "Top customers by revenue",
+        columns: [{ key: "customerName", title: "Customer Name" }],
+        rows: [],
+      },
+    ],
+    sources: [],
+    dataStatus: "no_activity",
+    actions: [{ type: "read_only_agent_response" }],
+  })
+
+  assert.match(message, /ဒီကာလအတွက် paid customer spending data မတွေ့သေးပါ/)
+  assert.match(message, /payment\/sales data အပေါ်မူတည်ပြီး စစ်ထားပါတယ်/)
+  assert.doesNotMatch(message, /Closest services/)
+  assert.doesNotMatch(message, /treatment\/service detail records/)
 })
 
 test("Telegram formatter explains never-visited package customers and customer purchases", () => {

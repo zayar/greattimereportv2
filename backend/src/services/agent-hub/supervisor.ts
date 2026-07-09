@@ -4,6 +4,7 @@ import { hasPaymentMethodReference } from "./payment-method-intent.js";
 import { isAppointmentRosterQuestion, isOperationsCountReconciliationQuestion, isTreatmentRosterQuestion } from "./question-dimensions.js";
 import { hasExplicitServiceSearchIntent } from "./service-query.js";
 import { isTreatmentDetailQuestion } from "./treatment-detail-intent.js";
+import { isTopCustomerQuestion as matchesTopCustomerQuestion } from "./top-customer-intent.js";
 
 const AGENT_ORDER: GreatTimeAgentId[] = ["finance", "customer_relationship", "business", "appointment"];
 
@@ -80,6 +81,10 @@ function isOwnerDailyBriefQuestion(message: string) {
   );
 }
 
+export function isTopCustomerQuestion(message: string) {
+  return matchesTopCustomerQuestion(message);
+}
+
 export function resolveAgent(params: {
   requestedAgent: GreatTimeRequestedAgentId | undefined;
   message: string;
@@ -107,6 +112,11 @@ export function resolveAgent(params: {
 
   if (hasPaymentMethodReference(params.message)) {
     scores.finance += 6;
+  }
+
+  if (isTopCustomerQuestion(params.message)) {
+    scores.customer_relationship += 8;
+    scores.business = Math.max(0, scores.business - 2);
   }
 
   if (isNamedCustomerPurchaseQuestion(params.message)) {

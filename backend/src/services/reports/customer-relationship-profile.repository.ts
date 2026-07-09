@@ -20,7 +20,7 @@ export type CustomerRelationshipProfileSearchInput = {
   segment?: CustomerRelationshipSegment | "";
   riskLevel?: CustomerRelationshipRiskLevel | "";
   search?: string;
-  sortBy?: "priorityScore" | "lastVisitDate" | "daysSinceLastVisit" | "lifetimeSpend" | "remainingPackageSessions";
+  sortBy?: "priorityScore" | "lastVisitDate" | "daysSinceLastVisit" | "lifetimeSpend" | "remainingPackageSessions" | "totalVisits";
   sortDirection?: "asc" | "desc";
   limit?: number;
   offset?: number;

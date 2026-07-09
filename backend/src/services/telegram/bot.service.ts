@@ -1473,6 +1473,58 @@ function formatCustomerMatchesConversation(response: GreatTimeAgentChatResponse)
   return lines;
 }
 
+function formatTopCustomersByRevenueConversation(response: GreatTimeAgentChatResponse, viewerContext?: CustomerPhoneViewerContext) {
+  const table = response.tables?.find((item) => /top customers by revenue/i.test(item.title));
+  if (!table?.rows.length) {
+    return [];
+  }
+
+  const topRows = table.rows.slice(0, 10);
+  const totalRevenue = topRows.reduce((sum, row) => sum + (numberValue(row, "totalSpent") ?? 0), 0);
+  const periodText = response.period.label === "this month" ? "ဒီလ" : "ဒီကာလ";
+  const lines = [`${periodText} spending အများဆုံး customer များ:`];
+
+  topRows.forEach((row, index) => {
+    const name = stringValue(row, "customerName", "Customer");
+    const phone = formatCustomerPhone(
+      {
+        fullPhone: stringValue(row, "phoneNumber", ""),
+        maskedPhone: stringValue(row, "customerPhoneMasked", ""),
+      },
+      viewerContext,
+      { logContext: "top_customers_by_revenue_phone" },
+    );
+    const totalSpent = numberValue(row, "totalSpent");
+    const visits = numberValue(row, "visitCount");
+    const lastVisit = stringValue(row, "lastVisitDate", "");
+    const topService = stringValue(row, "topServiceName", "");
+    const topPackage = stringValue(row, "topPackageName", "");
+    const servicePackage =
+      topService && topPackage
+        ? `${topService} / ${topPackage}`
+        : topService || topPackage;
+
+    lines.push("", `${index + 1}. ${name}`);
+    if (phone && phone !== "-") {
+      lines.push(`   Phone: ${phone}`);
+    }
+    lines.push(`   Total spent: ${totalSpent != null ? formatTelegramMoney(totalSpent) : "-"}`);
+    lines.push(`   Visits: ${visits != null ? visits.toLocaleString("en-US") : "0"}`);
+    lines.push(`   Last visit: ${lastVisit && lastVisit !== "-" ? lastVisit : "-"}`);
+    if (servicePackage && servicePackage !== "-") {
+      lines.push(`   Top service/package: ${servicePackage}`);
+    }
+  });
+
+  lines.push("", `Summary: Top ${topRows.length.toLocaleString("en-US")} customers total revenue: ${formatTelegramMoney(totalRevenue)}`);
+
+  if (table.rows.length > topRows.length) {
+    lines.push(`နောက်ထပ် customer ${(table.rows.length - topRows.length).toLocaleString("en-US")} ယောက်ကို CSV export ထဲမှာ ကြည့်နိုင်ပါတယ်။`);
+  }
+
+  return lines;
+}
+
 function formatCustomerPurchaseConversation(response: GreatTimeAgentChatResponse) {
   const purchaseTable = response.tables?.find((item) => /customer recent purchases/i.test(item.title));
   const packageTable = response.tables?.find((item) => /customer packages/i.test(item.title));
@@ -1698,6 +1750,11 @@ function formatConversationTablePreview(
     return service;
   }
 
+  const topCustomersByRevenue = formatTopCustomersByRevenueConversation(response, options?.viewerContext);
+  if (topCustomersByRevenue.length) {
+    return topCustomersByRevenue;
+  }
+
   const customers = formatCustomerMatchesConversation(response);
   if (customers.length) {
     return customers;
@@ -1901,6 +1958,7 @@ export function formatAgentHubTelegramReply(
     metrics.length > 0 &&
     response.resolvedAgent !== "appointment" &&
     response.intent !== "operations_count_reconciliation" &&
+    response.intent !== "top_customers_by_revenue" &&
     response.intent !== "payment_method_breakdown" &&
     response.intent !== "payment_method_detail" &&
     !isFinanceSalesSummaryResponse(response)

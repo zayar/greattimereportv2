@@ -18,6 +18,10 @@ import {
   hasNamedServiceInTreatmentQuestion,
   isTreatmentDetailQuestion,
 } from "./treatment-detail-intent.js";
+import {
+  isTopCustomerByRevenueQuestion,
+  isTopCustomerByVisitsQuestion,
+} from "./top-customer-intent.js";
 import type {
   AgentPeriod,
   GreatTimeAgentChatRequest,
@@ -447,8 +451,11 @@ function detectCustomerIntent(message: string) {
   ) {
     return "follow_up_today";
   }
-  if (/top customers?|best customers?|vip customers?|highest.*customers?|most valuable|valuable customers?|top spend|top visit|အကောင်းဆုံး|အများဆုံး/i.test(message)) {
-    return "top_customers";
+  if (isTopCustomerByVisitsQuestion(message)) {
+    return "top_customers_by_visits";
+  }
+  if (isTopCustomerByRevenueQuestion(message)) {
+    return "top_customers_by_revenue";
   }
   if (/history|last treatment|practitioner|package|purchase|payment/i.test(message)) {
     return "customer_overview";
@@ -631,7 +638,11 @@ function toolsForIntent(agentId: GreatTimeAgentId, intent: string, period?: Agen
       case "treatment_due":
       case "churn_risk":
       case "follow_up_today":
+        return ["search_customer_profiles"];
       case "top_customers":
+      case "top_customers_by_revenue":
+        return ["get_top_customers_by_revenue"];
+      case "top_customers_by_visits":
         return ["search_customer_profiles"];
       default:
         return ["search_customer_profiles"];
