@@ -6,7 +6,13 @@ import { getCustomerPortalPayments } from "../../reports/customer-portal.service
 import { getPaymentReport } from "../../reports/payment-report.service.js";
 import { getSalesReport } from "../../reports/sales-report.service.js";
 import type { GtAgentFactSnapshot } from "../memory/memory-types.js";
-import { extractPaymentMethodFilter } from "../payment-method-intent.js";
+import {
+  extractGenericPaymentMethodFilter,
+  extractPaymentMethodFilter,
+  extractSpecificPaymentMethodFilter,
+  matchPaymentMethodFromAvailableMethods,
+  normalizeMethodText,
+} from "../payment-method-intent.js";
 import { limitRows, nowIso } from "../safety.js";
 import {
   factSnapshotToAgentSource,
@@ -238,8 +244,26 @@ function canonicalPaymentMethod(value: string | null | undefined) {
   return extractPaymentMethodFilter(value ?? "") ?? (value ?? "").replace(/\s+/g, "").toUpperCase();
 }
 
-function selectedPaymentMethodFromInput(input: AgentToolInput) {
-  return extractPaymentMethodFilter(input.request.message);
+function paymentMethodMatchesSelected(method: string | null | undefined, selectedMethod: string) {
+  const canonicalMethod = canonicalPaymentMethod(method);
+  return (
+    canonicalMethod === selectedMethod ||
+    normalizeMethodText(method ?? "") === normalizeMethodText(selectedMethod)
+  );
+}
+
+function selectedPaymentMethodFromInput(input: AgentToolInput, availableMethods: Array<string | null | undefined> = []) {
+  const specificAlias = extractSpecificPaymentMethodFilter(input.request.message);
+  if (specificAlias) {
+    return specificAlias;
+  }
+
+  const dynamicMatch = matchPaymentMethodFromAvailableMethods(input.request.message, availableMethods);
+  if (dynamicMatch) {
+    return dynamicMatch;
+  }
+
+  return extractGenericPaymentMethodFilter(input.request.message);
 }
 
 export function extractInvoiceSearch(message: string) {
@@ -372,9 +396,12 @@ async function getPaymentMethodBreakdown(input: AgentToolInput): Promise<AgentTo
 }
 
 async function getPaymentMethodDetail(input: AgentToolInput, deps: FinanceToolDeps = defaultFinanceToolDeps): Promise<AgentToolResult> {
-  const paymentMethod = selectedPaymentMethodFromInput(input);
+  const breakdown = await deps.getPaymentReport(paymentReportParams(input));
+  const availableMethods = breakdown.methods.map((method) => method.paymentMethod);
+  const paymentMethod = selectedPaymentMethodFromInput(input, availableMethods);
 
   if (!paymentMethod) {
+    const availableText = availableMethods.length ? availableMethods.join(", ") : "KPAY, MMQR, CASH, BANK, WAVEPAY";
     return {
       toolName: "get_payment_method_detail",
       sourceName: "BigQuery payment report",
@@ -382,23 +409,29 @@ async function getPaymentMethodDetail(input: AgentToolInput, deps: FinanceToolDe
       period: periodLabel(input),
       dataStatus: "not_ready",
       live: false,
-      summary: "Please include a payment method such as KPAY, MMQR, CASH, BANK, WAVEPAY, CBPAY, AYAPAY, MPU, VISA, or MASTERCARD.",
+      summary: `Please choose one payment method: ${availableText}.`,
       warnings: [
         {
           type: "missing_payment_method",
           title: "Payment method needed",
-          message: "A selected payment method is required for payment method detail rows.",
+          message: `A selected payment method is required for payment method detail rows. Available methods: ${availableText}.`,
         },
       ],
+      data: {
+        availablePaymentMethods: availableMethods,
+      },
     };
   }
 
   const report = await deps.getPaymentReport(paymentReportParams(input, "", paymentMethod));
-  const methodSummary = report.methods.find((row) => canonicalPaymentMethod(row.paymentMethod) === paymentMethod);
+  const methodSummary =
+    breakdown.methods.find((row) => paymentMethodMatchesSelected(row.paymentMethod, paymentMethod)) ??
+    report.methods.find((row) => paymentMethodMatchesSelected(row.paymentMethod, paymentMethod));
   const totalCollected = methodSummary?.totalAmount ?? report.summary.totalAmount;
   const transactionCount = methodSummary?.transactionCount ?? report.summary.invoiceCount;
   const rows = limitRows(report.rows, 25);
-  const dataStatus = rows.length > 0 || totalCollected > 0 ? "ok" : "no_activity";
+  const hasSummaryButNoDetailRows = totalCollected > 0 && rows.length === 0;
+  const dataStatus = rows.length > 0 ? "ok" : hasSummaryButNoDetailRows ? "partial" : "no_activity";
 
   return {
     toolName: "get_payment_method_detail",
@@ -408,8 +441,10 @@ async function getPaymentMethodDetail(input: AgentToolInput, deps: FinanceToolDe
     dataStatus,
     live: false,
     summary:
-      dataStatus === "ok"
+      rows.length > 0
         ? `${paymentMethod} collection detail for ${input.period.label}: ${totalCollected.toLocaleString("en-US")} across ${transactionCount.toLocaleString("en-US")} transactions/invoices. This is not a real bank statement ledger.`
+        : hasSummaryButNoDetailRows
+          ? `${paymentMethod} payment rows were not returned, but the payment method summary shows ${totalCollected.toLocaleString("en-US")} collected. Detail query/filter mismatch may need audit log review.`
         : `No ${paymentMethod} payment rows were found for ${input.period.label}. This is not a real bank statement ledger.`,
     metrics: [
       { label: `${paymentMethod} collected`, value: totalCollected, unit: "amount" },
@@ -438,6 +473,15 @@ async function getPaymentMethodDetail(input: AgentToolInput, deps: FinanceToolDe
         ]
       : undefined,
     warnings: [
+      ...(hasSummaryButNoDetailRows
+        ? [
+            {
+              type: "payment_method_detail_mismatch",
+              title: "Payment detail mismatch",
+              message: `${paymentMethod} has ${totalCollected.toLocaleString("en-US")} in the payment method summary, but no detail rows were returned. Check the detail filter and audit log.`,
+            },
+          ]
+        : []),
       {
         type: "payment_method_report_not_bank_statement",
         title: "Not a bank statement ledger",
@@ -446,6 +490,7 @@ async function getPaymentMethodDetail(input: AgentToolInput, deps: FinanceToolDe
     ],
     data: {
       paymentMethod,
+      availablePaymentMethods: availableMethods,
       reportDefinition: {
         grain: "payment_method_invoice_service_detail",
         source: "BigQuery payment report",

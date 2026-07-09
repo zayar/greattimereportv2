@@ -4,6 +4,7 @@ import { HttpError } from "../../utils/http-error.js";
 import { hasFeatureAccess } from "../feature-access.service.js";
 import { askAgentHub, buildLockedAgentHubResponse } from "../agent-hub/agent-hub.service.js";
 import { isAgentCsvExportRequested, isExportOnlyFollowUp } from "../agent-hub/export-intent.js";
+import { hasExplicitPeriodCue } from "../agent-hub/intent-planner.js";
 import { buildCustomerKey } from "../agent-hub/customer-identity.js";
 import { maskPhone, nowIso, sanitizeError } from "../agent-hub/safety.js";
 import { updateAgentRunTrace, saveAgentRunTrace } from "../agent-hub/trace.repository.js";
@@ -42,6 +43,12 @@ import {
   type RecentAppointmentContext,
   type RecentAppointmentContextItem,
 } from "./appointment-context.js";
+import {
+  getRecentPaymentMethodContext,
+  resolveRecentPaymentMethodReference,
+  saveRecentPaymentMethodContext,
+  type RecentPaymentMethodContextItem,
+} from "./payment-method-context.js";
 import {
   canViewFullCustomerPhone,
   formatCustomerPhone,
@@ -1282,6 +1289,42 @@ function formatPaymentMethodsConversation(response: GreatTimeAgentChatResponse) 
   return lines;
 }
 
+export function buildRecentPaymentMethodContextItemsFromResponse(
+  response: GreatTimeAgentChatResponse,
+): RecentPaymentMethodContextItem[] {
+  if (response.intent !== "payment_method_breakdown") {
+    return [];
+  }
+
+  const table =
+    response.tables?.find((item) => /payment method/i.test(item.title)) ??
+    response.tables?.find((item) => item.rows.length > 0);
+  if (!table?.rows.length) {
+    return [];
+  }
+
+  return table.rows
+    .slice(0, 30)
+    .map((row, index) => {
+      const paymentMethod = stringValue(row, "paymentMethod", stringValue(row, "method", "")).trim();
+      if (!paymentMethod || paymentMethod === "-") {
+        return null;
+      }
+
+      return {
+        rank: index + 1,
+        paymentMethod,
+        totalAmount: numberValue(row, "totalAmount") ?? numberValue(row, "amount") ?? 0,
+        transactionCount:
+          numberValue(row, "transactionCount") ??
+          numberValue(row, "transactions") ??
+          numberValue(row, "count") ??
+          0,
+      };
+    })
+    .filter((item): item is RecentPaymentMethodContextItem => Boolean(item));
+}
+
 function formatPaymentMethodDetailConversation(response: GreatTimeAgentChatResponse) {
   if (response.intent !== "payment_method_detail") {
     return [];
@@ -1295,35 +1338,33 @@ function formatPaymentMethodDetailConversation(response: GreatTimeAgentChatRespo
     response.metrics?.find((metric) => metric.label.toLowerCase().includes("collected")) ??
     response.metrics?.find((metric) => metric.unit === "amount");
   const transactions = metricByLabel(response, "Transactions");
-  const invoices = metricByLabel(response, "Invoices");
-  const lines = [`${method} payment method detail (${response.period.fromDate} to ${response.period.toDate}):`];
+  const mismatchWarning = response.warnings?.find((warning) => warning.type === "payment_method_detail_mismatch");
+  const lines = [`Payment method: ${method}`];
 
   if (collected) {
-    lines.push(`${method} total collected: ${formatMetricValue(collected.value, collected.unit)}`);
+    lines.push(`${method} total: ${formatMetricValue(collected.value, collected.unit)}`);
   }
-
-  const countParts: string[] = [];
   if (transactions) {
-    countParts.push(`transactions ${formatMetricValue(transactions.value, transactions.unit)}`);
-  }
-  if (invoices) {
-    countParts.push(`invoice ${formatMetricValue(invoices.value, invoices.unit)} စောင်`);
-  }
-  if (countParts.length) {
-    lines.push(countParts.join("၊ "));
+    lines.push(`Transactions: ${formatMetricValue(transactions.value, transactions.unit)}`);
   }
 
   if (!table?.rows.length) {
-    lines.push("", `${method} payment rows မတွေ့ပါ။`);
+    const totalText = collected ? `${method} total ${formatMetricValue(collected.value, collected.unit)}` : `${method} total`;
+    lines.push(
+      "",
+      mismatchWarning
+        ? `${method} အတွက် payment rows မတွေ့ပါ။ ဒါပေမယ့် summary ထဲမှာ ${totalText} တွေ့ထားပါတယ်။ Detail query/filter mismatch ဖြစ်နိုင်ပါတယ်။ Audit log ကိုစစ်ပါ။`
+        : `${method} အတွက် payment rows မတွေ့ပါ။`,
+    );
     lines.push("", "မှတ်ချက်: ဒါက GreatTime payment report rows အပေါ်အခြေခံထားတာပါ။ Real bank statement ledger မဟုတ်ပါ။");
     return lines;
   }
 
-  lines.push("", "Invoice / customer / service detail:");
+  lines.push("", "Details:");
   table.rows.slice(0, 10).forEach((row, index) => {
-    const date = stringValue(row, "dateLabel", "-");
     const invoice = stringValue(row, "invoiceNumber", "-");
     const customer = stringValue(row, "customerName", "-");
+    const phone = stringValue(row, "customerPhone", "");
     const service = stringValue(row, "serviceName", "-");
     const servicePackage = stringValue(row, "servicePackageName", "");
     const paymentAmount = numberValue(row, "paymentAmount");
@@ -1333,12 +1374,21 @@ function formatPaymentMethodDetailConversation(response: GreatTimeAgentChatRespo
     const packageText = servicePackage && servicePackage !== "-" ? ` / ${servicePackage}` : "";
     const paymentText = paymentAmount != null ? formatTelegramMoney(paymentAmount) : "-";
     const invoiceTotalText = invoiceTotal != null ? formatTelegramMoney(invoiceTotal) : "-";
-    const statusText = status && status !== "-" ? `၊ status ${status}` : "";
-    const noteText = note && note !== "-" ? `၊ note ${note}` : "";
+    const statusText = status && status !== "-" ? status : "-";
+    const noteText = note && note !== "-" ? note : "";
 
-    lines.push(
-      `${index + 1}. ${date} — invoice ${invoice}၊ ${customer}၊ ${service}${packageText}၊ payment ${paymentText}၊ invoice total ${invoiceTotalText}${statusText}${noteText}`,
-    );
+    lines.push(`${index + 1}. Invoice: ${invoice}`);
+    lines.push(`   Customer: ${customer}`);
+    if (phone && phone !== "-") {
+      lines.push(`   Phone: ${phone}`);
+    }
+    lines.push(`   Service: ${service}${packageText}`);
+    lines.push(`   Amount: ${paymentText}`);
+    lines.push(`   Invoice total: ${invoiceTotalText}`);
+    lines.push(`   Status: ${statusText}`);
+    if (noteText) {
+      lines.push(`   Note: ${noteText}`);
+    }
   });
 
   lines.push("", "မှတ်ချက်: ဒါက GreatTime payment report rows အပေါ်အခြေခံထားတာပါ။ Real bank statement ledger မဟုတ်ပါ။");
@@ -1851,6 +1901,8 @@ export function formatAgentHubTelegramReply(
     metrics.length > 0 &&
     response.resolvedAgent !== "appointment" &&
     response.intent !== "operations_count_reconciliation" &&
+    response.intent !== "payment_method_breakdown" &&
+    response.intent !== "payment_method_detail" &&
     !isFinanceSalesSummaryResponse(response)
   ) {
     lines.push("", "အဓိကကိန်းဂဏန်းများ:");
@@ -2542,6 +2594,8 @@ async function buildAgentHubReply(params: {
   telegramCallbackDataType?: string | null;
   entityContext?: GreatTimeAgentEntityContext;
   agent?: GreatTimeAgentId | "auto";
+  fromDate?: string;
+  toDate?: string;
 }) {
   const premium = await hasFeatureAccess({
     clinicId: params.target.clinicId,
@@ -2562,6 +2616,8 @@ async function buildAgentHubReply(params: {
     message: params.question,
     aiLanguage: params.target.ownerAiLanguage,
     timezone: params.target.timezone,
+    fromDate: params.fromDate,
+    toDate: params.toDate,
     entityContext: params.entityContext,
   };
 
@@ -2766,7 +2822,18 @@ async function handleAgentQuestion(params: {
   let effectiveQuestion = question;
   let entityContext = params.entityContext;
   let agent = params.agent;
+  let followUpFromDate: string | undefined;
+  let followUpToDate: string | undefined;
   if (!entityContext) {
+    const recentPaymentContext = getRecentPaymentMethodContext({
+      clinicId: target.clinicId,
+      telegramChatId: params.chatId,
+      telegramUserId: params.telegramUserId,
+    });
+    const recentPaymentResolution = resolveRecentPaymentMethodReference({
+      message: question,
+      context: recentPaymentContext,
+    });
     const recentContext = getRecentAppointmentContext({
       clinicId: target.clinicId,
       telegramChatId: params.chatId,
@@ -2776,8 +2843,20 @@ async function handleAgentQuestion(params: {
       message: question,
       context: recentContext,
     });
+    const shouldUsePaymentMethodContext =
+      recentPaymentResolution.status === "resolved" &&
+      (recentResolution.status === "none" ||
+        recentPaymentResolution.context.createdAt >= (recentContext?.createdAt ?? 0));
 
-    if (recentResolution.status === "resolved") {
+    if (shouldUsePaymentMethodContext) {
+      const method = recentPaymentResolution.item.paymentMethod;
+      effectiveQuestion = `${question}\n${method} payment method details`;
+      agent = "finance";
+      if (!hasExplicitPeriodCue(question)) {
+        followUpFromDate = recentPaymentResolution.context.period.fromDate;
+        followUpToDate = recentPaymentResolution.context.period.toDate;
+      }
+    } else if (recentResolution.status === "resolved") {
       const item = recentResolution.item;
       if (recentResolution.action === "phone") {
         const phone = formatCustomerPhone(
@@ -2860,6 +2939,8 @@ async function handleAgentQuestion(params: {
     telegramCallbackDataType: params.telegramCallbackDataType,
     entityContext,
     agent,
+    fromDate: followUpFromDate,
+    toDate: followUpToDate,
   });
   const appointmentContextItems =
     response.resolvedAgent === "appointment"
@@ -2883,6 +2964,18 @@ async function handleAgentQuestion(params: {
         telegramChatId: params.chatId,
         telegramUserId: params.telegramUserId,
       });
+
+  const paymentMethodContextItems = buildRecentPaymentMethodContextItemsFromResponse(response);
+  if (paymentMethodContextItems.length > 0) {
+    saveRecentPaymentMethodContext({
+      clinicId: target.clinicId,
+      clinicCode: target.clinicCode,
+      telegramChatId: params.chatId,
+      telegramUserId: params.telegramUserId,
+      period: response.period,
+      methods: paymentMethodContextItems,
+    });
+  }
 
   const cacheEntry =
     response.intent !== "unsupported_write_request" && hasExportableAgentTables(response)

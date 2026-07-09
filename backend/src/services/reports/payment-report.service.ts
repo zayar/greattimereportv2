@@ -18,6 +18,41 @@ function parseNumber(value: unknown) {
   return Number(value ?? 0);
 }
 
+const PAYMENT_METHOD_FILTER_ALIASES: Record<string, string[]> = {
+  YOMA: ["YOMA", "YOMA BANK", "YOMABANK", "YOMA PAY"],
+  KPAY: ["KPAY", "K PAY", "KPAYE", "KBZPAY", "KBZ PAY"],
+  KBZ: ["KBZ", "KBZ BANK"],
+  AYAPAY: ["AYAPAY", "AYA PAY"],
+  AYA: ["AYA", "AYA BANK"],
+  CBPAY: ["CBPAY", "CB PAY"],
+  CB: ["CB", "CB BANK"],
+  UAB: ["UAB", "UAB BANK"],
+  MOB: ["MOB", "MOB BANK"],
+  WAVEPAY: ["WAVEPAY", "WAVE PAY", "WAVE"],
+  CASH: ["CASH"],
+  MMQR: ["MMQR", "MM QR", "MYANMAR QR", "QR"],
+  BANK: ["BANK", "BANK TRANSFER"],
+  MPU: ["MPU"],
+  VISA: ["VISA"],
+  MASTERCARD: ["MASTERCARD", "MASTER CARD"],
+};
+
+function normalizePaymentMethodForFilter(value: string) {
+  return value.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function buildPaymentMethodFilterAliases(paymentMethod: string) {
+  const normalized = normalizePaymentMethodForFilter(paymentMethod);
+  const aliases = PAYMENT_METHOD_FILTER_ALIASES[normalized] ?? [paymentMethod];
+  const values = new Set(
+    [paymentMethod, normalized, ...aliases]
+      .map((value) => normalizePaymentMethodForFilter(value))
+      .filter(Boolean),
+  );
+
+  return values.size ? [...values] : [""];
+}
+
 export async function getPaymentReport(params: {
   clinicId: string;
   clinicCode: string;
@@ -29,6 +64,10 @@ export async function getPaymentReport(params: {
   limit: number;
   offset: number;
 }) {
+  const queryParams = {
+    ...params,
+    paymentMethodAliases: params.paymentMethod ? buildPaymentMethodFilterAliases(params.paymentMethod) : [""],
+  };
   const baseWhere = `
     DATE(OrderCreatedDate) BETWEEN @fromDate AND @toDate
       AND PaymentMethod != 'PASS'
@@ -43,7 +82,7 @@ export async function getPaymentReport(params: {
       )
       AND (
         @paymentMethod = ''
-        OR LOWER(COALESCE(PaymentMethod, 'Unknown')) = LOWER(@paymentMethod)
+        OR UPPER(REGEXP_REPLACE(COALESCE(PaymentMethod, 'Unknown'), r'[^a-zA-Z0-9]', '')) IN UNNEST(@paymentMethodAliases)
       )
       AND (
         @includeZeroValues
@@ -320,7 +359,7 @@ export async function getPaymentReport(params: {
           COALESCE(AVG(invoiceNetTotal), 0) AS averageInvoice
         FROM InvoiceSummary
       `,
-      params,
+      queryParams,
     ),
     runAnalyticsQuery<{
       paymentMethod: string;
@@ -385,7 +424,7 @@ export async function getPaymentReport(params: {
         GROUP BY paymentMethod
         ORDER BY totalAmount DESC
       `,
-      params,
+      queryParams,
     ),
     runAnalyticsQuery<{
       dateLabel: string;
@@ -420,7 +459,7 @@ export async function getPaymentReport(params: {
         LIMIT @limit
         OFFSET @offset
       `,
-      params,
+      queryParams,
     ),
     runAnalyticsQuery<{ totalCount: number }>(
       `
@@ -428,7 +467,7 @@ export async function getPaymentReport(params: {
         SELECT COUNT(*) AS totalCount
         FROM (${detailSelect})
       `,
-      params,
+      queryParams,
     ),
   ]);
 

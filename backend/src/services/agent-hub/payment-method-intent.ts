@@ -1,36 +1,65 @@
 type PaymentMethodAlias = {
   canonical: string;
   patterns: RegExp[];
+  generic?: boolean;
 };
 
 const PAYMENT_METHOD_ALIASES: PaymentMethodAlias[] = [
   {
-    canonical: "CASH",
-    patterns: [/\bcash\b/i, /ငွေသား/i],
+    canonical: "YOMA",
+    patterns: [/\byoma(?:\s*(?:bank|pay))?\b/i, /ရိုးမ(?:\s*ဘဏ်)?/i],
   },
   {
     canonical: "KPAY",
-    patterns: [/\bk\s*pay(?:\s*e)?\b/i, /\bkpaye\b/i, /\bkbz\s*pay\b/i, /ကေပေး/i],
+    patterns: [
+      /\bkbz\s*pay\b/i,
+      /\bkbzpay\b/i,
+      /\bk\s*pay(?:\s*e)?\b/i,
+      /\bkpay(?:e)?\b/i,
+      /\bkpaye\b/i,
+      /ကေဘီဇက်\s*ပေး/i,
+      /ကေပေး/i,
+    ],
   },
   {
-    canonical: "WAVEPAY",
-    patterns: [/\bwave\s*pay\b/i, /\bwavepay\b/i, /\bwave\b/i],
+    canonical: "KBZ",
+    patterns: [/\bkbz(?:\s*bank)?\b/i, /ကေဘီဇက်/i],
   },
   {
-    canonical: "MMQR",
-    patterns: [/\bmm\s*qr\b/i, /\bmyanmar\s*qr\b/i],
+    canonical: "AYAPAY",
+    patterns: [/\baya\s*pay\b/i, /\bayapay\b/i],
   },
   {
-    canonical: "BANK",
-    patterns: [/\bbank(?:\s+transfer)?\b/i, /ဘဏ်/i],
+    canonical: "AYA",
+    patterns: [/\baya(?:\s*bank)?\b/i, /အေးရာ/i, /ဧရာ/i],
   },
   {
     canonical: "CBPAY",
     patterns: [/\bcb\s*pay\b/i, /\bcbpay\b/i],
   },
   {
-    canonical: "AYAPAY",
-    patterns: [/\baya\s*pay\b/i, /\bayapay\b/i],
+    canonical: "CB",
+    patterns: [/\bcb(?:\s*bank)?\b/i],
+  },
+  {
+    canonical: "UAB",
+    patterns: [/\buab(?:\s*bank)?\b/i],
+  },
+  {
+    canonical: "MOB",
+    patterns: [/\bmob(?:\s*bank)?\b/i],
+  },
+  {
+    canonical: "WAVEPAY",
+    patterns: [/\bwave\s*pay\b/i, /\bwavepay\b/i, /\bwave\b/i],
+  },
+  {
+    canonical: "CASH",
+    patterns: [/\bcash\b/i, /ငွေသား/i],
+  },
+  {
+    canonical: "MMQR",
+    patterns: [/\bmm\s*qr\b/i, /\bmyanmar\s*qr\b/i],
   },
   {
     canonical: "MPU",
@@ -43,6 +72,11 @@ const PAYMENT_METHOD_ALIASES: PaymentMethodAlias[] = [
   {
     canonical: "MASTERCARD",
     patterns: [/\bmaster\s*card\b/i, /\bmastercard\b/i],
+  },
+  {
+    canonical: "BANK",
+    patterns: [/\bbank(?:\s+transfer)?\b/i, /ဘဏ်/i],
+    generic: true,
   },
 ];
 
@@ -60,15 +94,79 @@ const PAYMENT_METHOD_AMOUNT_CUE_PATTERN =
 export const PAYMENT_METHOD_BREAKDOWN_CUE_PATTERN =
   /\b(?:by\s+payment\s+method|payment\s+method\s+(?:breakdown|summary|report)|by\s+method|by\s+bank)\b|နည်းလမ်း\s*အလိုက်|method\s*အလိုက်|bank\s*အလိုက်|ဘဏ်\s*အလိုက်|အလိုက်/i;
 
-export function extractPaymentMethodFilter(message: string): string | null {
+function extractPaymentMethodAlias(message: string, includeGeneric: boolean) {
   for (const alias of PAYMENT_METHOD_ALIASES) {
+    if (Boolean(alias.generic) !== includeGeneric) {
+      continue;
+    }
     if (alias.patterns.some((pattern) => pattern.test(message))) {
       return alias.canonical;
     }
   }
 
+  return null;
+}
+
+export function extractSpecificPaymentMethodFilter(message: string): string | null {
+  const alias = extractPaymentMethodAlias(message, false);
+  if (alias) {
+    return alias;
+  }
+
   if (QR_PATTERN.test(message) && PAYMENT_METHOD_CONTEXT_PATTERN.test(message)) {
     return "MMQR";
+  }
+
+  return null;
+}
+
+export function extractGenericPaymentMethodFilter(message: string): string | null {
+  return extractPaymentMethodAlias(message, true);
+}
+
+export function extractPaymentMethodFilter(message: string): string | null {
+  return extractSpecificPaymentMethodFilter(message) ?? extractGenericPaymentMethodFilter(message);
+}
+
+export function normalizeMethodText(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9\u1000-\u109f]/g, "");
+}
+
+function methodTokens(value: string) {
+  return value
+    .toLowerCase()
+    .split(/[^a-z0-9\u1000-\u109f]+/g)
+    .map((token) => token.trim())
+    .filter(Boolean);
+}
+
+export function matchPaymentMethodFromAvailableMethods(
+  message: string,
+  availableMethods: Array<string | null | undefined> = [],
+): string | null {
+  const normalizedMessage = normalizeMethodText(message);
+  const tokens = new Set(methodTokens(message));
+  const methods = availableMethods
+    .map((method) => (method ?? "").trim())
+    .filter(Boolean)
+    .sort((left, right) => normalizeMethodText(right).length - normalizeMethodText(left).length);
+
+  for (const method of methods) {
+    const normalizedMethod = normalizeMethodText(method);
+    if (!normalizedMethod) {
+      continue;
+    }
+
+    if (normalizedMethod.length <= 3) {
+      if (tokens.has(normalizedMethod)) {
+        return method;
+      }
+      continue;
+    }
+
+    if (normalizedMessage.includes(normalizedMethod)) {
+      return method;
+    }
   }
 
   return null;
