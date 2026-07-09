@@ -1408,26 +1408,36 @@ export async function getCustomerPortalTopCustomersByRevenue(params: {
           FROM PaidSalesRows
           GROUP BY customerIdentityKey
         ),
-        PaidServiceRank AS (
+        PaidServiceAgg AS (
           SELECT
             customerIdentityKey,
             NULLIF(serviceName, '') AS serviceName,
             NULLIF(servicePackageName, '') AS servicePackageName,
             SUM(netAmount) AS serviceRevenue,
             COUNT(DISTINCT invoiceNumber) AS invoiceCount,
-            MAX(orderCreatedDate) AS latestInvoiceDate,
-            ROW_NUMBER() OVER (
-              PARTITION BY customerIdentityKey
-              ORDER BY
-                SUM(netAmount) DESC,
-                COUNT(DISTINCT invoiceNumber) DESC,
-                MAX(orderCreatedDate) DESC,
-                NULLIF(serviceName, '') ASC,
-                NULLIF(servicePackageName, '') ASC
-            ) AS rowNum
+            MAX(orderCreatedDate) AS latestInvoiceDate
           FROM PaidSalesRows
           WHERE COALESCE(serviceName, '') != '' OR COALESCE(servicePackageName, '') != ''
           GROUP BY customerIdentityKey, serviceName, servicePackageName
+        ),
+        PaidServiceRank AS (
+          SELECT
+            customerIdentityKey,
+            serviceName,
+            servicePackageName,
+            serviceRevenue,
+            invoiceCount,
+            latestInvoiceDate,
+            ROW_NUMBER() OVER (
+              PARTITION BY customerIdentityKey
+              ORDER BY
+                serviceRevenue DESC,
+                invoiceCount DESC,
+                latestInvoiceDate DESC,
+                serviceName ASC,
+                servicePackageName ASC
+            ) AS rowNum
+          FROM PaidServiceAgg
         ),
         ${buildDistinctVisitsCte("DATE(CheckInTime) BETWEEN DATE(@fromDate) AND DATE(@toDate)")}
         ,
@@ -1449,19 +1459,27 @@ export async function getCustomerPortalTopCustomersByRevenue(params: {
           FROM VisitRows
           GROUP BY customerIdentityKey
         ),
-        VisitServiceRank AS (
+        VisitServiceAgg AS (
           SELECT
             customerIdentityKey,
             NULLIF(serviceName, '') AS serviceName,
             COUNT(*) AS usageCount,
-            MAX(checkInTime) AS latestVisitDate,
-            ROW_NUMBER() OVER (
-              PARTITION BY customerIdentityKey
-              ORDER BY COUNT(*) DESC, MAX(checkInTime) DESC, NULLIF(serviceName, '') ASC
-            ) AS rowNum
+            MAX(checkInTime) AS latestVisitDate
           FROM VisitRows
           WHERE COALESCE(serviceName, '') != ''
           GROUP BY customerIdentityKey, serviceName
+        ),
+        VisitServiceRank AS (
+          SELECT
+            customerIdentityKey,
+            serviceName,
+            usageCount,
+            latestVisitDate,
+            ROW_NUMBER() OVER (
+              PARTITION BY customerIdentityKey
+              ORDER BY usageCount DESC, latestVisitDate DESC, serviceName ASC
+            ) AS rowNum
+          FROM VisitServiceAgg
         ),
         PackageSourceRows AS (
           SELECT
