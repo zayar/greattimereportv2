@@ -11,7 +11,7 @@ import type {
   AiRevenueServiceUsageSnapshot,
 } from "../../types/ai-revenue-agent.js";
 import { calculateCustomerRiskSignals } from "../ai/customer-risk.service.js";
-import { getCustomerPortalList, getCustomerPortalPackages } from "../reports/customer-portal.service.js";
+import { getCustomerPortalBirthdayCustomers, getCustomerPortalList, getCustomerPortalPackages } from "../reports/customer-portal.service.js";
 import { getPackagePortalReport } from "../reports/package-portal.service.js";
 import { getTodayAppointmentsForClinic } from "../telegram/report.service.js";
 import { fetchApicoreBookingDetails, type ApicoreBookingDetailsRow } from "../apicore.service.js";
@@ -72,6 +72,8 @@ type PackageFollowUpRow = {
   latestTherapist?: string | null;
   sourcePriority?: number;
 };
+
+type BirthdayCustomerRow = Awaited<ReturnType<typeof getCustomerPortalBirthdayCustomers>>["rows"][number];
 
 const ACTIVE_APPOINTMENT_STATUSES = new Set(["BOOKED", "REQUEST", "CHECKIN", "CHECKED_IN"]);
 const PENDING_REMINDER_APPOINTMENT_STATUSES = new Set(["BOOKED", "REQUEST"]);
@@ -1181,6 +1183,106 @@ function createInactiveVipCandidates(rows: Array<{
   });
 }
 
+function birthdayServiceUsageFromRow(row: BirthdayCustomerRow): AiRevenueServiceUsageSnapshot[] {
+  return row.packageRemainingDetails
+    .filter((detail) => (detail.remainingSessions ?? 0) > 0)
+    .slice(0, 8)
+    .map((detail, index) => ({
+      serviceId: null,
+      serviceName: detail.serviceName || detail.packageName || "Package balance",
+      packageId: null,
+      packageName: detail.packageName,
+      packageTotal: detail.totalSessions ?? null,
+      used: detail.usedSessions ?? null,
+      remaining: detail.remainingSessions ?? null,
+      latestUsageDate: detail.lastUsedDate ?? null,
+      latestTherapist: row.lastTherapistName ?? null,
+      status: serviceUsageStatus(detail.remainingSessions ?? null),
+      isFocusService: index === 0,
+      note: detail.totalSessions != null
+        ? `${detail.remainingSessions ?? 0}/${detail.totalSessions} session(s) remaining`
+        : `${detail.remainingSessions ?? 0} session(s) remaining`,
+    }));
+}
+
+function createBirthdayCandidates(rows: BirthdayCustomerRow[], dateKey: string) {
+  return rows.flatMap<Candidate>((row) => {
+    const customer: AiRevenueCustomer = {
+      customerKey: row.customerKey,
+      memberId: cleanText(row.memberId) || null,
+      customerName: row.customerName,
+      phoneNumber: cleanText(row.phoneNumber) || null,
+      phoneMasked: maskPhone(row.phoneNumber),
+    };
+    if (!hasUsableIdentity(customer)) {
+      return [];
+    }
+
+    const serviceUsage = birthdayServiceUsageFromRow(row);
+    const primaryPackage = row.packageRemainingDetails.find((detail) => (detail.remainingSessions ?? 0) > 0) ?? null;
+    const packageRemainingText = row.packageRemainingDetailsText || row.activePackageNames.join(", ");
+    const serviceName = primaryPackage?.serviceName || primaryPackage?.packageName || row.lastServiceName || "Birthday follow-up";
+    const daysUntilBirthday = daysBetweenDateKeys(row.upcomingBirthdayDate, dateKey);
+    const basePriorityScore = Math.min(
+      100,
+      68 +
+        (daysUntilBirthday <= 3 ? 12 : daysUntilBirthday <= 7 ? 8 : 0) +
+        (row.packageRemainingSessionsTotal > 0 ? 10 : 0) +
+        (row.lifetimeSpend >= 1_000_000 ? 5 : 0),
+    );
+
+    return [
+      {
+        source: "bigquery",
+        sourceRefId: `birthday:${customer.customerKey || normalizeNameKey(row.customerName)}:${row.upcomingBirthdayDate}`,
+        actionType: "birthday_follow_up",
+        basePriorityScore,
+        title: "Birthday customer follow-up",
+        summary: `${row.customerName} has an upcoming birthday on ${row.upcomingBirthdayDate}.`,
+        reason:
+          row.packageRemainingSessionsTotal > 0 && primaryPackage
+            ? `Customer has an upcoming birthday and ${primaryPackage.packageName} has ${primaryPackage.remainingSessions ?? 0} remaining session(s).`
+            : "Customer has an upcoming birthday, which is a timely human-approved relationship follow-up opportunity.",
+        recommendedAction: row.suggestedAction,
+        evidence: [
+          { label: "Birthday date", value: row.upcomingBirthdayDate },
+          { label: "Days until birthday", value: daysUntilBirthday },
+          ...(row.turningAge != null ? [{ label: "Turning age", value: row.turningAge }] : []),
+          ...(row.lastVisitDate ? [{ label: "Last visit date", value: row.lastVisitDate }] : []),
+          ...(row.lastServiceName ? [{ label: "Last service", value: row.lastServiceName }] : []),
+          ...(row.lastTherapistName ? [{ label: "Last therapist", value: row.lastTherapistName }] : []),
+          { label: "Total visits", value: row.totalVisits },
+          ...(moneyLabel(row.lifetimeSpend) ? [{ label: "Lifetime spend", value: moneyLabel(row.lifetimeSpend)! }] : []),
+          ...(row.packageRemainingSessionsTotal > 0
+            ? [{ label: "Remaining package sessions", value: row.packageRemainingSessionsTotal }]
+            : []),
+          ...(packageRemainingText ? [{ label: "Package remaining details", value: packageRemainingText }] : []),
+        ],
+        customer,
+        service: {
+          serviceName,
+          lastVisitDate: row.lastVisitDate,
+          lastVisitSinceDays: resolveDaysSinceVisit(dateKey, row.lastVisitDate, null),
+          lastTreatmentTherapist: row.lastTherapistName ?? null,
+          preferredTherapist: row.lastTherapistName ?? null,
+          reminderDate: row.upcomingBirthdayDate,
+        },
+        serviceUsage,
+        packageInfo: primaryPackage
+          ? {
+              packageId: null,
+              packageName: primaryPackage.packageName,
+              remainingUnits: primaryPackage.remainingSessions ?? null,
+              purchasedUnits: primaryPackage.totalSessions ?? null,
+              usedUnits: primaryPackage.usedSessions ?? null,
+              lastUsedAt: primaryPackage.lastUsedDate ?? null,
+            }
+          : undefined,
+      },
+    ];
+  });
+}
+
 function uniqueCandidates(candidates: Candidate[]) {
   const byKey = new Map<string, Candidate>();
 
@@ -1252,8 +1354,9 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
   const customerFromDate = addDays(input.dateKey, -365);
   const appointmentHistoryFromDate = addDays(input.dateKey, -90);
   const tomorrowDateKey = addDays(input.dateKey, 1);
+  const birthdayToDate = addDays(input.dateKey, 7);
 
-  const [packageResult, customerResult, vipResult, todayAppointmentsResult, tomorrowAppointmentsResult, appointmentHistoryResult] =
+  const [packageResult, customerResult, vipResult, todayAppointmentsResult, tomorrowAppointmentsResult, appointmentHistoryResult, birthdayResult] =
     await Promise.allSettled([
       getPackagePortalReport({
         clinicId: input.clinicId,
@@ -1314,6 +1417,12 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
         toDate: addDays(input.dateKey, -1),
         authorizationHeader: input.authorizationHeader,
       }),
+      getCustomerPortalBirthdayCustomers({
+        clinicCode: input.clinicCode,
+        fromDate: input.dateKey,
+        toDate: birthdayToDate,
+        limit: 50,
+      }),
     ]);
 
   const customerRows = customerResult.status === "fulfilled" ? customerResult.value.rows : [];
@@ -1321,6 +1430,7 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
   const todayRows = todayAppointmentsResult.status === "fulfilled" ? todayAppointmentsResult.value.rows : [];
   const tomorrowRows = tomorrowAppointmentsResult.status === "fulfilled" ? tomorrowAppointmentsResult.value.rows : [];
   const appointmentHistoryRows = appointmentHistoryResult.status === "fulfilled" ? appointmentHistoryResult.value : [];
+  const birthdayRows = birthdayResult.status === "fulfilled" ? birthdayResult.value.rows : [];
   const packagePortalRows = packageResult.status === "fulfilled" ? packageResult.value.followUpRows : [];
   const packageCustomerLookupRows = packagePortalRows.map((row) => ({
     customerName: row.customerName,
@@ -1376,6 +1486,7 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
       highRiskCustomers,
     }),
     ...createInactiveVipCandidates(vipRows, input.dateKey),
+    ...createBirthdayCandidates(birthdayRows, input.dateKey),
   ]);
   let suppressedSkippedCount = 0;
   const candidates = candidatePool.filter((candidate) => {

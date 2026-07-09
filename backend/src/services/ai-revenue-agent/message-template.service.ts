@@ -186,6 +186,19 @@ function personalFollowUpDraft(action: AiRevenueAction) {
   ].join("\n\n");
 }
 
+function birthdayFollowUpDraft(action: AiRevenueAction) {
+  const remaining = remainingBalanceSentence(action);
+  const packageLine = remaining
+    ? `${remaining} လက်ကျန် treatment/session လေးကို birthday month ထဲမှာ ပြန်လာသုံးလို့ရပါတယ်ရှင့်။`
+    : "Birthday promo / consultation လေးရှိလို့ စိတ်ဝင်စားရင် booking လုပ်ပေးရမလားရှင့်။";
+
+  return [
+    greeting(action),
+    "မကြာခင် birthday လေးရောက်တော့မှာမို့ GreatTime မှ birthday wish လေးပို့ပေးပါတယ်ရှင့်။",
+    packageLine,
+  ].join("\n\n");
+}
+
 export function buildAiRevenueMessageDraft(action: AiRevenueAction) {
   const context = contextSentence(action);
   const service = serviceName(action);
@@ -199,6 +212,9 @@ export function buildAiRevenueMessageDraft(action: AiRevenueAction) {
 
     case "unused_package_follow_up":
       return personalFollowUpDraft(action);
+
+    case "birthday_follow_up":
+      return birthdayFollowUpDraft(action);
 
     case "appointment_confirmation_reminder":
       return `${greeting(action)}${appointmentDateTime(action)} တွင် appointment ရှိပါတယ်။ လာရောက်မည်ဆို confirm ပြန်ပေးပါ၊ အချိန်ပြောင်းရန် သို့မဟုတ် cancel လုပ်ရန်လည်း ပြန်ပြောနိုင်ပါတယ်။`;

@@ -111,6 +111,181 @@ function addDaysToDateKey(dateKey: string, days: number) {
   return date.toISOString().slice(0, 10);
 }
 
+function daysBetweenDateKeys(laterDateKey: string, earlierDateKey: string) {
+  const later = new Date(`${laterDateKey.slice(0, 10)}T00:00:00.000Z`);
+  const earlier = new Date(`${earlierDateKey.slice(0, 10)}T00:00:00.000Z`);
+  return Math.round((later.getTime() - earlier.getTime()) / 86_400_000);
+}
+
+function daysInMonth(year: number, month: number) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+export function parseBirthdayDateParts(value: string | null | undefined): {
+  year?: number;
+  month: number;
+  day: number;
+} | null {
+  const raw = (value ?? "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  const fullDate = raw.match(/^((?:19|20)\d{2})[-/](0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])$/);
+  if (fullDate?.[1] && fullDate[2] && fullDate[3]) {
+    return {
+      year: Number(fullDate[1]),
+      month: Number(fullDate[2]),
+      day: Number(fullDate[3]),
+    };
+  }
+
+  const monthDay = raw.match(/^(0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])$/);
+  if (monthDay?.[1] && monthDay[2]) {
+    return {
+      month: Number(monthDay[1]),
+      day: Number(monthDay[2]),
+    };
+  }
+
+  return null;
+}
+
+export function calculateUpcomingBirthdayDate(params: {
+  dateOfBirth: string | null | undefined;
+  fromDate: string;
+  toDate?: string;
+}) {
+  const parts = parseBirthdayDateParts(params.dateOfBirth);
+  if (!parts) {
+    return null;
+  }
+
+  const from = new Date(`${params.fromDate}T00:00:00.000Z`);
+  const fromYear = from.getUTCFullYear();
+  const birthdayForYear = (year: number) => {
+    const day = Math.min(parts.day, daysInMonth(year, parts.month));
+    return `${year}-${String(parts.month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  };
+  const thisYearBirthday = birthdayForYear(fromYear);
+  const upcomingBirthdayDate = thisYearBirthday >= params.fromDate
+    ? thisYearBirthday
+    : birthdayForYear(fromYear + 1);
+
+  if (params.toDate && upcomingBirthdayDate > params.toDate) {
+    return null;
+  }
+
+  return {
+    upcomingBirthdayDate,
+    daysUntilBirthday: daysBetweenDateKeys(upcomingBirthdayDate, params.fromDate),
+    turningAge: parts.year ? Number(upcomingBirthdayDate.slice(0, 4)) - parts.year : null,
+  };
+}
+
+export type CustomerPackageRemainingDetail = {
+  packageName: string;
+  serviceName?: string | null;
+  categoryName?: string | null;
+  totalSessions?: number | null;
+  usedSessions?: number | null;
+  remainingSessions?: number | null;
+  remainingAmount?: number | null;
+  purchaseDate?: string | null;
+  lastUsedDate?: string | null;
+  expiryDate?: string | null;
+};
+
+function sortPackageRemainingDetails(details: CustomerPackageRemainingDetail[]) {
+  return [...details].sort((left, right) => {
+    const leftExpiry = left.expiryDate ?? "9999-12-31";
+    const rightExpiry = right.expiryDate ?? "9999-12-31";
+    if (leftExpiry !== rightExpiry) {
+      return leftExpiry.localeCompare(rightExpiry);
+    }
+
+    const leftUsed = left.lastUsedDate ?? "";
+    const rightUsed = right.lastUsedDate ?? "";
+    if (leftUsed !== rightUsed) {
+      return rightUsed.localeCompare(leftUsed);
+    }
+
+    const remainingDiff = (right.remainingSessions ?? 0) - (left.remainingSessions ?? 0);
+    if (remainingDiff !== 0) {
+      return remainingDiff;
+    }
+
+    return (left.packageName || left.serviceName || "").localeCompare(right.packageName || right.serviceName || "");
+  });
+}
+
+function parsePackageRemainingDetails(value: unknown): CustomerPackageRemainingDetail[] {
+  return sortPackageRemainingDetails(
+    parseJsonArray(value).map((item) => ({
+      packageName: parseText(item.packageName, parseText(item.serviceName, "Package balance")),
+      serviceName: parseText(item.serviceName) || null,
+      categoryName: parseText(item.categoryName) || null,
+      totalSessions: item.totalSessions == null ? null : parseNumber(item.totalSessions),
+      usedSessions: item.usedSessions == null ? null : parseNumber(item.usedSessions),
+      remainingSessions: item.remainingSessions == null ? null : parseNumber(item.remainingSessions),
+      remainingAmount: item.remainingAmount == null ? null : parseNumber(item.remainingAmount),
+      purchaseDate: parseText(item.purchaseDate) || null,
+      lastUsedDate: parseText(item.lastUsedDate) || null,
+      expiryDate: parseText(item.expiryDate) || null,
+    })),
+  );
+}
+
+function activePackageNames(details: CustomerPackageRemainingDetail[]) {
+  return Array.from(
+    new Set(
+      details
+        .filter((item) => (item.remainingSessions ?? 0) > 0)
+        .map((item) => item.packageName || item.serviceName || "")
+        .filter(Boolean),
+    ),
+  );
+}
+
+function packageRemainingText(details: CustomerPackageRemainingDetail[]) {
+  return details
+    .filter((item) => (item.remainingSessions ?? 0) > 0)
+    .map((item) => {
+      const name = item.packageName || item.serviceName || "Package balance";
+      const remaining = item.remainingSessions == null ? "-" : item.remainingSessions.toLocaleString("en-US");
+      const total = item.totalSessions == null ? null : item.totalSessions.toLocaleString("en-US");
+      return total ? `${name}: ${remaining}/${total} left` : `${name}: ${remaining} left`;
+    })
+    .join("; ");
+}
+
+function primaryPackageDetail(details: CustomerPackageRemainingDetail[]) {
+  return sortPackageRemainingDetails(details.filter((item) => (item.remainingSessions ?? 0) > 0))[0] ?? null;
+}
+
+function birthdaySuggestedAction(input: {
+  packageRemainingDetails: CustomerPackageRemainingDetail[];
+  packageRemainingSessionsTotal: number;
+  lastVisitDate?: string | null;
+  lifetimeSpend?: number;
+  fromDate: string;
+}) {
+  const primaryPackage = primaryPackageDetail(input.packageRemainingDetails);
+  if (primaryPackage && input.packageRemainingSessionsTotal > 0) {
+    return `Birthday wish ပို့ပြီး ${primaryPackage.packageName} လက်ကျန် ${primaryPackage.remainingSessions ?? ""} session ပြန်လာသုံးဖို့ ဖိတ်ပါ။`;
+  }
+
+  if (input.lastVisitDate && daysBetweenDateKeys(input.fromDate, input.lastVisitDate) > 90) {
+    return "Birthday wish + check-up / promo နဲ့ ပြန်လာဖို့ ဖိတ်ပါ။";
+  }
+
+  if ((input.lifetimeSpend ?? 0) >= 1_000_000) {
+    return "VIP birthday greeting ပို့ပါ။";
+  }
+
+  return "Birthday promo / consultation invitation ပို့ပါ။";
+}
+
 function buildServiceCategoryExpression(serviceField: string, packageField: string) {
   return `
     CASE
@@ -885,6 +1060,289 @@ export async function getCustomerPortalPriorityCustomers(params: {
   };
 }
 
+export async function getCustomerPortalBirthdayCustomers(params: {
+  clinicCode: string;
+  fromDate: string;
+  toDate: string;
+  limit?: number;
+}) {
+  const limit = Math.min(Math.max(params.limit ?? 20, 1), 200);
+  const rows = await runAnalyticsQuery<{
+    customerKey: string;
+    customerName: string;
+    phoneNumber: string;
+    memberId: string;
+    dateOfBirth: string | null;
+    upcomingBirthdayDate: string;
+    daysUntilBirthday: number;
+    turningAge: number | null;
+    lastVisitDate: string | null;
+    lastServiceName: string | null;
+    lastTherapistName: string | null;
+    totalVisits: number;
+    lifetimeSpend: number;
+    packageRemainingSessionsTotal: number;
+    packageRemainingAmount: number;
+    packageRemainingDetailsJson: string | null;
+    lastPackageUsageDate: string | null;
+    totalCount: number;
+  }>(
+    `
+      WITH
+        VisitRows AS (
+          SELECT
+            COALESCE(NULLIF(TRIM(CustomerName), ''), 'Unknown customer') AS customerName,
+            COALESCE(CustomerPhoneNumber, '') AS phoneNumber,
+            COALESCE(CAST(CustomerID AS STRING), '') AS memberId,
+            CAST(DateOfBirth AS STRING) AS dateOfBirthRaw,
+            CheckInTime AS checkInTime,
+            COALESCE(CheckOutTime, CheckInTime) AS activityTime,
+            COALESCE(ServiceName, '') AS serviceName,
+            COALESCE(PractitionerName, 'Unknown') AS therapistName,
+            CAST(COALESCE(Price, 0) AS FLOAT64) AS serviceValue,
+            CAST(COALESCE(PackageCount, 0) AS INT64) AS packageCount,
+            CAST(COALESCE(RemainingPackageCount, 0) AS INT64) AS remainingPackageCount,
+            ${buildServiceCategoryExpression("ServiceName", "CAST(NULL AS STRING)")} AS categoryName
+          FROM ${analyticsTables.mainDataView}
+          WHERE LOWER(ClinicCode) = LOWER(@clinicCode)
+            AND CustomerName IS NOT NULL
+            AND DateOfBirth IS NOT NULL
+            AND TRIM(CAST(DateOfBirth AS STRING)) != ''
+        ),
+        VisitSummary AS (
+          SELECT
+            customerName,
+            phoneNumber,
+            MAX(memberId) AS memberId,
+            ARRAY_AGG(dateOfBirthRaw IGNORE NULLS ORDER BY activityTime DESC LIMIT 1)[SAFE_OFFSET(0)] AS dateOfBirth,
+            FORMAT_DATE('%Y-%m-%d', MAX(DATE(activityTime))) AS lastVisitDate,
+            ARRAY_AGG(serviceName IGNORE NULLS ORDER BY activityTime DESC LIMIT 1)[SAFE_OFFSET(0)] AS lastServiceName,
+            ARRAY_AGG(therapistName IGNORE NULLS ORDER BY activityTime DESC LIMIT 1)[SAFE_OFFSET(0)] AS lastTherapistName,
+            COUNT(DISTINCT COALESCE(CAST(activityTime AS STRING), serviceName)) AS totalVisits
+          FROM VisitRows
+          GROUP BY customerName, phoneNumber
+        ),
+        BirthdayParts AS (
+          SELECT
+            *,
+            COALESCE(
+              SAFE_CAST(dateOfBirth AS DATE),
+              SAFE.PARSE_DATE('%Y-%m-%d', dateOfBirth),
+              SAFE.PARSE_DATE('%m/%d/%Y', dateOfBirth),
+              SAFE.PARSE_DATE('%d/%m/%Y', dateOfBirth)
+            ) AS dobDate
+          FROM VisitSummary
+        ),
+        BirthdayNormalized AS (
+          SELECT
+            *,
+            COALESCE(
+              EXTRACT(MONTH FROM dobDate),
+              SAFE_CAST(REGEXP_EXTRACT(dateOfBirth, r'^(?:\\d{4}[-/])?(\\d{1,2})[-/]\\d{1,2}$') AS INT64)
+            ) AS birthMonth,
+            COALESCE(
+              EXTRACT(DAY FROM dobDate),
+              SAFE_CAST(REGEXP_EXTRACT(dateOfBirth, r'^(?:\\d{4}[-/])?\\d{1,2}[-/](\\d{1,2})$') AS INT64)
+            ) AS birthDay,
+            EXTRACT(YEAR FROM dobDate) AS birthYear
+          FROM BirthdayParts
+        ),
+        BirthdayCandidates AS (
+          SELECT
+            *,
+            DATE(
+              EXTRACT(YEAR FROM DATE(@fromDate)),
+              birthMonth,
+              LEAST(
+                birthDay,
+                EXTRACT(DAY FROM LAST_DAY(DATE(EXTRACT(YEAR FROM DATE(@fromDate)), birthMonth, 1)))
+              )
+            ) AS birthdayThisYear,
+            DATE(
+              EXTRACT(YEAR FROM DATE(@fromDate)) + 1,
+              birthMonth,
+              LEAST(
+                birthDay,
+                EXTRACT(DAY FROM LAST_DAY(DATE(EXTRACT(YEAR FROM DATE(@fromDate)) + 1, birthMonth, 1)))
+              )
+            ) AS birthdayNextYear
+          FROM BirthdayNormalized
+          WHERE birthMonth BETWEEN 1 AND 12
+            AND birthDay BETWEEN 1 AND 31
+        ),
+        BirthdayEligible AS (
+          SELECT
+            *,
+            CASE
+              WHEN birthdayThisYear >= DATE(@fromDate) THEN birthdayThisYear
+              ELSE birthdayNextYear
+            END AS upcomingBirthdayDate
+          FROM BirthdayCandidates
+        ),
+        PaidInvoices AS (
+          SELECT
+            COALESCE(NULLIF(TRIM(CustomerName), ''), 'Unknown customer') AS customerName,
+            COALESCE(CustomerPhoneNumber, '') AS phoneNumber,
+            InvoiceNumber AS invoiceNumber,
+            MAX(OrderCreatedDate) AS orderCreatedDate,
+            MAX(CAST(COALESCE(NetTotal, 0) AS FLOAT64)) AS invoiceNetTotal
+          FROM ${analyticsTables.mainPaymentView}
+          WHERE LOWER(ClinicCode) = LOWER(@clinicCode)
+            AND CustomerName IS NOT NULL
+            AND PaymentStatus = 'PAID'
+            AND NOT STARTS_WITH(InvoiceNumber, 'CO-')
+            AND COALESCE(PaymentMethod, '') != 'PASS'
+          GROUP BY customerName, phoneNumber, invoiceNumber
+        ),
+        PaymentLifetime AS (
+          SELECT
+            customerName,
+            phoneNumber,
+            SUM(invoiceNetTotal) AS lifetimeSpend
+          FROM PaidInvoices
+          GROUP BY customerName, phoneNumber
+        ),
+        PackageGrouped AS (
+          SELECT
+            customerName,
+            phoneNumber,
+            COALESCE(NULLIF(serviceName, ''), 'Package balance') AS packageName,
+            NULLIF(serviceName, '') AS serviceName,
+            COALESCE(categoryName, 'Other') AS categoryName,
+            MAX(GREATEST(packageCount, remainingPackageCount, 0)) AS totalSessions,
+            ARRAY_AGG(GREATEST(remainingPackageCount, 0) ORDER BY activityTime DESC LIMIT 1)[SAFE_OFFSET(0)] AS latestRemainingSessions,
+            FORMAT_DATE('%Y-%m-%d', MAX(DATE(activityTime))) AS lastUsedDate
+          FROM VisitRows
+          WHERE packageCount > 0 OR remainingPackageCount > 0
+          GROUP BY customerName, phoneNumber, packageName, serviceName, categoryName
+        ),
+        PackageByService AS (
+          SELECT
+            customerName,
+            phoneNumber,
+            packageName,
+            serviceName,
+            categoryName,
+            totalSessions,
+            GREATEST(totalSessions - latestRemainingSessions, 0) AS usedSessions,
+            latestRemainingSessions AS remainingSessions,
+            lastUsedDate
+          FROM PackageGrouped
+        ),
+        PackageSummary AS (
+          SELECT
+            customerName,
+            phoneNumber,
+            SUM(remainingSessions) AS packageRemainingSessionsTotal,
+            CAST(0 AS FLOAT64) AS packageRemainingAmount,
+            MAX(lastUsedDate) AS lastPackageUsageDate,
+            TO_JSON_STRING(ARRAY_AGG(STRUCT(
+              packageName,
+              serviceName,
+              categoryName,
+              totalSessions,
+              usedSessions,
+              remainingSessions,
+              CAST(NULL AS FLOAT64) AS remainingAmount,
+              CAST(NULL AS STRING) AS purchaseDate,
+              lastUsedDate,
+              CAST(NULL AS STRING) AS expiryDate
+            ) ORDER BY lastUsedDate DESC, remainingSessions DESC, packageName ASC LIMIT 8)) AS packageRemainingDetailsJson
+          FROM PackageByService
+          WHERE remainingSessions > 0
+          GROUP BY customerName, phoneNumber
+        ),
+        FinalRows AS (
+          SELECT
+            birthday.customerName,
+            birthday.phoneNumber,
+            COALESCE(birthday.memberId, '') AS memberId,
+            birthday.dateOfBirth,
+            FORMAT_DATE('%Y-%m-%d', birthday.upcomingBirthdayDate) AS upcomingBirthdayDate,
+            DATE_DIFF(birthday.upcomingBirthdayDate, DATE(@fromDate), DAY) AS daysUntilBirthday,
+            CASE
+              WHEN birthday.birthYear BETWEEN 1900 AND EXTRACT(YEAR FROM birthday.upcomingBirthdayDate)
+                THEN EXTRACT(YEAR FROM birthday.upcomingBirthdayDate) - birthday.birthYear
+              ELSE NULL
+            END AS turningAge,
+            birthday.lastVisitDate,
+            birthday.lastServiceName,
+            birthday.lastTherapistName,
+            birthday.totalVisits,
+            COALESCE(payment.lifetimeSpend, 0) AS lifetimeSpend,
+            COALESCE(packageSummary.packageRemainingSessionsTotal, 0) AS packageRemainingSessionsTotal,
+            COALESCE(packageSummary.packageRemainingAmount, 0) AS packageRemainingAmount,
+            packageSummary.packageRemainingDetailsJson,
+            packageSummary.lastPackageUsageDate
+          FROM BirthdayEligible birthday
+          LEFT JOIN PaymentLifetime payment USING (customerName, phoneNumber)
+          LEFT JOIN PackageSummary packageSummary USING (customerName, phoneNumber)
+          WHERE birthday.upcomingBirthdayDate BETWEEN DATE(@fromDate) AND DATE(@toDate)
+        )
+      SELECT
+        TO_HEX(SHA256(CONCAT(LOWER(@clinicCode), ':', COALESCE(NULLIF(phoneNumber, ''), LOWER(customerName))))) AS customerKey,
+        *,
+        COUNT(*) OVER() AS totalCount
+      FROM FinalRows
+      ORDER BY upcomingBirthdayDate ASC, customerName ASC
+      LIMIT @limit
+    `,
+    {
+      clinicCode: params.clinicCode,
+      fromDate: params.fromDate,
+      toDate: params.toDate,
+      limit,
+    },
+    {
+      queryName: "report.customerPortal.birthdayCustomers",
+      ttlMs: 5 * 60_000,
+    },
+  );
+
+  const mappedRows = rows.map((row) => {
+    const packageRemainingDetails = parsePackageRemainingDetails(row.packageRemainingDetailsJson);
+    const packageRemainingSessionsTotal = parseNumber(row.packageRemainingSessionsTotal);
+    return {
+      customerId: row.customerKey,
+      customerKey: row.customerKey,
+      memberId: row.memberId || null,
+      customerName: row.customerName,
+      phoneNumber: row.phoneNumber || null,
+      customerCode: row.memberId || null,
+      dateOfBirth: row.dateOfBirth ?? null,
+      upcomingBirthdayDate: row.upcomingBirthdayDate,
+      daysUntilBirthday: parseNumber(row.daysUntilBirthday),
+      turningAge: row.turningAge == null ? null : parseNumber(row.turningAge),
+      lastVisitDate: row.lastVisitDate,
+      lastServiceName: row.lastServiceName,
+      lastTherapistName: row.lastTherapistName,
+      totalVisits: parseNumber(row.totalVisits),
+      lifetimeSpend: parseNumber(row.lifetimeSpend),
+      packageRemainingSessions: packageRemainingSessionsTotal,
+      packageRemainingSessionsTotal,
+      packageRemainingAmount: parseNumber(row.packageRemainingAmount),
+      packageRemainingDetails,
+      packageRemainingDetailsText: packageRemainingText(packageRemainingDetails),
+      activePackageNames: activePackageNames(packageRemainingDetails),
+      lastPackageUsageDate: row.lastPackageUsageDate,
+      suggestedAction: birthdaySuggestedAction({
+        packageRemainingDetails,
+        packageRemainingSessionsTotal,
+        lastVisitDate: row.lastVisitDate,
+        lifetimeSpend: parseNumber(row.lifetimeSpend),
+        fromDate: params.fromDate,
+      }),
+    };
+  });
+
+  return {
+    rows: mappedRows,
+    total: rows[0]?.totalCount == null ? mappedRows.length : parseNumber(rows[0].totalCount),
+    fromDate: params.fromDate,
+    toDate: params.toDate,
+  };
+}
+
 export async function getCustomerPortalTopCustomersByRevenue(params: {
   clinicCode: string;
   fromDate: string;
@@ -905,6 +1363,8 @@ export async function getCustomerPortalTopCustomersByRevenue(params: {
     topPackageName: string | null;
     lastInvoiceDate: string | null;
     paymentMethods: string | null;
+    packageRemainingSessionsTotal: number;
+    packageRemainingDetailsJson: string | null;
   }>(
     `
       WITH
@@ -935,33 +1395,15 @@ export async function getCustomerPortalTopCustomersByRevenue(params: {
               OR COALESCE(CAST(MemberID AS STRING), '') != ''
             )
         ),
-        InvoiceRows AS (
-          SELECT
-            customerIdentityKey,
-            invoiceNumber,
-            ARRAY_AGG(customerName ORDER BY orderCreatedDate DESC LIMIT 1)[SAFE_OFFSET(0)] AS customerName,
-            COALESCE(ARRAY_AGG(NULLIF(phoneNumber, '') IGNORE NULLS ORDER BY orderCreatedDate DESC LIMIT 1)[SAFE_OFFSET(0)], '') AS phoneNumber,
-            COALESCE(ARRAY_AGG(NULLIF(memberId, '') IGNORE NULLS ORDER BY orderCreatedDate DESC LIMIT 1)[SAFE_OFFSET(0)], '') AS memberId,
-            MAX(orderCreatedDate) AS orderCreatedDate,
-            MAX(netAmount) AS invoiceNetTotal
-          FROM PaidSalesRows
-          GROUP BY customerIdentityKey, invoiceNumber
-        ),
         CustomerRevenue AS (
           SELECT
             customerIdentityKey,
             ARRAY_AGG(customerName ORDER BY orderCreatedDate DESC LIMIT 1)[SAFE_OFFSET(0)] AS customerName,
             COALESCE(ARRAY_AGG(NULLIF(phoneNumber, '') IGNORE NULLS ORDER BY orderCreatedDate DESC LIMIT 1)[SAFE_OFFSET(0)], '') AS phoneNumber,
             COALESCE(ARRAY_AGG(NULLIF(memberId, '') IGNORE NULLS ORDER BY orderCreatedDate DESC LIMIT 1)[SAFE_OFFSET(0)], '') AS memberId,
-            SUM(invoiceNetTotal) AS totalSpent,
+            SUM(netAmount) AS totalSpent,
             COUNT(DISTINCT invoiceNumber) AS invoiceCount,
-            FORMAT_DATE('%Y-%m-%d', DATE(MAX(orderCreatedDate))) AS lastInvoiceDate
-          FROM InvoiceRows
-          GROUP BY customerIdentityKey
-        ),
-        CustomerPaymentMethods AS (
-          SELECT
-            customerIdentityKey,
+            FORMAT_DATE('%Y-%m-%d', DATE(MAX(orderCreatedDate))) AS lastInvoiceDate,
             STRING_AGG(DISTINCT NULLIF(paymentMethod, ''), ', ' ORDER BY NULLIF(paymentMethod, '')) AS paymentMethods
           FROM PaidSalesRows
           GROUP BY customerIdentityKey
@@ -1020,6 +1462,70 @@ export async function getCustomerPortalTopCustomersByRevenue(params: {
           FROM VisitRows
           WHERE COALESCE(serviceName, '') != ''
           GROUP BY customerIdentityKey, serviceName
+        ),
+        PackageSourceRows AS (
+          SELECT
+            COALESCE(NULLIF(TRIM(CustomerName), ''), 'Unknown customer') AS customerName,
+            COALESCE(CustomerPhoneNumber, '') AS phoneNumber,
+            COALESCE(CAST(CustomerID AS STRING), '') AS memberId,
+            COALESCE(ServiceName, '') AS serviceName,
+            CAST(COALESCE(PackageCount, 0) AS INT64) AS packageCount,
+            CAST(COALESCE(RemainingPackageCount, 0) AS INT64) AS remainingPackageCount,
+            CheckInTime AS checkInTime,
+            ${buildServiceCategoryExpression("ServiceName", "CAST(NULL AS STRING)")} AS categoryName,
+            COALESCE(
+              NULLIF(REGEXP_REPLACE(COALESCE(CustomerPhoneNumber, ''), r'[^0-9]', ''), ''),
+              NULLIF(LOWER(TRIM(CAST(CustomerID AS STRING))), ''),
+              LOWER(TRIM(COALESCE(CustomerName, 'Unknown customer')))
+            ) AS customerIdentityKey
+          FROM ${analyticsTables.mainDataView}
+          WHERE LOWER(ClinicCode) = LOWER(@clinicCode)
+            AND CustomerName IS NOT NULL
+            AND (CAST(COALESCE(PackageCount, 0) AS INT64) > 0 OR CAST(COALESCE(RemainingPackageCount, 0) AS INT64) > 0)
+        ),
+        PackageGrouped AS (
+          SELECT
+            customerIdentityKey,
+            COALESCE(NULLIF(serviceName, ''), 'Package balance') AS packageName,
+            NULLIF(serviceName, '') AS serviceName,
+            COALESCE(categoryName, 'Other') AS categoryName,
+            MAX(GREATEST(packageCount, remainingPackageCount, 0)) AS totalSessions,
+            ARRAY_AGG(GREATEST(remainingPackageCount, 0) ORDER BY checkInTime DESC LIMIT 1)[SAFE_OFFSET(0)] AS latestRemainingSessions,
+            FORMAT_DATE('%Y-%m-%d', MAX(DATE(checkInTime))) AS lastUsedDate
+          FROM PackageSourceRows
+          GROUP BY customerIdentityKey, packageName, serviceName, categoryName
+        ),
+        PackageByService AS (
+          SELECT
+            customerIdentityKey,
+            packageName,
+            serviceName,
+            categoryName,
+            totalSessions,
+            GREATEST(totalSessions - latestRemainingSessions, 0) AS usedSessions,
+            latestRemainingSessions AS remainingSessions,
+            lastUsedDate
+          FROM PackageGrouped
+        ),
+        PackageSummary AS (
+          SELECT
+            customerIdentityKey,
+            SUM(remainingSessions) AS packageRemainingSessionsTotal,
+            TO_JSON_STRING(ARRAY_AGG(STRUCT(
+              packageName,
+              serviceName,
+              categoryName,
+              totalSessions,
+              usedSessions,
+              remainingSessions,
+              CAST(NULL AS FLOAT64) AS remainingAmount,
+              CAST(NULL AS STRING) AS purchaseDate,
+              lastUsedDate,
+              CAST(NULL AS STRING) AS expiryDate
+            ) ORDER BY lastUsedDate DESC, remainingSessions DESC, packageName ASC LIMIT 8)) AS packageRemainingDetailsJson
+          FROM PackageByService
+          WHERE remainingSessions > 0
+          GROUP BY customerIdentityKey
         )
       SELECT
         revenue.customerIdentityKey,
@@ -1033,9 +1539,10 @@ export async function getCustomerPortalTopCustomersByRevenue(params: {
         COALESCE(paidService.serviceName, visitService.serviceName) AS topServiceName,
         paidService.servicePackageName AS topPackageName,
         revenue.lastInvoiceDate,
-        COALESCE(paymentMethods.paymentMethods, '') AS paymentMethods
+        COALESCE(revenue.paymentMethods, '') AS paymentMethods,
+        COALESCE(packageSummary.packageRemainingSessionsTotal, 0) AS packageRemainingSessionsTotal,
+        packageSummary.packageRemainingDetailsJson
       FROM CustomerRevenue revenue
-      LEFT JOIN CustomerPaymentMethods paymentMethods USING (customerIdentityKey)
       LEFT JOIN VisitAgg visits USING (customerIdentityKey)
       LEFT JOIN PaidServiceRank paidService
         ON revenue.customerIdentityKey = paidService.customerIdentityKey
@@ -1043,6 +1550,7 @@ export async function getCustomerPortalTopCustomersByRevenue(params: {
       LEFT JOIN VisitServiceRank visitService
         ON revenue.customerIdentityKey = visitService.customerIdentityKey
         AND visitService.rowNum = 1
+      LEFT JOIN PackageSummary packageSummary USING (customerIdentityKey)
       ORDER BY
         revenue.totalSpent DESC,
         visitCount DESC,
@@ -1059,7 +1567,9 @@ export async function getCustomerPortalTopCustomersByRevenue(params: {
   );
 
   const mappedRows = rows
-    .map((row) => ({
+    .map((row) => {
+      const packageRemainingDetails = parsePackageRemainingDetails(row.packageRemainingDetailsJson);
+      return {
       customerKey: hashCustomerKey({
         clinicCode: params.clinicCode,
         phoneNumber: row.phoneNumber,
@@ -1076,8 +1586,13 @@ export async function getCustomerPortalTopCustomersByRevenue(params: {
       topPackageName: row.topPackageName ?? null,
       lastInvoiceDate: row.lastInvoiceDate ?? null,
       paymentMethods: row.paymentMethods ?? "",
+      packageRemainingSessionsTotal: parseNumber(row.packageRemainingSessionsTotal),
+      activePackageNames: activePackageNames(packageRemainingDetails),
+      packageRemainingDetails,
+      packageRemainingDetailsText: packageRemainingText(packageRemainingDetails),
       customerIdentityKey: row.customerIdentityKey,
-    }))
+      };
+    })
     .sort((left, right) => {
       const spentDiff = right.totalSpent - left.totalSpent;
       if (spentDiff !== 0) {

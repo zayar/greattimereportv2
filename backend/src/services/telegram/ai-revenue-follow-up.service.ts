@@ -395,6 +395,11 @@ export function getWhyLine(action: AiRevenueAction, dateKey?: string) {
     return days != null ? `High-value customer inactive for ${days} days` : "High-value customer inactive";
   }
 
+  if (action.actionType === "birthday_follow_up") {
+    const birthdayDate = action.evidence.find((item) => item.label === "Birthday date")?.value;
+    return birthdayDate ? `Birthday on ${birthdayDate}` : "Upcoming birthday follow-up";
+  }
+
   if (action.actionType === "payment_follow_up") {
     return "Payment follow-up needed";
   }
@@ -561,6 +566,9 @@ function detailReason(action: AiRevenueAction) {
   }
   if (action.actionType === "inactive_vip_recovery") {
     return "High-value customer inactive.";
+  }
+  if (action.actionType === "birthday_follow_up") {
+    return "Upcoming birthday is a good human-approved relationship follow-up.";
   }
   if (action.actionType === "payment_follow_up") {
     return "Payment follow-up is needed.";

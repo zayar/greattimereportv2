@@ -19,6 +19,7 @@ export const aiRevenueActionTypes = [
   "no_show_recovery",
   "cancelled_appointment_recovery",
   "inactive_vip_recovery",
+  "birthday_follow_up",
   "package_upsell_opportunity",
   "payment_follow_up",
 ] as const;
@@ -603,6 +604,7 @@ export interface AiRevenueSummary {
     noShowRecovery: number;
     cancelledRecovery: number;
     inactiveVip: number;
+    birthdayFollowUp: number;
     other: number;
   };
   currency: "MMK";

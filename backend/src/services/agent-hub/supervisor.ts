@@ -1,4 +1,5 @@
 import type { GreatTimeAgentId, GreatTimeRequestedAgentId } from "./types.js";
+import { isBirthdayCustomerQuestion } from "./birthday-customer-intent.js";
 import { extractLikelyCustomerSearchText, hasExplicitCustomerSearchIntent } from "./customer-query.js";
 import { hasPaymentMethodReference } from "./payment-method-intent.js";
 import { isAppointmentRosterQuestion, isOperationsCountReconciliationQuestion, isTreatmentRosterQuestion } from "./question-dimensions.js";
@@ -105,6 +106,7 @@ export function resolveAgent(params: {
   const scores = Object.fromEntries(
     AGENT_ORDER.map((agentId) => [agentId, scoreAgent(params.message, agentId)]),
   ) as Record<GreatTimeAgentId, number>;
+  const birthdayCustomerQuestion = isBirthdayCustomerQuestion(params.message);
 
   if (hasExplicitServiceSearchIntent(params.message)) {
     scores.business += 2;
@@ -119,6 +121,13 @@ export function resolveAgent(params: {
     scores.business = Math.max(0, scores.business - 2);
   }
 
+  if (birthdayCustomerQuestion) {
+    scores.customer_relationship += 10;
+    scores.business = Math.max(0, scores.business - 2);
+    scores.appointment = Math.max(0, scores.appointment - 2);
+    scores.finance = Math.max(0, scores.finance - 1);
+  }
+
   if (isNamedCustomerPurchaseQuestion(params.message)) {
     scores.customer_relationship += 4;
   }
@@ -131,10 +140,10 @@ export function resolveAgent(params: {
     scores.business += 8;
   }
 
-  if (isTreatmentDetailQuestion(params.message)) {
+  if (!birthdayCustomerQuestion && isTreatmentDetailQuestion(params.message)) {
     scores.business += 8;
     scores.customer_relationship = Math.max(0, scores.customer_relationship - 3);
-  } else if (isTreatmentRosterQuestion(params.message)) {
+  } else if (!birthdayCustomerQuestion && isTreatmentRosterQuestion(params.message)) {
     scores.business += 6;
     scores.customer_relationship = Math.max(0, scores.customer_relationship - 2);
   }

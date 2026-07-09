@@ -1,6 +1,7 @@
 import { env } from "../../config/env.js";
 import { shiftRange, toIsoDate } from "../../utils/date-range.js";
 import { formatDateKeyInTimeZone, normalizeTimeZone } from "../telegram/time.js";
+import { extractBirthdayWindowDays, isBirthdayCustomerQuestion } from "./birthday-customer-intent.js";
 import { hasCustomerEntityReference, hasExplicitCustomerSearchIntent, isCustomer360Question } from "./customer-query.js";
 import {
   isAppointmentRosterQuestion,
@@ -56,6 +57,11 @@ function startOfWeek(dateKey: string) {
 
 function startOfMonth(dateKey: string) {
   return `${dateKey.slice(0, 8)}01`;
+}
+
+function endOfMonth(dateKey: string) {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  return dateFromUtc(new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)));
 }
 
 function daysInUtcMonth(year: number, monthIndex: number) {
@@ -363,6 +369,33 @@ export function extractAgentPeriod(params: {
   return buildThisMonthPeriod(today);
 }
 
+export function extractBirthdayCustomerPeriod(params: {
+  message: string;
+  fromDate?: string;
+  toDate?: string;
+  timezone?: string;
+  now?: Date;
+}): AgentPeriod {
+  const timeZone = normalizeTimeZone(params.timezone || env.DEFAULT_TIMEZONE);
+  const today = formatDateKeyInTimeZone(params.now ?? new Date(), timeZone);
+
+  if (/this\s+month|current\s+month|ဒီ\s*လ/i.test(params.message)) {
+    return buildPeriod(startOfMonth(today), endOfMonth(today), "this month");
+  }
+
+  const days = extractBirthdayWindowDays(params.message);
+  if (days) {
+    return buildPeriod(today, addDays(today, days), `next ${days} days`);
+  }
+
+  if (params.fromDate && params.toDate) {
+    return buildPeriod(params.fromDate, params.toDate, params.fromDate === params.toDate ? params.fromDate : `${params.fromDate} to ${params.toDate}`);
+  }
+
+  const defaultDays = 30;
+  return buildPeriod(today, addDays(today, defaultDays), `next ${defaultDays} days`);
+}
+
 export function hasExplicitPeriodCue(message: string) {
   return (
     PERIOD_CUE_PATTERN.test(message) ||
@@ -408,6 +441,9 @@ function detectFinanceIntent(message: string) {
 }
 
 function detectCustomerIntent(message: string) {
+  if (isBirthdayCustomerQuestion(message)) {
+    return "birthday_customers";
+  }
   if (/returned after|came back after|reactivated|ပြန်လာ.*follow|follow.*ပြန်လာ/i.test(message)) {
     return "reactivated_customer";
   }
@@ -615,6 +651,8 @@ function toolsForIntent(agentId: GreatTimeAgentId, intent: string, period?: Agen
 
   if (agentId === "customer_relationship") {
     switch (intent) {
+      case "birthday_customers":
+        return ["get_birthday_customers"];
       case "customer_overview":
         return [
           "get_customer_overview",
@@ -740,6 +778,16 @@ export function planAgentRequest(params: {
           : resolvedAgent === "business"
             ? detectBusinessIntent(params.request.message)
             : detectAppointmentIntent(params.request.message);
+
+  if (resolvedAgent === "customer_relationship" && intent === "birthday_customers") {
+    period = extractBirthdayCustomerPeriod({
+      message: params.request.message,
+      fromDate: params.request.fromDate,
+      toDate: params.request.toDate,
+      timezone: params.request.timezone,
+      now: params.now,
+    });
+  }
 
   if (
     resolvedAgent === "customer_relationship" &&

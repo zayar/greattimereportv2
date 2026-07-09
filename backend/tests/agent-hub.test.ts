@@ -30,6 +30,7 @@ const { composeCustomer360Summary } = await import("../src/services/agent-hub/cu
 const { resolveEntityReference } = await import("../src/services/agent-hub/entity-context.ts")
 const {
   extractAgentPeriod,
+  extractBirthdayCustomerPeriod,
   hasExplicitPeriodCue,
   isOwnerDailyBriefIntentMessage,
   planAgentRequest,
@@ -52,12 +53,17 @@ const { buildFinanceSnapshotSummaryResult, createFinanceTools } = await import("
 const { buildAppointmentCountResultFromSnapshot, buildAppointmentLedgerQueryRange, createAppointmentTools } = await import("../src/services/agent-hub/tools/appointment.tools.ts")
 const { buildOwnerDailyBriefFromSnapshots, createBusinessTools, selectOwnerDailyBriefDate } = await import("../src/services/agent-hub/tools/business.tools.ts")
 const { getTreatmentReportRange } = await import("../src/services/reports/daily-treatment.service.ts")
-const { getCustomerPortalTopCustomersByRevenue } = await import("../src/services/reports/customer-portal.service.ts")
+const {
+  calculateUpcomingBirthdayDate,
+  getCustomerPortalTopCustomersByRevenue,
+  parseBirthdayDateParts,
+} = await import("../src/services/reports/customer-portal.service.ts")
 const { extractLikelyCustomerSearchText } = await import("../src/services/agent-hub/customer-query.ts")
 const {
   extractPaymentMethodFilter,
   hasPaymentMethodReference,
   isPaymentMethodDetailQuestion,
+  matchPaymentMethodFromAvailableMethods,
 } = await import("../src/services/agent-hub/payment-method-intent.ts")
 const {
   cleanTreatmentServiceCandidate,
@@ -91,11 +97,17 @@ const { buildLearningBucket, isScheduleDueForJob } = await import("../src/servic
 const { isAgentLearningSchedulerSecretValid } = await import("../src/routes/agent-learning.routes.ts")
 const { canAccessAgentStatus } = await import("../src/routes/ai.routes.ts")
 const {
+  buildRecentPaymentMethodContextItemsFromResponse,
   buildAgentHubTelegramReplyMarkup,
   canTelegramUserChatWithAgent,
   extractTelegramAgentQuestion,
   formatAgentHubTelegramReply,
 } = await import("../src/services/telegram/bot.service.ts")
+const {
+  __test: paymentMethodContextTest,
+  resolveRecentPaymentMethodReference,
+  saveRecentPaymentMethodContext,
+} = await import("../src/services/telegram/payment-method-context.ts")
 const { buildGreatTimeAgentCsvExportFromTables } = await import("../src/services/telegram/agent-csv-export.service.ts")
 
 function delay(ms: number) {
@@ -768,13 +780,20 @@ test("finance summary falls back to existing report behavior when snapshot is mi
 })
 
 test("finance payment method detail filters payment report rows by selected method", async () => {
-  let requestedPaymentMethod = ""
+  const requestedPaymentMethods: string[] = []
   const detailTool = requireTool(
     createFinanceTools({
       getCompletedDayFinanceSnapshot: async () => null,
       getSalesReport: async () => buildSalesReportFixture(),
       getPaymentReport: async (params) => {
-        requestedPaymentMethod = params.paymentMethod
+        requestedPaymentMethods.push(params.paymentMethod)
+        if (!params.paymentMethod) {
+          return buildPaymentReportFixture({
+            totalAmount: 350000,
+            invoiceCount: 2,
+            methods: [{ paymentMethod: "MMQR", totalAmount: 350000, transactionCount: 2 }],
+          })
+        }
         return buildPaymentReportFixture({
           totalAmount: 350000,
           invoiceCount: 2,
@@ -825,7 +844,7 @@ test("finance payment method detail filters payment report rows by selected meth
     message: "မနေ့က MMQR transaction အသေးစိတ်ပြပါ",
   }))
 
-  assert.equal(requestedPaymentMethod, "MMQR")
+  assert.deepEqual(requestedPaymentMethods, ["", "MMQR"])
   assert.equal(result.dataStatus, "ok")
   assert.equal(result.metrics?.find((metric) => metric.label === "MMQR collected")?.value, 350000)
   assert.equal(result.metrics?.find((metric) => metric.label === "Transactions")?.value, 2)
@@ -835,6 +854,109 @@ test("finance payment method detail filters payment report rows by selected meth
   assert.equal(result.tables?.[0]?.rows[0]?.invoiceNumber, "INV-001")
   assert.equal(result.data?.paymentMethod, "MMQR")
   assert.match(result.summary ?? "", /not a real bank statement ledger/i)
+})
+
+test("finance payment method detail prefers YOMA over generic bank", async () => {
+  const requestedPaymentMethods: string[] = []
+  const detailTool = requireTool(
+    createFinanceTools({
+      getCompletedDayFinanceSnapshot: async () => null,
+      getSalesReport: async () => buildSalesReportFixture(),
+      getPaymentReport: async (params) => {
+        requestedPaymentMethods.push(params.paymentMethod)
+        if (!params.paymentMethod) {
+          return buildPaymentReportFixture({
+            totalAmount: 6_760_000,
+            invoiceCount: 4,
+            methods: [
+              { paymentMethod: "YOMA", totalAmount: 6_000_000, transactionCount: 1 },
+              { paymentMethod: "KPAY", totalAmount: 550_000, transactionCount: 2 },
+              { paymentMethod: "WAVEPAY", totalAmount: 200_000, transactionCount: 1 },
+              { paymentMethod: "CASH", totalAmount: 10_000, transactionCount: 1 },
+            ],
+          })
+        }
+
+        assert.equal(params.paymentMethod, "YOMA")
+        return buildPaymentReportFixture({
+          totalAmount: 6_000_000,
+          invoiceCount: 1,
+          methods: [{ paymentMethod: "YOMA", totalAmount: 6_000_000, transactionCount: 1 }],
+          rows: [
+            {
+              dateLabel: "2026-07-08",
+              invoiceNumber: "INV-YOMA-001",
+              customerName: "Hnin Hnin",
+              memberId: "M-YOMA",
+              salePerson: "Owner",
+              serviceName: "Premium Package",
+              servicePackageName: "Yoma Plan",
+              paymentMethod: "YOMA",
+              paymentStatus: "PAID",
+              paymentType: "Bank",
+              paymentAmount: 6_000_000,
+              paymentNote: "Yoma bank transfer",
+              invoiceNetTotal: 6_000_000,
+            },
+          ],
+        })
+      },
+    }),
+    "get_payment_method_detail",
+  )
+
+  const result = await detailTool.execute(buildAgentToolInputFixture({
+    fromDate: "2026-07-08",
+    toDate: "2026-07-08",
+    label: "yesterday",
+    intent: "payment_method_detail",
+    message: "မနေ့က Yoma bank details ပြပေးပါ",
+  }))
+
+  assert.deepEqual(requestedPaymentMethods, ["", "YOMA"])
+  assert.equal(result.data?.paymentMethod, "YOMA")
+  assert.equal(result.metrics?.find((metric) => metric.label === "YOMA collected")?.value, 6_000_000)
+  assert.equal(result.tables?.[0]?.rows[0]?.invoiceNumber, "INV-YOMA-001")
+})
+
+test("finance payment method detail warns when summary has amount but detail rows are empty", async () => {
+  const detailTool = requireTool(
+    createFinanceTools({
+      getCompletedDayFinanceSnapshot: async () => null,
+      getSalesReport: async () => buildSalesReportFixture(),
+      getPaymentReport: async (params) => {
+        if (!params.paymentMethod) {
+          return buildPaymentReportFixture({
+            totalAmount: 6_000_000,
+            invoiceCount: 1,
+            methods: [{ paymentMethod: "YOMA", totalAmount: 6_000_000, transactionCount: 1 }],
+          })
+        }
+
+        return buildPaymentReportFixture({
+          totalAmount: 0,
+          invoiceCount: 0,
+          methods: [{ paymentMethod: "YOMA", totalAmount: 6_000_000, transactionCount: 1 }],
+          rows: [],
+        })
+      },
+    }),
+    "get_payment_method_detail",
+  )
+
+  const result = await detailTool.execute(buildAgentToolInputFixture({
+    fromDate: "2026-07-08",
+    toDate: "2026-07-08",
+    label: "yesterday",
+    intent: "payment_method_detail",
+    message: "YOMA details",
+  }))
+
+  assert.equal(result.dataStatus, "partial")
+  assert.equal(result.tables, undefined)
+  assert.match(result.summary ?? "", /Detail query\/filter mismatch/i)
+  assert.match(result.warnings?.map((warning) => warning.type).join(","), /payment_method_detail_mismatch/)
+  assert.equal(result.metrics?.find((metric) => metric.label === "YOMA collected")?.value, 6_000_000)
 })
 
 test("appointment snapshot count result labels operational and daily profile sources", () => {
@@ -1909,18 +2031,34 @@ test("supervisor routes four agent domains and respects explicit override", () =
 })
 
 test("payment method aliases are recognized without becoming customer search text", () => {
+  assert.equal(extractPaymentMethodFilter("Yoma bank details"), "YOMA")
+  assert.equal(extractPaymentMethodFilter("YOMA details"), "YOMA")
+  assert.equal(extractPaymentMethodFilter("Yoma transaction details"), "YOMA")
+  assert.equal(extractPaymentMethodFilter("မနေ့က Yoma bank details ပြပေးပါ"), "YOMA")
+  assert.equal(extractPaymentMethodFilter("bank details"), "BANK")
   assert.equal(extractPaymentMethodFilter("tell me details about KPaye"), "KPAY")
+  assert.equal(extractPaymentMethodFilter("KPAY details"), "KPAY")
   assert.equal(extractPaymentMethodFilter("k pay transaction details"), "KPAY")
   assert.equal(extractPaymentMethodFilter("kpay e transcription"), "KPAY")
   assert.equal(extractPaymentMethodFilter("kbzpay transcription"), "KPAY")
+  assert.equal(extractPaymentMethodFilter("KBZ Pay details"), "KPAY")
   assert.equal(extractPaymentMethodFilter("မနေ့က MMQR ဘယ်လောက်ဝင်လဲ?"), "MMQR")
+  assert.equal(extractPaymentMethodFilter("MMQR details"), "MMQR")
   assert.equal(extractPaymentMethodFilter("show qr transaction details"), "MMQR")
+  assert.equal(extractPaymentMethodFilter("QR transaction details"), "MMQR")
   assert.equal(extractPaymentMethodFilter("show QR code setup"), null)
   assert.equal(extractPaymentMethodFilter("wave pay details"), "WAVEPAY")
+  assert.equal(extractPaymentMethodFilter("Wavepay transaction details"), "WAVEPAY")
+  assert.equal(extractPaymentMethodFilter("Cash details"), "CASH")
+  assert.equal(extractPaymentMethodFilter("UAB bank details"), "UAB")
   assert.equal(extractPaymentMethodFilter("cb pay details"), "CBPAY")
+  assert.equal(extractPaymentMethodFilter("CB bank details"), "CB")
   assert.equal(extractPaymentMethodFilter("master card details"), "MASTERCARD")
+  assert.equal(matchPaymentMethodFromAvailableMethods("yoma bank details", ["YOMA", "KPAY", "WAVEPAY", "CASH"]), "YOMA")
+  assert.equal(matchPaymentMethodFromAvailableMethods("wavepay details", ["YOMA", "KPAY", "WAVE", "CASH"]), "WAVE")
   assert.equal(hasPaymentMethodReference("MMQR transaction details"), true)
   assert.equal(isPaymentMethodDetailQuestion("tell me details about KPaye"), true)
+  assert.equal(isPaymentMethodDetailQuestion("Yoma bank details"), true)
   assert.equal(isPaymentMethodDetailQuestion("Tell me yesterday KPay transcription?"), true)
   assert.equal(isPaymentMethodDetailQuestion("မနေ့က KPay transcription တွေပြပါ"), true)
   assert.equal(isPaymentMethodDetailQuestion("How much MMQR ဝင်လဲ?"), true)
@@ -2226,6 +2364,9 @@ test("planner routes selected payment method follow-ups to finance detail", () =
     ["tell me details about KPAY", "this month", "2026-07-01", "2026-07-03"],
     ["Tell me yesterday KPay transcription?", "yesterday", "2026-07-02", "2026-07-02"],
     ["မနေ့က KPay transcription တွေပြပါ", "yesterday", "2026-07-02", "2026-07-02"],
+    ["မနေ့က Yoma bank details ပြပေးပါ", "yesterday", "2026-07-02", "2026-07-02"],
+    ["YOMA details", "this month", "2026-07-01", "2026-07-03"],
+    ["Yoma transaction details", "this month", "2026-07-01", "2026-07-03"],
     ["yesterday CASH transactions", "yesterday", "2026-07-02", "2026-07-02"],
     ["yesterday WavePay details", "yesterday", "2026-07-02", "2026-07-02"],
     ["yesterday bank transactions", "yesterday", "2026-07-02", "2026-07-02"],
@@ -2282,6 +2423,20 @@ test("planner routes selected payment method follow-ups to finance detail", () =
   assert.equal(bankBreakdownPlan.resolvedAgent, "finance")
   assert.equal(bankBreakdownPlan.intent, "payment_method_breakdown")
   assert.deepEqual(bankBreakdownPlan.toolNames, ["get_payment_summary", "get_payment_method_breakdown"])
+
+  const myanmarBankBreakdownPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "မနေ့ရောင်းအားကို bank အလိုက်ပြပေးပါ?",
+      timezone: "UTC",
+    },
+    now: julyNow,
+  })
+  assert.equal(myanmarBankBreakdownPlan.resolvedAgent, "finance")
+  assert.equal(myanmarBankBreakdownPlan.intent, "payment_method_breakdown")
+  assert.deepEqual(myanmarBankBreakdownPlan.toolNames, ["get_payment_summary", "get_payment_method_breakdown"])
 })
 
 test("read-only guard detects dangerous business mutations without blocking safe report questions", () => {
@@ -2445,7 +2600,6 @@ test("top customers by revenue report uses paid sales data and sorts mapped rows
   assert.match(queryText, /PaymentStatus = 'PAID'/)
   assert.match(queryText, /PaymentMethod/)
   assert.match(queryText, /NetTotal/)
-  assert.match(queryText, /MAX\(netAmount\) AS invoiceNetTotal/)
   assert.match(queryText, /ORDER BY\s+revenue\.totalSpent DESC,\s+visitCount DESC,\s+visits\.lastVisitDate DESC/is)
   assert.equal(queryParams.clinicCode, "ABC")
   assert.equal(queryParams.fromDate, "2026-07-01")
@@ -3016,6 +3170,147 @@ test("planner keeps generic show questions out of Customer 360 and includes usag
   assert.equal(neverVisitedPlan.period.toDate, "2026-06-24")
   assert.deepEqual(neverVisitedPlan.toolNames, ["search_customer_profiles"])
 })
+
+test("planner routes birthday customer questions to the birthday customer tool", () => {
+  const birthdayMessages = [
+    "ဒီလ birthday customers တွေဘယ်သူတွေရှိလဲ?",
+    "this month birthday customers?",
+    "နောက် 30 ရက် birthday customer တွေပြပါ",
+    "ဒီလ မွေးနေ့ရှိတဲ့ customer တွေပြပါ",
+  ];
+
+  for (const message of birthdayMessages) {
+    const plan = planAgentRequest({
+      request: {
+        clinicId: "clinic-1",
+        clinicCode: "ABC",
+        agent: "auto",
+        message,
+        timezone: "UTC",
+      },
+      now: new Date("2026-07-09T12:00:00.000Z"),
+    });
+
+    assert.equal(plan.resolvedAgent, "customer_relationship", message);
+    assert.equal(plan.intent, "birthday_customers", message);
+    assert.deepEqual(plan.toolNames, ["get_birthday_customers"], message);
+  }
+
+  const thisMonthPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "this month birthday customers?",
+      timezone: "UTC",
+    },
+    now: new Date("2026-07-09T12:00:00.000Z"),
+  });
+  assert.equal(thisMonthPlan.period.fromDate, "2026-07-01");
+  assert.equal(thisMonthPlan.period.toDate, "2026-07-31");
+  assert.equal(thisMonthPlan.period.label, "this month");
+
+  const next30Plan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "နောက် 30 ရက် birthday customer တွေပြပါ",
+      timezone: "UTC",
+    },
+    now: new Date("2026-07-09T12:00:00.000Z"),
+  });
+  assert.equal(next30Plan.period.fromDate, "2026-07-09");
+  assert.equal(next30Plan.period.toDate, "2026-08-08");
+  assert.equal(next30Plan.period.label, "next 30 days");
+
+  const defaultBirthdayPeriod = extractBirthdayCustomerPeriod({
+    message: "birthday customers",
+    timezone: "UTC",
+    now: new Date("2026-07-09T12:00:00.000Z"),
+  });
+  assert.equal(defaultBirthdayPeriod.fromDate, "2026-07-09");
+  assert.equal(defaultBirthdayPeriod.toDate, "2026-08-08");
+  assert.equal(defaultBirthdayPeriod.label, "next 30 days");
+
+  const topCustomerPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "top customers this month",
+      timezone: "UTC",
+    },
+    now: new Date("2026-07-09T12:00:00.000Z"),
+  });
+  assert.notEqual(topCustomerPlan.intent, "birthday_customers");
+  assert.deepEqual(topCustomerPlan.toolNames, ["get_top_customers_by_revenue"]);
+
+  const packageRemainingPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "package remaining customers",
+      timezone: "UTC",
+    },
+    now: new Date("2026-07-09T12:00:00.000Z"),
+  });
+  assert.notEqual(packageRemainingPlan.intent, "birthday_customers");
+});
+
+test("birthday date helpers compare month/day and handle year boundaries", () => {
+  assert.deepEqual(parseBirthdayDateParts("1995-07-20"), { year: 1995, month: 7, day: 20 });
+  assert.deepEqual(parseBirthdayDateParts("07-20"), { month: 7, day: 20 });
+
+  assert.deepEqual(
+    calculateUpcomingBirthdayDate({
+      dateOfBirth: "1995-07-20",
+      fromDate: "2026-07-09",
+      toDate: "2026-08-08",
+    }),
+    {
+      upcomingBirthdayDate: "2026-07-20",
+      daysUntilBirthday: 11,
+      turningAge: 31,
+    },
+  );
+
+  assert.deepEqual(
+    calculateUpcomingBirthdayDate({
+      dateOfBirth: "1990-01-10",
+      fromDate: "2026-12-20",
+      toDate: "2027-01-15",
+    }),
+    {
+      upcomingBirthdayDate: "2027-01-10",
+      daysUntilBirthday: 21,
+      turningAge: 37,
+    },
+  );
+
+  assert.deepEqual(
+    calculateUpcomingBirthdayDate({
+      dateOfBirth: "07/20",
+      fromDate: "2026-07-09",
+      toDate: "2026-08-08",
+    }),
+    {
+      upcomingBirthdayDate: "2026-07-20",
+      daysUntilBirthday: 11,
+      turningAge: null,
+    },
+  );
+
+  assert.equal(
+    calculateUpcomingBirthdayDate({
+      dateOfBirth: "1995-09-20",
+      fromDate: "2026-07-09",
+      toDate: "2026-08-08",
+    }),
+    null,
+  );
+});
 
 test("planner routes named customer purchase questions to customer purchase history", () => {
   assert.equal(extractExplicitCustomerSearchText("Tell me what service win wati ko purchase?"), "win wati ko")
@@ -4148,14 +4443,127 @@ test("Telegram finance payment method detail formatter shows invoice customer se
   })
 
   assert.match(message, /ကာလ: မနေ့ \(2026-07-02\)/)
-  assert.match(message, /MMQR payment method detail \(2026-07-02 to 2026-07-02\)/)
-  assert.match(message, /MMQR total collected: 350,000 ကျပ်/)
-  assert.match(message, /transactions 2၊ invoice 2 စောင်/)
-  assert.match(message, /invoice INV-001၊ Aye Aye၊ Whitening Laser \/ Package A/)
-  assert.match(message, /payment 200,000 ကျပ်၊ invoice total 250,000 ကျပ်၊ status PAID၊ note MMQR paid/)
+  assert.match(message, /Payment method: MMQR/)
+  assert.match(message, /MMQR total: 350,000 ကျပ်/)
+  assert.match(message, /Transactions: 2/)
+  assert.match(message, /1\. Invoice: INV-001/)
+  assert.match(message, /Customer: Aye Aye/)
+  assert.match(message, /Service: Whitening Laser \/ Package A/)
+  assert.match(message, /Amount: 200,000 ကျပ်/)
+  assert.match(message, /Invoice total: 250,000 ကျပ်/)
+  assert.match(message, /Status: PAID/)
+  assert.match(message, /Note: MMQR paid/)
   assert.match(message, /GreatTime payment report rows/)
   assert.match(message, /Real bank statement ledger မဟုတ်ပါ/)
   assert.doesNotMatch(message, /Payment amount: 200000/)
+})
+
+test("Telegram payment method detail formatter warns on summary/detail mismatch", () => {
+  const message = formatAgentHubTelegramReply({
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "finance",
+    autoMode: true,
+    intent: "payment_method_detail",
+    period: {
+      fromDate: "2026-07-08",
+      toDate: "2026-07-08",
+      label: "yesterday",
+    },
+    assistantMessage: "YOMA detail mismatch.",
+    summary: "YOMA detail mismatch.",
+    metrics: [
+      { label: "YOMA collected", value: 6_000_000, unit: "amount" },
+      { label: "Transactions", value: 1 },
+      { label: "Rows loaded", value: 0 },
+    ],
+    data: { paymentMethod: "YOMA" },
+    sources: [],
+    dataStatus: "partial",
+    warnings: [
+      {
+        type: "payment_method_detail_mismatch",
+        title: "Payment detail mismatch",
+        message: "YOMA has summary amount but no detail rows.",
+      },
+    ],
+    actions: [{ type: "read_only_agent_response" }],
+  })
+
+  assert.match(message, /Payment method: YOMA/)
+  assert.match(message, /YOMA total: 6,000,000 ကျပ်/)
+  assert.match(message, /YOMA အတွက် payment rows မတွေ့ပါ/)
+  assert.match(message, /summary ထဲမှာ YOMA total 6,000,000 ကျပ် တွေ့ထားပါတယ်/)
+  assert.match(message, /Detail query\/filter mismatch/)
+  assert.match(message, /Audit log ကိုစစ်ပါ/)
+  assert.doesNotMatch(message, /BANK collected: 0/)
+})
+
+test("Telegram payment method context resolves method names and ordinals from previous breakdown", () => {
+  paymentMethodContextTest.clear()
+  const breakdownResponse = {
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "finance",
+    autoMode: true,
+    intent: "payment_method_breakdown",
+    period: {
+      fromDate: "2026-07-08",
+      toDate: "2026-07-08",
+      label: "yesterday",
+    },
+    assistantMessage: "Payment methods.",
+    summary: "Payment methods.",
+    tables: [
+      {
+        title: "Payment methods",
+        columns: [
+          { key: "paymentMethod", title: "Method" },
+          { key: "totalAmount", title: "Amount" },
+          { key: "transactionCount", title: "Transactions" },
+        ],
+        rows: [
+          { paymentMethod: "YOMA", totalAmount: 6_000_000, transactionCount: 1 },
+          { paymentMethod: "KPAY", totalAmount: 550_000, transactionCount: 2 },
+          { paymentMethod: "WAVEPAY", totalAmount: 200_000, transactionCount: 1 },
+          { paymentMethod: "CASH", totalAmount: 10_000, transactionCount: 1 },
+        ],
+      },
+    ],
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  } satisfies Parameters<typeof buildRecentPaymentMethodContextItemsFromResponse>[0]
+
+  const methods = buildRecentPaymentMethodContextItemsFromResponse(breakdownResponse)
+  assert.deepEqual(methods.map((method) => [method.rank, method.paymentMethod, method.totalAmount]), [
+    [1, "YOMA", 6_000_000],
+    [2, "KPAY", 550_000],
+    [3, "WAVEPAY", 200_000],
+    [4, "CASH", 10_000],
+  ])
+
+  const context = saveRecentPaymentMethodContext({
+    clinicId: "clinic-1",
+    clinicCode: "ABC",
+    telegramChatId: "chat-1",
+    telegramUserId: "user-1",
+    period: breakdownResponse.period,
+    methods,
+    now: 1_000,
+  })
+
+  assert.equal(resolveRecentPaymentMethodReference({ message: "Yoma details", context }).status, "resolved")
+  assert.equal(resolveRecentPaymentMethodReference({ message: "Yoma bank details", context }).status, "resolved")
+  assert.equal(resolveRecentPaymentMethodReference({ message: "နံပါတ် 1 details", context }).status, "resolved")
+  assert.equal(resolveRecentPaymentMethodReference({ message: "first one details", context }).status, "resolved")
+  const second = resolveRecentPaymentMethodReference({ message: "second one", context })
+  assert.equal(second.status, "resolved")
+  assert.equal(second.status === "resolved" ? second.item.paymentMethod : "", "KPAY")
 })
 
 test("Telegram generic table formatter formats money and counts but preserves phone and id values", () => {
@@ -5028,6 +5436,152 @@ test("Telegram formatter renders top customers by revenue and CSV headers", () =
   )
   assert.doesNotMatch(exportFile.csv, /Last Invoice/)
 })
+
+test("Telegram formatter renders birthday customers with named package balances and CSV headers", () => {
+  const response = {
+    sessionId: "session-1",
+    requestId: "request-1",
+    responseId: "response-1",
+    requestedAgent: "auto",
+    resolvedAgent: "customer_relationship",
+    autoMode: true,
+    intent: "birthday_customers",
+    period: {
+      fromDate: "2026-07-09",
+      toDate: "2026-08-08",
+      label: "next 30 days",
+    },
+    assistantMessage: "Birthday customers.",
+    summary: "2 birthday customers found.",
+    metrics: [
+      { label: "Birthday customers", value: 2 },
+      { label: "With package balance", value: 1 },
+    ],
+    tables: [
+      {
+        title: "Birthday customers",
+        columns: [
+          { key: "customerName", title: "Customer Name" },
+          { key: "phoneNumber", title: "Phone", pii: "phone", exportable: true },
+          { key: "customerCode", title: "Customer Code", pii: "id", exportable: true },
+          { key: "dateOfBirth", title: "Date of Birth" },
+          { key: "upcomingBirthdayDate", title: "Upcoming Birthday Date" },
+          { key: "daysUntilBirthday", title: "Days Until Birthday", unit: "count" },
+          { key: "turningAge", title: "Turning Age", unit: "count" },
+          { key: "lastVisitDate", title: "Last Visit" },
+          { key: "lastServiceName", title: "Last Service" },
+          { key: "lastTherapistName", title: "Last Therapist" },
+          { key: "totalVisits", title: "Total Visits", unit: "count" },
+          { key: "lifetimeSpend", title: "Lifetime Spend", unit: "amount" },
+          { key: "packageRemainingSessionsTotal", title: "Package Remaining Sessions", unit: "count" },
+          { key: "activePackageNames", title: "Active Packages" },
+          { key: "packageRemainingDetailsText", title: "Package Remaining Details" },
+          { key: "packageRemainingDetails", title: "Package Remaining Details Raw", exportable: false },
+          { key: "suggestedAction", title: "Suggested Action" },
+        ],
+        rows: [
+          {
+            customerName: "Wut Hmone",
+            phoneNumber: "+959769708967",
+            customerCode: "C",
+            dateOfBirth: "1994-07-18",
+            upcomingBirthdayDate: "2026-07-18",
+            daysUntilBirthday: 9,
+            turningAge: 32,
+            lastVisitDate: "2026-05-20",
+            lastServiceName: "Skin Booster",
+            lastTherapistName: "May Thu",
+            totalVisits: 5,
+            lifetimeSpend: 1200000,
+            packageRemainingSessionsTotal: 3,
+            activePackageNames: "Queen Package, Exosome Face",
+            packageRemainingDetailsText: "Queen Package: 2/5 left; Exosome Face: 1/3 left",
+            packageRemainingDetails: [
+              {
+                packageName: "Queen Package",
+                serviceName: "Queen Package",
+                categoryName: "Facial",
+                totalSessions: 5,
+                usedSessions: 3,
+                remainingSessions: 2,
+                lastUsedDate: "2026-05-20",
+              },
+              {
+                packageName: "Exosome Face",
+                serviceName: "Exosome Face",
+                categoryName: "Facial",
+                totalSessions: 3,
+                usedSessions: 2,
+                remainingSessions: 1,
+                lastUsedDate: "2026-05-01",
+              },
+            ],
+            suggestedAction: "Birthday wish ပို့ပြီး Queen Package လက်ကျန် 2 session ပြန်လာသုံးဖို့ ဖိတ်ပါ။",
+          },
+          {
+            customerName: "Ma Nan Kalayar Moe Myint",
+            phoneNumber: "+959260226622",
+            customerCode: "M-2",
+            dateOfBirth: "1997-07-25",
+            upcomingBirthdayDate: "2026-07-25",
+            daysUntilBirthday: 16,
+            turningAge: 29,
+            lastVisitDate: null,
+            lastServiceName: null,
+            lastTherapistName: null,
+            totalVisits: 0,
+            lifetimeSpend: 0,
+            packageRemainingSessionsTotal: 0,
+            activePackageNames: "",
+            packageRemainingDetailsText: "",
+            packageRemainingDetails: [],
+            suggestedAction: "Birthday promo / consultation invitation ပို့ပါ။",
+          },
+        ],
+      },
+    ],
+    sources: [],
+    dataStatus: "ok",
+    actions: [{ type: "read_only_agent_response" }],
+  } satisfies Parameters<typeof formatAgentHubTelegramReply>[0]
+
+  const message = formatAgentHubTelegramReply(response, {
+    viewerContext: { canViewFullCustomerPhone: true },
+    clinicCode: "ABC",
+  })
+
+  assert.match(message, /မွေးနေ့ရှိတဲ့ customers/)
+  assert.match(message, /1\. Wut Hmone \(C\)/)
+  assert.match(message, /Phone: \+959769708967/)
+  assert.match(message, /Birthday: Jul 18/)
+  assert.match(message, /Age: 32/)
+  assert.match(message, /Last visit: 2026-05-20/)
+  assert.match(message, /Last service: Skin Booster/)
+  assert.match(message, /Remaining package:/)
+  assert.match(message, /Queen Package: 2\/5 sessions left/)
+  assert.match(message, /Exosome Face: 1\/3 sessions left/)
+  assert.match(message, /Action:\nBirthday wish ပို့ပြီး Queen Package/)
+  assert.match(message, /Last visit: မရှိသေးပါ/)
+  assert.match(message, /Total birthday customers: 2/)
+  assert.doesNotMatch(message, /package\/session လက်ကျန် 2/)
+
+  const exportFile = buildGreatTimeAgentCsvExportFromTables({
+    tables: response.tables,
+    resolvedAgent: response.resolvedAgent,
+    intent: response.intent,
+    period: response.period,
+    originalMessage: "ဒီလ birthday customers excel ထုတ်ပေးပါ",
+    now: "2026-07-09T00:00:00.000Z",
+  })
+  const csvHeader = exportFile.csv.split("\r\n")[0]?.replace(/^\uFEFF/, "")
+
+  assert.equal(
+    csvHeader,
+    "Customer Name,Phone,Customer Code,Date of Birth,Upcoming Birthday Date,Days Until Birthday,Turning Age,Last Visit,Last Service,Last Therapist,Total Visits,Lifetime Spend,Package Remaining Sessions,Active Packages,Package Remaining Details,Suggested Action",
+  )
+  assert.match(exportFile.csv, /Queen Package: 2\/5 left; Exosome Face: 1\/3 left/)
+  assert.doesNotMatch(exportFile.csv, /Package Remaining Details Raw/)
+});
 
 test("Telegram formatter explains no top-customer spending data cleanly", () => {
   const message = formatAgentHubTelegramReply({

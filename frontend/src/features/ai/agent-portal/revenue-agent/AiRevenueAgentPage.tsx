@@ -134,6 +134,7 @@ const ACTION_TYPE_OPTIONS: Array<{ value: AiRevenueActionType; label: string }> 
   { value: "no_show_recovery", label: "No-show recovery" },
   { value: "cancelled_appointment_recovery", label: "Cancelled recovery" },
   { value: "inactive_vip_recovery", label: "Inactive VIP recovery" },
+  { value: "birthday_follow_up", label: "Birthday follow-up" },
   { value: "package_upsell_opportunity", label: "Package upsell" },
   { value: "payment_follow_up", label: "Payment follow-up" },
 ];

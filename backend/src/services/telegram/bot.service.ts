@@ -403,6 +403,15 @@ function translatePeriodLabel(label: string) {
   if (normalized === "last 365 days") {
     return "ပြီးခဲ့တဲ့ ၃၆၅ ရက်";
   }
+  if (normalized === "next 30 days") {
+    return "နောက် 30 ရက်";
+  }
+  if (normalized === "next 60 days") {
+    return "နောက် 60 ရက်";
+  }
+  if (normalized === "next 90 days") {
+    return "နောက် 90 ရက်";
+  }
   if (normalized === "year to date") {
     return "ဒီနှစ်အစမှ ယနေ့အထိ";
   }
@@ -439,6 +448,15 @@ function ownerBodyPeriodPrefix(period: GreatTimeAgentChatResponse["period"]) {
   }
   if (normalized === "this month") {
     return "ဒီလ";
+  }
+  if (normalized === "next 30 days") {
+    return "နောက် 30 ရက်";
+  }
+  if (normalized === "next 60 days") {
+    return "နောက် 60 ရက်";
+  }
+  if (normalized === "next 90 days") {
+    return "နောက် 90 ရက်";
   }
   if (period.fromDate !== period.toDate) {
     return `${period.fromDate} မှ ${period.toDate} အထိ`;
@@ -1424,6 +1442,172 @@ function formatServicePerformanceConversation(response: GreatTimeAgentChatRespon
   return lines;
 }
 
+type TelegramPackageRemainingDetail = {
+  packageName: string;
+  serviceName?: string | null;
+  categoryName?: string | null;
+  totalSessions?: number | null;
+  usedSessions?: number | null;
+  remainingSessions?: number | null;
+  remainingAmount?: number | null;
+  purchaseDate?: string | null;
+  lastUsedDate?: string | null;
+  expiryDate?: string | null;
+};
+
+function packageRemainingDetailsFromRow(row: Record<string, unknown>): TelegramPackageRemainingDetail[] {
+  const rawDetails = row.packageRemainingDetails;
+  if (Array.isArray(rawDetails)) {
+    return rawDetails
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+      .map((item) => ({
+        packageName: stringValue(item, "packageName", stringValue(item, "serviceName", "Package balance")),
+        serviceName: stringValue(item, "serviceName", ""),
+        categoryName: stringValue(item, "categoryName", ""),
+        totalSessions: numberValue(item, "totalSessions"),
+        usedSessions: numberValue(item, "usedSessions"),
+        remainingSessions: numberValue(item, "remainingSessions"),
+        remainingAmount: numberValue(item, "remainingAmount"),
+        purchaseDate: stringValue(item, "purchaseDate", ""),
+        lastUsedDate: stringValue(item, "lastUsedDate", ""),
+        expiryDate: stringValue(item, "expiryDate", ""),
+      }))
+      .filter((item) => (item.remainingSessions ?? 0) > 0)
+      .sort((left, right) => {
+        const leftExpiry = left.expiryDate || "9999-12-31";
+        const rightExpiry = right.expiryDate || "9999-12-31";
+        if (leftExpiry !== rightExpiry) {
+          return leftExpiry.localeCompare(rightExpiry);
+        }
+
+        const leftUsed = left.lastUsedDate || "";
+        const rightUsed = right.lastUsedDate || "";
+        if (leftUsed !== rightUsed) {
+          return rightUsed.localeCompare(leftUsed);
+        }
+
+        return (right.remainingSessions ?? 0) - (left.remainingSessions ?? 0);
+      });
+  }
+
+  const packageName =
+    stringValue(row, "packageOrServiceName", "") ||
+    stringValue(row, "lastPackageName", "") ||
+    stringValue(row, "lastPackageServiceName", "") ||
+    stringValue(row, "lastServiceName", "") ||
+    stringValue(row, "lastService", "");
+  const remaining =
+    numberValue(row, "packageRemainingSessionsTotal") ??
+    numberValue(row, "remainingPackageSessions") ??
+    numberValue(row, "remainingSessions");
+
+  if (!packageName || packageName === "-" || remaining == null || remaining <= 0) {
+    return [];
+  }
+
+  return [
+    {
+      packageName,
+      serviceName: stringValue(row, "serviceName", stringValue(row, "lastServiceName", "")),
+      totalSessions: numberValue(row, "totalSessions"),
+      usedSessions: numberValue(row, "usedSessions"),
+      remainingSessions: remaining,
+      lastUsedDate: stringValue(row, "lastMatchingUsageDate", stringValue(row, "lastPackageUsageDate", "")),
+    },
+  ];
+}
+
+function formatRemainingPackageLine(detail: TelegramPackageRemainingDetail) {
+  const name = detail.packageName || detail.serviceName || "Package balance";
+  const remaining = detail.remainingSessions == null ? "-" : detail.remainingSessions.toLocaleString("en-US");
+  const total = detail.totalSessions == null ? null : detail.totalSessions.toLocaleString("en-US");
+  const used = detail.usedSessions == null ? null : detail.usedSessions.toLocaleString("en-US");
+  const sessionText = total
+    ? `${remaining}/${total} sessions left`
+    : used
+      ? `${remaining} sessions left, ${used} used`
+      : `${remaining} sessions left`;
+  const expiry = detail.expiryDate ? `, expiry ${detail.expiryDate}` : "";
+  return `- ${name}: ${sessionText}${expiry}`;
+}
+
+function formatBirthdayMonthDay(dateKey: string) {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) {
+    return dateKey;
+  }
+
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function formatBirthdayCustomersConversation(response: GreatTimeAgentChatResponse, viewerContext?: CustomerPhoneViewerContext) {
+  const table = response.tables?.find((item) => /birthday customers/i.test(item.title));
+  if (response.intent !== "birthday_customers" || !table) {
+    return [];
+  }
+
+  if (table.rows.length === 0) {
+    return ["ဒီကာလအတွင်း birthday customer မတွေ့ပါ။ နောက် 60 ရက် / 90 ရက်နဲ့ ပြန်စစ်နိုင်ပါတယ်။"];
+  }
+
+  const topRows = table.rows.slice(0, 10);
+  const total = metricValue(response, ["Birthday customers"]) ?? table.rows.length;
+  const lines = ["မွေးနေ့ရှိတဲ့ customers:"];
+
+  topRows.forEach((row, index) => {
+    const name = stringValue(row, "customerName", "Customer");
+    const code = stringValue(row, "customerCode", "");
+    const phone = formatCustomerPhone(
+      {
+        fullPhone: stringValue(row, "phoneNumber", ""),
+        maskedPhone: stringValue(row, "customerPhoneMasked", ""),
+      },
+      viewerContext,
+      { logContext: "birthday_customers_phone" },
+    );
+    const birthday = stringValue(row, "upcomingBirthdayDate", "");
+    const age = numberValue(row, "turningAge");
+    const lastVisit = stringValue(row, "lastVisitDate", "");
+    const lastService = stringValue(row, "lastServiceName", "");
+    const packageDetails = packageRemainingDetailsFromRow(row).slice(0, 2);
+    const action = stringValue(row, "suggestedAction", "");
+    const codeText = code && code !== "-" ? ` (${code})` : "";
+
+    lines.push("", `${index + 1}. ${name}${codeText}`);
+    lines.push(`Phone: ${phone && phone !== "-" ? phone : "မရှိသေးပါ"}`);
+    lines.push(`Birthday: ${birthday && birthday !== "-" ? formatBirthdayMonthDay(birthday) : "-"}`);
+    lines.push(`Age: ${age == null ? "unknown" : age.toLocaleString("en-US")}`);
+    lines.push(`Last visit: ${lastVisit && lastVisit !== "-" ? lastVisit : "မရှိသေးပါ"}`);
+    if (lastService && lastService !== "-") {
+      lines.push(`Last service: ${lastService}`);
+    }
+
+    if (packageDetails.length > 0) {
+      lines.push("", "Remaining package:");
+      packageDetails.forEach((detail) => {
+        lines.push(formatRemainingPackageLine(detail));
+      });
+    }
+
+    if (action && action !== "-") {
+      lines.push("", "Action:");
+      lines.push(action);
+    }
+  });
+
+  lines.push("", `Summary:`, `Total birthday customers: ${formatTelegramNumber(total)}`);
+
+  if (table.rows.length > topRows.length) {
+    lines.push(`နောက်ထပ် customer ${(table.rows.length - topRows.length).toLocaleString("en-US")} ယောက်ကို CSV export ထဲမှာ ကြည့်နိုင်ပါတယ်။`);
+  }
+
+  return lines;
+}
+
 function formatCustomerMatchesConversation(response: GreatTimeAgentChatResponse) {
   const table = response.tables?.find((item) => /customer relationship matches/i.test(item.title));
   if (!table?.rows.length) {
@@ -1446,6 +1630,7 @@ function formatCustomerMatchesConversation(response: GreatTimeAgentChatResponse)
     const packagePurchaseDate = stringValue(row, "lastPackagePurchaseDate", "");
     const packageService = stringValue(row, "lastPackageServiceName", stringValue(row, "lastPackageName", ""));
     const remaining = numberValue(row, "remainingPackageSessions");
+    const packageDetails = packageRemainingDetailsFromRow(row);
 
     if (isPackageNeverCame || isPackageNotUsed) {
       const phoneText = phone && phone !== "-" ? `phone ${phone}၊ ` : "";
@@ -1464,8 +1649,8 @@ function formatCustomerMatchesConversation(response: GreatTimeAgentChatResponse)
     if (lastVisit && lastVisit !== "-") {
       parts.push(`နောက်ဆုံးလာခဲ့တာ ${lastVisit}`);
     }
-    if (remaining != null) {
-      parts.push(`package/session လက်ကျန် ${remaining.toLocaleString("en-US")}`);
+    if (packageDetails.length > 0) {
+      parts.push(`${packageDetails[0]!.packageName} လက်ကျန် ${(packageDetails[0]!.remainingSessions ?? remaining ?? 0).toLocaleString("en-US")} session`);
     }
     lines.push(`${parts.join(" — ")}။`);
   });
@@ -1503,6 +1688,7 @@ function formatTopCustomersByRevenueConversation(response: GreatTimeAgentChatRes
       topService && topPackage
         ? `${topService} / ${topPackage}`
         : topService || topPackage;
+    const packageDetails = packageRemainingDetailsFromRow(row).slice(0, 2);
 
     lines.push("", `${index + 1}. ${name}`);
     if (phone && phone !== "-") {
@@ -1513,6 +1699,12 @@ function formatTopCustomersByRevenueConversation(response: GreatTimeAgentChatRes
     lines.push(`   Last visit: ${lastVisit && lastVisit !== "-" ? lastVisit : "-"}`);
     if (servicePackage && servicePackage !== "-") {
       lines.push(`   Top service/package: ${servicePackage}`);
+    }
+    if (packageDetails.length > 0) {
+      lines.push("   Remaining package:");
+      packageDetails.forEach((detail) => {
+        lines.push(`   ${formatRemainingPackageLine(detail)}`);
+      });
     }
   });
 
@@ -1748,6 +1940,11 @@ function formatConversationTablePreview(
   const service = formatServicePerformanceConversation(response);
   if (service.length) {
     return service;
+  }
+
+  const birthdayCustomers = formatBirthdayCustomersConversation(response, options?.viewerContext);
+  if (birthdayCustomers.length) {
+    return birthdayCustomers;
   }
 
   const topCustomersByRevenue = formatTopCustomersByRevenueConversation(response, options?.viewerContext);

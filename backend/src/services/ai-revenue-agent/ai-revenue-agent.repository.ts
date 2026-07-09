@@ -1894,6 +1894,7 @@ export async function getSummary(params: {
     noShowRecovery: filtered.filter((action) => action.actionType === "no_show_recovery").length,
     cancelledRecovery: filtered.filter((action) => action.actionType === "cancelled_appointment_recovery").length,
     inactiveVip: filtered.filter((action) => action.actionType === "inactive_vip_recovery").length,
+    birthdayFollowUp: filtered.filter((action) => action.actionType === "birthday_follow_up").length,
     other: filtered.filter((action) => action.actionType === "payment_follow_up").length,
   };
 

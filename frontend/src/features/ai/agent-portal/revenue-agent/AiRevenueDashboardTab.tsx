@@ -55,6 +55,8 @@ function sourceBreakdownLabel(action: AiRevenueAction) {
       return "Cancelled Recovery";
     case "inactive_vip_recovery":
       return "Inactive VIP";
+    case "birthday_follow_up":
+      return "Birthday Follow-up";
     default:
       return "Other";
   }
@@ -147,6 +149,7 @@ export function AiRevenueDashboardTab({
     { label: "No-show Recovery", count: summary?.sourceBreakdown?.noShowRecovery ?? actions.filter((action) => sourceBreakdownLabel(action) === "No-show Recovery").length },
     { label: "Cancelled Recovery", count: summary?.sourceBreakdown?.cancelledRecovery ?? actions.filter((action) => sourceBreakdownLabel(action) === "Cancelled Recovery").length },
     { label: "Inactive VIP", count: summary?.sourceBreakdown?.inactiveVip ?? actions.filter((action) => sourceBreakdownLabel(action) === "Inactive VIP").length },
+    { label: "Birthday Follow-up", count: summary?.sourceBreakdown?.birthdayFollowUp ?? actions.filter((action) => sourceBreakdownLabel(action) === "Birthday Follow-up").length },
   ];
 
   const metrics = [

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { env } from "../../../config/env.js";
 import {
+  getCustomerPortalBirthdayCustomers,
   getCustomerPortalBookings,
   getCustomerPortalOverview,
   getCustomerPortalPackages,
@@ -242,6 +243,8 @@ type CustomerProfileToolRow = {
   lastVisitDate?: string | null;
   daysSinceLastVisit?: number | null;
   remainingPackageSessions: number;
+  preferredService?: string | null;
+  lastService?: string | null;
   lifetimeSpend?: number;
   totalVisits?: number;
   riskLevel?: string;
@@ -250,6 +253,91 @@ type CustomerProfileToolRow = {
 };
 
 type CustomerPhoneCandidate = Awaited<ReturnType<typeof resolveCustomerPortalPhonesByNames>>[number];
+
+function packageDetailNumber(value: unknown) {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function packageDetailsText(details: Array<Record<string, unknown>>) {
+  return details
+    .map((detail) => {
+      const name = String(detail.packageName || detail.serviceName || "Package balance");
+      const remaining = detail.remainingSessions == null ? "-" : Number(detail.remainingSessions).toLocaleString("en-US");
+      const total = detail.totalSessions == null ? null : Number(detail.totalSessions).toLocaleString("en-US");
+      return total ? `${name}: ${remaining}/${total} left` : `${name}: ${remaining} left`;
+    })
+    .join("; ");
+}
+
+function packageRemainingDetailsFromProfile(profile: CustomerProfileToolRow, lifecycle: Record<string, unknown> | null) {
+  const record = profile as Record<string, unknown>;
+  const holdings = Array.isArray(record.packageHoldings)
+    ? record.packageHoldings.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    : [];
+  const holdingDetails = holdings
+    .map((holding) => ({
+      packageName: String(holding.packageName || holding.serviceName || "Package balance"),
+      serviceName: typeof holding.serviceName === "string" ? holding.serviceName : null,
+      categoryName: typeof holding.serviceCategory === "string" ? holding.serviceCategory : null,
+      totalSessions: packageDetailNumber(holding.packageTotal ?? holding.totalSessions),
+      usedSessions: packageDetailNumber(holding.usedCount ?? holding.usedSessions),
+      remainingSessions: packageDetailNumber(holding.remainingCount ?? holding.remainingSessions),
+      remainingAmount: null,
+      purchaseDate: typeof holding.purchaseDate === "string" ? holding.purchaseDate : null,
+      lastUsedDate: typeof holding.latestUsageDate === "string" ? holding.latestUsageDate : null,
+      expiryDate: typeof holding.expiryDate === "string" ? holding.expiryDate : null,
+    }))
+    .filter((detail) => detail.remainingSessions > 0);
+
+  if (holdingDetails.length > 0) {
+    return holdingDetails;
+  }
+
+  if (lifecycle && packageDetailNumber(lifecycle.remainingSessions) > 0) {
+    return [
+      {
+        packageName: String(lifecycle.packageName || lifecycle.serviceName || "Package balance"),
+        serviceName: typeof lifecycle.serviceName === "string" ? lifecycle.serviceName : null,
+        categoryName: null,
+        totalSessions: lifecycle.purchasedSessions == null ? null : packageDetailNumber(lifecycle.purchasedSessions),
+        usedSessions: lifecycle.usedSessions == null ? null : packageDetailNumber(lifecycle.usedSessions),
+        remainingSessions: packageDetailNumber(lifecycle.remainingSessions),
+        remainingAmount: null,
+        purchaseDate: typeof lifecycle.purchaseDate === "string" ? lifecycle.purchaseDate : null,
+        lastUsedDate: typeof lifecycle.lastMatchingUsageDate === "string" ? lifecycle.lastMatchingUsageDate : null,
+        expiryDate: null,
+      },
+    ];
+  }
+
+  const fallbackName =
+    typeof record.preferredService === "string" && record.preferredService
+      ? record.preferredService
+      : typeof record.lastPackageServiceName === "string" && record.lastPackageServiceName
+        ? record.lastPackageServiceName
+        : typeof record.lastService === "string" && record.lastService
+          ? record.lastService
+          : "";
+  if (profile.remainingPackageSessions > 0 && fallbackName) {
+    return [
+      {
+        packageName: fallbackName,
+        serviceName: fallbackName,
+        categoryName: null,
+        totalSessions: null,
+        usedSessions: null,
+        remainingSessions: profile.remainingPackageSessions,
+        remainingAmount: null,
+        purchaseDate: typeof record.lastPackagePurchaseDate === "string" ? record.lastPackagePurchaseDate : null,
+        lastUsedDate: typeof profile.lastVisitDate === "string" ? profile.lastVisitDate : null,
+        expiryDate: null,
+      },
+    ];
+  }
+
+  return [];
+}
 
 function choosePhoneCandidate(profile: CustomerProfileToolRow, candidates: CustomerPhoneCandidate[]) {
   const memberId = normalizeLookupText(profile.memberId);
@@ -356,6 +444,8 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
         lastVisitDate: row.lastVisitDate,
         daysSinceLastVisit: row.daysSinceLastVisit,
         remainingPackageSessions: row.remainingPackageSessions,
+        preferredService: row.preferredService,
+        lastService: row.preferredService,
         lifetimeSpend: 0,
         totalVisits: row.totalVisits,
         riskLevel: row.riskLevel,
@@ -384,6 +474,8 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
           { key: "purchaseDate", title: "Purchase date" },
           { key: "lastMatchingUsageDate", title: "Usage date" },
           { key: "remainingSessionsDisplay", title: "Remaining" },
+          { key: "packageRemainingDetailsText", title: "Package remaining details" },
+          { key: "packageRemainingDetails", title: "Package remaining details raw", exportable: false },
           { key: "daysInactive", title: "Days inactive" },
           { key: "segmentLabel", title: "Segment" },
           { key: "priorityScore", title: "Priority" },
@@ -395,6 +487,8 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
           { key: "customerPhone", title: "Phone" },
           { key: "lastVisitDate", title: "Last visit" },
           { key: "remainingPackageSessions", title: "Package balance" },
+          { key: "packageRemainingDetailsText", title: "Package remaining details" },
+          { key: "packageRemainingDetails", title: "Package remaining details raw", exportable: false },
           { key: "riskLevel", title: "Risk" },
           { key: "nextBestAction", title: "Next action" },
         ];
@@ -441,6 +535,7 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
               ? `${String(lifecycle.serviceName ?? "")} / ${lifecycle.packageName}`
               : String(lifecycle?.serviceName ?? ("lastPackageServiceName" in profile ? profile.lastPackageServiceName : "") ?? "");
           const remainingSessions = lifecycle?.remainingSessions;
+          const packageRemainingDetails = packageRemainingDetailsFromProfile(profile, lifecycle);
 
           return {
             customerKey: profile.customerKey,
@@ -471,6 +566,8 @@ async function searchCustomerProfiles(input: AgentToolInput): Promise<AgentToolR
             packageBoughtNeverCame: "packageBoughtNeverCame" in profile ? profile.packageBoughtNeverCame : false,
             packageBoughtButNoUsage: "packageBoughtButNoUsage" in profile ? profile.packageBoughtButNoUsage : false,
             remainingPackageSessions: profile.remainingPackageSessions,
+            packageRemainingDetails,
+            packageRemainingDetailsText: packageDetailsText(packageRemainingDetails),
             lifetimeSpend: profile.lifetimeSpend,
             riskLevel: profile.riskLevel,
             segments: Array.isArray(profile.segments) ? profile.segments.join(", ") : "",
@@ -544,6 +641,10 @@ async function getTopCustomersByRevenue(input: AgentToolInput): Promise<AgentToo
     topPackageName: row.topPackageName,
     paymentMethods: row.paymentMethods,
     lastInvoiceDate: row.lastInvoiceDate,
+    packageRemainingSessionsTotal: row.packageRemainingSessionsTotal,
+    activePackageNames: row.activePackageNames.join(", "),
+    packageRemainingDetails: row.packageRemainingDetails,
+    packageRemainingDetailsText: row.packageRemainingDetailsText,
   }));
   const totalSpent = rows.reduce((sum, row) => sum + row.totalSpent, 0);
   const invoiceCount = rows.reduce((sum, row) => sum + row.invoiceCount, 0);
@@ -580,6 +681,10 @@ async function getTopCustomersByRevenue(input: AgentToolInput): Promise<AgentToo
           { key: "topServiceName", title: "Top Service" },
           { key: "topPackageName", title: "Top Package" },
           { key: "paymentMethods", title: "Payment Methods" },
+          { key: "packageRemainingSessionsTotal", title: "Package Remaining Sessions", unit: "count" },
+          { key: "activePackageNames", title: "Active Packages" },
+          { key: "packageRemainingDetailsText", title: "Package Remaining Details" },
+          { key: "packageRemainingDetails", title: "Package Remaining Details Raw", exportable: false },
           { key: "lastInvoiceDate", title: "Last Invoice", exportable: false },
         ],
         rows: tableRows,
@@ -593,6 +698,121 @@ async function getTopCustomersByRevenue(input: AgentToolInput): Promise<AgentToo
       displayName: row.customerName,
       customerName: row.customerName,
       customerPhone: row.phoneNumber || undefined,
+      rank: index + 1,
+    })),
+  };
+}
+
+function birthdayCustomerSummary(params: {
+  count: number;
+  total: number;
+  periodLabel: string;
+  language: AgentToolInput["request"]["aiLanguage"];
+}) {
+  const total = params.total.toLocaleString("en-US");
+  const count = params.count.toLocaleString("en-US");
+
+  if (isMyanmarLanguage(params.language)) {
+    if (params.total === 0) {
+      return "ဒီကာလအတွင်း birthday customer မတွေ့ပါ။ နောက် 60 ရက် / 90 ရက်နဲ့ ပြန်စစ်နိုင်ပါတယ်။";
+    }
+
+    return `${params.periodLabel} မွေးနေ့ရှိတဲ့ customer ${total} ယောက်တွေ့ပါတယ်။ ${count} ယောက်ကို ပြထားပါတယ်။`;
+  }
+
+  if (params.total === 0) {
+    return "No birthday customers were found for this period. Try the next 60 or 90 days.";
+  }
+
+  return `${total} birthday customer${params.total === 1 ? "" : "s"} found for ${params.periodLabel}; showing ${count}.`;
+}
+
+async function getBirthdayCustomers(input: AgentToolInput): Promise<AgentToolResult> {
+  const data = await getCustomerPortalBirthdayCustomers({
+    clinicCode: input.clinic.clinicCode,
+    fromDate: input.period.fromDate,
+    toDate: input.period.toDate,
+    limit: 20,
+  });
+  const rows = limitRows(data.rows, 20);
+  const tableRows = rows.map((row) => ({
+    customerName: row.customerName,
+    phoneNumber: row.phoneNumber,
+    customerCode: row.customerCode,
+    dateOfBirth: row.dateOfBirth,
+    upcomingBirthdayDate: row.upcomingBirthdayDate,
+    daysUntilBirthday: row.daysUntilBirthday,
+    turningAge: row.turningAge,
+    lastVisitDate: row.lastVisitDate,
+    lastServiceName: row.lastServiceName,
+    lastTherapistName: row.lastTherapistName,
+    totalVisits: row.totalVisits,
+    lifetimeSpend: row.lifetimeSpend,
+    packageRemainingSessionsTotal: row.packageRemainingSessionsTotal,
+    packageRemainingAmount: row.packageRemainingAmount,
+    activePackageNames: row.activePackageNames.join(", "),
+    packageRemainingDetails: row.packageRemainingDetails,
+    packageRemainingDetailsText: row.packageRemainingDetailsText,
+    suggestedAction: row.suggestedAction,
+  }));
+  const packageCustomers = rows.filter((row) => row.packageRemainingSessionsTotal > 0).length;
+
+  return {
+    toolName: "get_birthday_customers",
+    sourceName: "BigQuery customer/member birthday and package data",
+    checkedAt: nowIso(),
+    period: periodLabel(input),
+    dataStatus: rows.length ? "ok" : "no_activity",
+    live: false,
+    summary: birthdayCustomerSummary({
+      count: rows.length,
+      total: data.total,
+      periodLabel: input.period.label,
+      language: input.request.aiLanguage,
+    }),
+    metrics: [
+      { label: "Birthday customers", value: data.total },
+      { label: "Shown customers", value: rows.length },
+      { label: "With package balance", value: packageCustomers },
+    ],
+    tables: [
+      {
+        title: "Birthday customers",
+        columns: [
+          { key: "customerName", title: "Customer Name" },
+          { key: "phoneNumber", title: "Phone", pii: "phone", exportable: true },
+          { key: "customerCode", title: "Customer Code", pii: "id", exportable: true },
+          { key: "dateOfBirth", title: "Date of Birth" },
+          { key: "upcomingBirthdayDate", title: "Upcoming Birthday Date" },
+          { key: "daysUntilBirthday", title: "Days Until Birthday", unit: "count" },
+          { key: "turningAge", title: "Turning Age", unit: "count" },
+          { key: "lastVisitDate", title: "Last Visit" },
+          { key: "lastServiceName", title: "Last Service" },
+          { key: "lastTherapistName", title: "Last Therapist" },
+          { key: "totalVisits", title: "Total Visits", unit: "count" },
+          { key: "lifetimeSpend", title: "Lifetime Spend", unit: "amount" },
+          { key: "packageRemainingSessionsTotal", title: "Package Remaining Sessions", unit: "count" },
+          { key: "activePackageNames", title: "Active Packages" },
+          { key: "packageRemainingDetailsText", title: "Package Remaining Details" },
+          { key: "packageRemainingDetails", title: "Package Remaining Details Raw", exportable: false },
+          { key: "suggestedAction", title: "Suggested Action" },
+        ],
+        rows: tableRows,
+      },
+    ],
+    recommendations: rows.slice(0, 3).map((row) => ({
+      title: row.customerName,
+      message: row.suggestedAction,
+      sourceTools: ["get_birthday_customers"],
+    })),
+    entityRefs: rows.map((row, index) => ({
+      entityType: "customer",
+      entityId: row.customerKey,
+      customerKey: row.customerKey,
+      memberId: row.memberId ?? undefined,
+      displayName: row.customerName,
+      customerName: row.customerName,
+      customerPhone: row.phoneNumber ?? undefined,
       rank: index + 1,
     })),
   };
@@ -892,6 +1112,17 @@ export function createCustomerTools(): AgentToolDefinition[] {
       maxRows: 50,
       timeoutMs: 20_000,
       execute: getTopCustomersByRevenue,
+    },
+    {
+      name: "get_birthday_customers",
+      agentId: "customer_relationship",
+      description: "Get customers with birthdays in a selected date range, including contact details, upcoming birthday date, turning age, last visit, last service, and remaining package/session context.",
+      inputSchema: toolInputSchema,
+      sourceName: "BigQuery customer/member birthday and package data",
+      live: false,
+      maxRows: 20,
+      timeoutMs: 20_000,
+      execute: getBirthdayCustomers,
     },
     {
       name: "get_customer_overview",
