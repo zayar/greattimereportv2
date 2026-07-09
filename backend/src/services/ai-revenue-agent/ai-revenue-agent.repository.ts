@@ -92,12 +92,15 @@ export type AiRevenueClinicRunRecord = {
 
 export type AiRevenueBatchRunSummary = {
   totalClinics: number;
+  dueClinics?: number;
   processedClinics: number;
   skippedClinics: number;
   failedClinics: number;
   totalCreated: number;
   totalDuplicateSkipped: number;
   totalSuppressedSkipped: number;
+  dryRun?: boolean;
+  skippedReason?: string | null;
 };
 
 export type AiRevenueRunSummaryRecord = {
@@ -2186,17 +2189,30 @@ export async function saveAiRevenueBatchRun(params: {
       startedAt: params.startedAt ?? nowIso(),
       completedAt: params.completedAt ?? null,
       totalClinics: params.summary?.totalClinics ?? 0,
+      dueClinics: params.summary?.dueClinics ?? 0,
       processedClinics: params.summary?.processedClinics ?? 0,
       skippedClinics: params.summary?.skippedClinics ?? 0,
       failedClinics: params.summary?.failedClinics ?? 0,
       totalCreated: params.summary?.totalCreated ?? 0,
       totalDuplicateSkipped: params.summary?.totalDuplicateSkipped ?? 0,
       totalSuppressedSkipped: params.summary?.totalSuppressedSkipped ?? 0,
+      dryRun: params.summary?.dryRun ?? false,
+      skippedReason: params.summary?.skippedReason ?? null,
       errorMessage: params.error ? scheduledErrorMessage(params.error) : null,
       updatedAt: nowIso(),
     }) as Record<string, unknown>,
     { merge: true },
   );
+}
+
+export async function getAiRevenueClinicRun(params: {
+  jobName: string;
+  clinicId: string;
+  dateKey: string;
+}) {
+  const id = aiRevenueClinicRunId(params);
+  const snapshot = await clinicRunCollection().doc(id).get();
+  return normalizeClinicRunRecord(snapshot.id, snapshot.data());
 }
 
 export async function acquireAiRevenueClinicRunLock(params: {

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { verifyFirebaseToken } from "../middleware/auth.js";
 import { requireClinicAccess } from "../middleware/clinic-access.js";
 import {
+  type AiRevenueSettings,
   type AiRevenueActionStatus,
   aiRevenueActionSources,
   aiRevenueActionStatuses,
@@ -327,6 +328,36 @@ const settingsSchema = z.object({
   attributionWindowDays: z.number().int().min(1).max(365).optional(),
   maxActionsPerRun: z.number().int().min(1).max(500).optional(),
 });
+
+type AiRevenueSettingsPayload = z.infer<typeof settingsSchema>;
+
+const settingsPatchFields = [
+  "clinicCode",
+  "clinicName",
+  "aiRevenueAgentEnabled",
+  "autoGenerateTodayOpportunities",
+  "timezone",
+  "dailyGenerateTime",
+  "runOrder",
+  "language",
+  "messagingMode",
+  "approvalRequired",
+  "attributionWindowDays",
+  "maxActionsPerRun",
+] as const satisfies ReadonlyArray<keyof AiRevenueSettingsPayload & keyof AiRevenueSettings>;
+
+export function buildAiRevenueSettingsPatch(params: AiRevenueSettingsPayload): Partial<AiRevenueSettings> {
+  const patch: Partial<AiRevenueSettings> = {};
+
+  for (const field of settingsPatchFields) {
+    const value = params[field];
+    if (value !== undefined) {
+      (patch as Record<string, unknown>)[field] = value;
+    }
+  }
+
+  return patch;
+}
 
 function actionId(req: { params: { actionId?: string | string[] } }) {
   const value = req.params.actionId;
@@ -868,13 +899,7 @@ router.post(
     const settings = await saveAiRevenueSettings({
       clinicId: params.clinicId,
       user: req.user,
-      patch: {
-        language: params.language,
-        messagingMode: params.messagingMode,
-        approvalRequired: params.approvalRequired,
-        attributionWindowDays: params.attributionWindowDays,
-        maxActionsPerRun: params.maxActionsPerRun,
-      },
+      patch: buildAiRevenueSettingsPatch(params),
     });
 
     res.json({ success: true, data: { settings } });

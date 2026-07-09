@@ -11,6 +11,7 @@ import {
   hasAiRevenueActionsForDate,
   listAiRevenueActions,
 } from "../ai-revenue-agent/ai-revenue-agent.service.js";
+import { getScheduledAiRevenueClinicRun } from "../ai-revenue-agent/scheduled-generation.service.js";
 import { getTelegramTargetByChatId } from "./storage.service.js";
 import type { TelegramChatType } from "./types.js";
 import {
@@ -640,14 +641,31 @@ export function formatAiRevenueCustomerDraftMessage(input: {
   ].join("\n");
 }
 
-function noDataMessage(dateKey: string) {
+function scheduleNotRunMessage(dateKey: string) {
   return [
     "AI Revenue Follow-up",
     `Date: ${dateKey}`,
     "",
-    "No follow-up data for today yet.",
-    "The AI Revenue Agent schedule has not run yet.",
-    "Please check again after today's schedule run.",
+    "ဒီနေ့ AI Revenue schedule မ run ရသေးပါ။",
+    "မနက် ၆ နာရီ schedule ပြီးမှ ပြန်စစ်ပါ။",
+  ].join("\n");
+}
+
+function noOpportunitiesMessage(dateKey: string) {
+  return [
+    "AI Revenue Follow-up",
+    `Date: ${dateKey}`,
+    "",
+    "ဒီနေ့ AI Revenue opportunity မတွေ့သေးပါ။",
+  ].join("\n");
+}
+
+function scheduleFailedMessage(dateKey: string) {
+  return [
+    "AI Revenue Follow-up",
+    `Date: ${dateKey}`,
+    "",
+    "AI Revenue schedule failed for today. Please check AI Revenue Agent audit log.",
   ].join("\n");
 }
 
@@ -752,12 +770,23 @@ export async function buildAiRevenueFollowUpTelegramReply(input: {
     clinicId: target.clinicId,
     dateKey,
   });
-  const hasRunData = runSummary || (await hasLegacyRunEvidenceFromSameDayActions({
+  const scheduledRun = await getScheduledAiRevenueClinicRun({
     clinicId: target.clinicId,
     dateKey,
-  }));
+  });
+  if (scheduledRun?.status === "failed") {
+    return scheduleFailedMessage(dateKey);
+  }
+
+  const hasRunData =
+    Boolean(runSummary) ||
+    scheduledRun?.status === "completed" ||
+    (await hasLegacyRunEvidenceFromSameDayActions({
+      clinicId: target.clinicId,
+      dateKey,
+    }));
   if (!hasRunData) {
-    return noDataMessage(dateKey);
+    return scheduleNotRunMessage(dateKey);
   }
 
   const { actions } = await listAiRevenueActions({
@@ -769,6 +798,18 @@ export async function buildAiRevenueFollowUpTelegramReply(input: {
   const queueActions = actions
     .filter((action) => isTelegramQueueAction(action, dateKey))
     .sort(sortForMobile);
+  const runCreatedNoActions = Boolean(runSummary && runSummary.generatedCount === 0 && runSummary.actionCount === 0);
+  const scheduleCompletedNoActions = Boolean(
+    !runSummary &&
+      scheduledRun?.status === "completed" &&
+      scheduledRun.createdCount === 0 &&
+      scheduledRun.duplicateSkippedCount === 0 &&
+      scheduledRun.suppressedSkippedCount === 0,
+  );
+  if (queueActions.length === 0 && (runCreatedNoActions || scheduleCompletedNoActions)) {
+    return noOpportunitiesMessage(dateKey);
+  }
+
   const topActions = queueActions.slice(0, MAX_TELEGRAM_FOLLOW_UP_TASKS);
   const counts = buildCounts(queueActions, dateKey);
 

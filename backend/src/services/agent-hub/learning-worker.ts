@@ -793,6 +793,23 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+type RunAgentLearningForSchedulesDependencies = {
+  listSchedules: typeof listAgentLearningSchedules;
+  runAiRevenueGeneration: typeof runScheduledAiRevenueGeneration;
+};
+
+const defaultScheduleRunnerDependencies: RunAgentLearningForSchedulesDependencies = {
+  listSchedules: listAgentLearningSchedules,
+  runAiRevenueGeneration: runScheduledAiRevenueGeneration,
+};
+
+export function shouldRunAiRevenueGenerationForScheduledJobs(jobTypes?: AgentLearningJobType[]) {
+  const requestedJobTypes = jobTypes?.length ? jobTypes : null;
+  return requestedJobTypes
+    ? requestedJobTypes.includes(AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB)
+    : true;
+}
+
 export async function runAgentLearningTick(params: {
   clinicIds?: string[];
   clinicCodesById?: Record<string, string>;
@@ -865,7 +882,7 @@ export async function runAgentLearningForSchedules(params?: {
   jobTypes?: AgentLearningJobType[];
   dryRun?: boolean;
   now?: Date;
-}) {
+}, dependencies: RunAgentLearningForSchedulesDependencies = defaultScheduleRunnerDependencies) {
   if (!env.AGENT_LEARNING_ENABLED) {
     return {
       enabled: false,
@@ -875,11 +892,9 @@ export async function runAgentLearningForSchedules(params?: {
   }
 
   const now = params?.now ?? new Date();
-  const schedules = await listAgentLearningSchedules({ clinicIds: params?.clinicIds });
+  const schedules = await dependencies.listSchedules({ clinicIds: params?.clinicIds });
   const requestedJobTypes = params?.jobTypes?.length ? params.jobTypes : null;
-  const shouldRunAiRevenueGeneration = requestedJobTypes
-    ? requestedJobTypes.includes(AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB)
-    : false;
+  const shouldRunAiRevenueGeneration = shouldRunAiRevenueGenerationForScheduledJobs(params?.jobTypes);
   const perScheduleResults = await mapWithConcurrency(schedules, env.AGENT_LEARNING_MAX_CLINIC_CONCURRENCY, async (schedule) => {
     const jobTypes = (requestedJobTypes ?? schedule.enabledJobTypes)
       .filter((jobType) => jobType !== AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB)
@@ -902,7 +917,7 @@ export async function runAgentLearningForSchedules(params?: {
     });
   });
   const aiRevenue = shouldRunAiRevenueGeneration
-    ? await runScheduledAiRevenueGeneration({
+    ? await dependencies.runAiRevenueGeneration({
         now,
         dryRun: params?.dryRun,
       })
