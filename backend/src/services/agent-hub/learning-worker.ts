@@ -25,7 +25,14 @@ import {
   type AgentLearningScheduleRecord,
 } from "./learning.repository.js";
 import { learnMemoriesFromFeedbackEvents } from "./memory/memory-writer.js";
-import { getInsightCardById, saveFactSnapshot, saveInsightCard, saveLatestFactSnapshot } from "./memory/memory.repository.js";
+import {
+  archiveExpiredMemories,
+  getInsightCardById,
+  listRecentRecommendationOutcomes,
+  saveFactSnapshot,
+  saveInsightCard,
+  saveLatestFactSnapshot,
+} from "./memory/memory.repository.js";
 import type { AgentDataStatus } from "./types.js";
 
 export const DEFAULT_JOB_TYPES: AgentLearningJobType[] = [
@@ -314,6 +321,15 @@ async function saveSnapshot(params: {
 }
 
 async function runFeedbackLearningJob(params: { clinicId: string }): Promise<AgentLearningJobOutcome> {
+  if (!env.AGENT_MEMORY_V2_ENABLED) {
+    return {
+      rowCount: 0,
+      counts: emptyCounts({ skipped: 1 }),
+      sourceWatermark: new Date().toISOString(),
+      dataStatus: "not_ready",
+    };
+  }
+
   const feedbackEvents = await listUnprocessedAgentFeedback({ clinicId: params.clinicId, limit: 100 });
   const learned = await learnMemoriesFromFeedbackEvents(feedbackEvents);
   await markAgentFeedbackProcessed({
@@ -394,6 +410,73 @@ async function runOwnerInsightCardsJob(params: {
     rowCount: result.rows.length,
     counts: emptyCounts({ scanned: result.rows.length, created, updated, skipped }),
     sourceWatermark: checkedAt,
+  };
+}
+
+async function runRecommendationOutcomeObserverJob(params: {
+  clinicId: string;
+  clinicCode: string;
+  bucket: string;
+  dateKey: string;
+  timezone: string;
+}): Promise<AgentLearningJobOutcome> {
+  const observedSince = new Date(Date.now() - 30 * 24 * 60 * 60_000);
+  const outcomes = await listRecentRecommendationOutcomes({
+    clinicId: params.clinicId,
+    since: observedSince,
+    limit: 500,
+  });
+  const stateCounts = outcomes.reduce<Record<string, number>>((counts, outcome) => {
+    counts[outcome.state] = (counts[outcome.state] ?? 0) + 1;
+    return counts;
+  }, {});
+  const observedConversions = outcomes.filter((outcome) => ["booked", "paid", "visited"].includes(outcome.state)).length;
+  const checkedAt = new Date().toISOString();
+
+  await saveSnapshot({
+    clinicId: params.clinicId,
+    clinicCode: params.clinicCode,
+    snapshotType: "recommendation_outcome_observer",
+    bucket: params.bucket,
+    source: "GT Agent recommendation outcome records",
+    checkedAt,
+    dataStatus: "ok",
+    dateRange: {
+      fromDate: observedSince.toISOString().slice(0, 10),
+      toDate: params.dateKey,
+      timezone: params.timezone,
+    },
+    summary: {
+      totalOutcomes: outcomes.length,
+      observedConversions,
+      stateCounts,
+      observationWindowDays: 30,
+      note: "Outcome records are operational signals. They are not model retraining or source-system revenue attribution.",
+    },
+  });
+
+  return {
+    rowCount: outcomes.length,
+    counts: emptyCounts({ scanned: outcomes.length, created: 1 }),
+    sourceWatermark: outcomes[0]?.updatedAt ?? checkedAt,
+  };
+}
+
+async function runMemoryMaintenanceJob(params: { clinicId: string }): Promise<AgentLearningJobOutcome> {
+  if (!env.AGENT_MEMORY_V2_ENABLED) {
+    return {
+      rowCount: 0,
+      counts: emptyCounts({ skipped: 1 }),
+      sourceWatermark: new Date().toISOString(),
+      dataStatus: "not_ready",
+    };
+  }
+
+  const archived = await archiveExpiredMemories({ clinicId: params.clinicId });
+  return {
+    rowCount: archived,
+    counts: emptyCounts({ scanned: archived, updated: archived }),
+    sourceWatermark: new Date().toISOString(),
   };
 }
 
@@ -612,8 +695,16 @@ async function runJob(params: {
         bucket: params.bucket,
       });
     case "recommendation_outcome_observer":
-    case "weekly_business_review":
+      return runRecommendationOutcomeObserverJob({
+        clinicId: params.clinicId,
+        clinicCode: params.clinicCode,
+        bucket: params.bucket,
+        dateKey: params.dateKey,
+        timezone: params.timezone,
+      });
     case "memory_maintenance":
+      return runMemoryMaintenanceJob({ clinicId: params.clinicId });
+    case "weekly_business_review":
       return {
         rowCount: 0,
         counts: emptyCounts({ skipped: 1 }),

@@ -9,6 +9,7 @@ import {
 import { isExportOnlyFollowUp } from "./export-intent.js";
 import { extractExplicitServiceSearchText, hasExplicitServiceSearchIntent, isService360Question } from "./service-query.js";
 import { hasExplicitPeriodCue, planAgentRequest } from "./intent-planner.js";
+import { planAgentRecovery } from "./recovery-planner.js";
 import { enhanceAgentResponseNarrative } from "./narrative.service.js";
 import { buildAgentResponse } from "./response-builder.js";
 import { newId, nowIso, sanitizeError } from "./safety.js";
@@ -511,7 +512,7 @@ export async function askAgentHub(params: {
     timelineStatus: plan.unsupportedReason ? "completed" : "started",
     timelineDetail: plan.unsupportedReason ?? plan.toolNames.join(", "),
   });
-  const toolResults = plan.unsupportedReason
+  const initialToolResults = plan.unsupportedReason
     ? []
     : await executeToolPlan({
         toolNames: plan.toolNames,
@@ -526,6 +527,29 @@ export async function askAgentHub(params: {
         },
         registry,
       });
+  const recoveryPlan = plan.unsupportedReason
+    ? null
+    : planAgentRecovery({
+        plan,
+        toolResults: initialToolResults,
+      });
+  const recoveryToolResults = recoveryPlan
+    ? await executeToolPlan({
+        toolNames: recoveryPlan.toolNames,
+        agentId: plan.resolvedAgent,
+        input: {
+          request,
+          clinic: params.clinic,
+          period: plan.period,
+          intent: plan.intent,
+          entityContext: request.entityContext,
+          requestContext: params.requestContext,
+        },
+        registry,
+        maxConcurrency: 1,
+      })
+    : [];
+  const toolResults = [...initialToolResults, ...recoveryToolResults];
   const toolLatencyMs = Date.now() - toolStartedAt;
   const cacheStatsAfter = getAnalyticsQueryCacheStats();
   const earlyToolTraceMetadata = buildToolTraceMetadata(toolResults, toolLatencyMs);
@@ -540,6 +564,17 @@ export async function askAgentHub(params: {
     timelineStatus: toolResults.some((result) => result.timedOut || result.errorCategory) ? "failed" : "completed",
     timelineDetail: `${toolResults.length} tools`,
   });
+  if (recoveryPlan) {
+    await recordTrace({
+      status: "generating_response",
+      currentStep: "Recovery tools completed",
+      recoveryToolNames: recoveryPlan.toolNames,
+      recoveryReason: recoveryPlan.reason,
+      timelineLabel: "Recovery tools completed",
+      timelineStatus: recoveryToolResults.some((result) => result.dataStatus === "unavailable") ? "failed" : "completed",
+      timelineDetail: recoveryPlan.reason,
+    });
+  }
 
   const deterministicResponse = buildAgentResponse({
     request,
@@ -616,6 +651,8 @@ export async function askAgentHub(params: {
       resolvedAgent: response.resolvedAgent,
       intent: response.intent,
       toolNames: plan.toolNames,
+      recoveryToolNames: recoveryPlan?.toolNames ?? [],
+      recoveryReason: recoveryPlan?.reason ?? null,
       sourceStatuses: response.sources.map((source) => source.dataStatus),
       dataStatus: response.dataStatus,
       fallbackUsed: narrativeResult.fallbackUsed,
@@ -670,6 +707,8 @@ export async function askAgentHub(params: {
         resolvedAgent: response.resolvedAgent,
         intent: response.intent,
         toolNames: plan.toolNames,
+        recoveryToolNames: recoveryPlan?.toolNames ?? [],
+        recoveryReason: recoveryPlan?.reason ?? null,
         sourceStatuses: response.sources.map((source) => source.dataStatus),
         dataStatus: response.dataStatus,
         fallbackUsed: narrativeResult.fallbackUsed,

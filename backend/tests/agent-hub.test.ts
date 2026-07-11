@@ -90,10 +90,13 @@ const {
   shouldIgnoreExplicitEntityContext,
 } = await import("../src/services/agent-hub/agent-hub.service.ts")
 const { evaluateMemoryCandidate, buildMemoryRecord } = await import("../src/services/agent-hub/memory/memory-policy.ts")
+const { selectRecommendationOutcomeState } = await import("../src/services/agent-hub/memory/memory.repository.ts")
 const { rankMemoriesForRequest } = await import("../src/services/agent-hub/memory/memory-retriever.ts")
 const { buildMemoryRecordsFromFeedbackEvents } = await import("../src/services/agent-hub/memory/memory-writer.ts")
 const { buildSessionSummaryFromTurn, isSessionSummaryFresh } = await import("../src/services/agent-hub/session.repository.ts")
 const { buildLearningBucket, isScheduleDueForJob } = await import("../src/services/agent-hub/learning-worker.ts")
+const { resolveAgentClinicContext } = await import("../src/services/agent-hub/clinic-context.service.ts")
+const { planAgentRecovery } = await import("../src/services/agent-hub/recovery-planner.ts")
 const { isAgentLearningSchedulerSecretValid } = await import("../src/routes/agent-learning.routes.ts")
 const { canAccessAgentStatus } = await import("../src/routes/ai.routes.ts")
 const {
@@ -6012,6 +6015,7 @@ test("executeToolPlan returns unavailable for one failing tool without failing t
 })
 
 test("executeToolPlan annotates timed out tools with metadata", async () => {
+  let aborted = false
   const registry = new Map([
     [
       "slow_tool",
@@ -6025,7 +6029,10 @@ test("executeToolPlan annotates timed out tools with metadata", async () => {
         live: false,
         maxRows: 10,
         timeoutMs: 10,
-        async execute(input: { period: { label: string } }) {
+        async execute(input: { period: { label: string }; executionAbortSignal?: AbortSignal }) {
+          input.executionAbortSignal?.addEventListener("abort", () => {
+            aborted = true
+          })
           await delay(80)
           return {
             toolName: "slow_tool",
@@ -6075,6 +6082,7 @@ test("executeToolPlan annotates timed out tools with metadata", async () => {
   assert.equal(results[0]?.timedOut, true)
   assert.equal(results[0]?.errorCategory, "timeout")
   assert.ok((results[0]?.latencyMs ?? 0) >= 8)
+  assert.equal(aborted, true)
 })
 
 test("executeToolPlan blocks non-read-only tools in read-only Agent Hub mode", async () => {
@@ -7354,4 +7362,114 @@ test("locked Agent Hub response is structured instead of a raw 403 chat failure"
   assert.equal(response.intent, "feature_locked")
   assert.equal(response.sources[0]?.tool, "gt_growth_ai_feature_gate")
   assert.match(response.assistantMessage, /Upgrade/)
+})
+
+test("Agent Hub resolves the clinic code on the server and rejects a client mismatch", async () => {
+  const user = {
+    uid: "uid-1",
+    email: "owner@example.com",
+    roles: [],
+    clinicIds: ["clinic-1"],
+  }
+  let lookupCalls = 0
+
+  await assert.rejects(
+    () =>
+      resolveAgentClinicContext(
+        { user, clinicId: "clinic-1", clinicCode: "spoofed-code" },
+        {
+          lookupClinicCode: async () => {
+            lookupCalls += 1
+            return "GT-001"
+          },
+        },
+      ),
+    /does not match the authorized clinic/i,
+  )
+  assert.equal(lookupCalls, 1)
+
+  const trusted = await resolveAgentClinicContext(
+    { user, clinicId: "clinic-1" },
+    { lookupClinicCode: async () => "GT-001" },
+  )
+  assert.deepEqual(trusted, { clinicId: "clinic-1", clinicCode: "GT-001" })
+})
+
+test("recovery planner performs at most one approved read-only fallback", () => {
+  const ownerRecovery = planAgentRecovery({
+    plan: {
+      requestedAgent: "business",
+      resolvedAgent: "business",
+      autoMode: false,
+      intent: "owner_daily_brief",
+      toolNames: ["get_owner_daily_brief"],
+      period: { fromDate: "2026-07-01", toDate: "2026-07-01", label: "today" },
+    },
+    toolResults: [
+      {
+        toolName: "get_owner_daily_brief",
+        sourceName: "snapshots",
+        checkedAt: "2026-07-01T00:00:00.000Z",
+        dataStatus: "not_ready",
+        live: false,
+      },
+    ],
+  })
+  assert.deepEqual(ownerRecovery?.toolNames, ["get_business_health_snapshot"])
+
+  const appointmentRecovery = planAgentRecovery({
+    plan: {
+      requestedAgent: "appointment",
+      resolvedAgent: "appointment",
+      autoMode: false,
+      intent: "appointment_summary",
+      toolNames: ["get_live_appointment_counts"],
+      period: { fromDate: "2026-07-01", toDate: "2026-07-01", label: "today" },
+    },
+    toolResults: [
+      {
+        toolName: "get_live_appointment_counts",
+        sourceName: "live appointments",
+        checkedAt: "2026-07-01T00:00:00.000Z",
+        dataStatus: "unavailable",
+        live: true,
+      },
+    ],
+  })
+  assert.deepEqual(appointmentRecovery?.toolNames, ["get_appointment_ledger"])
+
+  const noSecondRetry = planAgentRecovery({
+    plan: {
+      requestedAgent: "appointment",
+      resolvedAgent: "appointment",
+      autoMode: false,
+      intent: "appointment_summary",
+      toolNames: ["get_live_appointment_counts", "get_appointment_ledger"],
+      period: { fromDate: "2026-07-01", toDate: "2026-07-01", label: "today" },
+    },
+    toolResults: [
+      {
+        toolName: "get_live_appointment_counts",
+        sourceName: "live appointments",
+        checkedAt: "2026-07-01T00:00:00.000Z",
+        dataStatus: "unavailable",
+        live: true,
+      },
+      {
+        toolName: "get_appointment_ledger",
+        sourceName: "appointment ledger",
+        checkedAt: "2026-07-01T00:00:00.000Z",
+        dataStatus: "unavailable",
+        live: true,
+      },
+    ],
+  })
+  assert.equal(noSecondRetry, null)
+})
+
+test("recommendation outcomes cannot regress when a recommendation is shown again", () => {
+  assert.equal(selectRecommendationOutcomeState({ existing: "accepted", incoming: "shown" }), "accepted")
+  assert.equal(selectRecommendationOutcomeState({ existing: "contacted", incoming: "accepted" }), "contacted")
+  assert.equal(selectRecommendationOutcomeState({ existing: "contacted", incoming: "booked" }), "booked")
+  assert.equal(selectRecommendationOutcomeState({ existing: "booked", incoming: "shown" }), "booked")
 })

@@ -6,11 +6,17 @@ This phase adds the first production-safe Agent Hub V2 foundation behind feature
 
 ## Current Gaps Confirmed
 
-- `backend/src/services/agent-hub/session.repository.ts` stores only V1 session metadata and short-lived entity references.
-- `backend/src/services/agent-hub/feedback.repository.ts` stores feedback events but does not convert explicit preferences or corrections into scoped memories.
-- `backend/src/services/agent-hub/learning-worker.ts` has no-op `feedback_learning` and `owner_insight_cards` jobs.
-- `backend/src/services/agent-hub/learning-worker.ts` records row counts for several jobs but does not consistently persist source-backed V2 snapshots or schedule watermarks.
-- `.github/workflows/deploy-backend.yml` creates the Telegram Cloud Scheduler job but does not create the Agent Learning scheduler job.
+- Web requests resolve the clinic code from the trusted clinic record, rather than accepting the browser-supplied value.
+- Feedback is bound to a server-persisted response context, preventing a client from attaching feedback to a different recommendation, agent, or tool result.
+- Recommendation outcomes are monotonic: lower-confidence events cannot overwrite booked, paid, visited, or other terminal outcomes.
+- A bounded recovery pass can run one approved, read-only fallback tool when an owner or appointment summary lacks usable evidence. It cannot invent tools or retry indefinitely.
+- The outcome observer and memory-maintenance jobs perform bounded operational work. The weekly business review remains intentionally `not_ready` until its source-backed business-review contract is implemented.
+
+## Remaining Operational Work
+
+- Configure the scheduler in each deployed environment and alert on failed or skipped learning jobs.
+- Propagate the execution abort signal into every external data-source client so a timed-out tool can cancel the underlying query as well as stop waiting for it.
+- Measure recommendation quality with explicit outcome-attribution rules before using learned signals to change prompts, policies, or business actions.
 
 ## Phase Plan
 

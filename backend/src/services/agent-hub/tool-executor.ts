@@ -24,11 +24,16 @@ export function assertToolAllowed(params: {
 
 async function executeWithTimeout(tool: AgentToolDefinition, input: AgentToolInput) {
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  const abortController = new AbortController();
 
   return Promise.race([
-    tool.execute(input),
+    tool.execute({
+      ...input,
+      executionAbortSignal: abortController.signal,
+    }),
     new Promise<AgentToolResult>((resolve) => {
       timeoutHandle = setTimeout(() => {
+        abortController.abort(new Error(`${tool.name} timed out.`));
         resolve({
           toolName: tool.name,
           sourceName: tool.sourceName,

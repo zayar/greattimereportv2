@@ -39,6 +39,7 @@ import {
 } from "../services/agent-hub/agent-hub.service.js";
 import { resolveAgentClinicContext } from "../services/agent-hub/clinic-context.service.js";
 import { saveAgentFeedback } from "../services/agent-hub/feedback.repository.js";
+import { getAgentResponseContext } from "../services/agent-hub/session.repository.js";
 import {
   getAgentStatusReport,
   normalizeAgentStatusRange,
@@ -308,10 +309,11 @@ router.post(
       return;
     }
 
-    const clinic = resolveAgentClinicContext({
+    const clinic = await resolveAgentClinicContext({
       user: req.user,
       clinicId: params.clinicId,
       clinicCode: params.clinicCode,
+      authorizationHeader: req.headers.authorization,
     });
     const data = await askAgentHub({
       request: params,
@@ -427,9 +429,30 @@ router.post(
   asyncHandler(async (req, res) => {
     const params = agentFeedbackSchema.parse(req.body);
     await requireGtGrowthAi(params.clinicId);
+    const userId = req.user?.userId ?? req.user?.uid ?? "unknown";
+    const responseContext = await getAgentResponseContext({
+      clinicId: params.clinicId,
+      userId,
+      sessionId: params.sessionId,
+      responseId: params.responseId,
+    });
+
+    if (!responseContext) {
+      throw new HttpError(404, "This response is not available for feedback in the current session.");
+    }
+
+    if (params.recommendationId && !responseContext.recommendationIds.includes(params.recommendationId)) {
+      throw new HttpError(400, "The recommendation does not belong to this agent response.");
+    }
+
     const data = await saveAgentFeedback({
       ...params,
-      userId: req.user?.userId ?? req.user?.uid ?? "unknown",
+      requestId: responseContext.requestId,
+      resolvedAgent: responseContext.resolvedAgent,
+      intent: responseContext.intent,
+      sourceTools: responseContext.sourceTools,
+      usedMemoryIds: responseContext.usedMemoryIds,
+      userId,
       userEmail: req.user?.email,
     });
 

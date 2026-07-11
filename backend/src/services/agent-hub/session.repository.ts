@@ -8,6 +8,7 @@ import type { GreatTimeAgentChatRequest, GreatTimeAgentChatResponse, GreatTimeAg
 
 const SESSIONS_COLLECTION = "gtAgentSessionsV1";
 const ENTITY_REFS_COLLECTION = "gtAgentSessionEntityRefsV1";
+const RESPONSE_CONTEXTS_COLLECTION = "gtAgentResponseContextsV1";
 const ENTITY_TTL_MS = 2 * 60 * 60 * 1000;
 const SUMMARY_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -18,6 +19,25 @@ function sessionRef(sessionId: string) {
 function entityRef(sessionId: string) {
   return firestoreDb().collection(ENTITY_REFS_COLLECTION).doc(sessionId);
 }
+
+function responseContextRef(responseId: string) {
+  return firestoreDb().collection(RESPONSE_CONTEXTS_COLLECTION).doc(responseId);
+}
+
+export type AgentResponseContext = {
+  clinicId: string;
+  userId: string;
+  sessionId: string;
+  requestId: string;
+  responseId: string;
+  resolvedAgent: GreatTimeAgentChatResponse["resolvedAgent"];
+  intent: string;
+  recommendationIds: string[];
+  sourceTools: string[];
+  usedMemoryIds: string[];
+  createdAt: string;
+  expiresAt: string;
+};
 
 export async function saveAgentSessionTurn(params: {
   clinicId: string;
@@ -34,6 +54,22 @@ export async function saveAgentSessionTurn(params: {
     ...ref,
     sourceResponseId: ref.sourceResponseId ?? params.response.responseId,
   }));
+  const responseContext: AgentResponseContext = {
+    clinicId: params.clinicId,
+    userId: params.userId,
+    sessionId: params.sessionId,
+    requestId: params.response.requestId,
+    responseId: params.response.responseId,
+    resolvedAgent: params.response.resolvedAgent,
+    intent: params.response.intent,
+    recommendationIds: (params.response.recommendations ?? [])
+      .map((recommendation) => recommendation.recommendationId)
+      .filter((id): id is string => Boolean(id)),
+    sourceTools: [...new Set(params.response.sources.map((source) => source.tool))],
+    usedMemoryIds: params.usedMemories?.map((memory) => memory.id) ?? [],
+    createdAt,
+    expiresAt: new Date(Date.now() + SUMMARY_TTL_MS).toISOString(),
+  };
 
   await Promise.all([
     sessionRef(params.sessionId).set(
@@ -59,6 +95,7 @@ export async function saveAgentSessionTurn(params: {
       },
       { merge: true },
     ),
+    responseContextRef(params.response.responseId).set(responseContext, { merge: true }),
   ]);
 
   if (env.AGENT_MEMORY_V2_ENABLED) {
@@ -82,6 +119,32 @@ export async function saveAgentSessionTurn(params: {
       }),
     ).catch(() => undefined);
   }
+}
+
+function isAgentResponseContext(data: FirebaseFirestore.DocumentData | undefined): data is AgentResponseContext {
+  return Boolean(data?.clinicId && data?.userId && data?.sessionId && data?.requestId && data?.responseId && data?.createdAt);
+}
+
+export async function getAgentResponseContext(params: {
+  clinicId: string;
+  userId: string;
+  sessionId: string;
+  responseId: string;
+}) {
+  const snapshot = await responseContextRef(params.responseId).get();
+  const data = snapshot.data();
+
+  if (
+    !isAgentResponseContext(data) ||
+    data.clinicId !== params.clinicId ||
+    data.userId !== params.userId ||
+    data.sessionId !== params.sessionId ||
+    (data.expiresAt && new Date(data.expiresAt).getTime() <= Date.now())
+  ) {
+    return null;
+  }
+
+  return data;
 }
 
 export async function getAgentSessionEntityRefs(params: {

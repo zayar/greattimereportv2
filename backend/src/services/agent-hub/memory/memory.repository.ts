@@ -69,6 +69,51 @@ function latestFactSnapshotId(params: { clinicId: string; snapshotType: string }
   return stableFactSnapshotId("fact_latest", [params.clinicId, params.snapshotType]);
 }
 
+const TERMINAL_RECOMMENDATION_STATES = new Set<GtAgentRecommendationOutcome["state"]>([
+  "booked",
+  "paid",
+  "visited",
+  "dismissed",
+  "not_interested",
+  "failed",
+]);
+
+const RECOMMENDATION_STATE_RANK: Record<GtAgentRecommendationOutcome["state"], number> = {
+  shown: 0,
+  accepted: 1,
+  contacted: 2,
+  no_reply: 2,
+  remind_later: 2,
+  replied: 3,
+  booked: 4,
+  paid: 4,
+  visited: 4,
+  dismissed: 4,
+  not_interested: 4,
+  failed: 4,
+};
+
+export function selectRecommendationOutcomeState(params: {
+  existing?: GtAgentRecommendationOutcome["state"] | null;
+  incoming: GtAgentRecommendationOutcome["state"];
+}): GtAgentRecommendationOutcome["state"] {
+  if (!params.existing) {
+    return params.incoming;
+  }
+
+  if (TERMINAL_RECOMMENDATION_STATES.has(params.existing)) {
+    return params.existing;
+  }
+
+  if (params.incoming === "shown") {
+    return params.existing;
+  }
+
+  return RECOMMENDATION_STATE_RANK[params.incoming] >= RECOMMENDATION_STATE_RANK[params.existing]
+    ? params.incoming
+    : params.existing;
+}
+
 function isMemoryRecord(data: FirebaseFirestore.DocumentData | undefined): data is GtAgentMemoryRecord {
   return Boolean(data?.id && data?.clinicId && data?.memoryType && data?.content);
 }
@@ -276,6 +321,10 @@ export async function saveRecommendationOutcome(outcome: GtAgentRecommendationOu
       [...(existing?.sourceEvidenceRefs ?? []), ...(outcome.sourceEvidenceRefs ?? [])],
       50,
     );
+    const state = selectRecommendationOutcomeState({
+      existing: existing?.state,
+      incoming: outcome.state,
+    });
     const merged: GtAgentRecommendationOutcome = {
       ...outcome,
       recommendationType: outcome.recommendationType ?? existing?.recommendationType ?? null,
@@ -283,6 +332,7 @@ export async function saveRecommendationOutcome(outcome: GtAgentRecommendationOu
       targetCustomerKey: outcome.targetCustomerKey ?? existing?.targetCustomerKey ?? null,
       sourceTools,
       sourceEvidenceRefs,
+      state,
       shownAt: existing?.shownAt ?? outcome.shownAt ?? (outcome.state === "shown" ? outcome.updatedAt : null),
       acceptedAt: existing?.acceptedAt ?? outcome.acceptedAt ?? (outcome.state === "accepted" ? outcome.updatedAt : null),
       contactedAt: existing?.contactedAt ?? outcome.contactedAt ?? (outcome.state === "contacted" ? outcome.updatedAt : null),
@@ -575,4 +625,37 @@ export async function countActiveMemories(params: { clinicId: string }) {
   ]);
 
   return userSnapshot.size + clinicSnapshot.size;
+}
+
+export async function archiveExpiredMemories(params: {
+  clinicId: string;
+  now?: Date;
+  limit?: number;
+}) {
+  const now = params.now ?? new Date();
+  const limit = Math.min(Math.max(params.limit ?? 200, 1), 400);
+  const [userSnapshot, clinicSnapshot] = await Promise.all([
+    userPreferenceCollection().where("clinicId", "==", params.clinicId).limit(limit).get(),
+    clinicMemoryCollection().where("clinicId", "==", params.clinicId).limit(limit).get(),
+  ]);
+  const expired = [...userSnapshot.docs, ...clinicSnapshot.docs].filter((doc) => {
+    const memory = doc.data() as GtAgentMemoryRecord;
+    if (!isMemoryRecord(memory) || !memory.validUntil || ["archived", "superseded"].includes(memory.status)) {
+      return false;
+    }
+
+    return new Date(memory.validUntil).getTime() <= now.getTime();
+  });
+
+  if (expired.length === 0) {
+    return 0;
+  }
+
+  const db = firestoreDb();
+  const batch = db.batch();
+  expired.slice(0, 450).forEach((doc) => {
+    batch.set(doc.ref, { status: "archived", updatedAt: now.toISOString() }, { merge: true });
+  });
+  await batch.commit();
+  return Math.min(expired.length, 450);
 }

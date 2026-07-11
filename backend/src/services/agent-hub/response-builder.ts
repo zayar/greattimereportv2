@@ -519,10 +519,16 @@ export function buildAgentResponse(params: {
   const entityRefs = params.toolResults.flatMap((result) => result.entityRefs ?? []);
   const entityContext = entityRefs[0] ?? params.request.entityContext;
   const ownerDailyBriefResult = params.toolResults.find((result) => result.toolName === "get_owner_daily_brief");
+  const ownerBriefNeedsFallback =
+    ownerDailyBriefResult &&
+    ["not_ready", "unavailable"].includes(ownerDailyBriefResult.dataStatus) &&
+    params.toolResults.some((result) => result.toolName === "get_business_health_snapshot" && result.dataStatus !== "unavailable");
   const responseData = safeResponseDataFromToolResults(params.toolResults);
   const summary =
     isUnsupportedWriteRequest ? buildUnsupportedWriteSummary() :
-    (ownerDailyBriefResult ? buildOwnerDailyBriefMessage(ownerDailyBriefResult) : defaultSummary(params.plan, params.toolResults));
+    (ownerDailyBriefResult && !ownerBriefNeedsFallback
+      ? buildOwnerDailyBriefMessage(ownerDailyBriefResult)
+      : defaultSummary(params.plan, params.toolResults));
   const sources = params.toolResults.flatMap((result) =>
     result.sources?.length
       ? result.sources

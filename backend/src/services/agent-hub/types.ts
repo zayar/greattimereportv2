@@ -320,6 +320,8 @@ export type AgentToolInput = {
   intent: string;
   entityContext?: GreatTimeAgentEntityContext;
   requestContext: AgentRequestContext;
+  /** Abort signal for request-scoped source work. Tools should propagate it to their I/O clients where supported. */
+  executionAbortSignal?: AbortSignal;
 };
 
 export type AgentToolResult = {
@@ -410,6 +412,8 @@ export type AgentRunTrace = {
   memoryLatencyMs?: number;
   toolLatencyMs?: number;
   narrativeLatencyMs?: number;
+  recoveryToolNames?: string[];
+  recoveryReason?: string | null;
   persistenceLatencyMs?: number;
   cacheStats?: {
     bigQueryHits?: number;
