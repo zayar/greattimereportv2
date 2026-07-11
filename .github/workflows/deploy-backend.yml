@@ -328,6 +328,55 @@ jobs:
               --quiet
           fi
 
+      - name: Upsert AI Revenue Cloud Scheduler job
+        env:
+          GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+          CLOUD_RUN_REGION: ${{ vars.CLOUD_RUN_REGION }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          TELEGRAM_SCHEDULER_SECRET: ${{ secrets.TELEGRAM_SCHEDULER_SECRET }}
+          AI_REVENUE_SCHEDULER_JOB_NAME: ${{ vars.AI_REVENUE_SCHEDULER_JOB_NAME }}
+          AI_REVENUE_SCHEDULER_CRON: ${{ vars.AI_REVENUE_SCHEDULER_CRON }}
+          AI_REVENUE_SCHEDULER_TIME_ZONE: ${{ vars.AI_REVENUE_SCHEDULER_TIME_ZONE }}
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$TELEGRAM_SCHEDULER_SECRET" ]; then
+            echo "Skipping AI Revenue Cloud Scheduler job because APP_BASE_URL or TELEGRAM_SCHEDULER_SECRET is not configured."
+            exit 0
+          fi
+
+          JOB_NAME="${AI_REVENUE_SCHEDULER_JOB_NAME:-gt-v2report-ai-revenue-scheduler}"
+          JOB_SCHEDULE="${AI_REVENUE_SCHEDULER_CRON:-*/15 * * * *}"
+          JOB_TIME_ZONE="${AI_REVENUE_SCHEDULER_TIME_ZONE:-Asia/Yangon}"
+          SCHEDULER_URI="${APP_BASE_URL%/}/api/integrations/telegram/scheduler/ai-revenue/run"
+          echo "Using AI Revenue Cloud Scheduler schedule: ${JOB_SCHEDULE} (${JOB_TIME_ZONE})"
+
+          if gcloud scheduler jobs describe "$JOB_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --location "$CLOUD_RUN_REGION" >/dev/null 2>&1; then
+            gcloud scheduler jobs update http "$JOB_NAME" \
+              --project "$GCP_PROJECT_ID" \
+              --location "$CLOUD_RUN_REGION" \
+              --schedule="$JOB_SCHEDULE" \
+              --time-zone="$JOB_TIME_ZONE" \
+              --uri="$SCHEDULER_URI" \
+              --http-method=POST \
+              --update-headers="Content-Type=application/json,x-telegram-scheduler-secret=${TELEGRAM_SCHEDULER_SECRET}" \
+              --message-body='{}' \
+              --attempt-deadline=120s \
+              --quiet
+          else
+            gcloud scheduler jobs create http "$JOB_NAME" \
+              --project "$GCP_PROJECT_ID" \
+              --location "$CLOUD_RUN_REGION" \
+              --schedule="$JOB_SCHEDULE" \
+              --time-zone="$JOB_TIME_ZONE" \
+              --uri="$SCHEDULER_URI" \
+              --http-method=POST \
+              --headers="Content-Type=application/json,x-telegram-scheduler-secret=${TELEGRAM_SCHEDULER_SECRET}" \
+              --message-body='{}' \
+              --attempt-deadline=120s \
+              --quiet
+          fi
+
       - name: Upsert Agent Learning Cloud Scheduler job
         env:
           GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}

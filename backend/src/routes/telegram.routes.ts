@@ -6,6 +6,7 @@ import { verifyFirebaseToken } from "../middleware/auth.js";
 import { requireClinicAccess } from "../middleware/clinic-access.js";
 import { sendTrackedTelegramReport } from "../services/telegram/delivery.service.js";
 import { runTelegramSchedulerOnce } from "../services/telegram/runtime.service.js";
+import { runScheduledAiRevenueGeneration } from "../services/ai-revenue-agent/scheduled-generation.service.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { HttpError } from "../utils/http-error.js";
 import { getTelegramBotLinkMetadata, handleTelegramWebhook, type TelegramUpdate } from "../services/telegram/bot.service.js";
@@ -168,6 +169,21 @@ router.post(
     }
 
     const summary = await runTelegramSchedulerOnce();
+
+    res.json({ success: true, data: summary });
+  }),
+);
+
+router.post(
+  "/scheduler/ai-revenue/run",
+  asyncHandler(async (req, res) => {
+    const secret = req.header("x-telegram-scheduler-secret") ?? "";
+
+    if (!env.TELEGRAM_SCHEDULER_SECRET || !isSecretMatch(secret, env.TELEGRAM_SCHEDULER_SECRET)) {
+      throw new HttpError(401, "Invalid Telegram scheduler secret.");
+    }
+
+    const summary = await runScheduledAiRevenueGeneration();
 
     res.json({ success: true, data: summary });
   }),
