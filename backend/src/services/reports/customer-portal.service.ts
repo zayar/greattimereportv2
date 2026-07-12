@@ -1568,7 +1568,8 @@ export async function getCustomerPortalTopCustomersByRevenue(params: {
       LEFT JOIN VisitServiceRank visitService
         ON revenue.customerIdentityKey = visitService.customerIdentityKey
         AND visitService.rowNum = 1
-      LEFT JOIN PackageSummary packageSummary USING (customerIdentityKey)
+      LEFT JOIN PackageSummary packageSummary
+        ON revenue.customerIdentityKey = packageSummary.customerIdentityKey
       ORDER BY
         revenue.totalSpent DESC,
         visitCount DESC,

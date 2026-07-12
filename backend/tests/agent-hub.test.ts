@@ -2607,6 +2607,8 @@ test("top customers by revenue report uses paid sales data and sorts mapped rows
   assert.match(queryText, /FROM PaidServiceAgg/i)
   assert.match(queryText, /VisitServiceAgg AS/i)
   assert.match(queryText, /FROM VisitServiceAgg/i)
+  assert.match(queryText, /LEFT JOIN PackageSummary packageSummary\s+ON revenue\.customerIdentityKey = packageSummary\.customerIdentityKey/i)
+  assert.doesNotMatch(queryText, /LEFT JOIN PackageSummary packageSummary\s+USING\s*\(customerIdentityKey\)/i)
   assert.doesNotMatch(queryText, /ROW_NUMBER\(\) OVER \(\s*PARTITION BY customerIdentityKey\s*ORDER BY[\s\S]{0,240}NULLIF\(serviceName, ''\) ASC/i)
   assert.match(queryText, /ORDER BY\s+revenue\.totalSpent DESC,\s+visitCount DESC,\s+visits\.lastVisitDate DESC/is)
   assert.equal(queryParams.clinicCode, "ABC")
