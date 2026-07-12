@@ -11,7 +11,10 @@ import {
   hasAiRevenueActionsForDate,
   listAiRevenueActions,
 } from "../ai-revenue-agent/ai-revenue-agent.service.js";
-import { getScheduledAiRevenueClinicRun } from "../ai-revenue-agent/scheduled-generation.service.js";
+import {
+  getScheduledAiRevenueClinicRun,
+  runScheduledAiRevenueGeneration,
+} from "../ai-revenue-agent/scheduled-generation.service.js";
 import { getTelegramTargetByChatId } from "./storage.service.js";
 import type { TelegramChatType } from "./types.js";
 import {
@@ -774,11 +777,11 @@ export async function buildAiRevenueFollowUpTelegramReply(input: {
     });
   }
 
-  const runSummary = await getAiRevenueRunSummary({
+  let runSummary = await getAiRevenueRunSummary({
     clinicId: target.clinicId,
     dateKey,
   });
-  const scheduledRun = await getScheduledAiRevenueClinicRun({
+  let scheduledRun = await getScheduledAiRevenueClinicRun({
     clinicId: target.clinicId,
     dateKey,
   });
@@ -786,13 +789,43 @@ export async function buildAiRevenueFollowUpTelegramReply(input: {
     return scheduleFailedMessage(dateKey);
   }
 
-  const hasRunData =
+  let hasRunData =
     Boolean(runSummary) ||
     scheduledRun?.status === "completed" ||
     (await hasLegacyRunEvidenceFromSameDayActions({
       clinicId: target.clinicId,
       dateKey,
     }));
+
+  if (!hasRunData) {
+    try {
+      await runScheduledAiRevenueGeneration({
+        now: new Date(),
+        clinicIds: [target.clinicId],
+        clinicCodesById: { [target.clinicId]: target.clinicCode },
+      });
+    } catch (error) {
+      console.warn("[telegram] AI Revenue catch-up generation failed", {
+        clinicId: target.clinicId,
+        dateKey,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+    runSummary = await getAiRevenueRunSummary({
+      clinicId: target.clinicId,
+      dateKey,
+    });
+    scheduledRun = await getScheduledAiRevenueClinicRun({
+      clinicId: target.clinicId,
+      dateKey,
+    });
+    hasRunData = Boolean(runSummary) || scheduledRun?.status === "completed";
+  }
+
+  if (scheduledRun?.status === "failed") {
+    return scheduleFailedMessage(dateKey);
+  }
+
   if (!hasRunData) {
     return scheduleNotRunMessage(dateKey);
   }

@@ -142,7 +142,9 @@ Recommended Telegram scheduler setup:
 - Keep `TELEGRAM_SCHEDULER_ENABLED=true`. The backend still runs a local catch-up tick, but Cloud Scheduler is the reliable production trigger when Cloud Run scales down or CPU is throttled between requests.
 - Keep `TELEGRAM_WEBHOOK_WATCHDOG_ENABLED=true` unless intentionally disabled. The watchdog repairs the Telegram webhook if another process clears or replaces it.
 
-The backend deploy workflow also creates the AI Revenue scheduler using the Telegram scheduler secret. It calls `/api/integrations/telegram/scheduler/ai-revenue/run` independently of `AGENT_LEARNING_ENABLED`, so AI Revenue opportunity generation continues to run even when Agent Hub learning is disabled. The job uses a catch-up rule: a delayed tick after the configured clinic time still runs once for that clinic/date.
+The backend deploy workflow also creates the AI Revenue scheduler using the Telegram scheduler secret. It calls `/api/integrations/telegram/scheduler/ai-revenue/run` independently of `AGENT_LEARNING_ENABLED`, so AI Revenue opportunity generation continues to run even when Agent Hub learning is disabled. Every clinic with `aiRevenueAgentEnabled=true` is included; the legacy `autoGenerateTodayOpportunities` flag no longer blocks the daily run. The job uses a catch-up rule: a delayed tick after the configured clinic time still runs once for that clinic/date.
+
+To run a manual catch-up for all AI-enabled businesses, use the Deploy Backend workflow's `run_ai_revenue_now` workflow-dispatch input. The workflow deploys the current backend first, then calls the same protected scheduler endpoint once.
 
 Recommended service account roles for `GCP_SERVICE_ACCOUNT_KEY`:
 - Cloud Run Admin

@@ -5,6 +5,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      run_ai_revenue_now:
+        description: "Run AI Revenue generation for all AI-enabled businesses after deployment"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: deploy-backend-${{ github.ref }}
@@ -376,6 +382,24 @@ jobs:
               --attempt-deadline=120s \
               --quiet
           fi
+
+      - name: Run AI Revenue scheduler now
+        if: github.event_name == 'workflow_dispatch' && inputs.run_ai_revenue_now == true
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          TELEGRAM_SCHEDULER_SECRET: ${{ secrets.TELEGRAM_SCHEDULER_SECRET }}
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$TELEGRAM_SCHEDULER_SECRET" ]; then
+            echo "Cannot run AI Revenue now because APP_BASE_URL or TELEGRAM_SCHEDULER_SECRET is not configured."
+            exit 1
+          fi
+
+          curl --fail --silent --show-error --max-time 600 \
+            --request POST \
+            --url "${APP_BASE_URL%/}/api/integrations/telegram/scheduler/ai-revenue/run" \
+            --header "Content-Type: application/json" \
+            --header "x-telegram-scheduler-secret: ${TELEGRAM_SCHEDULER_SECRET}" \
+            --data '{}'
 
       - name: Upsert Agent Learning Cloud Scheduler job
         env:

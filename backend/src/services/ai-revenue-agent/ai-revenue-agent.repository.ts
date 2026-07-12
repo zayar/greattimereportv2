@@ -1951,7 +1951,7 @@ export function buildDefaultSettings(clinicId: string): AiRevenueSettings {
     clinicCode: null,
     clinicName: null,
     aiRevenueAgentEnabled: false,
-    autoGenerateTodayOpportunities: false,
+    autoGenerateTodayOpportunities: true,
     timezone: "Asia/Yangon",
     dailyGenerateTime: "06:00",
     runOrder: 0,
@@ -2022,13 +2022,12 @@ export async function listAutoGenerateEnabledSettings(params?: { limit?: number 
   const limit = Math.min(Math.max(params?.limit ?? 500, 1), 1_000);
   const snapshot = await settingsCollection()
     .where("aiRevenueAgentEnabled", "==", true)
-    .where("autoGenerateTodayOpportunities", "==", true)
     .limit(limit)
     .get();
 
   return snapshot.docs
     .map((doc) => normalizeSettings(doc.id, doc.data()))
-    .filter((settings) => settings.aiRevenueAgentEnabled && settings.autoGenerateTodayOpportunities)
+    .filter((settings) => settings.aiRevenueAgentEnabled)
     .sort(
       (left, right) =>
         left.runOrder - right.runOrder ||
