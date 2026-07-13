@@ -69,6 +69,8 @@ const CUSTOMER_SUPPRESSIONS_COLLECTION = "gt_ai_revenue_customer_suppressions";
 const BATCH_RUNS_COLLECTION = "gt_ai_revenue_batch_runs";
 const CLINIC_RUNS_COLLECTION = "gt_ai_revenue_clinic_runs";
 const AI_REVENUE_RUNS_COLLECTION = "gt_ai_revenue_runs";
+const AI_REVENUE_CLINIC_LOCK_LEASE_MS = 20 * 60_000;
+const AI_REVENUE_CLINIC_STALE_RUN_MS = 20 * 60_000;
 const RESOLVED_STATUSES = new Set<AiRevenueActionStatus>(["closed", "skipped", "not_interested"]);
 
 export type AiRevenueScheduledRunStatus = "running" | "completed" | "skipped" | "failed";
@@ -2263,19 +2265,33 @@ export async function acquireAiRevenueClinicRunLock(params: {
   const ref = clinicRunCollection().doc(id);
   const now = Date.now();
   const startedAt = nowIso();
-  const lockExpiresAt = new Date(now + (params.leaseMs ?? 45 * 60_000)).toISOString();
+  const leaseMs = params.leaseMs ?? AI_REVENUE_CLINIC_LOCK_LEASE_MS;
+  const lockExpiresAt = new Date(now + leaseMs).toISOString();
 
   return db.runTransaction(async (transaction) => {
     const snapshot = await transaction.get(ref);
     const record = normalizeClinicRunRecord(snapshot.id, snapshot.data());
     const existingExpiresAt = record?.lockExpiresAt ? new Date(record.lockExpiresAt).getTime() : 0;
+    const existingStartedAt = record?.startedAt ? new Date(record.startedAt).getTime() : 0;
+    const staleRunningRecord =
+      record?.status === "running" &&
+      existingStartedAt > 0 &&
+      now - existingStartedAt >= AI_REVENUE_CLINIC_STALE_RUN_MS;
 
     if (record?.status === "completed") {
       return { acquired: false, reason: "completed" as const, record };
     }
 
-    if (record?.status === "running" && existingExpiresAt > now) {
+    if (record?.status === "running" && existingExpiresAt > now && !staleRunningRecord) {
       return { acquired: false, reason: "lock_active" as const, record };
+    }
+
+    if (staleRunningRecord) {
+      console.warn("[ai-revenue] recovering stale clinic run lock", {
+        clinicId: params.clinicId,
+        dateKey: params.dateKey,
+        startedAt: record?.startedAt,
+      });
     }
 
     const nextRecord = {
