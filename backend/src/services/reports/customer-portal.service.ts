@@ -664,7 +664,7 @@ export async function getCustomerPortalAgentVisitSnapshot(params: DetailBasePara
 }) {
   const visitScope = `
     ${buildCustomerIdentityCondition("CustomerPhoneNumber", "CustomerName", "CustomerID")}
-    AND DATE(CheckInTime) BETWEEN DATE(@yearStart) AND DATE(@toDate)
+    AND DATE(CheckInTime) <= DATE(@toDate)
   `;
   const yearStart = `${params.year}-01-01`;
   const queryParams = {
@@ -702,9 +702,14 @@ export async function getCustomerPortalAgentVisitSnapshot(params: DetailBasePara
       WITH
         ${buildDistinctVisitsCte(visitScope)}
         ,
-        YearVisits AS (
+        AllCustomerVisits AS (
           SELECT *
           FROM DistinctVisits
+        ),
+        YearVisits AS (
+          SELECT *
+          FROM AllCustomerVisits
+          WHERE DATE(checkInTime) BETWEEN DATE(@yearStart) AND DATE(@toDate)
         ),
         VisitIntervals AS (
           SELECT
@@ -778,16 +783,16 @@ export async function getCustomerPortalAgentVisitSnapshot(params: DetailBasePara
           LIMIT 8
         )
       SELECT
-        COALESCE((SELECT ANY_VALUE(customerName) FROM YearVisits), @customerName) AS customerName,
-        COALESCE((SELECT ANY_VALUE(phoneNumber) FROM YearVisits), @customerPhone) AS phoneNumber,
-        COALESCE((SELECT MAX(memberId) FROM YearVisits), @memberId) AS memberId,
+        COALESCE((SELECT ANY_VALUE(customerName) FROM AllCustomerVisits), @customerName) AS customerName,
+        COALESCE((SELECT ANY_VALUE(phoneNumber) FROM AllCustomerVisits), @customerPhone) AS phoneNumber,
+        COALESCE((SELECT MAX(memberId) FROM AllCustomerVisits), @memberId) AS memberId,
         FORMAT_DATE('%Y-%m-%d', (SELECT MIN(DATE(checkInTime)) FROM YearVisits)) AS firstVisitThisYear,
-        FORMAT_DATE('%Y-%m-%d', (SELECT MAX(DATE(COALESCE(checkOutTime, checkInTime))) FROM YearVisits)) AS lastVisitDate,
-        (SELECT serviceName FROM YearVisits ORDER BY COALESCE(checkOutTime, checkInTime) DESC LIMIT 1) AS lastService,
-        (SELECT practitionerName FROM YearVisits ORDER BY COALESCE(checkOutTime, checkInTime) DESC LIMIT 1) AS lastTherapist,
+        FORMAT_DATE('%Y-%m-%d', (SELECT MAX(DATE(COALESCE(checkOutTime, checkInTime))) FROM AllCustomerVisits)) AS lastVisitDate,
+        (SELECT serviceName FROM AllCustomerVisits ORDER BY COALESCE(checkOutTime, checkInTime) DESC LIMIT 1) AS lastService,
+        (SELECT practitionerName FROM AllCustomerVisits ORDER BY COALESCE(checkOutTime, checkInTime) DESC LIMIT 1) AS lastTherapist,
         CASE
-          WHEN (SELECT MAX(DATE(COALESCE(checkOutTime, checkInTime))) FROM YearVisits) IS NULL THEN NULL
-          ELSE DATE_DIFF(DATE(@toDate), (SELECT MAX(DATE(COALESCE(checkOutTime, checkInTime))) FROM YearVisits), DAY)
+          WHEN (SELECT MAX(DATE(COALESCE(checkOutTime, checkInTime))) FROM AllCustomerVisits) IS NULL THEN NULL
+          ELSE DATE_DIFF(DATE(@toDate), (SELECT MAX(DATE(COALESCE(checkOutTime, checkInTime))) FROM AllCustomerVisits), DAY)
         END AS daysSinceLastVisit,
         (SELECT COUNT(*) FROM YearVisits) AS visitsThisYear,
         (SELECT serviceName FROM PreferredService) AS preferredService,
@@ -804,7 +809,7 @@ export async function getCustomerPortalAgentVisitSnapshot(params: DetailBasePara
             practitionerName AS therapistName,
             serviceCategory,
             'Completed' AS status
-          FROM YearVisits
+          FROM AllCustomerVisits
           ORDER BY checkInTime DESC
           LIMIT 8
         )) AS recentCompletedJson,

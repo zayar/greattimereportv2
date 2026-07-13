@@ -50,6 +50,15 @@ export function extractExplicitCustomerSearchText(message: string) {
     return purchaseSubject;
   }
 
+  const trailingDetailMatch = normalized.match(
+    /^([A-Za-z\u1000-\u109F][A-Za-z\u1000-\u109F\s().-]{1,80}?)\s+(?:customer\s+details?|details?|information|info|profile|overview)[?.!]?$/i,
+  );
+  const trailingDetailSearch = cleanupSearchText(trailingDetailMatch?.[1]);
+
+  if (trailingDetailSearch && looksLikeNamedCustomer(trailingDetailSearch)) {
+    return trailingDetailSearch;
+  }
+
   const directMatch = normalized.match(
     /^(?:can\s+you\s+)?(?:find|search|look\s+up|show(?:\s+me)?(?:\s+details?\s+(?:about|for))?|tell\s+me\s+about|details?\s+(?:about|for)|what\s+about|who\s+is|what\s+do\s+we\s+know\s+about)\s+(.+)$/i,
   );
@@ -95,7 +104,8 @@ export function isCustomer360Question(message: string) {
     return false;
   }
 
-  return /tell\s+me\s+about|show|details?\s+(?:about|for)|what\s+about|who\s+is|what\s+do\s+we\s+know\s+about/i.test(
-    message,
+  return (
+    /tell\s+me\s+about|show|details?\s+(?:about|for)|what\s+about|who\s+is|what\s+do\s+we\s+know\s+about/i.test(message) ||
+    /(?:customer\s+details?|details?|information|info|profile|overview)[?.!]?$/i.test(message.trim())
   );
 }

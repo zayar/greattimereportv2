@@ -1,4 +1,5 @@
 import type { GreatTimeAgentEntityContext } from "./types.js";
+import { extractExplicitCustomerSearchText } from "./customer-query.js";
 
 const ORDINALS: Array<[RegExp, number]> = [
   [/\bfirst\b|ပထမ/i, 1],
@@ -29,6 +30,15 @@ export function dedupeEntityRefs(refs: GreatTimeAgentEntityContext[]) {
   return deduped.map((ref, index) => ({ ...ref, rank: ref.rank ?? index + 1 }));
 }
 
+function normalizeEntityName(value: string | null | undefined) {
+  return (value ?? "")
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/\s*\([^)]{1,12}\)\s*$/u, "")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
 export function resolveEntityReference(params: {
   message: string;
   explicit?: GreatTimeAgentEntityContext;
@@ -45,6 +55,19 @@ export function resolveEntityReference(params: {
 
   if (ordinal) {
     return refs.find((ref) => ref.rank === ordinal) ?? refs[ordinal - 1] ?? null;
+  }
+
+  const explicitCustomerName = normalizeEntityName(extractExplicitCustomerSearchText(params.message));
+  if (explicitCustomerName) {
+    const namedCustomerMatches = refs.filter(
+      (ref) =>
+        ref.entityType === "customer" &&
+        [ref.customerName, ref.displayName].some((name) => normalizeEntityName(name) === explicitCustomerName),
+    );
+
+    if (namedCustomerMatches.length === 1) {
+      return namedCustomerMatches[0];
+    }
   }
 
   if (ENTITY_REFERENCE.test(params.message) && refs.length === 1) {

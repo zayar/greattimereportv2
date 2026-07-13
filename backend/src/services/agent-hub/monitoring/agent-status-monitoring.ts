@@ -80,6 +80,8 @@ export type AgentStatusReport = {
     timeoutCount: number;
     fallbackCount: number;
     narrativeFallbackCount: number;
+    semanticPlannerUsedCount: number;
+    semanticPlannerFallbackCount: number;
     toolFailureCount: number;
     wrongDataFeedbackCount: number;
     alertCount: number;
@@ -90,6 +92,16 @@ export type AgentStatusReport = {
     timeoutCount: number;
     fallbackCount: number;
     narrativeFallbackCount: number;
+    semanticPlanner: {
+      attemptedCount: number;
+      usedCount: number;
+      fallbackCount: number;
+      successRate: number;
+      averageLatencyMs: number;
+      promptTokens: number;
+      completionTokens: number;
+      estimatedCostUsd: number;
+    };
     toolFailureCount: number;
     toolFailureRate: number;
     slowestTools: AgentStatusSlowTool[];
@@ -589,6 +601,17 @@ export function buildAgentStatusReport(params: {
   const timeoutCount = params.traces.reduce((sum, trace) => sum + traceTimedOutToolCount(trace), 0);
   const fallbackCount = params.traces.filter(isFallbackTrace).length;
   const narrativeFallbackCount = params.traces.filter(isNarrativeFallbackTrace).length;
+  const semanticPlannerAttempted = params.traces.filter((trace) => trace.semanticPlannerAttempted);
+  const semanticPlannerUsedCount = params.traces.filter((trace) => trace.semanticPlannerUsed).length;
+  const semanticPlannerFallbackCount = semanticPlannerAttempted.filter(
+    (trace) => trace.semanticPlannerFallbackUsed,
+  ).length;
+  const semanticPlannerLatencies = semanticPlannerAttempted
+    .map((trace) => trace.semanticPlannerLatencyMs)
+    .filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+  const semanticPromptTokens = params.traces.reduce((sum, trace) => sum + (trace.promptTokens ?? 0), 0);
+  const semanticCompletionTokens = params.traces.reduce((sum, trace) => sum + (trace.completionTokens ?? 0), 0);
+  const semanticEstimatedCostUsd = params.traces.reduce((sum, trace) => sum + (trace.estimatedCostUsd ?? 0), 0);
   const toolFailureCount = params.traces.reduce((sum, trace) => sum + traceUnavailableToolCount(trace), 0);
   const wrongDataFeedbackCount = params.feedbackEvents.filter((event) => event.feedbackType === "wrong_data").length;
   const learning = buildLearningStatus(params.learningRuns, now);
@@ -628,6 +651,8 @@ export function buildAgentStatusReport(params: {
       timeoutCount,
       fallbackCount,
       narrativeFallbackCount,
+      semanticPlannerUsedCount,
+      semanticPlannerFallbackCount,
       toolFailureCount,
       wrongDataFeedbackCount,
       alertCount: alerts.length,
@@ -638,6 +663,18 @@ export function buildAgentStatusReport(params: {
       timeoutCount,
       fallbackCount,
       narrativeFallbackCount,
+      semanticPlanner: {
+        attemptedCount: semanticPlannerAttempted.length,
+        usedCount: semanticPlannerUsedCount,
+        fallbackCount: semanticPlannerFallbackCount,
+        successRate: semanticPlannerAttempted.length
+          ? semanticPlannerUsedCount / semanticPlannerAttempted.length
+          : 0,
+        averageLatencyMs: round(average(semanticPlannerLatencies)),
+        promptTokens: semanticPromptTokens,
+        completionTokens: semanticCompletionTokens,
+        estimatedCostUsd: Number(semanticEstimatedCostUsd.toFixed(6)),
+      },
       toolFailureCount,
       toolFailureRate: totalAgentQuestions ? toolFailureCount / totalAgentQuestions : 0,
       slowestTools: buildSlowestTools(params.traces),

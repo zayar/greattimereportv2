@@ -48,6 +48,15 @@ function formatDateTime(value: string | null | undefined) {
   }).format(date);
 }
 
+function formatUsd(value: number | null | undefined) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 6,
+  }).format(value ?? 0);
+}
+
 function getStatusBadgeClass(status: ClinicFeatureAccessStatus | null | undefined) {
   if (!status) {
     return "ai-control-panel__badge ai-control-panel__badge--idle";
@@ -334,6 +343,14 @@ export function AiControlPanelPage() {
             <div className="ai-control-panel__health-card">
               <strong>Wrong-data feedback</strong>
               <span>{formatNumber(agentStatus?.feedback.wrongDataFeedbackCount)}</span>
+            </div>
+            <div className="ai-control-panel__health-card">
+              <strong>Semantic routing success</strong>
+              <span>{formatPercent(agentStatus?.performance.semanticPlanner.successRate)}</span>
+            </div>
+            <div className="ai-control-panel__health-card">
+              <strong>Semantic planner cost</strong>
+              <span>{formatUsd(agentStatus?.performance.semanticPlanner.estimatedCostUsd)}</span>
             </div>
           </div>
         )}

@@ -11,6 +11,7 @@ import { extractExplicitServiceSearchText, hasExplicitServiceSearchIntent, isSer
 import { hasExplicitPeriodCue, planAgentRequest } from "./intent-planner.js";
 import { planAgentRecovery } from "./recovery-planner.js";
 import { enhanceAgentResponseNarrative } from "./narrative.service.js";
+import { planSemanticAgentRequest } from "./semantic-planner.js";
 import { buildAgentResponse } from "./response-builder.js";
 import { newId, nowIso, sanitizeError } from "./safety.js";
 import { applyMemoryPreferencesToResponse } from "./memory/memory-writer.js";
@@ -458,7 +459,7 @@ export async function askAgentHub(params: {
       summaryRange?.toDate &&
       !hasExplicitPeriodCue(params.request.message),
   );
-  const request = {
+  let request = {
     ...withFollowUpAgentInference(params.request, resolvedRef),
     fromDate: shouldUseSummaryRange ? summaryRange?.fromDate : params.request.fromDate,
     toDate: shouldUseSummaryRange ? summaryRange?.toDate : params.request.toDate,
@@ -466,11 +467,46 @@ export async function askAgentHub(params: {
     entityContext: shouldIgnoreContext ? undefined : (params.request.entityContext ?? resolvedRef ?? undefined),
   };
   const initialPlan = planAgentRequest({ request });
+  const semanticPlanningResult = await planSemanticAgentRequest({
+    request,
+    deterministicPlan: initialPlan,
+    session: {
+      activeTopic: session?.summaryV2?.activeTopic ?? null,
+      lastIntent: session?.lastIntent ?? session?.summaryV2?.lastIntent ?? null,
+      entityRefs: sessionRefs.map((ref) => ({
+        entityType: ref.entityType,
+        displayName: ref.displayName,
+        rank: ref.rank,
+      })),
+    },
+    registry,
+  });
+  if (!request.entityContext && semanticPlanningResult.entityContext) {
+    request = {
+      ...request,
+      entityContext: semanticPlanningResult.entityContext,
+    };
+  }
   const plan = forceFollowUpPlan({
-    plan: initialPlan,
+    plan: semanticPlanningResult.plan,
     entityContext: request.entityContext,
     request,
   });
+  const semanticTraceMetadata = {
+    semanticPlannerAttempted: semanticPlanningResult.metadata.attempted,
+    semanticPlannerUsed: semanticPlanningResult.metadata.used,
+    semanticPlannerFallbackUsed: semanticPlanningResult.metadata.fallbackUsed,
+    semanticPlannerFallbackReason: semanticPlanningResult.metadata.fallbackReason ?? null,
+    semanticPlannerModel: semanticPlanningResult.metadata.model ?? null,
+    semanticPlannerLanguage: semanticPlanningResult.metadata.language ?? null,
+    semanticPlannerConfidence: semanticPlanningResult.metadata.confidence ?? null,
+    semanticPlannerLatencyMs: semanticPlanningResult.metadata.latencyMs,
+    provider: semanticPlanningResult.metadata.provider ?? null,
+    model: semanticPlanningResult.metadata.model ?? null,
+    promptTokens: semanticPlanningResult.metadata.promptTokens ?? null,
+    completionTokens: semanticPlanningResult.metadata.completionTokens ?? null,
+    estimatedCostUsd: semanticPlanningResult.metadata.estimatedCostUsd ?? null,
+  };
   const planningLatencyMs = Date.now() - planningStartedAt;
   await recordTrace({
     status: "planning",
@@ -480,6 +516,7 @@ export async function askAgentHub(params: {
     intent: plan.intent,
     toolNames: plan.toolNames,
     planningLatencyMs,
+    ...semanticTraceMetadata,
     timelineLabel: "Intent planned",
     timelineStatus: "completed",
     timelineDetail: `${plan.resolvedAgent} · ${plan.intent}`,
@@ -663,6 +700,7 @@ export async function askAgentHub(params: {
       usedMemoryIds: memoryContext.usedMemoryIds,
       totalLatencyMs: Date.now() - totalStartedAt,
       planningLatencyMs,
+      ...semanticTraceMetadata,
       memoryLatencyMs,
       toolLatencyMs,
       narrativeLatencyMs,
@@ -719,6 +757,7 @@ export async function askAgentHub(params: {
         usedMemoryIds: memoryContext.usedMemoryIds,
         totalLatencyMs: Date.now() - totalStartedAt,
         planningLatencyMs,
+        ...semanticTraceMetadata,
         memoryLatencyMs,
         toolLatencyMs,
         narrativeLatencyMs,

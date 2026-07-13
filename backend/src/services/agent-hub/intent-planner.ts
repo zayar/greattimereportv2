@@ -404,6 +404,38 @@ export function hasExplicitPeriodCue(message: string) {
   );
 }
 
+export function applyIntentPeriodDefaults(params: {
+  resolvedAgent: GreatTimeAgentId;
+  intent: string;
+  request: GreatTimeAgentChatRequest;
+  period: AgentPeriod;
+  now?: Date;
+}) {
+  if (params.resolvedAgent === "customer_relationship" && params.intent === "birthday_customers") {
+    return extractBirthdayCustomerPeriod({
+      message: params.request.message,
+      fromDate: params.request.fromDate,
+      toDate: params.request.toDate,
+      timezone: params.request.timezone,
+      now: params.now,
+    });
+  }
+
+  if (
+    params.resolvedAgent === "customer_relationship" &&
+    ["unactivated_purchase", "package_bought_never_came", "package_bought_never_used", "package_bought_not_used"].includes(
+      params.intent,
+    ) &&
+    !params.request.fromDate &&
+    !params.request.toDate &&
+    !hasExplicitPeriodCue(params.request.message)
+  ) {
+    return buildPeriod(addDays(params.period.toDate, -364), params.period.toDate, "last 365 days");
+  }
+
+  return params.period;
+}
+
 function detectFinanceIntent(message: string) {
   if (/\b(?:compare|comparison|versus|vs\.?|difference|different)\b|ယှဉ်/i.test(message)) {
     return "sales_period_comparison";
@@ -624,7 +656,7 @@ function isTodayPeriod(period?: AgentPeriod) {
   return Boolean(period && period.label === "today" && period.fromDate === period.toDate);
 }
 
-function toolsForIntent(agentId: GreatTimeAgentId, intent: string, period?: AgentPeriod) {
+export function toolsForIntent(agentId: GreatTimeAgentId, intent: string, period?: AgentPeriod) {
   if (intent === "unsupported_write_request") {
     return [];
   }
@@ -779,25 +811,13 @@ export function planAgentRequest(params: {
             ? detectBusinessIntent(params.request.message)
             : detectAppointmentIntent(params.request.message);
 
-  if (resolvedAgent === "customer_relationship" && intent === "birthday_customers") {
-    period = extractBirthdayCustomerPeriod({
-      message: params.request.message,
-      fromDate: params.request.fromDate,
-      toDate: params.request.toDate,
-      timezone: params.request.timezone,
-      now: params.now,
-    });
-  }
-
-  if (
-    resolvedAgent === "customer_relationship" &&
-    ["unactivated_purchase", "package_bought_never_came", "package_bought_never_used", "package_bought_not_used"].includes(intent) &&
-    !params.request.fromDate &&
-    !params.request.toDate &&
-    !hasExplicitPeriodCue(params.request.message)
-  ) {
-    period = buildPeriod(addDays(period.toDate, -364), period.toDate, "last 365 days");
-  }
+  period = applyIntentPeriodDefaults({
+    resolvedAgent,
+    intent,
+    request: params.request,
+    period,
+    now: params.now,
+  });
 
   return {
     requestedAgent,

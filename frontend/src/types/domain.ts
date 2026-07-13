@@ -1615,6 +1615,8 @@ export interface GreatTimeAgentStatusReport {
     timeoutCount: number;
     fallbackCount: number;
     narrativeFallbackCount: number;
+    semanticPlannerUsedCount: number;
+    semanticPlannerFallbackCount: number;
     toolFailureCount: number;
     wrongDataFeedbackCount: number;
     alertCount: number;
@@ -1625,6 +1627,16 @@ export interface GreatTimeAgentStatusReport {
     timeoutCount: number;
     fallbackCount: number;
     narrativeFallbackCount: number;
+    semanticPlanner: {
+      attemptedCount: number;
+      usedCount: number;
+      fallbackCount: number;
+      successRate: number;
+      averageLatencyMs: number;
+      promptTokens: number;
+      completionTokens: number;
+      estimatedCostUsd: number;
+    };
     toolFailureCount: number;
     toolFailureRate: number;
     slowestTools: Array<{

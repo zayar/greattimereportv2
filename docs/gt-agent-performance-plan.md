@@ -42,6 +42,10 @@ The most important snapshot jobs are:
 - `AGENT_NARRATIVE_TIMEOUT_MS=1500`
 - `AGENT_BIGQUERY_TIMEOUT_MS=8000`
 - `AGENT_TOOL_MAX_CONCURRENCY=3`
+- `AGENT_SEMANTIC_PLANNER_ENABLED=true`
+- `AGENT_SEMANTIC_PLANNER_MODEL=gemini-3.5-flash`
+- `AGENT_SEMANTIC_PLANNER_TIMEOUT_MS=3000`
+- `AGENT_SEMANTIC_PLANNER_MIN_CONFIDENCE=0.65`
 - `AGENT_OPERATIONAL_SNAPSHOT_MAX_AGE_MINUTES=20`
 - `AGENT_SNAPSHOT_MAX_AGE_MINUTES=1440`
 - `BQ_QUERY_CACHE_ENABLED=true`
@@ -67,6 +71,9 @@ Cards to watch:
 - Latest learning run: scheduler freshness.
 - Stale snapshots: snapshot readiness.
 - Wrong-data feedback: correctness risk requiring urgent review.
+- Semantic routing success and estimated cost: model routing quality and spend for the selected range.
+
+The semantic planning architecture, safety boundary, evaluation set, and rollout are documented in `GT_AGENT_SEMANTIC_LLM.md`.
 
 ## Snapshot-First Behavior
 

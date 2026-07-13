@@ -53,6 +53,15 @@ export function extractExplicitServiceSearchText(message: string) {
     return analyticalFollowUpSearch;
   }
 
+  const trailingDetailMatch = normalized.match(
+    /^(.+?)\s+(?:service\s+details?|details?|information|info|profile|overview)[?.!]?$/i,
+  );
+  const trailingDetailSearch = cleanupSearchText(trailingDetailMatch?.[1]);
+
+  if (trailingDetailSearch && looksLikeNamedService(trailingDetailSearch)) {
+    return trailingDetailSearch;
+  }
+
   const directMatch = normalized.match(
     /^(?:can\s+you\s+)?(?:tell\s+me\s+about|what\s+do\s+we\s+know\s+about|show(?:\s+me)?\s+details?\s+(?:about|for)|details?\s+(?:about|for)|how\s+is|how\s+are)\s+(.+)$/i,
   );

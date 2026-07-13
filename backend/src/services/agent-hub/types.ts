@@ -311,6 +311,13 @@ export type GreatTimeAgentIntentPlan = {
   period: AgentPeriod;
   unsupportedReason?: string;
   warnings?: GreatTimeAgentWarning[];
+  semanticUnderstanding?: {
+    language: "en" | "my" | "mixed";
+    confidence: number;
+    requestedFacts: string[];
+    entityType?: GreatTimeAgentEntityType | "package";
+    entityName?: string;
+  };
 };
 
 export type AgentToolInput = {
@@ -405,6 +412,14 @@ export type AgentRunTrace = {
   narrativeFallbackUsed?: boolean;
   narrativeSkipped?: boolean;
   narrativeCacheHit?: boolean;
+  semanticPlannerAttempted?: boolean;
+  semanticPlannerUsed?: boolean;
+  semanticPlannerFallbackUsed?: boolean;
+  semanticPlannerFallbackReason?: string | null;
+  semanticPlannerModel?: string | null;
+  semanticPlannerLanguage?: "en" | "my" | "mixed" | null;
+  semanticPlannerConfidence?: number | null;
+  semanticPlannerLatencyMs?: number;
   deterministicResponseUsed?: boolean;
   usedMemoryIds?: string[];
   totalLatencyMs?: number;

@@ -55,6 +55,7 @@ const { buildOwnerDailyBriefFromSnapshots, createBusinessTools, selectOwnerDaily
 const { getTreatmentReportRange } = await import("../src/services/reports/daily-treatment.service.ts")
 const {
   calculateUpcomingBirthdayDate,
+  getCustomerPortalAgentVisitSnapshot,
   getCustomerPortalTopCustomersByRevenue,
   parseBirthdayDateParts,
 } = await import("../src/services/reports/customer-portal.service.ts")
@@ -76,6 +77,8 @@ const {
 } = await import("../src/services/agent-hub/treatment-detail-intent.ts")
 const { extractExplicitServiceSearchText } = await import("../src/services/agent-hub/service-query.ts")
 const { enhanceAgentResponseNarrative } = await import("../src/services/agent-hub/narrative.service.ts")
+const { planSemanticAgentRequest } = await import("../src/services/agent-hub/semantic-planner.ts")
+const { createGeminiProvider } = await import("../src/services/ai/provider.ts")
 const { buildAgentStatusReport } = await import("../src/services/agent-hub/monitoring/agent-status-monitoring.ts")
 const {
   buildSnapshotUnavailableWarning,
@@ -528,6 +531,12 @@ test("env defaults parse Agent Hub and BigQuery performance knobs", () => {
   assert.equal(parsed.AGENT_HUB_READ_ONLY_MODE, true)
   assert.equal(parsed.AGENT_BIGQUERY_TIMEOUT_MS, 8_000)
   assert.equal(parsed.AGENT_TOOL_MAX_CONCURRENCY, 3)
+  assert.equal(parsed.GEMINI_MODEL, "gemini-3.5-flash")
+  assert.equal(parsed.AGENT_SEMANTIC_PLANNER_ENABLED, true)
+  assert.equal(parsed.AGENT_SEMANTIC_PLANNER_MODEL, "gemini-3.5-flash")
+  assert.equal(parsed.AGENT_SEMANTIC_PLANNER_TIMEOUT_MS, 3_000)
+  assert.equal(parsed.AGENT_SEMANTIC_PLANNER_MAX_OUTPUT_TOKENS, 1_200)
+  assert.equal(parsed.AGENT_SEMANTIC_PLANNER_MIN_CONFIDENCE, 0.65)
   assert.equal(parsed.AGENT_NARRATIVE_ENABLED, true)
   assert.equal(parsed.AGENT_FAST_MODE_ENABLED, true)
   assert.equal(parsed.AGENT_NARRATIVE_TIMEOUT_MS, 1_500)
@@ -1244,6 +1253,13 @@ test("AI status aggregation summarizes fake traces and feedback", () => {
       dataStatus: "ok",
       fallbackUsed: false,
       narrativeFallbackUsed: false,
+      semanticPlannerAttempted: true,
+      semanticPlannerUsed: true,
+      semanticPlannerFallbackUsed: false,
+      semanticPlannerLatencyMs: 200,
+      promptTokens: 100,
+      completionTokens: 20,
+      estimatedCostUsd: 0.00033,
       totalLatencyMs: 900,
       cacheStats: { bigQueryHits: 2, bigQueryMisses: 1 },
       toolExecutionResults: [
@@ -1270,6 +1286,13 @@ test("AI status aggregation summarizes fake traces and feedback", () => {
       dataStatus: "partial",
       fallbackUsed: true,
       narrativeFallbackUsed: true,
+      semanticPlannerAttempted: true,
+      semanticPlannerUsed: false,
+      semanticPlannerFallbackUsed: true,
+      semanticPlannerLatencyMs: 400,
+      promptTokens: 80,
+      completionTokens: 10,
+      estimatedCostUsd: 0.00021,
       totalLatencyMs: 5_200,
       cacheStats: { bigQueryHits: 0, bigQueryMisses: 1 },
       toolExecutionResults: [
@@ -1314,6 +1337,12 @@ test("AI status aggregation summarizes fake traces and feedback", () => {
   assert.equal(report.performance.averageLatencyMs, 3050)
   assert.equal(report.performance.timeoutCount, 1)
   assert.equal(report.performance.narrativeFallbackCount, 1)
+  assert.equal(report.performance.semanticPlanner.usedCount, 1)
+  assert.equal(report.performance.semanticPlanner.fallbackCount, 1)
+  assert.equal(report.performance.semanticPlanner.successRate, 0.5)
+  assert.equal(report.performance.semanticPlanner.averageLatencyMs, 300)
+  assert.equal(report.performance.semanticPlanner.promptTokens, 180)
+  assert.equal(report.performance.semanticPlanner.estimatedCostUsd, 0.00054)
   assert.equal(report.performance.toolFailureCount, 1)
   assert.equal(report.performance.slowestTools[0]?.toolName, "get_live_appointment_counts")
   assert.equal(report.performance.bigQueryCache.hits, 2)
@@ -2617,6 +2646,75 @@ test("top customers by revenue report uses paid sales data and sorts mapped rows
   assert.equal(queryParams.limit, 10)
 })
 
+test("Customer 360 snapshot keeps yearly metrics but resolves the last visit from all history", async () => {
+  let capturedOptions: unknown
+
+  await withMockedBigQuery(async (options) => {
+    capturedOptions = options
+    return [[
+      {
+        customerName: "May Chit Thu",
+        phoneNumber: "+959975532713",
+        memberId: "MAY-1",
+        firstVisitThisYear: null,
+        lastVisitDate: "2025-11-18",
+        lastService: "Whitening Laser",
+        lastTherapist: "July",
+        daysSinceLastVisit: 237,
+        visitsThisYear: 0,
+        preferredService: null,
+        preferredServiceCategory: null,
+        preferredTherapist: null,
+        preferredTherapistVisits: 0,
+        recent3MonthVisits: 0,
+        previous3MonthVisits: 0,
+        avgVisitIntervalDays: null,
+        recentCompletedJson: JSON.stringify([
+          {
+            checkInTime: "2025-11-18 02:00 PM",
+            serviceName: "Whitening Laser",
+            therapistName: "July",
+            status: "Completed",
+          },
+        ]),
+        topServicesJson: "[]",
+        packageHoldingsJson: JSON.stringify([
+          {
+            serviceName: "Whitening Laser",
+            packageTotal: 3,
+            usedCount: 0,
+            remainingCount: 3,
+            latestUsageDate: null,
+            latestTherapist: null,
+            status: "active",
+          },
+        ]),
+      },
+    ]]
+  }, async () => {
+    const result = await getCustomerPortalAgentVisitSnapshot({
+      clinicCode: "ABC",
+      customerName: "May Chit Thu",
+      customerPhone: "+959975532713",
+      memberId: "MAY-1",
+      fromDate: "2026-07-01",
+      toDate: "2026-07-13",
+      year: 2026,
+    })
+
+    assert.equal(result.customer.visitsThisYear, 0)
+    assert.equal(result.customer.lastVisitDate, "2025-11-18")
+    assert.equal(result.recentCompleted[0]?.serviceName, "Whitening Laser")
+    assert.equal(result.packageHoldings[0]?.remainingCount, 3)
+  })
+
+  const queryText = String((capturedOptions as { query?: unknown }).query ?? "")
+  assert.match(queryText, /AllCustomerVisits AS\s*\(\s*SELECT \*\s*FROM DistinctVisits/is)
+  assert.match(queryText, /YearVisits AS\s*\(\s*SELECT \*\s*FROM AllCustomerVisits\s*WHERE DATE\(checkInTime\) BETWEEN DATE\(@yearStart\) AND DATE\(@toDate\)/is)
+  assert.match(queryText, /MAX\(DATE\(COALESCE\(checkOutTime, checkInTime\)\)\) FROM AllCustomerVisits/is)
+  assert.match(queryText, /FROM AllCustomerVisits\s+ORDER BY checkInTime DESC/is)
+})
+
 test("Agent Hub SQL and GraphQL read-only assertions reject mutation paths", async () => {
   assert.doesNotThrow(() => assertAgentReadOnlySql("SELECT * FROM table"))
   assert.doesNotThrow(() => assertAgentReadOnlySql("-- source note\nSELECT * FROM `dataset.table`"))
@@ -3023,6 +3121,35 @@ test("planner routes exact named customer briefings to one-shot Customer 360", (
   assert.equal(showPlan.resolvedAgent, "customer_relationship")
   assert.equal(showPlan.intent, "customer_360")
   assert.deepEqual(showPlan.toolNames, ["get_customer_360"])
+
+  const trailingDetailPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "May Chit Thu details?",
+    },
+    now: new Date("2026-07-13T06:30:00.000Z"),
+  })
+
+  assert.equal(extractExplicitCustomerSearchText("May Chit Thu details?"), "May Chit Thu")
+  assert.equal(trailingDetailPlan.resolvedAgent, "customer_relationship")
+  assert.equal(trailingDetailPlan.intent, "customer_360")
+  assert.deepEqual(trailingDetailPlan.toolNames, ["get_customer_360"])
+
+  const serviceDetailPlan = planAgentRequest({
+    request: {
+      clinicId: "clinic-1",
+      clinicCode: "ABC",
+      agent: "auto",
+      message: "Whitening Laser details?",
+    },
+    now: new Date("2026-07-13T06:30:00.000Z"),
+  })
+
+  assert.equal(serviceDetailPlan.resolvedAgent, "business")
+  assert.equal(serviceDetailPlan.intent, "service_360")
+  assert.deepEqual(serviceDetailPlan.toolNames, ["get_service_360"])
 })
 
 test("planner keeps generic show questions out of Customer 360 and includes usage in overview", () => {
@@ -6223,6 +6350,25 @@ test("entity context resolves ordinal customer references", () => {
     ],
   })
   assert.equal(serviceRef?.entityId, "svc-1")
+
+  const namedCustomerRef = resolveEntityReference({
+    message: "May Chit Thu details?",
+    sessionRefs: [
+      { entityType: "customer", entityId: "customer-sandi", displayName: "Sandi Hla Myaing ( C )", customerName: "Sandi Hla Myaing ( C )", rank: 1 },
+      { entityType: "customer", entityId: "customer-may", displayName: "May Chit Thu", customerName: "May Chit Thu", memberId: "MAY-1", rank: 4 },
+    ],
+  })
+  assert.equal(namedCustomerRef?.entityId, "customer-may")
+  assert.equal(namedCustomerRef?.memberId, "MAY-1")
+
+  const duplicateNamedCustomerRef = resolveEntityReference({
+    message: "May Chit Thu details?",
+    sessionRefs: [
+      { entityType: "customer", entityId: "customer-may-1", displayName: "May Chit Thu", rank: 1 },
+      { entityType: "customer", entityId: "customer-may-2", displayName: "May Chit Thu", rank: 2 },
+    ],
+  })
+  assert.equal(duplicateNamedCustomerRef, null)
 })
 
 test("narrative timeout returns deterministic response", async () => {
@@ -7474,4 +7620,153 @@ test("recommendation outcomes cannot regress when a recommendation is shown agai
   assert.equal(selectRecommendationOutcomeState({ existing: "contacted", incoming: "accepted" }), "contacted")
   assert.equal(selectRecommendationOutcomeState({ existing: "contacted", incoming: "booked" }), "booked")
   assert.equal(selectRecommendationOutcomeState({ existing: "booked", incoming: "shown" }), "booked")
+})
+
+test("semantic planner routes mixed-language named customer details to Customer 360", async () => {
+  let capturedPrompt = ""
+  const request = {
+    clinicId: "clinic-1",
+    agent: "auto" as const,
+    message: "May Chit Thu ရဲ့ နောက်ဆုံးလာတဲ့အချိန်နဲ့ မသုံးရသေးတဲ့ package ကိုပြပါ",
+    aiLanguage: "my-MM" as const,
+    fromDate: "2026-01-01",
+    toDate: "2026-07-13",
+  }
+  const deterministicPlan = planAgentRequest({ request })
+  const result = await planSemanticAgentRequest({
+    request,
+    deterministicPlan,
+    provider: {
+      modelName: "gemini-test",
+      async generateJson(prompt: string) {
+        capturedPrompt = prompt
+        return JSON.stringify({
+          language: "mixed",
+          resolvedAgent: "customer_relationship",
+          intent: "customer_360",
+          confidence: 0.97,
+          requestedFacts: ["last_visit", "unused_package", "remaining_sessions", "therapist"],
+          entity: { type: "customer", name: "May Chit Thu" },
+        })
+      },
+    },
+  })
+
+  assert.equal(result.metadata.used, true)
+  assert.equal(result.plan.resolvedAgent, "customer_relationship")
+  assert.equal(result.plan.intent, "customer_360")
+  assert.deepEqual(result.plan.toolNames, ["get_customer_360"])
+  assert.equal(result.plan.semanticUnderstanding?.language, "mixed")
+  assert.equal(result.entityContext?.entityType, "customer")
+  assert.equal(result.entityContext?.customerName, "May Chit Thu")
+  assert.match(capturedPrompt, /mixed English-Myanmar/)
+  assert.match(capturedPrompt, /get_customer_360/)
+})
+
+test("semantic planner rejects an agent mismatch and preserves deterministic policy", async () => {
+  const request = {
+    clinicId: "clinic-1",
+    agent: "business" as const,
+    message: "Show service performance",
+    fromDate: "2026-07-01",
+    toDate: "2026-07-13",
+  }
+  const deterministicPlan = planAgentRequest({ request })
+  const result = await planSemanticAgentRequest({
+    request,
+    deterministicPlan,
+    provider: {
+      modelName: "gemini-test",
+      async generateJson() {
+        return JSON.stringify({
+          language: "en",
+          resolvedAgent: "customer_relationship",
+          intent: "customer_360",
+          confidence: 0.99,
+          requestedFacts: ["identity"],
+          entity: { type: "none", name: "" },
+        })
+      },
+    },
+  })
+
+  assert.equal(result.metadata.used, false)
+  assert.equal(result.metadata.fallbackUsed, true)
+  assert.equal(result.metadata.fallbackReason, "requested_agent_mismatch")
+  assert.deepEqual(result.plan, deterministicPlan)
+})
+
+test("semantic planner never invokes the model for blocked write requests", async () => {
+  let invoked = false
+  const request = {
+    clinicId: "clinic-1",
+    agent: "auto" as const,
+    message: "delete customer May Chit Thu",
+  }
+  const deterministicPlan = planAgentRequest({ request })
+  const result = await planSemanticAgentRequest({
+    request,
+    deterministicPlan,
+    provider: {
+      modelName: "gemini-test",
+      async generateJson() {
+        invoked = true
+        return "{}"
+      },
+    },
+  })
+
+  assert.equal(deterministicPlan.intent, "unsupported_write_request")
+  assert.equal(invoked, false)
+  assert.equal(result.metadata.attempted, false)
+  assert.equal(result.metadata.fallbackReason, "read_only_guard")
+})
+
+test("Gemini structured JSON provider sends a schema and returns token usage", async () => {
+  const originalApiKey = env.GEMINI_API_KEY
+  const originalFetch = globalThis.fetch
+  let requestedUrl = ""
+  let requestedBody: Record<string, unknown> = {}
+  env.GEMINI_API_KEY = "test-key"
+  globalThis.fetch = async (input, init) => {
+    requestedUrl = String(input)
+    requestedBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+    return new Response(
+      JSON.stringify({
+        candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }],
+        usageMetadata: { promptTokenCount: 21, candidatesTokenCount: 7, totalTokenCount: 28 },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    )
+  }
+
+  try {
+    const provider = createGeminiProvider()
+    assert.ok(provider?.generateStructuredJson)
+    const result = await provider.generateStructuredJson("Return JSON", {
+      modelName: "gemini-3.5-flash",
+      responseSchema: {
+        type: "OBJECT",
+        properties: { ok: { type: "BOOLEAN" } },
+        required: ["ok"],
+      },
+      maxOutputTokens: 100,
+      temperature: 0,
+    })
+
+    assert.match(requestedUrl, /models\/gemini-3\.5-flash:generateContent/)
+    const generationConfig = requestedBody.generationConfig as Record<string, unknown>
+    assert.deepEqual(generationConfig.responseSchema, {
+      type: "OBJECT",
+      properties: { ok: { type: "BOOLEAN" } },
+      required: ["ok"],
+    })
+    assert.equal(result.text, '{"ok":true}')
+    assert.equal(result.usage.promptTokens, 21)
+    assert.equal(result.usage.completionTokens, 7)
+    assert.equal(result.usage.totalTokens, 28)
+  } finally {
+    env.GEMINI_API_KEY = originalApiKey
+    globalThis.fetch = originalFetch
+  }
 })
