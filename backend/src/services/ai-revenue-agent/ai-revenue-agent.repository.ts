@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { firestoreDb } from "../../config/firebase.js";
+import { listKnownGtGrowthAiEnabledClinicIds } from "../feature-access.service.js";
 import { HttpError } from "../../utils/http-error.js";
 import {
   aiRevenueActionSources,
@@ -2020,14 +2021,43 @@ export async function saveSettings(input: {
 
 export async function listAutoGenerateEnabledSettings(params?: { limit?: number }) {
   const limit = Math.min(Math.max(params?.limit ?? 500, 1), 1_000);
-  const snapshot = await settingsCollection()
-    .where("aiRevenueAgentEnabled", "==", true)
-    .limit(limit)
-    .get();
+  const settingsByClinicId = new Map<string, AiRevenueSettings>();
 
-  return snapshot.docs
-    .map((doc) => normalizeSettings(doc.id, doc.data()))
-    .filter((settings) => settings.aiRevenueAgentEnabled)
+  try {
+    const snapshot = await settingsCollection()
+      .where("aiRevenueAgentEnabled", "==", true)
+      .limit(limit)
+      .get();
+
+    snapshot.docs
+      .map((doc) => normalizeSettings(doc.id, doc.data()))
+      .filter((settings) => settings.aiRevenueAgentEnabled)
+      .forEach((settings) => settingsByClinicId.set(settings.clinicId, settings));
+  } catch (error) {
+    console.warn("[ai-revenue] explicit settings lookup failed; continuing with entitled clinics", {
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+
+  let entitledClinicIds: string[] = [];
+  try {
+    entitledClinicIds = await listKnownGtGrowthAiEnabledClinicIds();
+  } catch (error) {
+    console.warn("[ai-revenue] GT Growth AI entitlement lookup failed", {
+      error: error instanceof Error ? error.message : "Unknown error",
+    });
+  }
+
+  entitledClinicIds.slice(0, limit).forEach((clinicId) => {
+    const current = settingsByClinicId.get(clinicId) ?? buildDefaultSettings(clinicId);
+    settingsByClinicId.set(clinicId, {
+      ...current,
+      aiRevenueAgentEnabled: true,
+      autoGenerateTodayOpportunities: true,
+    });
+  });
+
+  return [...settingsByClinicId.values()]
     .sort(
       (left, right) =>
         left.runOrder - right.runOrder ||

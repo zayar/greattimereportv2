@@ -1,5 +1,6 @@
 import { env } from "../config/env.js";
 import { firestoreDb } from "../config/firebase.js";
+import { queryApicoreWithFallback } from "./apicore.service.js";
 import {
   GT_GROWTH_AI_FEATURE_GATE,
   type ReportPremiumAccess,
@@ -8,6 +9,13 @@ import {
 import { HttpError } from "../utils/http-error.js";
 
 const FEATURE_ACCESS_COLLECTION = "gt_v2report_feature_access";
+const KNOWN_CLINICS_QUERY = `
+  query GtGrowthAiKnownClinics {
+    clinics {
+      id
+    }
+  }
+`;
 
 type FeatureAccessInput = {
   clinicId?: string | null;
@@ -221,6 +229,28 @@ export async function getClinicGtGrowthAiAccess(clinicId: string): Promise<Clini
 export async function listKnownGtGrowthAiEnabledClinicIds() {
   const enabledClinicIds = new Set<string>();
   parseClinicIdList(env.GT_GROWTH_AI_ENABLED_CLINIC_IDS).forEach((clinicId) => enabledClinicIds.add(clinicId));
+
+  if (env.GT_GROWTH_AI_DEFAULT_ENABLED) {
+    try {
+      const data = await queryApicoreWithFallback<{
+        clinics?: Array<{ id?: string | null }> | null;
+      }>({
+        query: KNOWN_CLINICS_QUERY,
+        errorMessage: "Unable to enumerate clinics for the default GT Growth AI entitlement.",
+        readOnly: true,
+      });
+      (data?.clinics ?? []).forEach((clinic) => {
+        const clinicId = clinic.id?.trim();
+        if (clinicId) {
+          enabledClinicIds.add(clinicId);
+        }
+      });
+    } catch (error) {
+      console.warn("[GT_V2Report][GT Growth AI] default entitlement clinic lookup failed", {
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
 
   if (!env.GT_GROWTH_AI_FEATURE_STORE_ENABLED) {
     return [...enabledClinicIds];

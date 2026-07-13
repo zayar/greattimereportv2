@@ -59,6 +59,29 @@ export function clearAgentClinicContextCache() {
   clinicCodeCache.clear();
 }
 
+export async function lookupAgentClinicCodes(clinicIds: string[]): Promise<Record<string, string>> {
+  const normalizedClinicIds = [...new Set(clinicIds.map((clinicId) => clinicId.trim()).filter(Boolean))];
+  if (normalizedClinicIds.length === 0) {
+    return {};
+  }
+
+  const data = await queryApicoreWithFallback<{
+    clinics?: Array<{ id?: string | null; code?: string | null }> | null;
+  }>({
+    query: AGENT_CLINIC_CONTEXT_QUERY,
+    variables: { clinicIds: normalizedClinicIds },
+    errorMessage: "Unable to resolve clinic codes for scheduled AI Revenue generation.",
+    readOnly: true,
+  });
+
+  return Object.fromEntries(
+    (data?.clinics ?? [])
+      .map((clinic) => ({ clinicId: clinic.id?.trim(), clinicCode: clinic.code?.trim() }))
+      .filter((clinic): clinic is { clinicId: string; clinicCode: string } => Boolean(clinic.clinicId && clinic.clinicCode))
+      .map((clinic) => [clinic.clinicId, clinic.clinicCode]),
+  );
+}
+
 export async function resolveAgentClinicContext(params: {
   user?: SessionUser;
   clinicId: string;

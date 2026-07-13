@@ -2,6 +2,7 @@ import { env } from "../../config/env.js";
 import type { AiRevenueSettings } from "../../types/ai-revenue-agent.js";
 import { formatDateKeyInTimeZone, formatTimeKeyInTimeZone, normalizeTimeZone } from "../telegram/time.js";
 import { listAgentLearningSchedules } from "../agent-hub/learning.repository.js";
+import { lookupAgentClinicCodes } from "../agent-hub/clinic-context.service.js";
 import { generateAiRevenueActions } from "./ai-revenue-agent.service.js";
 import * as repository from "./ai-revenue-agent.repository.js";
 
@@ -166,6 +167,20 @@ async function resolveClinicCodes(
     });
   } catch {
     // Settings-provided clinic codes remain valid when Agent Learning schedules are unavailable.
+  }
+
+  const missingClinicIds = clinicIds.filter((clinicId) => !clinicCodeById.has(clinicId));
+  if (missingClinicIds.length > 0) {
+    try {
+      const apicoreCodes = await lookupAgentClinicCodes(missingClinicIds);
+      Object.entries(apicoreCodes).forEach(([clinicId, clinicCode]) => {
+        if (!clinicCodeById.has(clinicId)) {
+          clinicCodeById.set(clinicId, clinicCode);
+        }
+      });
+    } catch {
+      // A Telegram-scoped fallback clinic code or stored settings code may still be usable.
+    }
   }
 
   return settings.map((item) => ({

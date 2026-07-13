@@ -367,7 +367,7 @@ jobs:
               --http-method=POST \
               --update-headers="Content-Type=application/json,x-telegram-scheduler-secret=${TELEGRAM_SCHEDULER_SECRET}" \
               --message-body='{}' \
-              --attempt-deadline=120s \
+              --attempt-deadline=600s \
               --quiet
           else
             gcloud scheduler jobs create http "$JOB_NAME" \
@@ -379,7 +379,7 @@ jobs:
               --http-method=POST \
               --headers="Content-Type=application/json,x-telegram-scheduler-secret=${TELEGRAM_SCHEDULER_SECRET}" \
               --message-body='{}' \
-              --attempt-deadline=120s \
+              --attempt-deadline=600s \
               --quiet
           fi
 
