@@ -100,6 +100,7 @@ Optional GitHub repository variables for AI Revenue scheduled generation:
 - `AI_REVENUE_SCHEDULER_JOB_NAME` (defaults to `gt-v2report-ai-revenue-scheduler`)
 - `AI_REVENUE_SCHEDULER_CRON` (defaults to `*/15 * * * *`)
 - `AI_REVENUE_SCHEDULER_TIME_ZONE` (defaults to `Asia/Yangon`)
+- `CLOUD_RUN_TIMEOUT` controls the backend request timeout; it defaults to `900s` so the scheduled generation can finish.
 
 Optional GitHub repository variables for Agent Hub scheduled learning:
 - `AGENT_MEMORY_V2_ENABLED` (defaults to `false`)
@@ -142,7 +143,7 @@ Recommended Telegram scheduler setup:
 - Keep `TELEGRAM_SCHEDULER_ENABLED=true`. The backend still runs a local catch-up tick, but Cloud Scheduler is the reliable production trigger when Cloud Run scales down or CPU is throttled between requests.
 - Keep `TELEGRAM_WEBHOOK_WATCHDOG_ENABLED=true` unless intentionally disabled. The watchdog repairs the Telegram webhook if another process clears or replaces it.
 
-The backend deploy workflow also creates the AI Revenue scheduler using the Telegram scheduler secret. It calls `/api/integrations/telegram/scheduler/ai-revenue/run` independently of `AGENT_LEARNING_ENABLED`, so AI Revenue opportunity generation continues to run even when Agent Hub learning is disabled. Every clinic with `aiRevenueAgentEnabled=true` or an enabled GT Growth AI entitlement is included; the legacy `autoGenerateTodayOpportunities` flag no longer blocks the daily run. The default Cloud Scheduler trigger runs every 15 minutes in `Asia/Yangon`, while each clinic is due once per day at `06:00` and a delayed tick catches up after that time. The AI Revenue HTTP attempt deadline is 10 minutes so a real generation run is not cut off by the scheduler.
+The backend deploy workflow also creates the AI Revenue scheduler using the Telegram scheduler secret. It calls `/api/integrations/telegram/scheduler/ai-revenue/run` independently of `AGENT_LEARNING_ENABLED`, so AI Revenue opportunity generation continues to run even when Agent Hub learning is disabled. Every clinic with `aiRevenueAgentEnabled=true` or an enabled GT Growth AI entitlement is included; the legacy `autoGenerateTodayOpportunities` flag no longer blocks the daily run. The default Cloud Scheduler trigger runs every 15 minutes in `Asia/Yangon`, while each clinic is due once per day at `06:00` and a delayed tick catches up after that time. The AI Revenue HTTP attempt deadline is 15 minutes and the Cloud Run request timeout defaults to 15 minutes so a real generation run is not cut off by infrastructure timeouts.
 
 To run a manual catch-up for all AI-enabled businesses, use the Deploy Backend workflow's `run_ai_revenue_now` workflow-dispatch input. The workflow deploys the current backend first, then calls the same protected scheduler endpoint once.
 

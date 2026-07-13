@@ -252,6 +252,7 @@ jobs:
           CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT: ${{ vars.CLOUD_RUN_RUNTIME_SERVICE_ACCOUNT }}
           CLOUD_RUN_MEMORY: ${{ vars.CLOUD_RUN_MEMORY }}
           CLOUD_RUN_CPU: ${{ vars.CLOUD_RUN_CPU }}
+          CLOUD_RUN_TIMEOUT: ${{ vars.CLOUD_RUN_TIMEOUT }}
           CLOUD_RUN_MIN_INSTANCES: ${{ vars.CLOUD_RUN_MIN_INSTANCES }}
           CLOUD_RUN_MAX_INSTANCES: ${{ vars.CLOUD_RUN_MAX_INSTANCES }}
         run: |
@@ -267,6 +268,12 @@ jobs:
 
           if [ -n "$CLOUD_RUN_CPU" ]; then
             EXTRA_FLAGS+=(--cpu "$CLOUD_RUN_CPU")
+          fi
+
+          if [ -n "$CLOUD_RUN_TIMEOUT" ]; then
+            EXTRA_FLAGS+=(--timeout "$CLOUD_RUN_TIMEOUT")
+          else
+            EXTRA_FLAGS+=(--timeout 900s)
           fi
 
           if [ -n "$CLOUD_RUN_MIN_INSTANCES" ]; then
@@ -367,7 +374,7 @@ jobs:
               --http-method=POST \
               --update-headers="Content-Type=application/json,x-telegram-scheduler-secret=${TELEGRAM_SCHEDULER_SECRET}" \
               --message-body='{}' \
-              --attempt-deadline=600s \
+              --attempt-deadline=900s \
               --quiet
           else
             gcloud scheduler jobs create http "$JOB_NAME" \
@@ -379,7 +386,7 @@ jobs:
               --http-method=POST \
               --headers="Content-Type=application/json,x-telegram-scheduler-secret=${TELEGRAM_SCHEDULER_SECRET}" \
               --message-body='{}' \
-              --attempt-deadline=600s \
+              --attempt-deadline=900s \
               --quiet
           fi
 
@@ -394,7 +401,7 @@ jobs:
             exit 1
           fi
 
-          curl --fail --silent --show-error --max-time 600 \
+          curl --fail --silent --show-error --max-time 900 \
             --request POST \
             --url "${APP_BASE_URL%/}/api/integrations/telegram/scheduler/ai-revenue/run" \
             --header "Content-Type: application/json" \
