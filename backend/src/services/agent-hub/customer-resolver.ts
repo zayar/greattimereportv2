@@ -6,6 +6,7 @@ import {
   type CustomerRelationshipProfileSearchInput,
 } from "../reports/customer-relationship-profile.repository.js";
 import { extractExplicitCustomerSearchText } from "./customer-query.js";
+import { resolveEntityCandidates } from "./entity-candidate-resolver.js";
 import { limitRows, maskPhone, nowIso } from "./safety.js";
 import type {
   AgentDataStatus,
@@ -86,66 +87,6 @@ function source(params: {
     live: params.live ?? params.scope === "live",
     scope: params.scope,
   };
-}
-
-function isExactCandidate(searchText: string, candidate: CandidateRow) {
-  const search = normalizeText(searchText);
-  const searchDigits = normalizeDigits(searchText);
-  const phoneDigits = normalizeDigits(candidate.phoneNumber);
-
-  return (
-    (search && normalizeText(candidate.customerName) === search) ||
-    (search && normalizeText(candidate.memberId ?? "") === search) ||
-    (searchDigits && phoneDigits && searchDigits === phoneDigits)
-  );
-}
-
-function editDistance(left: string, right: string) {
-  const a = [...left];
-  const b = [...right];
-  const dp = Array.from({ length: a.length + 1 }, () => Array<number>(b.length + 1).fill(0));
-
-  for (let i = 0; i <= a.length; i += 1) {
-    dp[i]![0] = i;
-  }
-  for (let j = 0; j <= b.length; j += 1) {
-    dp[0]![j] = j;
-  }
-
-  for (let i = 1; i <= a.length; i += 1) {
-    for (let j = 1; j <= b.length; j += 1) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      dp[i]![j] = Math.min(
-        dp[i - 1]![j]! + 1,
-        dp[i]![j - 1]! + 1,
-        dp[i - 1]![j - 1]! + cost,
-      );
-    }
-  }
-
-  return dp[a.length]![b.length]!;
-}
-
-function fuzzyNameScore(searchText: string, candidateName: string) {
-  const search = normalizeText(searchText);
-  const name = normalizeText(candidateName);
-  if (!search || !name) {
-    return 0;
-  }
-  if (search === name) {
-    return 1;
-  }
-  if (name.includes(search) || search.includes(name)) {
-    return 0.96;
-  }
-
-  const searchTokens = search.split(/\s+/).filter(Boolean);
-  const nameTokens = name.split(/\s+/).filter(Boolean);
-  const sharedTokens = searchTokens.filter((token) => nameTokens.includes(token)).length;
-  const sharedScore = sharedTokens / Math.max(searchTokens.length, nameTokens.length, 1);
-  const distanceScore = 1 - editDistance(search, name) / Math.max(search.length, name.length, 1);
-
-  return Math.max(sharedScore, distanceScore);
 }
 
 function dedupeCandidates(candidates: CandidateRow[]) {
@@ -244,27 +185,25 @@ async function searchLearnedProfiles(input: CustomerRelationshipProfileSearchInp
 }
 
 function chooseFromCandidates(searchText: string, candidates: CandidateRow[], sourceScope: AgentSourceScope) {
-  const exactCandidates = candidates.filter((candidate) => isExactCandidate(searchText, candidate));
-  const selected = exactCandidates.length === 1 ? exactCandidates[0] : candidates.length === 1 ? candidates[0] : null;
+  const resolution = resolveEntityCandidates({
+    query: searchText,
+    candidates: candidates.map((candidate) => ({
+      id: candidate.customerKey,
+      name: candidate.customerName,
+      aliases: [candidate.memberId, candidate.phoneNumber, normalizeDigits(candidate.phoneNumber)],
+      value: candidate,
+    })),
+  });
 
-  if (selected) {
-    return { kind: "selected" as const, identity: identityFromCandidate(selected, sourceScope) };
+  if (resolution.status === "resolved") {
+    return { kind: "selected" as const, identity: identityFromCandidate(resolution.candidate.value, sourceScope) };
   }
-
-  if (exactCandidates.length > 1 || candidates.length > 1) {
-    const scored = candidates
-      .map((candidate) => ({ candidate, score: fuzzyNameScore(searchText, candidate.customerName) }))
-      .sort((left, right) => right.score - left.score);
-    const best = scored[0];
-    const runnerUp = scored[1];
-
-    if (best && best.score >= 0.82 && (!runnerUp || best.score - runnerUp.score >= 0.08)) {
-      return { kind: "selected" as const, identity: identityFromCandidate(best.candidate, sourceScope) };
-    }
-
-    return { kind: "ambiguous" as const, candidates };
+  if (resolution.status === "ambiguous") {
+    return { kind: "ambiguous" as const, candidates: resolution.candidates.map((candidate) => candidate.value) };
   }
-
+  if (resolution.status === "suggestions") {
+    return { kind: "suggestions" as const, candidates: resolution.candidates.map((candidate) => candidate.value) };
+  }
   return { kind: "none" as const };
 }
 
@@ -351,6 +290,9 @@ export async function resolveCustomerIdentity(input: AgentToolInput): Promise<Cu
     if (chosen.kind === "ambiguous") {
       return { status: "ambiguous", searchText, candidates: chosen.candidates, sources };
     }
+    if (chosen.kind === "suggestions") {
+      return { status: "suggestions", searchText, candidates: chosen.candidates, sources, warnings: [suggestionWarning(searchText)] };
+    }
   } catch {
     sources.push(
       source({
@@ -395,23 +337,10 @@ export async function resolveCustomerIdentity(input: AgentToolInput): Promise<Cu
       return { status: "resolved", identity: chosen.identity, sources };
     }
     if (chosen.kind === "ambiguous") {
-      const fuzzySuggestions = candidates
-        .map((candidate) => ({ candidate, score: fuzzyNameScore(searchText, candidate.customerName) }))
-        .filter((candidate) => candidate.score >= 0.68)
-        .sort((left, right) => right.score - left.score)
-        .map((candidate) => candidate.candidate);
-
-      if (fuzzySuggestions.length > 0 && fuzzySuggestions.length < candidates.length) {
-        return {
-          status: "suggestions",
-          searchText,
-          candidates: fuzzySuggestions,
-          sources,
-          warnings: [suggestionWarning(searchText)],
-        };
-      }
-
       return { status: "ambiguous", searchText, candidates: chosen.candidates, sources };
+    }
+    if (chosen.kind === "suggestions") {
+      return { status: "suggestions", searchText, candidates: chosen.candidates, sources, warnings: [suggestionWarning(searchText)] };
     }
   } catch {
     sources.push(

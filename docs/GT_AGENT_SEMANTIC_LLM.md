@@ -18,6 +18,8 @@ The existing deterministic planner remains the automatic fallback whenever Gemin
 8. Re-derive tool names from the backend intent policy.
 9. Verify each tool belongs to the selected agent and is read-only.
 10. Execute typed source tools and build the deterministic, source-grounded answer.
+11. Verify that optional LLM wording did not change structured facts or introduce unsupported numbers.
+12. Fall back to the deterministic wording when verification fails.
 
 Gemini never receives permission to generate SQL, GraphQL, business metrics, or arbitrary tool names. It never executes a tool directly.
 
@@ -28,6 +30,8 @@ Gemini never receives permission to generate SQL, GraphQL, business metrics, or 
 - Clinic IDs, customer keys, raw phone fields, credentials, and authorization headers are not included in semantic session context.
 - A semantic entity ID is a short hash, not the customer or service name.
 - Exact values still come from APICORE, BigQuery typed report services, or source-backed snapshots.
+- Customer, service, and practitioner tools share one bounded entity-matching policy.
+- Duplicate exact names are never selected silently. The response returns a typed clarification plus safe choices such as masked phone or member ID.
 
 ## Configuration
 
@@ -40,6 +44,7 @@ AGENT_SEMANTIC_PLANNER_MODEL=gemini-3.5-flash
 AGENT_SEMANTIC_PLANNER_TIMEOUT_MS=3000
 AGENT_SEMANTIC_PLANNER_MAX_OUTPUT_TOKENS=1200
 AGENT_SEMANTIC_PLANNER_MIN_CONFIDENCE=0.65
+AGENT_FACT_VERIFICATION_ENABLED=true
 GEMINI_INPUT_COST_PER_MILLION_USD=1.5
 GEMINI_OUTPUT_COST_PER_MILLION_USD=9
 ```
@@ -59,6 +64,8 @@ Each Agent Hub trace records:
 
 The AI Control Panel aggregates semantic routing success, fallback count, latency, tokens, and estimated cost for the selected status range.
 
+Fact-verification results and fallback issue codes are also written to each run trace. Telegram answers include Correct, Wrong data, Wrong person, and Wrong meaning buttons. A button records feedback against the exact clinic, session, request, response, agent, intent, and source tools; callback tokens expire after 24 hours and can be used only once.
+
 ## Evaluation Set
 
 Before expanding rollout, maintain a versioned set of real, anonymized questions covering:
@@ -73,6 +80,20 @@ Before expanding rollout, maintain a versioned set of real, anonymized questions
 - ambiguous questions, unsupported writes, prompt injection, and hallucinated entity names.
 
 Score at least these fields independently: agent, intent, entity type/name, requested facts, selected tools, period, answer source status, and PII safety. A model/provider change should not ship when read-only safety is below 100%, or when the verified routing set regresses beyond the agreed threshold.
+
+The repository includes versioned evaluation dataset `1.0.0` with exactly 100 unique English, Myanmar, and mixed-language questions. Run the zero-cost deterministic baseline with:
+
+```bash
+npm run eval:agent
+```
+
+Run the real semantic planner evaluation, which makes provider API calls and incurs normal model cost, with:
+
+```bash
+npm run eval:agent:semantic
+```
+
+The deterministic fallback gate starts at 70% and the semantic gate at 90%. These are regression floors, not final quality targets. Keep the expected answers fixed, add anonymized production failures, and raise both thresholds as routing improves.
 
 ## Rollout
 

@@ -1600,7 +1600,14 @@ export interface GreatTimeAgentChatResponse {
   sources: GreatTimeAgentSource[];
   dataStatus: AgentDataStatus;
   warnings?: GreatTimeAgentWarning[];
+  clarification?: {
+    type: "entity_selection";
+    entityType: "customer" | "service" | "practitioner";
+    query: string;
+    optionCount: number;
+  };
   entityContext?: GreatTimeAgentEntityContext;
+  entityRefs?: GreatTimeAgentEntityContext[];
   actions: Array<{ type: "read_only_agent_response"; detail?: string }>;
 }
 

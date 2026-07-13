@@ -5,7 +5,7 @@ const STRONG_WRITE_ACTION =
   /(?:create|add|book|cancel|reschedule|update|delete|remove|destroy|erase|clear|wipe|purge|refund|collect|charge|edit|change|modify|void|adjust|mark|check\s*-?\s*in|check\s*-?\s*out)/i;
 
 const ACTION_OBJECT_REQUEST = new RegExp(
-  `\\b${STRONG_WRITE_ACTION.source}\\b\\s+(?:an?\\s+|the\\s+|this\\s+|that\\s+|first\\s+|second\\s+|third\\s+|all\\s+|every\\s+|customer\\s+)*${BUSINESS_SOURCE_OBJECT.source}\\b`,
+  `\\b${STRONG_WRITE_ACTION.source}\\b\\s+(?:an?\\s+|the\\s+|this\\s+|that\\s+|last\\s+|latest\\s+|first\\s+|second\\s+|third\\s+|all\\s+|every\\s+|customer\\s+)*${BUSINESS_SOURCE_OBJECT.source}\\b`,
   "i",
 );
 

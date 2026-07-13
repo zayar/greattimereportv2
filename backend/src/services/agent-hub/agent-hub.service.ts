@@ -1,4 +1,5 @@
 import { createAgentToolRegistry } from "./tool-registry.js";
+import { env } from "../../config/env.js";
 import { executeToolPlan } from "./tool-executor.js";
 import { resolveEntityReference } from "./entity-context.js";
 import {
@@ -13,6 +14,7 @@ import { planAgentRecovery } from "./recovery-planner.js";
 import { enhanceAgentResponseNarrative } from "./narrative.service.js";
 import { planSemanticAgentRequest } from "./semantic-planner.js";
 import { buildAgentResponse } from "./response-builder.js";
+import { buildFactVerificationFallback, verifyAgentResponseFacts } from "./fact-verifier.js";
 import { newId, nowIso, sanitizeError } from "./safety.js";
 import { applyMemoryPreferencesToResponse } from "./memory/memory-writer.js";
 import { retrieveMemoryContext } from "./memory/memory-retriever.js";
@@ -628,7 +630,22 @@ export async function askAgentHub(params: {
   });
   const narrativeLatencyMs = Date.now() - narrativeStartedAt;
   const narrativeResponse = narrativeResult.response;
-  const response = applyMemoryPreferencesToResponse(narrativeResponse, memoryContext.memories);
+  const preferredResponse = applyMemoryPreferencesToResponse(narrativeResponse, memoryContext.memories);
+  const factVerification = env.AGENT_FACT_VERIFICATION_ENABLED
+    ? verifyAgentResponseFacts({
+        deterministicResponse,
+        candidateResponse: preferredResponse,
+        toolResults,
+      })
+    : { passed: true, issues: [], checkedNumericFacts: [] };
+  const factVerificationFallbackUsed = !factVerification.passed;
+  const response = factVerificationFallbackUsed
+    ? buildFactVerificationFallback({
+        deterministicResponse,
+        usedMemoryIds: memoryContext.usedMemoryIds,
+      })
+    : preferredResponse;
+  const responseFallbackUsed = narrativeResult.fallbackUsed || factVerificationFallbackUsed;
   await recordTrace({
     status: "sending_response",
     currentStep: "Response generated",
@@ -638,11 +655,14 @@ export async function askAgentHub(params: {
     intent: response.intent,
     sourceStatuses: response.sources.map((source) => source.dataStatus),
     dataStatus: response.dataStatus,
-    fallbackUsed: narrativeResult.fallbackUsed,
+    fallbackUsed: responseFallbackUsed,
     narrativeFallbackUsed: narrativeResult.fallbackUsed,
     narrativeSkipped: narrativeResult.narrativeSkipped,
     narrativeCacheHit: narrativeResult.cacheHit,
-    deterministicResponseUsed: narrativeResult.fallbackUsed || narrativeResult.narrativeSkipped,
+    deterministicResponseUsed: responseFallbackUsed || narrativeResult.narrativeSkipped,
+    factVerificationPassed: factVerification.passed,
+    factVerificationFallbackUsed,
+    factVerificationIssueCodes: factVerification.issues.map((issue) => issue.code),
     narrativeLatencyMs,
     answerPreview: redactMonitoringText(response.assistantMessage, 500),
     warnings: response.warnings?.map((warning) => `${warning.title}: ${warning.message}`),
@@ -692,11 +712,14 @@ export async function askAgentHub(params: {
       recoveryReason: recoveryPlan?.reason ?? null,
       sourceStatuses: response.sources.map((source) => source.dataStatus),
       dataStatus: response.dataStatus,
-      fallbackUsed: narrativeResult.fallbackUsed,
+      fallbackUsed: responseFallbackUsed,
       narrativeFallbackUsed: narrativeResult.fallbackUsed,
       narrativeSkipped: narrativeResult.narrativeSkipped,
       narrativeCacheHit: narrativeResult.cacheHit,
-      deterministicResponseUsed: narrativeResult.fallbackUsed || narrativeResult.narrativeSkipped,
+      deterministicResponseUsed: responseFallbackUsed || narrativeResult.narrativeSkipped,
+      factVerificationPassed: factVerification.passed,
+      factVerificationFallbackUsed,
+      factVerificationIssueCodes: factVerification.issues.map((issue) => issue.code),
       usedMemoryIds: memoryContext.usedMemoryIds,
       totalLatencyMs: Date.now() - totalStartedAt,
       planningLatencyMs,
@@ -749,11 +772,14 @@ export async function askAgentHub(params: {
         recoveryReason: recoveryPlan?.reason ?? null,
         sourceStatuses: response.sources.map((source) => source.dataStatus),
         dataStatus: response.dataStatus,
-        fallbackUsed: narrativeResult.fallbackUsed,
+        fallbackUsed: responseFallbackUsed,
         narrativeFallbackUsed: narrativeResult.fallbackUsed,
         narrativeSkipped: narrativeResult.narrativeSkipped,
         narrativeCacheHit: narrativeResult.cacheHit,
-        deterministicResponseUsed: narrativeResult.fallbackUsed || narrativeResult.narrativeSkipped,
+        deterministicResponseUsed: responseFallbackUsed || narrativeResult.narrativeSkipped,
+        factVerificationPassed: factVerification.passed,
+        factVerificationFallbackUsed,
+        factVerificationIssueCodes: factVerification.issues.map((issue) => issue.code),
         usedMemoryIds: memoryContext.usedMemoryIds,
         totalLatencyMs: Date.now() - totalStartedAt,
         planningLatencyMs,

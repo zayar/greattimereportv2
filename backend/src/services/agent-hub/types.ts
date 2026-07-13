@@ -102,6 +102,13 @@ export type GreatTimeAgentWarning = {
   message: string;
 };
 
+export type GreatTimeAgentClarification = {
+  type: "entity_selection";
+  entityType: "customer" | "service" | "practitioner";
+  query: string;
+  optionCount: number;
+};
+
 export type Customer360PackageStatus = "active" | "low_remaining" | "completed" | "unknown";
 
 export type Customer360FactPack = {
@@ -273,6 +280,7 @@ export type GreatTimeAgentChatResponse = {
   sources: GreatTimeAgentSource[];
   dataStatus: AgentDataStatus;
   warnings?: GreatTimeAgentWarning[];
+  clarification?: GreatTimeAgentClarification;
   entityContext?: GreatTimeAgentEntityContext;
   entityRefs?: GreatTimeAgentEntityContext[];
   actions: Array<{ type: "read_only_agent_response"; detail?: string }>;
@@ -346,6 +354,7 @@ export type AgentToolResult = {
   tables?: GreatTimeAgentTable[];
   recommendations?: GreatTimeAgentRecommendation[];
   warnings?: GreatTimeAgentWarning[];
+  clarification?: GreatTimeAgentClarification;
   summary?: string;
   data?: Record<string, unknown>;
   entityRefs?: GreatTimeAgentEntityContext[];
@@ -420,6 +429,9 @@ export type AgentRunTrace = {
   semanticPlannerLanguage?: "en" | "my" | "mixed" | null;
   semanticPlannerConfidence?: number | null;
   semanticPlannerLatencyMs?: number;
+  factVerificationPassed?: boolean;
+  factVerificationFallbackUsed?: boolean;
+  factVerificationIssueCodes?: string[];
   deterministicResponseUsed?: boolean;
   usedMemoryIds?: string[];
   totalLatencyMs?: number;

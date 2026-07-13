@@ -538,6 +538,7 @@ test("env defaults parse Agent Hub and BigQuery performance knobs", () => {
   assert.equal(parsed.AGENT_SEMANTIC_PLANNER_MAX_OUTPUT_TOKENS, 1_200)
   assert.equal(parsed.AGENT_SEMANTIC_PLANNER_MIN_CONFIDENCE, 0.65)
   assert.equal(parsed.AGENT_NARRATIVE_ENABLED, true)
+  assert.equal(parsed.AGENT_FACT_VERIFICATION_ENABLED, true)
   assert.equal(parsed.AGENT_FAST_MODE_ENABLED, true)
   assert.equal(parsed.AGENT_NARRATIVE_TIMEOUT_MS, 1_500)
   assert.equal(parsed.AGENT_NARRATIVE_CACHE_ENABLED, true)
@@ -2501,6 +2502,7 @@ test("read-only guard detects dangerous business mutations without blocking safe
     "reschedule booking",
     "refund payment",
     "refund this payment",
+    "refund the last payment",
     "collect payment",
     "charge customer",
     "edit service",

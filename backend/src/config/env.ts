@@ -84,6 +84,7 @@ const envSchema = z.object({
   AGENT_SEMANTIC_PLANNER_TIMEOUT_MS: z.coerce.number().int().positive().default(3_000),
   AGENT_SEMANTIC_PLANNER_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(1_200),
   AGENT_SEMANTIC_PLANNER_MIN_CONFIDENCE: z.coerce.number().min(0).max(1).default(0.65),
+  AGENT_FACT_VERIFICATION_ENABLED: booleanEnv(true),
   AGENT_NARRATIVE_ENABLED: booleanEnv(true),
   AGENT_FAST_MODE_ENABLED: booleanEnv(true),
   AGENT_NARRATIVE_TIMEOUT_MS: z.coerce.number().int().positive().default(1_500),

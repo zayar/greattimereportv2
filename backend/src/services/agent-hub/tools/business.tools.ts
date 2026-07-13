@@ -20,6 +20,7 @@ import {
   isCompletedHistoricalDay,
 } from "../snapshot-cache.service.js";
 import { extractTreatmentDetailFilters, normalizeServiceSearchText } from "../treatment-detail-intent.js";
+import { resolveEntityCandidates } from "../entity-candidate-resolver.js";
 import type { AgentDataStatus, AgentToolDefinition, AgentToolInput, AgentToolResult, GreatTimeAgentSource } from "../types.js";
 import { fetchAppointmentLedger } from "./appointment.tools.js";
 
@@ -900,6 +901,7 @@ async function getPractitionerOverview(input: AgentToolInput): Promise<AgentTool
     return buildPractitionerProfileSnapshotResult(input, snapshot);
   }
 
+  const practitionerQuery = input.entityContext?.practitionerName ?? input.entityContext?.displayName ?? "";
   const data = await runBusinessBigQueryOperation({
     toolName: "get_practitioner_overview",
     operationName: "snapshot_fallback",
@@ -908,22 +910,99 @@ async function getPractitionerOverview(input: AgentToolInput): Promise<AgentTool
         clinicCode: input.clinic.clinicCode,
         fromDate: input.period.fromDate,
         toDate: input.period.toDate,
-        search: input.entityContext?.practitionerName ?? input.entityContext?.displayName ?? "",
+        search: practitionerQuery,
         serviceCategory: "",
         sortBy: "treatmentsCompleted",
         sortDirection: "desc",
       }),
   });
+  const resolution = practitionerQuery
+    ? resolveEntityCandidates({
+        query: practitionerQuery,
+        candidates: data.leaderboard.map((row) => ({
+          id: row.therapistName,
+          name: row.therapistName,
+          aliases: [row.topService],
+          value: row,
+        })),
+      })
+    : null;
+  const resolvedRows = resolution?.status === "resolved" ? [resolution.candidate.value] : data.leaderboard;
+
+  if (resolution?.status === "ambiguous" || resolution?.status === "suggestions") {
+    const candidates = resolution.candidates.map((candidate) => candidate.value);
+    return {
+      toolName: "get_practitioner_overview",
+      sourceName: "BigQuery practitioner identity resolver",
+      checkedAt: nowIso(),
+      period: periodLabel(input),
+      dataStatus: "not_ready",
+      live: false,
+      summary: `I found ${candidates.length.toLocaleString("en-US")} possible practitioners for ${practitionerQuery}. Please choose one.`,
+      tables: [
+        {
+          title: "Possible practitioner matches",
+          columns: [
+            { key: "rank", title: "#" },
+            { key: "therapistName", title: "Practitioner" },
+            { key: "topService", title: "Top service" },
+            { key: "treatmentsCompleted", title: "Treatments" },
+          ],
+          rows: candidates.map((row, index) => ({ ...row, rank: index + 1 })),
+        },
+      ],
+      warnings: [
+        {
+          type: "ambiguous_practitioner_identity",
+          title: "Please choose a practitioner",
+          message: `${practitionerQuery} matched more than one practitioner. Choose a row to continue.`,
+        },
+      ],
+      clarification: {
+        type: "entity_selection",
+        entityType: "practitioner",
+        query: practitionerQuery,
+        optionCount: candidates.length,
+      },
+      entityRefs: candidates.map((row, index) => ({
+        entityType: "practitioner",
+        entityId: row.therapistName,
+        displayName: row.therapistName,
+        practitionerName: row.therapistName,
+        serviceName: row.topService,
+        rank: index + 1,
+      })),
+    };
+  }
+
+  if (practitionerQuery && resolution?.status === "not_found") {
+    return {
+      toolName: "get_practitioner_overview",
+      sourceName: "BigQuery practitioner identity resolver",
+      checkedAt: nowIso(),
+      period: periodLabel(input),
+      dataStatus: "not_found",
+      live: false,
+      summary: `No practitioner match was found for ${practitionerQuery}.`,
+      warnings: [
+        {
+          type: "practitioner_not_found",
+          title: "Practitioner not found",
+          message: `No practitioner match was found for "${practitionerQuery}" in this period.`,
+        },
+      ],
+    };
+  }
 
   return {
     toolName: "get_practitioner_overview",
     sourceName: "BigQuery practitioner portal",
     checkedAt: nowIso(),
     period: periodLabel(input),
-    dataStatus: data.leaderboard.length ? "ok" : "no_activity",
+    dataStatus: resolvedRows.length ? "ok" : "no_activity",
     live: false,
-    summary: data.highlight
-      ? `${data.highlight.therapistName} leads volume with ${data.highlight.treatmentsCompleted.toLocaleString("en-US")} treatments.`
+    summary: resolvedRows[0]
+      ? `${resolvedRows[0].therapistName} completed ${resolvedRows[0].treatmentsCompleted.toLocaleString("en-US")} treatments.`
       : "No practitioner activity was found for this period.",
     metrics: [
       { label: "Active practitioners", value: data.summary.activeTherapists },
@@ -941,10 +1020,10 @@ async function getPractitionerOverview(input: AgentToolInput): Promise<AgentTool
           { key: "topService", title: "Top service" },
           { key: "utilizationScore", title: "Utilization" },
         ],
-        rows: limitRows(data.leaderboard, 20),
+        rows: limitRows(resolvedRows, 20),
       },
     ],
-    entityRefs: data.leaderboard.map((row, index) => ({
+    entityRefs: resolvedRows.map((row, index) => ({
       entityType: "practitioner",
       entityId: row.therapistName,
       displayName: row.therapistName,

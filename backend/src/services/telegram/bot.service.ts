@@ -8,6 +8,7 @@ import { hasExplicitPeriodCue } from "../agent-hub/intent-planner.js";
 import { buildCustomerKey } from "../agent-hub/customer-identity.js";
 import { maskPhone, nowIso, sanitizeError } from "../agent-hub/safety.js";
 import { updateAgentRunTrace, saveAgentRunTrace } from "../agent-hub/trace.repository.js";
+import { saveAgentFeedback } from "../agent-hub/feedback.repository.js";
 import { redactMonitoringText } from "../agent-hub/monitoring/agent-monitoring.service.js";
 import type {
   Customer360FactPack,
@@ -133,6 +134,23 @@ type AppointmentCallbackToken = {
 };
 const appointmentActionCallbacks = new Map<string, AppointmentCallbackToken>();
 const APPOINTMENT_ACTION_TTL_MS = 15 * 60_000;
+type AgentFeedbackCallbackAction = "ok" | "data" | "person" | "intent";
+type AgentFeedbackCallbackToken = {
+  clinicId: string;
+  telegramChatId: string;
+  telegramUserId: string | null;
+  sessionId: string;
+  responseId: string;
+  requestId: string;
+  resolvedAgent: GreatTimeAgentId;
+  intent: string;
+  sourceTools: string[];
+  createdAt: number;
+  expiresAt: number;
+  usedAction?: AgentFeedbackCallbackAction;
+};
+const agentFeedbackCallbacks = new Map<string, AgentFeedbackCallbackToken>();
+const AGENT_FEEDBACK_CALLBACK_TTL_MS = 24 * 60 * 60_000;
 
 function getTelegramApiUrl(method: string) {
   if (!env.TELEGRAM_BOT_TOKEN) {
@@ -2351,6 +2369,75 @@ function newCallbackToken(prefix: string) {
     .slice(0, 12);
 }
 
+function cleanupAgentFeedbackCallbacks(now = Date.now()) {
+  for (const [key, value] of agentFeedbackCallbacks.entries()) {
+    if (value.expiresAt <= now) {
+      agentFeedbackCallbacks.delete(key);
+    }
+  }
+}
+
+function registerAgentFeedbackCallback(params: {
+  response: GreatTimeAgentChatResponse;
+  clinicId: string;
+  telegramChatId: string;
+  telegramUserId: string | null;
+}) {
+  cleanupAgentFeedbackCallbacks();
+  const key = newCallbackToken("agent-feedback");
+  const createdAt = Date.now();
+  agentFeedbackCallbacks.set(key, {
+    clinicId: params.clinicId,
+    telegramChatId: params.telegramChatId,
+    telegramUserId: params.telegramUserId,
+    sessionId: params.response.sessionId,
+    responseId: params.response.responseId,
+    requestId: params.response.requestId,
+    resolvedAgent: params.response.resolvedAgent,
+    intent: params.response.intent,
+    sourceTools: [...new Set(params.response.sources.map((source) => source.tool))],
+    createdAt,
+    expiresAt: createdAt + AGENT_FEEDBACK_CALLBACK_TTL_MS,
+  });
+  return key;
+}
+
+function buildAgentFeedbackButtonRows(params: {
+  response: GreatTimeAgentChatResponse;
+  clinicId?: string;
+  telegramChatId?: string;
+  telegramUserId?: string | null;
+}) {
+  if (!params.clinicId || !params.telegramChatId || params.response.intent === "unsupported_write_request") {
+    return [];
+  }
+
+  const token = registerAgentFeedbackCallback({
+    response: params.response,
+    clinicId: params.clinicId,
+    telegramChatId: params.telegramChatId,
+    telegramUserId: params.telegramUserId ?? null,
+  });
+  return [
+    [
+      { text: "✅ Correct", callback_data: `gtfb:ok:${token}` },
+      { text: "⚠️ Wrong data", callback_data: `gtfb:data:${token}` },
+    ],
+    [
+      { text: "👤 Wrong person", callback_data: `gtfb:person:${token}` },
+      { text: "🧭 Wrong meaning", callback_data: `gtfb:intent:${token}` },
+    ],
+  ];
+}
+
+function appendReplyMarkupRows(
+  replyMarkup: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> } | undefined,
+  rows: Array<Array<{ text: string; callback_data: string }>>,
+) {
+  const existing = replyMarkup?.inline_keyboard ?? [];
+  return existing.length || rows.length ? { inline_keyboard: [...existing, ...rows] } : undefined;
+}
+
 function hashTelegramIdentifier(value?: string | null) {
   if (!value) {
     return null;
@@ -2769,6 +2856,12 @@ export function buildAgentHubTelegramReplyMarkup(
     appointmentPage?: number;
   },
 ) {
+  const feedbackRows = buildAgentFeedbackButtonRows({
+    response,
+    clinicId: options?.clinicId,
+    telegramChatId: options?.telegramChatId,
+    telegramUserId: options?.telegramUserId,
+  });
   const appointmentRows = options?.appointmentContextItems ?? [];
   const appointmentMarkup = appointmentRows.length
     ? buildAppointmentSelectionReplyMarkup({
@@ -2781,7 +2874,7 @@ export function buildAgentHubTelegramReplyMarkup(
       })
     : undefined;
   if (appointmentMarkup) {
-    return appointmentMarkup;
+    return appendReplyMarkupRows(appointmentMarkup, feedbackRows);
   }
 
   const customerCardMarkup = buildCustomerCardReplyMarkup({
@@ -2792,10 +2885,12 @@ export function buildAgentHubTelegramReplyMarkup(
     telegramUserId: options?.telegramUserId,
   });
   if (customerCardMarkup) {
-    return customerCardMarkup;
+    return appendReplyMarkupRows(customerCardMarkup, feedbackRows);
   }
 
-  const shouldShowCustomerChoices = response.tables?.some((table) => /possible customer matches|suggested customer matches/i.test(table.title)) ?? false;
+  const shouldShowCustomerChoices =
+    response.clarification?.entityType === "customer" ||
+    (response.tables?.some((table) => /possible customer matches|suggested customer matches/i.test(table.title)) ?? false);
   const customerChoiceButtons =
     shouldShowCustomerChoices
         ? (response.entityRefs ?? [])
@@ -2806,7 +2901,11 @@ export function buildAgentHubTelegramReplyMarkup(
             return key
               ? [
                   {
-                    text: `Open ${ref.rank ?? index + 1}`,
+                    text: truncateButtonText(
+                      `${ref.customerName ?? ref.displayName ?? `Customer ${ref.rank ?? index + 1}`}${
+                        ref.customerPhoneMasked ? ` · ${ref.customerPhoneMasked}` : ref.memberId ? ` · ${ref.memberId}` : ""
+                      }`,
+                    ),
                     callback_data: `customer_details:${key}`,
                   },
                 ]
@@ -2815,11 +2914,7 @@ export function buildAgentHubTelegramReplyMarkup(
           .filter((row) => row.length > 0)
         : [];
 
-  if (customerChoiceButtons.length === 0 && !options?.exportCallbackData) {
-    return undefined;
-  }
-
-  return {
+  const baseMarkup = customerChoiceButtons.length || options?.exportCallbackData ? {
     inline_keyboard: [
       ...customerChoiceButtons,
       ...(options?.exportCallbackData
@@ -2833,7 +2928,9 @@ export function buildAgentHubTelegramReplyMarkup(
           ]
         : []),
     ],
-  };
+  } : undefined;
+
+  return appendReplyMarkupRows(baseMarkup, feedbackRows);
 }
 
 function sanitizeSessionPart(value: string) {
@@ -3453,6 +3550,86 @@ async function handleSuggestedQuestionCallback(callback: TelegramCallbackQuery) 
   });
 }
 
+async function handleAgentFeedbackCallback(callback: TelegramCallbackQuery) {
+  const match = callback.data?.match(/^gtfb:(ok|data|person|intent):([A-Za-z0-9]+)$/);
+  const action = match?.[1] as AgentFeedbackCallbackAction | undefined;
+  const key = match?.[2];
+  const chat = callback.message?.chat;
+  if (!action || !key || !chat) {
+    await answerTelegramCallback(callback.id, "Feedback button is invalid.");
+    return;
+  }
+
+  cleanupAgentFeedbackCallbacks();
+  const token = agentFeedbackCallbacks.get(key);
+  const chatId = String(chat.id);
+  const telegramUserId = callback.from?.id == null ? null : String(callback.from.id);
+  const target = await getTelegramTargetByChatId(chatId);
+  const validToken = Boolean(
+    token &&
+      target &&
+      token.clinicId === target.clinicId &&
+      token.telegramChatId === chatId &&
+      (!token.telegramUserId || token.telegramUserId === telegramUserId),
+  );
+
+  if (!validToken || !token || !target) {
+    await answerTelegramCallback(callback.id, "This feedback button expired.");
+    await recordTelegramCallbackIssue({
+      callback,
+      chatId,
+      target,
+      errorCategory: "telegram_callback_expired",
+      currentStep: "Agent feedback callback expired",
+      callbackExpired: true,
+    });
+    return;
+  }
+  if (!canTelegramUserChatWithAgent({ target, telegramUserId })) {
+    await answerTelegramCallback(callback.id, "Feedback is unavailable for this user.");
+    return;
+  }
+  if (token.usedAction) {
+    await answerTelegramCallback(callback.id, "Feedback was already recorded for this answer.");
+    return;
+  }
+
+  const feedback = {
+    ok: { rating: "helpful" as const, feedbackType: "helpful" as const, note: "Telegram: answer marked correct." },
+    data: { rating: "not_helpful" as const, feedbackType: "wrong_data" as const, note: "Telegram: user reported wrong data." },
+    person: { rating: "not_helpful" as const, feedbackType: "correction" as const, note: "Telegram: user reported the wrong customer/person." },
+    intent: { rating: "not_helpful" as const, feedbackType: "correction" as const, note: "Telegram: user reported the question was interpreted incorrectly." },
+  }[action];
+
+  try {
+    const sessionActor = telegramUserId ?? target.telegramChatId ?? chatId;
+    await saveAgentFeedback({
+      clinicId: token.clinicId,
+      sessionId: token.sessionId,
+      responseId: token.responseId,
+      requestId: token.requestId,
+      rating: feedback.rating,
+      feedbackType: feedback.feedbackType,
+      note: feedback.note,
+      resolvedAgent: token.resolvedAgent,
+      intent: token.intent,
+      sourceTools: token.sourceTools,
+      userId: `telegram:${sessionActor}`,
+    });
+    token.usedAction = action;
+    agentFeedbackCallbacks.set(key, token);
+    await answerTelegramCallback(callback.id, action === "ok" ? "Thanks — marked correct." : "Thanks — correction recorded.");
+
+    if (action === "person") {
+      await sendTelegramMessage(chatId, "Please send the correct customer or therapist name so I can answer again.");
+    } else if (action === "intent") {
+      await sendTelegramMessage(chatId, "Please rephrase what you meant, including the metric and date range if relevant.");
+    }
+  } catch {
+    await answerTelegramCallback(callback.id, "Feedback could not be saved. Please try again.");
+  }
+}
+
 async function handleCsvExportCallback(callback: TelegramCallbackQuery) {
   const exportId = callback.data?.match(/^gtcsv:([A-Za-z0-9-]+)$/)?.[1];
   const chat = callback.message?.chat;
@@ -3771,6 +3948,11 @@ async function handleCustomerActionCallback(callback: TelegramCallbackQuery) {
 }
 
 export async function handleTelegramUpdate(update: TelegramUpdate) {
+  if (update.callback_query?.data?.startsWith("gtfb:")) {
+    await handleAgentFeedbackCallback(update.callback_query);
+    return;
+  }
+
   if (update.callback_query?.data?.startsWith("apptsel:")) {
     await handleAppointmentSelectCallback(update.callback_query);
     return;
@@ -3915,6 +4097,12 @@ export const __test = {
   getCustomerActionRef(key: string) {
     return getCustomerActionRef(key);
   },
+  clearAgentFeedbackCallbacks() {
+    agentFeedbackCallbacks.clear();
+  },
+  getAgentFeedbackCallback(key: string) {
+    return agentFeedbackCallbacks.get(key);
+  },
 };
 
 export async function ensureTelegramWebhook() {
@@ -3945,7 +4133,7 @@ async function pollTelegramUpdates(offset: number) {
   return callTelegramApi<TelegramUpdate[]>("getUpdates", {
     offset,
     timeout: 0,
-    allowed_updates: ["message", "edited_message", "channel_post", "edited_channel_post", "my_chat_member"],
+    allowed_updates: ["message", "edited_message", "channel_post", "edited_channel_post", "my_chat_member", "callback_query"],
   });
 }
 

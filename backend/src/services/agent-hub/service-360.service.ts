@@ -3,6 +3,7 @@ import {
   resolveServicePortalCandidates,
 } from "../reports/service-portal.service.js";
 import { extractExplicitServiceSearchText } from "./service-query.js";
+import { resolveEntityCandidates } from "./entity-candidate-resolver.js";
 import { limitRows, maskPhone, nowIso } from "./safety.js";
 import type {
   AgentDataStatus,
@@ -83,10 +84,6 @@ function serviceDetailPath(params: { serviceName: string; fromDate: string; toDa
   return `/analytics/services/${slug}?${search.toString()}`;
 }
 
-function isExactServiceCandidate(searchText: string, candidate: ServiceCandidate) {
-  return normalizeText(searchText) === normalizeText(candidate.serviceName);
-}
-
 function candidateRows(candidates: ServiceCandidate[]) {
   return limitRows(candidates, 10).map((candidate, index) => ({
     rank: index + 1,
@@ -136,22 +133,29 @@ async function resolveServiceIdentity(input: AgentToolInput): Promise<ServiceIde
       }),
     );
 
-    const exactCandidates = candidates.filter((candidate) => isExactServiceCandidate(searchText, candidate));
-    const selected = exactCandidates.length === 1 ? exactCandidates[0] : candidates.length === 1 ? candidates[0] : null;
+    const resolution = resolveEntityCandidates({
+      query: searchText,
+      candidates: candidates.map((candidate) => ({
+        id: candidate.serviceKey || serviceKey(candidate.serviceName),
+        name: candidate.serviceName,
+        aliases: [candidate.serviceCategory],
+        value: candidate,
+      })),
+    });
 
-    if (exactCandidates.length > 1 || (!selected && candidates.length > 1)) {
+    if (resolution.status === "ambiguous" || resolution.status === "suggestions") {
       return {
         status: "ambiguous",
         searchText,
-        candidates,
+        candidates: resolution.candidates.map((candidate) => candidate.value),
         sources,
       };
     }
 
-    if (selected) {
+    if (resolution.status === "resolved") {
       return {
         status: "resolved",
-        candidate: selected,
+        candidate: resolution.candidate.value,
         sources,
       };
     }
@@ -386,6 +390,12 @@ export async function buildService360ToolResult(input: AgentToolInput): Promise<
           message: "I found more than one service with that name. Please choose one.",
         },
       ],
+      clarification: {
+        type: "entity_selection",
+        entityType: "service",
+        query: resolved.searchText,
+        optionCount: rows.length,
+      },
       entityRefs: rows.map((row) => ({
         entityType: "service",
         entityId: String(row.serviceKey),

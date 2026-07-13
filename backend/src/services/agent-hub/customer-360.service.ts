@@ -445,6 +445,12 @@ export async function buildCustomer360ToolResult(input: AgentToolInput): Promise
           message: `${resolved.searchText} ဆိုတဲ့ customer ${rows.length.toLocaleString("en-US")} ယောက်တွေ့ပါတယ်။ ဘယ်သူကိုကြည့်မလဲ?`,
         },
       ],
+      clarification: {
+        type: "entity_selection",
+        entityType: "customer",
+        query: resolved.searchText,
+        optionCount: rows.length,
+      },
       entityRefs: rows.map((candidate) => {
         const sourceCandidate = resolved.candidates.find((item) => item.customerKey === String(candidate.customerKey));
         return {
@@ -492,6 +498,14 @@ export async function buildCustomer360ToolResult(input: AgentToolInput): Promise
           ]
         : undefined,
       warnings: resolved.warnings,
+      clarification: rows.length
+        ? {
+            type: "entity_selection",
+            entityType: "customer",
+            query: resolved.searchText,
+            optionCount: rows.length,
+          }
+        : undefined,
       entityRefs: rows.map((candidate) => {
         const sourceCandidate = resolved.candidates.find((item) => item.customerKey === String(candidate.customerKey));
         return {

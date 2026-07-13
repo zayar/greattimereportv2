@@ -7,7 +7,9 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
-    "test": "tsx --test tests/**/*.test.ts"
+    "test": "tsx --test tests/**/*.test.ts",
+    "eval:agent": "tsx src/services/agent-hub/evaluation/agent-eval-cli.ts",
+    "eval:agent:semantic": "tsx src/services/agent-hub/evaluation/agent-eval-cli.ts --semantic"
   },
   "dependencies": {
     "@google-cloud/bigquery": "^7.9.4",

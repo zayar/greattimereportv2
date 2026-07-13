@@ -251,7 +251,9 @@ test("today appointment list with 13 appointments uses named paginated customer 
   assert.equal(buttonTexts[0], "13:30 Yadanar")
   assert.equal(buttonTexts[1], "14:10 Moe Pwint")
   assert.equal(buttonTexts[8], "Next")
-  assert.equal(buttonTexts.at(-1), "Download CSV")
+  assert.ok(buttonTexts.includes("Download CSV"))
+  assert.ok(buttonTexts.includes("✅ Correct"))
+  assert.ok(buttonTexts.includes("🧭 Wrong meaning"))
   assert.doesNotMatch(buttonTexts.join("\n"), /\b\d+\s+Details\b|\b\d+\s+History\b/)
 
   const firstCallback = markup?.inline_keyboard[0]?.[0]?.callback_data ?? ""
@@ -405,7 +407,15 @@ test("customer-name button token resolves exact appointment and customer card ac
   assert.match(cardMessage, /Service: Hair Removal Half Leg/)
   assert.match(cardMessage, /Last visit:/)
   assert.match(cardMessage, /Total visits: 3/)
-  assert.deepEqual(cardButtons, ["Full History", "Package / Balance", "Back to Today Appointments"])
+  assert.deepEqual(cardButtons, [
+    "Full History",
+    "Package / Balance",
+    "Back to Today Appointments",
+    "✅ Correct",
+    "⚠️ Wrong data",
+    "👤 Wrong person",
+    "🧭 Wrong meaning",
+  ])
 })
 
 test("history action appears only after customer is selected", () => {
@@ -550,6 +560,7 @@ test("duplicate customer names disambiguate appointment buttons and manual searc
       },
     ],
     warnings: [{ type: "ambiguous_customer_identity", title: "Please choose a customer", message: "Please choose one." }],
+    clarification: { type: "entity_selection", entityType: "customer", query: "Su Myat Lwin", optionCount: 2 },
     followUpQuestions: [],
     sources: [],
     dataStatus: "not_ready",
@@ -565,9 +576,54 @@ test("duplicate customer names disambiguate appointment buttons and manual searc
   assert.match(choiceMessage, /959xxxx902/)
   assert.match(choiceMessage, /KIUW Bn Hsu/)
   assert.doesNotMatch(choiceMessage, /Customer match is ambiguous|No bounded customer match|agent will not silently choose|resolver|bounded|database match|technical error/i)
-  assert.equal(choiceMarkup?.inline_keyboard[0]?.[0]?.text, "Open 1")
+  assert.equal(choiceMarkup?.inline_keyboard[0]?.[0]?.text, "Su Myat Lwin · 959xxxx902")
   assert.match(firstChoiceCallback, /^customer_details:/)
   assert.equal(firstChoice?.entityContext.customerKey, "cust-su-1")
+})
+
+test("Telegram Agent Hub answers include compact correction feedback buttons", () => {
+  botTest.clearAgentFeedbackCallbacks()
+  const response = {
+    sessionId: "session-feedback",
+    requestId: "request-feedback",
+    responseId: "response-feedback",
+    requestedAgent: "auto" as const,
+    resolvedAgent: "customer_relationship" as const,
+    autoMode: true,
+    intent: "customer_360",
+    period,
+    assistantMessage: "May Chit Thu has 3 remaining sessions.",
+    sources: [
+      {
+        tool: "get_customer_360",
+        sourceName: "BigQuery customer profile",
+        checkedAt: "2026-07-13T06:00:00.000Z",
+        dataStatus: "ok" as const,
+      },
+    ],
+    dataStatus: "ok" as const,
+    actions: [{ type: "read_only_agent_response" as const }],
+  }
+  const markup = buildAgentHubTelegramReplyMarkup(response, {
+    clinicId: "clinic-1",
+    telegramChatId: "chat-1",
+    telegramUserId: "user-1",
+  })
+  const buttons = markup?.inline_keyboard.flat() ?? []
+  const buttonByText = new Map(buttons.map((button) => [button.text, button.callback_data]))
+
+  assert.match(buttonByText.get("✅ Correct") ?? "", /^gtfb:ok:[A-Za-z0-9]+$/)
+  assert.match(buttonByText.get("⚠️ Wrong data") ?? "", /^gtfb:data:[A-Za-z0-9]+$/)
+  assert.match(buttonByText.get("👤 Wrong person") ?? "", /^gtfb:person:[A-Za-z0-9]+$/)
+  assert.match(buttonByText.get("🧭 Wrong meaning") ?? "", /^gtfb:intent:[A-Za-z0-9]+$/)
+  assert.ok(buttons.every((button) => button.callback_data.length <= 64))
+
+  const feedbackKey = (buttonByText.get("✅ Correct") ?? "").split(":").at(-1) ?? ""
+  const feedbackToken = botTest.getAgentFeedbackCallback(feedbackKey)
+  assert.equal(feedbackToken?.clinicId, "clinic-1")
+  assert.equal(feedbackToken?.telegramChatId, "chat-1")
+  assert.equal(feedbackToken?.responseId, response.responseId)
+  assert.deepEqual(feedbackToken?.sourceTools, ["get_customer_360"])
 })
 
 test("existing customer with no history is shown as new, not not-found", () => {
@@ -598,7 +654,13 @@ test("existing customer with no history is shown as new, not not-found", () => {
   assert.match(message, /No previous history found yet/)
   assert.match(message, /Today appointment: 18:34/)
   assert.doesNotMatch(message, /not found/i)
-  assert.deepEqual(buttons, ["Back to Today Appointments"])
+  assert.deepEqual(buttons, [
+    "Back to Today Appointments",
+    "✅ Correct",
+    "⚠️ Wrong data",
+    "👤 Wrong person",
+    "🧭 Wrong meaning",
+  ])
 })
 
 test("phone visibility is consistent and appointment buttons use suffix only for disambiguation", () => {

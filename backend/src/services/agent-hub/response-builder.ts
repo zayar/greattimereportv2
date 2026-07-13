@@ -514,6 +514,7 @@ export function buildAgentResponse(params: {
     ...(params.plan.warnings ?? []),
     ...params.toolResults.flatMap((result) => result.warnings ?? []),
   ];
+  const clarification = params.toolResults.find((result) => result.clarification)?.clarification;
   const customer360 = params.toolResults.find((result) => result.customer360)?.customer360;
   const service360 = params.toolResults.find((result) => result.service360)?.service360;
   const entityRefs = params.toolResults.flatMap((result) => result.entityRefs ?? []);
@@ -567,6 +568,7 @@ export function buildAgentResponse(params: {
     sources,
     dataStatus,
     warnings: warnings.length ? warnings : undefined,
+    clarification,
     entityContext,
     entityRefs: entityRefs.length ? entityRefs : params.request.entityContext ? [params.request.entityContext] : undefined,
     actions: [
