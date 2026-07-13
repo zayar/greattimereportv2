@@ -357,7 +357,7 @@ jobs:
           fi
 
           JOB_NAME="${AI_REVENUE_SCHEDULER_JOB_NAME:-gt-v2report-ai-revenue-scheduler}"
-          JOB_SCHEDULE="${AI_REVENUE_SCHEDULER_CRON:-*/15 * * * *}"
+          JOB_SCHEDULE="${AI_REVENUE_SCHEDULER_CRON:-0 6 * * *}"
           JOB_TIME_ZONE="${AI_REVENUE_SCHEDULER_TIME_ZONE:-Asia/Yangon}"
           SCHEDULER_URI="${APP_BASE_URL%/}/api/integrations/telegram/scheduler/ai-revenue/run"
           echo "Using AI Revenue Cloud Scheduler schedule: ${JOB_SCHEDULE} (${JOB_TIME_ZONE})"
