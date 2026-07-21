@@ -1351,6 +1351,24 @@ export interface ConsultantKnowledgeContent {
   my: ConsultantKnowledgeLocale;
 }
 
+export interface ConsultantKnowledgeSuggestion {
+  content: ConsultantKnowledgeContent;
+  confidence: "low" | "medium" | "high";
+  warnings: string[];
+  missingInformation: string[];
+  reviewNotes: string[];
+  generation: {
+    responseId: string | null;
+    model: string;
+    generatedAt: string;
+    usage: {
+      inputTokens: number | null;
+      outputTokens: number | null;
+      totalTokens: number | null;
+    };
+  };
+}
+
 export interface ConsultantServiceKnowledge {
   id: string;
   clinicId: string;

@@ -31,6 +31,23 @@ The Firestore collections introduced by this feature are:
 
 Prices are intentionally not copied into Firestore.
 
+## GPT-5.6 knowledge suggestions
+
+The knowledge editor can request a bilingual draft from `gpt-5.6-sol` through the
+OpenAI Responses API. This authoring helper is separate from the existing Gemini
+provider used elsewhere in GT V2.
+
+- The backend sends only the selected API Core service description, duration, and the
+  current editor content. It does not send customer records.
+- The request uses strict structured output, medium reasoning, and `store: false`.
+- Suggestions return English and Myanmar content plus confidence, warnings, missing
+  information, and review notes.
+- The response changes only the browser form. It does not write Firestore or publish.
+- API Core price remains live and is explicitly excluded from generated knowledge.
+- The endpoint is restricted to an authorized Queen clinic and AI Control Panel admins.
+- `OPENAI_API_KEY` is a backend-only GitHub Actions secret passed to Cloud Run. It must
+  never be added to frontend variables, Firestore, source code, or logs.
+
 ## Publishing workflow
 
 1. An AI Control Panel admin opens `/ai/consultant-knowledge`.

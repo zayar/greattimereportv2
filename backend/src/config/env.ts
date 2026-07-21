@@ -27,6 +27,14 @@ const envSchema = z.object({
   GEMINI_API_BASE_URL: z.string().url().default("https://generativelanguage.googleapis.com/v1beta"),
   GEMINI_INPUT_COST_PER_MILLION_USD: z.coerce.number().min(0).default(1.5),
   GEMINI_OUTPUT_COST_PER_MILLION_USD: z.coerce.number().min(0).default(9),
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_API_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
+  OPENAI_CONSULTANT_KNOWLEDGE_MODEL: z.string().default("gpt-5.6-sol"),
+  OPENAI_CONSULTANT_KNOWLEDGE_REASONING_EFFORT: z
+    .enum(["none", "low", "medium", "high", "xhigh", "max"])
+    .default("medium"),
+  OPENAI_CONSULTANT_KNOWLEDGE_TIMEOUT_MS: z.coerce.number().int().positive().default(90_000),
+  OPENAI_CONSULTANT_KNOWLEDGE_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(8_000),
   APP_BASE_URL: z.string().url().optional(),
   DEFAULT_TIMEZONE: z.string().default("Asia/Yangon"),
   GOOGLE_APPLICATION_CREDENTIALS: z.string().optional(),

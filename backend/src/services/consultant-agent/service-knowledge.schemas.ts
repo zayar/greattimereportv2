@@ -67,9 +67,24 @@ export const publishConsultantKnowledgeSchema = z.object({
   expectedVersion: z.number().int().positive(),
 });
 
+export const suggestConsultantKnowledgeSchema = z.object({
+  clinicId: z.string().min(1),
+  clinicCode: z.string().min(1).optional(),
+  currentContent: consultantKnowledgeContentSchema.optional(),
+});
+
+export const consultantKnowledgeSuggestionSchema = z.object({
+  content: consultantKnowledgeContentSchema,
+  confidence: z.enum(["low", "medium", "high"]),
+  warnings: z.array(shortText).max(20),
+  missingInformation: z.array(shortText).max(20),
+  reviewNotes: z.array(shortText).max(20),
+});
+
 export type ConsultantKnowledgeLocale = z.infer<typeof consultantKnowledgeLocaleSchema>;
 export type ConsultantKnowledgeContent = z.infer<typeof consultantKnowledgeContentSchema>;
 export type ConsultantServiceKnowledge = z.infer<typeof consultantServiceKnowledgeSchema>;
+export type ConsultantKnowledgeSuggestion = z.infer<typeof consultantKnowledgeSuggestionSchema>;
 
 export function emptyConsultantKnowledgeLocale(): ConsultantKnowledgeLocale {
   return {
