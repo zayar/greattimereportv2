@@ -26,7 +26,7 @@ import type {
   AiAgentMonitoringRunsResponse,
   AiAgentMonitoringSummary,
   ConsultantKnowledgeContent,
-  ConsultantKnowledgeSuggestion,
+  ConsultantKnowledgeSuggestionProgress,
   ConsultantCatalogService,
   ConsultantServiceKnowledge,
   ConsultantServiceKnowledgeListResponse,
@@ -243,12 +243,36 @@ export async function generateConsultantServiceKnowledgeDraft(params: {
 }) {
   const response = await apiClient.post<{
     success: true;
-    data: { service: ConsultantCatalogService; suggestion: ConsultantKnowledgeSuggestion };
+    data: { service: ConsultantCatalogService } & ConsultantKnowledgeSuggestionProgress;
   }>(`/ai/consultant/knowledge/${encodeURIComponent(params.serviceId)}/suggest`, {
     clinicId: params.clinicId,
     clinicCode: params.clinicCode,
     currentContent: params.currentContent,
   });
+
+  return response.data.data;
+}
+
+export async function pollConsultantServiceKnowledgeDraft(params: {
+  clinicId: string;
+  clinicCode: string;
+  serviceId: string;
+  responseId: string;
+  jobToken: string;
+}) {
+  const response = await apiClient.get<{
+    success: true;
+    data: ConsultantKnowledgeSuggestionProgress;
+  }>(
+    `/ai/consultant/knowledge/${encodeURIComponent(params.serviceId)}/suggest/${encodeURIComponent(params.responseId)}`,
+    {
+      params: {
+        clinicId: params.clinicId,
+        clinicCode: params.clinicCode,
+        jobToken: params.jobToken,
+      },
+    },
+  );
 
   return response.data.data;
 }

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "../../config/env.js";
 import type { ConsultantCatalogService } from "./service-catalog.service.js";
 import {
@@ -90,7 +90,7 @@ type OpenAiResponsesPayload = {
   id?: string;
   model?: string;
   status?: string;
-  error?: { message?: string } | null;
+  error?: { code?: string; message?: string; type?: string } | null;
   output?: Array<{
     type?: string;
     content?: Array<{
@@ -118,6 +118,20 @@ export type ConsultantKnowledgeSuggestionResult = ConsultantKnowledgeSuggestion 
     };
   };
 };
+
+export type ConsultantKnowledgeSuggestionProgress =
+  | {
+      status: "queued" | "in_progress";
+      job: {
+        responseId: string;
+        jobToken: string;
+        model: string;
+      };
+    }
+  | {
+      status: "completed";
+      suggestion: ConsultantKnowledgeSuggestionResult;
+    };
 
 type SuggestionDependencies = {
   apiKey?: string;
@@ -163,6 +177,30 @@ export function consultantSafetyIdentifier(actorId: string) {
   return `gtv2_${createHash("sha256").update(actorId).digest("hex").slice(0, 32)}`;
 }
 
+export function consultantSuggestionJobToken(params: {
+  apiKey: string;
+  actorId: string;
+  serviceId: string;
+  responseId: string;
+}) {
+  return createHmac("sha256", params.apiKey)
+    .update(JSON.stringify([params.actorId, params.serviceId, params.responseId]))
+    .digest("base64url");
+}
+
+function isValidJobToken(params: {
+  apiKey: string;
+  actorId: string;
+  serviceId: string;
+  responseId: string;
+  jobToken: string;
+}) {
+  const expected = consultantSuggestionJobToken(params);
+  const actualBuffer = Buffer.from(params.jobToken);
+  const expectedBuffer = Buffer.from(expected);
+  return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
 function responseText(payload: OpenAiResponsesPayload) {
   const refusal = payload.output
     ?.flatMap((item) => item.content ?? [])
@@ -181,73 +219,56 @@ function responseText(payload: OpenAiResponsesPayload) {
     .trim() ?? "";
 }
 
-export async function generateConsultantKnowledgeSuggestion(
-  params: {
-    service: ConsultantCatalogService;
-    currentContent?: ConsultantKnowledgeContent;
-    actorId: string;
-  },
-  dependencies: SuggestionDependencies = {},
-): Promise<ConsultantKnowledgeSuggestionResult> {
+function apiKeyFrom(dependencies: SuggestionDependencies) {
   const apiKey = dependencies.apiKey ?? env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new ConsultantKnowledgeSuggestionUnavailableError(
       "AI suggestions are not configured. Add the OpenAI API key and redeploy GT V2.",
     );
   }
+  return apiKey;
+}
 
-  const model = dependencies.model ?? env.OPENAI_CONSULTANT_KNOWLEDGE_MODEL;
-  const reasoningEffort = dependencies.reasoningEffort ?? env.OPENAI_CONSULTANT_KNOWLEDGE_REASONING_EFFORT;
-  const timeoutMs = dependencies.timeoutMs ?? env.OPENAI_CONSULTANT_KNOWLEDGE_TIMEOUT_MS;
-  const controller = new AbortController();
-  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
-  const endpoint = `${(dependencies.apiBaseUrl ?? env.OPENAI_API_BASE_URL).replace(/\/+$/, "")}${OPENAI_RESPONSES_PATH}`;
+function openAiEndpoint(dependencies: SuggestionDependencies, responseId?: string) {
+  const base = (dependencies.apiBaseUrl ?? env.OPENAI_API_BASE_URL).replace(/\/+$/, "");
+  return responseId
+    ? `${base}${OPENAI_RESPONSES_PATH}/${encodeURIComponent(responseId)}`
+    : `${base}${OPENAI_RESPONSES_PATH}`;
+}
 
-  let response: Response;
-  try {
-    response = await (dependencies.fetchImpl ?? fetch)(endpoint, {
-      method: "POST",
-      signal: controller.signal,
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+function openAiRequestBody(
+  params: {
+    service: ConsultantCatalogService;
+    currentContent?: ConsultantKnowledgeContent;
+    actorId: string;
+  },
+  dependencies: SuggestionDependencies,
+  background: boolean,
+) {
+  return {
+    model: dependencies.model ?? env.OPENAI_CONSULTANT_KNOWLEDGE_MODEL,
+    instructions: CONSULTANT_KNOWLEDGE_INSTRUCTIONS,
+    input: buildConsultantKnowledgeSuggestionInput(params),
+    reasoning: {
+      effort: dependencies.reasoningEffort ?? env.OPENAI_CONSULTANT_KNOWLEDGE_REASONING_EFFORT,
+    },
+    max_output_tokens: dependencies.maxOutputTokens ?? env.OPENAI_CONSULTANT_KNOWLEDGE_MAX_OUTPUT_TOKENS,
+    background,
+    store: false,
+    safety_identifier: consultantSafetyIdentifier(params.actorId),
+    text: {
+      verbosity: "medium",
+      format: {
+        type: "json_schema",
+        name: "consultant_service_knowledge_suggestion",
+        strict: true,
+        schema: CONSULTANT_KNOWLEDGE_SUGGESTION_JSON_SCHEMA,
       },
-      body: JSON.stringify({
-        model,
-        instructions: CONSULTANT_KNOWLEDGE_INSTRUCTIONS,
-        input: buildConsultantKnowledgeSuggestionInput(params),
-        reasoning: { effort: reasoningEffort },
-        max_output_tokens: dependencies.maxOutputTokens ?? env.OPENAI_CONSULTANT_KNOWLEDGE_MAX_OUTPUT_TOKENS,
-        store: false,
-        safety_identifier: consultantSafetyIdentifier(params.actorId),
-        text: {
-          verbosity: "medium",
-          format: {
-            type: "json_schema",
-            name: "consultant_service_knowledge_suggestion",
-            strict: true,
-            schema: CONSULTANT_KNOWLEDGE_SUGGESTION_JSON_SCHEMA,
-          },
-        },
-      }),
-    });
-  } catch (error) {
-    const message = error instanceof Error && error.name === "AbortError"
-      ? "GPT-5.6 took too long to prepare the draft. No knowledge was changed."
-      : "GPT-5.6 is temporarily unavailable. No knowledge was changed.";
-    throw new ConsultantKnowledgeSuggestionUnavailableError(message);
-  } finally {
-    clearTimeout(timeoutHandle);
-  }
+    },
+  };
+}
 
-  if (!response.ok) {
-    throw new ConsultantKnowledgeSuggestionUnavailableError(
-      response.status === 429
-        ? "GPT-5.6 is busy or the OpenAI usage limit was reached. Try again shortly."
-        : "GPT-5.6 could not prepare the draft. No knowledge was changed.",
-    );
-  }
-
+async function readOpenAiPayload(response: Response) {
   let payload: OpenAiResponsesPayload;
   try {
     payload = (await response.json()) as OpenAiResponsesPayload;
@@ -256,6 +277,69 @@ export async function generateConsultantKnowledgeSuggestion(
       "GPT-5.6 returned a response that could not be validated. No knowledge was changed.",
     );
   }
+
+  if (!response.ok) {
+    const message = response.status === 401 || response.status === 403
+      ? "OpenAI rejected the configured API credentials. Update OPENAI_API_KEY and redeploy GT V2."
+      : response.status === 404
+        ? "GPT-5.6 Sol is not available to this OpenAI project. Confirm model access and try again."
+        : response.status === 429
+          ? "GPT-5.6 is busy or the OpenAI usage limit was reached. Try again shortly."
+          : response.status === 400
+            ? "OpenAI rejected the Consultant draft request. No knowledge was changed."
+            : "GPT-5.6 could not prepare the draft. No knowledge was changed.";
+    throw new ConsultantKnowledgeSuggestionUnavailableError(message);
+  }
+
+  if (payload.status === "failed" || payload.status === "cancelled") {
+    throw new ConsultantKnowledgeSuggestionUnavailableError(
+      "GPT-5.6 could not complete the draft. No knowledge was changed.",
+    );
+  }
+
+  return payload;
+}
+
+async function requestOpenAi(params: {
+  endpoint: string;
+  apiKey: string;
+  method: "GET" | "POST";
+  body?: Record<string, unknown>;
+  dependencies: SuggestionDependencies;
+}) {
+  const timeoutMs = params.dependencies.timeoutMs ?? env.OPENAI_CONSULTANT_KNOWLEDGE_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await (params.dependencies.fetchImpl ?? fetch)(params.endpoint, {
+      method: params.method,
+      signal: controller.signal,
+      headers: {
+        Authorization: `Bearer ${params.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: params.body ? JSON.stringify(params.body) : undefined,
+    });
+    return await readOpenAiPayload(response);
+  } catch (error) {
+    if (error instanceof ConsultantKnowledgeSuggestionUnavailableError) {
+      throw error;
+    }
+    const message = error instanceof Error && error.name === "AbortError"
+      ? "GPT-5.6 took too long to respond. No knowledge was changed."
+      : "GPT-5.6 is temporarily unavailable. No knowledge was changed.";
+    throw new ConsultantKnowledgeSuggestionUnavailableError(message);
+  } finally {
+    clearTimeout(timeoutHandle);
+  }
+}
+
+function completedSuggestion(
+  payload: OpenAiResponsesPayload,
+  fallbackModel: string,
+  dependencies: SuggestionDependencies,
+): ConsultantKnowledgeSuggestionResult {
   const text = responseText(payload);
   if (!text) {
     throw new ConsultantKnowledgeSuggestionUnavailableError(
@@ -283,7 +367,7 @@ export async function generateConsultantKnowledgeSuggestion(
     ...parsed.data,
     generation: {
       responseId: payload.id ?? null,
-      model: payload.model ?? model,
+      model: payload.model ?? fallbackModel,
       generatedAt: (dependencies.now ?? (() => new Date()))().toISOString(),
       usage: {
         inputTokens: payload.usage?.input_tokens ?? null,
@@ -292,6 +376,119 @@ export async function generateConsultantKnowledgeSuggestion(
       },
     },
   };
+}
+
+export async function generateConsultantKnowledgeSuggestion(
+  params: {
+    service: ConsultantCatalogService;
+    currentContent?: ConsultantKnowledgeContent;
+    actorId: string;
+  },
+  dependencies: SuggestionDependencies = {},
+): Promise<ConsultantKnowledgeSuggestionResult> {
+  const apiKey = apiKeyFrom(dependencies);
+  const model = dependencies.model ?? env.OPENAI_CONSULTANT_KNOWLEDGE_MODEL;
+  const payload = await requestOpenAi({
+    endpoint: openAiEndpoint(dependencies),
+    apiKey,
+    method: "POST",
+    body: openAiRequestBody(params, dependencies, false),
+    dependencies,
+  });
+  return completedSuggestion(payload, model, dependencies);
+}
+
+export async function startConsultantKnowledgeSuggestion(
+  params: {
+    service: ConsultantCatalogService;
+    currentContent?: ConsultantKnowledgeContent;
+    actorId: string;
+  },
+  dependencies: SuggestionDependencies = {},
+): Promise<ConsultantKnowledgeSuggestionProgress> {
+  const apiKey = apiKeyFrom(dependencies);
+  const model = dependencies.model ?? env.OPENAI_CONSULTANT_KNOWLEDGE_MODEL;
+  const payload = await requestOpenAi({
+    endpoint: openAiEndpoint(dependencies),
+    apiKey,
+    method: "POST",
+    body: openAiRequestBody(params, dependencies, true),
+    dependencies,
+  });
+
+  if (payload.status === "completed") {
+    return {
+      status: "completed",
+      suggestion: completedSuggestion(payload, model, dependencies),
+    };
+  }
+
+  if ((payload.status === "queued" || payload.status === "in_progress") && payload.id) {
+    return {
+      status: payload.status,
+      job: {
+        responseId: payload.id,
+        jobToken: consultantSuggestionJobToken({
+          apiKey,
+          actorId: params.actorId,
+          serviceId: params.service.serviceId,
+          responseId: payload.id,
+        }),
+        model: payload.model ?? model,
+      },
+    };
+  }
+
+  throw new ConsultantKnowledgeSuggestionUnavailableError(
+    "GPT-5.6 returned an unexpected generation status. No knowledge was changed.",
+  );
+}
+
+export async function pollConsultantKnowledgeSuggestion(
+  params: {
+    serviceId: string;
+    responseId: string;
+    jobToken: string;
+    actorId: string;
+  },
+  dependencies: SuggestionDependencies = {},
+): Promise<ConsultantKnowledgeSuggestionProgress> {
+  const apiKey = apiKeyFrom(dependencies);
+  if (!isValidJobToken({ apiKey, ...params })) {
+    throw new ConsultantKnowledgeSuggestionUnavailableError(
+      "This GPT-5.6 draft job is invalid or belongs to another session.",
+    );
+  }
+
+  const model = dependencies.model ?? env.OPENAI_CONSULTANT_KNOWLEDGE_MODEL;
+  const payload = await requestOpenAi({
+    endpoint: openAiEndpoint(dependencies, params.responseId),
+    apiKey,
+    method: "GET",
+    dependencies,
+  });
+
+  if (payload.status === "completed") {
+    return {
+      status: "completed",
+      suggestion: completedSuggestion(payload, model, dependencies),
+    };
+  }
+
+  if (payload.status === "queued" || payload.status === "in_progress") {
+    return {
+      status: payload.status,
+      job: {
+        responseId: params.responseId,
+        jobToken: params.jobToken,
+        model: payload.model ?? model,
+      },
+    };
+  }
+
+  throw new ConsultantKnowledgeSuggestionUnavailableError(
+    "GPT-5.6 stopped before completing the draft. No knowledge was changed.",
+  );
 }
 
 export const __test = {

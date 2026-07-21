@@ -40,9 +40,13 @@ provider used elsewhere in GT V2.
 - The backend sends only the selected API Core service description, duration, and the
   current editor content. It does not send customer records.
 - The request uses strict structured output, medium reasoning, and `store: false`.
+- Generation runs as an OpenAI background response and is polled through an authenticated
+  GT V2 route, avoiding one long-lived browser request.
 - Suggestions return English and Myanmar content plus confidence, warnings, missing
   information, and review notes.
 - The response changes only the browser form. It does not write Firestore or publish.
+- The editor shows queued/in-progress status beside the button and stops polling with an
+  actionable error after four minutes.
 - API Core price remains live and is explicitly excluded from generated knowledge.
 - The endpoint is restricted to an authorized Queen clinic and AI Control Panel admins.
 - `OPENAI_API_KEY` is a backend-only GitHub Actions secret passed to Cloud Run. It must

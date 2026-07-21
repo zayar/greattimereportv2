@@ -267,6 +267,42 @@
   line-height: 1.4;
 }
 
+.consultant-ai-generation-feedback {
+  display: flex;
+  align-items: center;
+  flex-basis: 100%;
+  gap: 8px;
+  margin: 2px 0 0;
+  border-radius: 9px;
+  background: var(--info-soft);
+  color: var(--info);
+  padding: 9px 11px;
+  font-size: 0.78rem;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.consultant-ai-generation-feedback[data-tone="error"] {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.consultant-ai-generation-feedback > span {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 13px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  animation: consultant-ai-spin 750ms linear infinite;
+}
+
+@keyframes consultant-ai-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .consultant-ai-review {
   display: grid;
   gap: 10px;
