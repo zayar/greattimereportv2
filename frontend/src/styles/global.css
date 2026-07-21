@@ -58,6 +58,323 @@
   --luxe-divider: rgba(17, 24, 39, 0.048);
 }
 
+.consultant-knowledge-page {
+  display: grid;
+  gap: 16px;
+}
+
+.consultant-knowledge-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.consultant-knowledge-header h1,
+.consultant-knowledge-editor h2 {
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.consultant-knowledge-header > div > p:last-child,
+.consultant-knowledge-editor__service p {
+  max-width: 760px;
+  margin: 7px 0 0;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.consultant-knowledge-eyebrow {
+  margin: 0 0 5px;
+  color: var(--gt-green-dark);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.consultant-knowledge-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.consultant-knowledge-summary > div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: 12px 14px;
+}
+
+.consultant-knowledge-summary span,
+.consultant-knowledge-editor__service span,
+.consultant-knowledge-editor__service dt {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
+.consultant-knowledge-summary strong {
+  color: var(--text-primary);
+  font-size: 1.35rem;
+}
+
+.consultant-knowledge-notice {
+  margin: 0;
+  border: 1px solid rgba(11, 93, 73, 0.22);
+  border-radius: var(--radius-md);
+  background: var(--gt-green-soft);
+  color: var(--gt-green-dark);
+  padding: 10px 12px;
+  font-weight: 700;
+}
+
+.consultant-knowledge-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+}
+
+.consultant-service-list,
+.consultant-knowledge-editor {
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-subtle);
+  padding: 14px;
+}
+
+.consultant-service-list {
+  position: sticky;
+  top: 76px;
+  display: grid;
+  gap: 12px;
+}
+
+.consultant-service-list__rows {
+  display: grid;
+  gap: 6px;
+  max-height: calc(100vh - 230px);
+  overflow: auto;
+}
+
+.consultant-service-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  padding: 10px;
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.consultant-service-row:hover {
+  background: var(--surface-soft);
+}
+
+.consultant-service-row--active {
+  border-color: rgba(11, 93, 73, 0.28);
+  background: var(--gt-green-soft);
+}
+
+.consultant-service-row > span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.consultant-service-row strong,
+.consultant-service-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.consultant-service-row small {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.consultant-service-row em {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--text-muted);
+  padding: 3px 7px;
+  font-size: 0.68rem;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.consultant-service-row em[data-status="published"] {
+  background: var(--gt-green-soft);
+  color: var(--gt-green-dark);
+}
+
+.consultant-knowledge-editor {
+  display: grid;
+  gap: 16px;
+}
+
+.consultant-knowledge-editor__service {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(250px, 0.7fr);
+  gap: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.consultant-knowledge-editor__service dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.consultant-knowledge-editor__service dl > div {
+  display: grid;
+  gap: 3px;
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+  padding: 9px 10px;
+}
+
+.consultant-knowledge-editor__service dd {
+  margin: 0;
+  color: var(--text-primary);
+  font-weight: 800;
+}
+
+.consultant-language-tabs {
+  display: inline-flex;
+  justify-self: start;
+  gap: 4px;
+  border-radius: var(--radius-md);
+  background: var(--surface-soft);
+  padding: 4px;
+}
+
+.consultant-language-tabs button {
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 7px 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.consultant-language-tabs button.active {
+  background: var(--surface);
+  color: var(--gt-green-dark);
+  box-shadow: var(--shadow-subtle);
+}
+
+.consultant-knowledge-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.consultant-knowledge-fields .field {
+  align-content: start;
+}
+
+.consultant-knowledge-fields .field small {
+  min-height: 34px;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.consultant-knowledge-fields textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.consultant-knowledge-field--wide {
+  grid-column: 1 / -1;
+}
+
+.consultant-knowledge-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin: 0 -14px -14px;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  padding: 12px 14px;
+  backdrop-filter: blur(8px);
+}
+
+.consultant-knowledge-actions p {
+  margin: 0 auto 0 0;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.consultant-preview-context {
+  display: grid;
+  gap: 9px;
+}
+
+.consultant-preview-context .button {
+  width: 100%;
+}
+
+.consultant-preview-context > small {
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+@media (max-width: 1000px) {
+  .consultant-knowledge-layout,
+  .consultant-knowledge-editor__service {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .consultant-service-list {
+    position: static;
+  }
+
+  .consultant-service-list__rows {
+    max-height: 320px;
+  }
+}
+
+@media (max-width: 680px) {
+  .consultant-knowledge-header,
+  .consultant-knowledge-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .consultant-knowledge-summary,
+  .consultant-knowledge-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .consultant-knowledge-field--wide {
+    grid-column: auto;
+  }
+
+  .consultant-knowledge-actions p {
+    margin: 0;
+  }
+}
+
 /* Modern GreatTime dashboard refresh */
 :root {
   --app-bg: #f6f7f2;

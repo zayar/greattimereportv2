@@ -55,6 +55,7 @@ import { AiAgentMonitoringPage } from "./features/settings/ai-agent-monitoring/A
 import { AgentHubPage } from "./features/ai/agent-hub/AgentHubPage";
 import { AiAgentPortalPage } from "./features/ai/agent-portal/AiAgentPortalPage";
 import { AiRevenueAgentPage } from "./features/ai/agent-portal/revenue-agent/AiRevenueAgentPage";
+import { ConsultantKnowledgePage } from "./features/ai/consultant-knowledge/ConsultantKnowledgePage";
 
 export default function App() {
   return (
@@ -117,6 +118,7 @@ export default function App() {
                     <Route path="ai/agent-portal" element={<AiAgentPortalPage />} />
                     <Route path="ai/agent-portal/revenue-agent" element={<AiRevenueAgentPage />} />
                     <Route path="ai/agent-hub" element={<AgentHubPage />} />
+                    <Route path="ai/consultant-knowledge" element={<ConsultantKnowledgePage />} />
                     <Route path="ai/gt-growth-ai-sales-assistant" element={<Navigate to="/ai/agent-hub" replace />} />
                     <Route path="ai/customer-relationship-agent" element={<Navigate to="/ai/agent-hub" replace />} />
                     <Route path="settings/sales-document" element={<SalesDocumentSettingsPage />} />

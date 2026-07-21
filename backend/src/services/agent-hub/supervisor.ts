@@ -7,9 +7,11 @@ import { hasExplicitServiceSearchIntent } from "./service-query.js";
 import { isTreatmentDetailQuestion } from "./treatment-detail-intent.js";
 import { isTopCustomerQuestion as matchesTopCustomerQuestion } from "./top-customer-intent.js";
 
-const AGENT_ORDER: GreatTimeAgentId[] = ["finance", "customer_relationship", "business", "appointment"];
+type AutoRoutedAgentId = Exclude<GreatTimeAgentId, "consultant">;
 
-const KEYWORDS: Record<GreatTimeAgentId, RegExp[]> = {
+const AGENT_ORDER: AutoRoutedAgentId[] = ["finance", "customer_relationship", "business", "appointment"];
+
+const KEYWORDS: Record<AutoRoutedAgentId, RegExp[]> = {
   finance: [
     /sales?|revenue|income|turnover|invoice|transactions?|transcriptions?|payment|collection|collected|received|cash|bank|wallet|kpay|kpaye|kbz|wavepay|wave|mmqr|\bqr\b|cbpay|ayapay|mpu|visa|master\s*card|mastercard|purchase|refund/i,
     /ရောင်း|ဝင်ငွေ|ငွေ|ပေးချေ|ဘဏ်|အကြွေး|ငွေသား|ဘယ်လောက်|ဝင်လဲ|ဝင်|ရလဲ|အသေးစိတ်|စာရင်း/i,
@@ -28,7 +30,7 @@ const KEYWORDS: Record<GreatTimeAgentId, RegExp[]> = {
   ],
 };
 
-function scoreAgent(message: string, agentId: GreatTimeAgentId) {
+function scoreAgent(message: string, agentId: AutoRoutedAgentId) {
   return KEYWORDS[agentId].reduce((score, keyword) => score + (keyword.test(message) ? 1 : 0), 0);
 }
 
@@ -99,13 +101,14 @@ export function resolveAgent(params: {
         customer_relationship: 0,
         business: 0,
         appointment: 0,
+        consultant: 0,
       },
     };
   }
 
   const scores = Object.fromEntries(
     AGENT_ORDER.map((agentId) => [agentId, scoreAgent(params.message, agentId)]),
-  ) as Record<GreatTimeAgentId, number>;
+  ) as Record<AutoRoutedAgentId, number>;
   const birthdayCustomerQuestion = isBirthdayCustomerQuestion(params.message);
 
   if (hasExplicitServiceSearchIntent(params.message)) {
@@ -170,7 +173,7 @@ export function resolveAgent(params: {
     scores.customer_relationship += 1;
   }
 
-  const resolvedAgent = AGENT_ORDER.reduce<GreatTimeAgentId>((best, candidate) => {
+  const resolvedAgent = AGENT_ORDER.reduce<AutoRoutedAgentId>((best, candidate) => {
     if (scores[candidate] > scores[best]) {
       return candidate;
     }
@@ -181,6 +184,6 @@ export function resolveAgent(params: {
   return {
     resolvedAgent: scores[resolvedAgent] > 0 ? resolvedAgent : "business",
     autoMode: true,
-    scores,
+    scores: { ...scores, consultant: 0 },
   };
 }

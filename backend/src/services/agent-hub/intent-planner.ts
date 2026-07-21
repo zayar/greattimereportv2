@@ -744,6 +744,12 @@ export function toolsForIntent(agentId: GreatTimeAgentId, intent: string, period
     }
   }
 
+  if (agentId === "consultant") {
+    return intent === "consultant_trending_services"
+      ? ["get_consultant_trending_services"]
+      : ["get_consultant_service_advice"];
+  }
+
   switch (intent) {
     case "appointment_summary":
       return isTodayPeriod(period) ? ["get_live_appointment_counts"] : ["get_appointment_ledger"];
@@ -809,7 +815,11 @@ export function planAgentRequest(params: {
           ? detectCustomerIntent(params.request.message)
           : resolvedAgent === "business"
             ? detectBusinessIntent(params.request.message)
-            : detectAppointmentIntent(params.request.message);
+            : resolvedAgent === "consultant"
+              ? /trending|popular|most[- ]?booked|top\s+services?|ခေတ်စား|လူကြိုက်များ/i.test(params.request.message)
+                ? "consultant_trending_services"
+                : "consultant_service_advice"
+              : detectAppointmentIntent(params.request.message);
 
   period = applyIntentPeriodDefaults({
     resolvedAgent,

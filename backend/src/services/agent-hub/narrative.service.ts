@@ -140,15 +140,26 @@ function buildMemoryDirectives(memories: GtAgentRelevantMemory[]) {
 }
 
 function buildNarrativePrompt(response: GreatTimeAgentChatResponse, memories: GtAgentRelevantMemory[]) {
-  return JSON.stringify({
-    instruction:
-      [
+  const consultantInstructions = response.resolvedAgent === "consultant"
+    ? [
+        "Write a concise customer-facing beauty-service consultation using only the approved facts supplied.",
+        "Do not diagnose a condition, promise results, add medical advice, or recommend an unpublished service.",
+        "Use 'may be suitable' language and preserve every limitation, escalation note, current price, and duration exactly.",
+        "End by saying trained clinic staff must confirm final suitability.",
+      ]
+    : [
         "Write one concise GreatTime owner-facing answer from these fixed facts.",
-        "Do not add, remove, recalculate, or change any number.",
         "For appointment lists, use clear customer-friendly rows with customer name, phone, service, staff, time, and status when present.",
         "Ask the staff to choose by tapping the customer name; do not invent generic Details/History or Next Question button labels.",
         "For customer relationship answers, use recent appointment context first when present and never expose internal matching/debug terms.",
         "Use short Burmese + English mixed wording that is useful for salon/front-desk staff.",
+      ];
+
+  return JSON.stringify({
+    instruction:
+      [
+        ...consultantInstructions,
+        "Do not add, remove, recalculate, or change any number.",
         "Return JSON only: {\"assistantMessage\":\"...\"}.",
       ].join(" "),
     language: response.requestedAgent === "auto" ? "match user preference if obvious" : "concise",
@@ -207,6 +218,10 @@ function buildNarrativePrompt(response: GreatTimeAgentChatResponse, memories: Gt
         }
       : undefined,
     metrics: (response.metrics ?? []).slice(0, 8),
+    recommendations: (response.recommendations ?? []).slice(0, 4).map((recommendation) => ({
+      title: recommendation.title,
+      message: recommendation.message,
+    })),
     tableTitles: (response.tables ?? []).map((table) => ({
       title: table.title,
       rowCount: table.rows.length,

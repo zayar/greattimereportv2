@@ -73,6 +73,7 @@ const INTENTS_BY_AGENT = {
     "appointment_detail",
     "appointment_trend",
   ],
+  consultant: ["consultant_service_advice", "consultant_trending_services"],
 } as const satisfies Record<GreatTimeAgentId, readonly string[]>;
 
 const ALL_INTENTS = [...new Set(Object.values(INTENTS_BY_AGENT).flat())] as [string, ...string[]];
@@ -336,6 +337,16 @@ export async function planSemanticAgentRequest(params: {
       latencyMs: Date.now() - startedAt,
     },
   });
+
+  // The Consultant preview uses deterministic, approved concern matching. Keep it
+  // out of the general business semantic router until the customer-facing eval set is ready.
+  if (params.deterministicPlan.resolvedAgent === "consultant") {
+    return fallback({
+      attempted: false,
+      fallbackUsed: false,
+      fallbackReason: "consultant_preview_deterministic",
+    });
+  }
 
   if (!env.AGENT_SEMANTIC_PLANNER_ENABLED || params.deterministicPlan.unsupportedReason) {
     return fallback({

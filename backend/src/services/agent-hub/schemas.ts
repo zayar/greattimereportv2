@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const greatTimeAgentIds = ["finance", "customer_relationship", "business", "appointment"] as const;
+export const greatTimeAgentIds = ["finance", "customer_relationship", "business", "appointment", "consultant"] as const;
 export const greatTimeRequestedAgentIds = ["auto", ...greatTimeAgentIds] as const;
 
 export const agentEntityContextSchema = z.object({

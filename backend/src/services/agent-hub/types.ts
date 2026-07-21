@@ -1,6 +1,6 @@
 import type { z } from "zod";
 
-export type GreatTimeAgentId = "finance" | "customer_relationship" | "business" | "appointment";
+export type GreatTimeAgentId = "finance" | "customer_relationship" | "business" | "appointment" | "consultant";
 export type GreatTimeRequestedAgentId = GreatTimeAgentId | "auto";
 
 export type AgentDataStatus =

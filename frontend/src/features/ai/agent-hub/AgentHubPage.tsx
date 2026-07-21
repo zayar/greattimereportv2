@@ -5,7 +5,9 @@ import { askGreatTimeAgentHub, recordGreatTimeAgentFeedback } from "../../../api
 import { DateRangeControls } from "../../../components/DateRangeControls";
 import { ErrorState, EmptyState } from "../../../components/StatusViews";
 import { useAccess } from "../../access/AccessProvider";
+import { useSession } from "../../auth/SessionProvider";
 import { AI_LANGUAGE_OPTIONS, useAiPreferences } from "../AiPreferencesProvider";
+import { canAccessAiControlPanel } from "../adminAccess";
 import { startOfCurrentMonth, today } from "../../../utils/date";
 import autoAgentAvatar from "../../../../CFO_agent.jpg";
 import financeAgentAvatar from "../../../../Finance_agent.jpg";
@@ -38,7 +40,7 @@ type ChatTurn = {
   exportNotice?: string;
 };
 
-type AgentIconName = "auto" | "finance" | "relationship" | "business" | "appointment";
+type AgentIconName = "auto" | "finance" | "relationship" | "business" | "appointment" | "consultant";
 
 type AgentOption = {
   value: GreatTimeRequestedAgentId;
@@ -125,6 +127,14 @@ const AGENT_OPTIONS: AgentOption[] = [
     avatar: appointmentAgentAvatar,
     avatarAlt: "Appointment specialization portrait",
   },
+  {
+    value: "consultant",
+    label: "Service consultant",
+    description: "Customer concerns, approved service guidance, live prices, and trends.",
+    icon: "consultant",
+    avatar: relationshipAgentAvatar,
+    avatarAlt: "Service consultant specialization portrait",
+  },
 ];
 
 const SUGGESTIONS: Record<GreatTimeRequestedAgentId, string[]> = {
@@ -158,6 +168,12 @@ const SUGGESTIONS: Record<GreatTimeRequestedAgentId, string[]> = {
     "How many appointments are checked in right now?",
     "Which customers may not have started treatment?",
   ],
+  consultant: [
+    "I have dry skin. Which service may be suitable for me?",
+    "I have unwanted facial hair. What options can I ask about?",
+    "Which services are trending this month?",
+    "What should I know before choosing a service?",
+  ],
 };
 
 function agentLabel(agent: GreatTimeAgentId | GreatTimeRequestedAgentId) {
@@ -174,6 +190,8 @@ function specialistAgentLabel(agent: GreatTimeAgentId) {
       return "Business Agent";
     case "appointment":
       return "Appointment Agent";
+    case "consultant":
+      return "Service Consultant (Preview)";
     default:
       return "GreatTime Agent";
   }
@@ -296,6 +314,13 @@ function AgentModeIcon({ name }: { name: AgentIconName }) {
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect x="4" y="5" width="16" height="15" rx="2" />
           <path d="M8 3v4M16 3v4M4 10h16M9 15l2 2 4-4" />
+        </svg>
+      );
+    case "consultant":
+      return (
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M8 4h8a3 3 0 0 1 3 3v5a3 3 0 0 1-3 3h-4l-4 4v-4a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3z" />
+          <path d="M9 9h6M9 12h3" />
         </svg>
       );
     case "auto":
@@ -558,6 +583,7 @@ function AgentCustomer360Card({ factPack }: { factPack: Customer360FactPack }) {
 
 export function AgentHubPage() {
   const { currentClinic, loading: accessLoading, error: accessError } = useAccess();
+  const { gtUser } = useSession();
   const { aiLanguage, setAiLanguage } = useAiPreferences();
   const [agent, setAgent] = useState<GreatTimeRequestedAgentId>("auto");
   const [range, setRange] = useState({ fromDate: startOfCurrentMonth(), toDate: today() });
@@ -580,13 +606,21 @@ export function AgentHubPage() {
     setFeedbackDrafts({});
     setRecommendationFeedbackSent({});
     setRangeTouched(false);
+    if (currentClinic?.code?.trim().toUpperCase() !== "GTTHEQUEEN") {
+      setAgent("auto");
+    }
   }, [currentClinic?.id]);
 
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [turns, loading]);
 
-  const activeAgent = AGENT_OPTIONS.find((option) => option.value === agent) ?? AGENT_OPTIONS[0];
+  const isQueenConsultantPreview = currentClinic?.code?.trim().toUpperCase() === "GTTHEQUEEN";
+  const visibleAgentOptions = isQueenConsultantPreview
+    ? AGENT_OPTIONS
+    : AGENT_OPTIONS.filter((option) => option.value !== "consultant");
+  const canManageConsultantKnowledge = isQueenConsultantPreview && canAccessAiControlPanel(gtUser?.email);
+  const activeAgent = visibleAgentOptions.find((option) => option.value === agent) ?? visibleAgentOptions[0];
   const suggestions = SUGGESTIONS[agent];
   const latestResponse = useMemo(() => [...turns].reverse().find((turn) => turn.response)?.response, [turns]);
   const latestExportableResponse = useMemo(
@@ -809,7 +843,7 @@ export function AgentHubPage() {
             <strong>{activeAgent.label}</strong>
           </div>
           <div className="agent-mode-list">
-            {AGENT_OPTIONS.map((option) => (
+            {visibleAgentOptions.map((option) => (
               <button
                 key={option.value}
                 type="button"
@@ -1066,6 +1100,19 @@ export function AgentHubPage() {
               }}
             />
           </section>
+
+          {agent === "consultant" ? (
+            <section className="agent-context-section consultant-preview-context">
+              <h2>Queen preview</h2>
+              <p className="agent-context-panel__muted">
+                Advice uses published GT V2 knowledge. Current price and duration are read from GT API Core.
+              </p>
+              {canManageConsultantKnowledge ? (
+                <Link className="button button--secondary" to="/ai/consultant-knowledge">Manage service knowledge</Link>
+              ) : null}
+              <small>Booking is not enabled in this staff-testing phase.</small>
+            </section>
+          ) : null}
 
           <section className="agent-context-section">
             <div className="agent-context-section__header">

@@ -2,6 +2,7 @@ import { createAppointmentTools } from "./tools/appointment.tools.js";
 import { createBusinessTools } from "./tools/business.tools.js";
 import { createCustomerTools } from "./tools/customer.tools.js";
 import { createFinanceTools } from "./tools/finance.tools.js";
+import { createConsultantTools } from "./tools/consultant.tools.js";
 import type { AgentToolDefinition, GreatTimeAgentId } from "./types.js";
 
 export function createAgentToolRegistry() {
@@ -11,6 +12,7 @@ export function createAgentToolRegistry() {
     ...createCustomerTools(),
     ...businessTools,
     ...createAppointmentTools(),
+    ...createConsultantTools(),
   ];
 
   return new Map(tools.map((tool) => [tool.name, tool]));

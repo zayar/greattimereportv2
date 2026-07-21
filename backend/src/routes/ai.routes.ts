@@ -3,7 +3,10 @@ import { z } from "zod";
 import { env } from "../config/env.js";
 import { verifyFirebaseToken } from "../middleware/auth.js";
 import { requireClinicAccess } from "../middleware/clinic-access.js";
-import { isAiControlPanelAdminEmail } from "../services/ai-control-panel-access.service.js";
+import {
+  isAiControlPanelAdminEmail,
+  requireAiControlPanelAdmin,
+} from "../services/ai-control-panel-access.service.js";
 import { requireAiAgentMonitoringAdmin } from "../services/ai-agent-monitoring-access.service.js";
 import { asyncHandler } from "../utils/async-handler.js";
 import { HttpError } from "../utils/http-error.js";
@@ -61,6 +64,22 @@ import {
 } from "../services/agent-hub/schemas.js";
 import { hasFeatureAccess } from "../services/feature-access.service.js";
 import { GT_GROWTH_AI_FEATURE_GATE } from "../types/report-ai.js";
+import {
+  consultantKnowledgeClinicQuerySchema,
+  consultantKnowledgeServiceParamsSchema,
+  publishConsultantKnowledgeSchema,
+  saveConsultantKnowledgeDraftSchema,
+} from "../services/consultant-agent/service-knowledge.schemas.js";
+import {
+  ConsultantKnowledgeVersionConflictError,
+  ConsultantKnowledgeNotReadyError,
+  getConsultantServiceKnowledge,
+  listConsultantServiceKnowledge,
+  publishConsultantServiceKnowledge,
+  saveConsultantKnowledgeDraft,
+} from "../services/consultant-agent/service-knowledge.repository.js";
+import { getConsultantServiceCatalog } from "../services/consultant-agent/service-catalog.service.js";
+import { requireQueenConsultantClinic } from "../services/consultant-agent/consultant-access.js";
 
 const router = Router();
 
@@ -250,6 +269,168 @@ async function requireGtGrowthAi(clinicId: string) {
   return access;
 }
 
+function consultantActor(req: Express.Request) {
+  return {
+    userId: req.user?.userId ?? req.user?.uid ?? "unknown",
+    email: req.user?.email ?? null,
+  };
+}
+
+function rethrowConsultantKnowledgeError(error: unknown): never {
+  if (error instanceof ConsultantKnowledgeVersionConflictError) {
+    throw new HttpError(409, error.message);
+  }
+  if (error instanceof ConsultantKnowledgeNotReadyError) {
+    throw new HttpError(400, error.message);
+  }
+
+  throw error;
+}
+
+router.get(
+  "/consultant/services",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = consultantKnowledgeClinicQuerySchema.parse(req.query);
+    await requireGtGrowthAi(params.clinicId);
+    const clinic = await resolveAgentClinicContext({
+      user: req.user,
+      clinicId: params.clinicId,
+      clinicCode: params.clinicCode,
+      authorizationHeader: req.headers.authorization,
+    });
+    requireQueenConsultantClinic(clinic);
+
+    const [catalog, knowledge] = await Promise.all([
+      getConsultantServiceCatalog({ clinic, authorizationHeader: req.headers.authorization }),
+      listConsultantServiceKnowledge({ clinicId: clinic.clinicId }),
+    ]);
+    const knowledgeByServiceId = new Map(knowledge.map((item) => [item.serviceId, item]));
+    const rows = catalog.map((service) => {
+      const item = knowledgeByServiceId.get(service.serviceId);
+      return {
+        ...service,
+        knowledgeStatus: item?.status ?? "missing",
+        knowledgeVersion: item?.version ?? null,
+        publishedVersion: item?.publishedVersion ?? null,
+        hasUnpublishedChanges: Boolean(item && item.version !== item.publishedVersion),
+        knowledgeUpdatedAt: item?.updatedAt ?? null,
+      };
+    });
+
+    res.json({
+      success: true,
+      data: {
+        clinic,
+        rows,
+        summary: {
+          activeServiceCount: catalog.length,
+          publishedKnowledgeCount: knowledge.filter((item) => item.publishedContent).length,
+          draftKnowledgeCount: knowledge.filter((item) => item.version !== item.publishedVersion).length,
+        },
+      },
+    });
+  }),
+);
+
+router.get(
+  "/consultant/knowledge/:serviceId",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const query = consultantKnowledgeClinicQuerySchema.parse(req.query);
+    const path = consultantKnowledgeServiceParamsSchema.parse(req.params);
+    await requireGtGrowthAi(query.clinicId);
+    const clinic = await resolveAgentClinicContext({
+      user: req.user,
+      clinicId: query.clinicId,
+      clinicCode: query.clinicCode,
+      authorizationHeader: req.headers.authorization,
+    });
+    requireQueenConsultantClinic(clinic);
+    const [catalog, knowledge] = await Promise.all([
+      getConsultantServiceCatalog({ clinic, authorizationHeader: req.headers.authorization }),
+      getConsultantServiceKnowledge({ clinicId: clinic.clinicId, serviceId: path.serviceId }),
+    ]);
+    const service = catalog.find((item) => item.serviceId === path.serviceId);
+    if (!service) {
+      throw new HttpError(404, "The active service was not found in GT API Core.");
+    }
+
+    res.json({ success: true, data: { service, knowledge } });
+  }),
+);
+
+router.put(
+  "/consultant/knowledge/:serviceId",
+  requireClinicAccess("body", "clinicId"),
+  asyncHandler(async (req, res) => {
+    requireAiControlPanelAdmin(req);
+    const params = saveConsultantKnowledgeDraftSchema.parse(req.body);
+    const path = consultantKnowledgeServiceParamsSchema.parse(req.params);
+    await requireGtGrowthAi(params.clinicId);
+    const clinic = await resolveAgentClinicContext({
+      user: req.user,
+      clinicId: params.clinicId,
+      clinicCode: params.clinicCode,
+      authorizationHeader: req.headers.authorization,
+    });
+    requireQueenConsultantClinic(clinic);
+    const catalog = await getConsultantServiceCatalog({
+      clinic,
+      authorizationHeader: req.headers.authorization,
+    });
+    const service = catalog.find((item) => item.serviceId === path.serviceId);
+    if (!service) {
+      throw new HttpError(404, "The active service was not found in GT API Core.");
+    }
+
+    try {
+      const knowledge = await saveConsultantKnowledgeDraft({
+        clinicId: clinic.clinicId,
+        clinicCode: clinic.clinicCode,
+        serviceId: service.serviceId,
+        serviceName: service.serviceName,
+        content: params.content,
+        expectedVersion: params.expectedVersion,
+        actor: consultantActor(req),
+      });
+      res.json({ success: true, data: { service, knowledge } });
+    } catch (error) {
+      rethrowConsultantKnowledgeError(error);
+    }
+  }),
+);
+
+router.post(
+  "/consultant/knowledge/:serviceId/publish",
+  requireClinicAccess("body", "clinicId"),
+  asyncHandler(async (req, res) => {
+    requireAiControlPanelAdmin(req);
+    const params = publishConsultantKnowledgeSchema.parse(req.body);
+    const path = consultantKnowledgeServiceParamsSchema.parse(req.params);
+    await requireGtGrowthAi(params.clinicId);
+    const clinic = await resolveAgentClinicContext({
+      user: req.user,
+      clinicId: params.clinicId,
+      clinicCode: params.clinicCode,
+      authorizationHeader: req.headers.authorization,
+    });
+    requireQueenConsultantClinic(clinic);
+
+    try {
+      const knowledge = await publishConsultantServiceKnowledge({
+        clinicId: clinic.clinicId,
+        serviceId: path.serviceId,
+        expectedVersion: params.expectedVersion,
+        actor: consultantActor(req),
+      });
+      res.json({ success: true, data: { knowledge } });
+    } catch (error) {
+      rethrowConsultantKnowledgeError(error);
+    }
+  }),
+);
+
 router.post(
   "/agent/chat",
   requireClinicAccess("body", "clinicId"),
@@ -315,6 +496,9 @@ router.post(
       clinicCode: params.clinicCode,
       authorizationHeader: req.headers.authorization,
     });
+    if (params.agent === "consultant") {
+      requireQueenConsultantClinic(clinic);
+    }
     const data = await askAgentHub({
       request: params,
       clinic,
