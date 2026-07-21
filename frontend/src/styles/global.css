@@ -70,6 +70,19 @@
   gap: 18px;
 }
 
+.consultant-knowledge-header__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.consultant-knowledge-header__actions [aria-disabled="true"] {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 .consultant-knowledge-header h1,
 .consultant-knowledge-editor h2 {
   margin: 0;
@@ -129,6 +142,86 @@
   color: var(--gt-green-dark);
   padding: 10px 12px;
   font-weight: 700;
+}
+
+.consultant-bulk-progress {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(37, 99, 168, 0.2);
+  border-radius: var(--radius-md);
+  background: var(--info-soft);
+  padding: 13px 14px;
+}
+
+.consultant-bulk-progress[data-status="completed"] {
+  border-color: rgba(11, 93, 73, 0.22);
+  background: var(--gt-green-soft);
+}
+
+.consultant-bulk-progress__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.consultant-bulk-progress__heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.consultant-bulk-progress__heading span {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.consultant-bulk-progress__heading strong {
+  color: var(--text-primary);
+}
+
+.consultant-bulk-progress__heading small,
+.consultant-bulk-progress p,
+.consultant-bulk-progress li {
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.consultant-bulk-progress__heading small {
+  max-width: 420px;
+  text-align: right;
+}
+
+.consultant-bulk-progress progress {
+  width: 100%;
+  height: 9px;
+  accent-color: var(--gt-green);
+}
+
+.consultant-bulk-progress p {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.consultant-bulk-progress details {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 9px;
+}
+
+.consultant-bulk-progress summary {
+  color: var(--danger);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.consultant-bulk-progress ul {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0 0;
+  padding-left: 20px;
+  font-size: 0.8rem;
 }
 
 .consultant-knowledge-layout {
@@ -488,6 +581,21 @@
   .consultant-knowledge-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .consultant-knowledge-header__actions,
+  .consultant-knowledge-header__actions .button {
+    width: 100%;
+  }
+
+  .consultant-bulk-progress__heading {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .consultant-bulk-progress__heading small {
+    max-width: none;
+    text-align: left;
   }
 
   .consultant-knowledge-summary,

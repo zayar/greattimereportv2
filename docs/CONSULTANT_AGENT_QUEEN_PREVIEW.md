@@ -47,6 +47,14 @@ provider used elsewhere in GT V2.
 - The response changes only the browser form. It does not write Firestore or publish.
 - The editor shows queued/in-progress status beside the button and stops polling with an
   actionable error after four minutes.
+- For the initial Queen rollout, an admin can explicitly confirm a bulk run for every
+  service that has no published version. The page generates, saves, validates, and
+  publishes those services with concurrency limited to two OpenAI jobs.
+- Bulk rollout never replaces an already published service. It publishes an existing
+  unpublished draft as saved, continues past individual failures, and can be rerun to
+  resume only the services that remain unpublished.
+- The browser coordinates the first-version bulk run, so the signed-in admin must keep
+  the page open until the progress panel finishes.
 - API Core price remains live and is explicitly excluded from generated knowledge.
 - The endpoint is restricted to an authorized Queen clinic and AI Control Panel admins.
 - `OPENAI_API_KEY` is a backend-only GitHub Actions secret passed to Cloud Run. It must
@@ -60,6 +68,10 @@ provider used elsewhere in GT V2.
 4. **Save draft** creates a version without changing agent answers.
 5. **Publish for Consultant** copies the reviewed draft into the published content.
 6. Agent tools read only published content.
+
+For the explicitly confirmed first-version bulk rollout, steps 3–5 run automatically
+for services without any published version. This is an administrative bootstrap path;
+the single-service review workflow remains available for corrections and later updates.
 
 Publishing requires at least one complete language with:
 
