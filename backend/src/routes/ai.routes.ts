@@ -66,6 +66,8 @@ import { hasFeatureAccess } from "../services/feature-access.service.js";
 import { GT_GROWTH_AI_FEATURE_GATE } from "../types/report-ai.js";
 import {
   consultantKnowledgeClinicQuerySchema,
+  consultantKnowledgeSuggestionJobParamsSchema,
+  consultantKnowledgeSuggestionPollSchema,
   consultantKnowledgeServiceParamsSchema,
   publishConsultantKnowledgeSchema,
   saveConsultantKnowledgeDraftSchema,
@@ -83,7 +85,8 @@ import { getConsultantServiceCatalog } from "../services/consultant-agent/servic
 import { requireQueenConsultantClinic } from "../services/consultant-agent/consultant-access.js";
 import {
   ConsultantKnowledgeSuggestionUnavailableError,
-  generateConsultantKnowledgeSuggestion,
+  pollConsultantKnowledgeSuggestion,
+  startConsultantKnowledgeSuggestion,
 } from "../services/consultant-agent/service-knowledge-suggestion.service.js";
 
 const router = Router();
@@ -390,12 +393,51 @@ router.post(
     }
 
     try {
-      const suggestion = await generateConsultantKnowledgeSuggestion({
+      const result = await startConsultantKnowledgeSuggestion({
         service,
         currentContent: params.currentContent,
         actorId: req.user?.userId ?? req.user?.uid ?? "unknown",
       });
-      res.json({ success: true, data: { service, suggestion } });
+      res.status(result.status === "completed" ? 200 : 202).json({
+        success: true,
+        data: { service, ...result },
+      });
+    } catch (error) {
+      if (error instanceof ConsultantKnowledgeSuggestionUnavailableError) {
+        throw new HttpError(503, error.message);
+      }
+      throw error;
+    }
+  }),
+);
+
+router.get(
+  "/consultant/knowledge/:serviceId/suggest/:responseId",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    requireAiControlPanelAdmin(req);
+    const query = consultantKnowledgeSuggestionPollSchema.parse(req.query);
+    const path = consultantKnowledgeSuggestionJobParamsSchema.parse(req.params);
+    await requireGtGrowthAi(query.clinicId);
+    const clinic = await resolveAgentClinicContext({
+      user: req.user,
+      clinicId: query.clinicId,
+      clinicCode: query.clinicCode,
+      authorizationHeader: req.headers.authorization,
+    });
+    requireQueenConsultantClinic(clinic);
+
+    try {
+      const result = await pollConsultantKnowledgeSuggestion({
+        serviceId: path.serviceId,
+        responseId: path.responseId,
+        jobToken: query.jobToken,
+        actorId: req.user?.userId ?? req.user?.uid ?? "unknown",
+      });
+      res.status(result.status === "completed" ? 200 : 202).json({
+        success: true,
+        data: result,
+      });
     } catch (error) {
       if (error instanceof ConsultantKnowledgeSuggestionUnavailableError) {
         throw new HttpError(503, error.message);

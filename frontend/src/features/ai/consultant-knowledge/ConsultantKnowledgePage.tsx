@@ -5,6 +5,7 @@ import {
   fetchConsultantServiceKnowledge,
   fetchConsultantServices,
   generateConsultantServiceKnowledgeDraft,
+  pollConsultantServiceKnowledgeDraft,
   publishConsultantServiceKnowledge,
   saveConsultantServiceKnowledgeDraft,
 } from "../../../api/ai";
@@ -13,6 +14,7 @@ import type {
   ConsultantKnowledgeContent,
   ConsultantKnowledgeLocale,
   ConsultantKnowledgeSuggestion,
+  ConsultantKnowledgeSuggestionProgress,
   ConsultantServiceKnowledge,
   ConsultantServiceKnowledgeListResponse,
   ConsultantServiceKnowledgeRow,
@@ -25,6 +27,8 @@ type KnowledgeLanguage = "en" | "my";
 type ListField = Exclude<keyof ConsultantKnowledgeLocale, "overview">;
 
 const QUEEN_CLINIC_CODE = "GTTHEQUEEN";
+const AI_DRAFT_POLL_INTERVAL_MS = 2_000;
+const AI_DRAFT_MAX_WAIT_MS = 4 * 60_000;
 
 const KNOWLEDGE_FIELDS: Array<{
   key: ListField;
@@ -104,6 +108,10 @@ function hasKnowledgeContent(content: ConsultantKnowledgeContent) {
   );
 }
 
+function wait(milliseconds: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
 export function ConsultantKnowledgePage() {
   const { currentClinic, loading: accessLoading, error: accessError } = useAccess();
   const { gtUser } = useSession();
@@ -118,6 +126,10 @@ export function ConsultantKnowledgePage() {
   const [generating, setGenerating] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [aiSuggestion, setAiSuggestion] = useState<ConsultantKnowledgeSuggestion | null>(null);
+  const [generationFeedback, setGenerationFeedback] = useState<{
+    tone: "progress" | "error";
+    message: string;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -149,6 +161,7 @@ export function ConsultantKnowledgePage() {
     setContent(emptyContent());
     setDirty(false);
     setAiSuggestion(null);
+    setGenerationFeedback(null);
     setNotice(null);
     setError(null);
 
@@ -253,20 +266,53 @@ export function ConsultantKnowledgePage() {
     setGenerating(true);
     setError(null);
     setNotice(null);
+    setGenerationFeedback({ tone: "progress", message: "Starting a secure GPT-5.6 draft job..." });
     try {
-      const data = await generateConsultantServiceKnowledgeDraft({
+      const startedAt = Date.now();
+      let result: ConsultantKnowledgeSuggestionProgress = await generateConsultantServiceKnowledgeDraft({
         clinicId: currentClinic.id,
         clinicCode: currentClinic.code,
         serviceId: selectedServiceId,
         currentContent: content,
       });
-      setContent(data.suggestion.content);
-      setAiSuggestion(data.suggestion);
+
+      while (result.status === "queued" || result.status === "in_progress") {
+        const elapsedSeconds = Math.max(1, Math.round((Date.now() - startedAt) / 1_000));
+        setGenerationFeedback({
+          tone: "progress",
+          message: result.status === "queued"
+            ? `GPT-5.6 is queued (${elapsedSeconds}s). This page will update automatically.`
+            : `GPT-5.6 is preparing English and Myanmar guidance (${elapsedSeconds}s). This page will update automatically.`,
+        });
+
+        if (Date.now() - startedAt >= AI_DRAFT_MAX_WAIT_MS) {
+          throw new Error("GPT-5.6 is still processing after four minutes. No knowledge was changed; try again shortly.");
+        }
+
+        await wait(AI_DRAFT_POLL_INTERVAL_MS);
+        result = await pollConsultantServiceKnowledgeDraft({
+          clinicId: currentClinic.id,
+          clinicCode: currentClinic.code,
+          serviceId: selectedServiceId,
+          responseId: result.job.responseId,
+          jobToken: result.job.jobToken,
+        });
+      }
+
+      if (result.status !== "completed") {
+        throw new Error("GPT-5.6 did not return a completed draft. No knowledge was changed.");
+      }
+
+      setContent(result.suggestion.content);
+      setAiSuggestion(result.suggestion);
       setLanguage("en");
       setDirty(true);
+      setGenerationFeedback(null);
       setNotice("AI-assisted draft generated. It has not been saved or published; review every field first.");
     } catch (suggestionError) {
-      setError(errorMessage(suggestionError));
+      const message = errorMessage(suggestionError);
+      setError(message);
+      setGenerationFeedback({ tone: "error", message });
     } finally {
       setGenerating(false);
     }
@@ -351,8 +397,10 @@ export function ConsultantKnowledgePage() {
                     return;
                   }
                   setAiSuggestion(null);
+                  setGenerationFeedback(null);
                   setSelectedServiceId(service.serviceId);
                 }}
+                disabled={generating}
               >
                 <span><strong>{service.serviceName}</strong><small>{formatPrice(service.price)} · {service.durationMinutes} min</small></span>
                 <em data-status={service.knowledgeStatus}>{knowledgeStatus(service)}</em>
@@ -381,6 +429,16 @@ export function ConsultantKnowledgePage() {
                       {generating ? "Generating with GPT-5.6..." : "✦ Generate AI draft"}
                     </button>
                     <small>Uses GPT-5.6 Sol. Suggestions stay editable and are never published automatically.</small>
+                    {generationFeedback ? (
+                      <p
+                        className="consultant-ai-generation-feedback"
+                        data-tone={generationFeedback.tone}
+                        role={generationFeedback.tone === "error" ? "alert" : "status"}
+                      >
+                        {generationFeedback.tone === "progress" ? <span aria-hidden="true" /> : null}
+                        {generationFeedback.message}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
                 <dl>

@@ -17,7 +17,10 @@ const {
   ConsultantKnowledgeSuggestionUnavailableError,
   __test: suggestionTest,
   consultantSafetyIdentifier,
+  consultantSuggestionJobToken,
   generateConsultantKnowledgeSuggestion,
+  pollConsultantKnowledgeSuggestion,
+  startConsultantKnowledgeSuggestion,
 } = await import("../src/services/consultant-agent/service-knowledge-suggestion.service.js");
 
 function publishedDrySkinKnowledge(): ConsultantServiceKnowledge {
@@ -187,6 +190,7 @@ test("GPT-5.6 suggestion request is stateless, structured, and excludes live pri
   assert.equal(capturedUrl, "https://api.openai.test/v1/responses");
   assert.equal(capturedAuthorization, "Bearer test-key");
   assert.equal(capturedBody.model, "gpt-5.6-sol");
+  assert.equal(capturedBody.background, false);
   assert.equal(capturedBody.store, false);
   assert.deepEqual(capturedBody.reasoning, { effort: "medium" });
   assert.equal((capturedBody.text as { format: { strict: boolean } }).format.strict, true);
@@ -197,6 +201,114 @@ test("GPT-5.6 suggestion request is stateless, structured, and excludes live pri
   assert.equal(result.confidence, "low");
   assert.equal(result.generation.responseId, "resp-test");
   assert.equal(result.generation.usage.totalTokens, 300);
+});
+
+test("GPT-5.6 background draft returns promptly and completes through protected polling", async () => {
+  const content = emptyConsultantKnowledgeContent();
+  content.en.overview = "A staff-reviewed laser hair removal draft.";
+  content.my.overview = "ဝန်ထမ်းများ စစ်ဆေးရန် လေဆာအမွှေးဖယ်ရှားမှု မူကြမ်း။";
+  const suggestion = {
+    content,
+    confidence: "medium" as const,
+    warnings: [],
+    missingInformation: ["Confirm clinic-approved contraindications."],
+    reviewNotes: ["Review both languages before publishing."],
+  };
+  const requests: Array<{ url: string; method: string; body: Record<string, unknown> | null }> = [];
+  const fetchImpl: typeof fetch = async (input, init) => {
+    requests.push({
+      url: String(input),
+      method: init?.method ?? "GET",
+      body: init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null,
+    });
+    if (requests.length === 1) {
+      return new Response(JSON.stringify({
+        id: "resp_background_1",
+        model: "gpt-5.6-sol",
+        status: "in_progress",
+        output: [],
+      }), { status: 200, headers: { "Content-Type": "application/json" } });
+    }
+    return new Response(JSON.stringify({
+      id: "resp_background_1",
+      model: "gpt-5.6-sol",
+      status: "completed",
+      output: [{
+        type: "message",
+        content: [{ type: "output_text", text: JSON.stringify(suggestion) }],
+      }],
+      usage: { input_tokens: 120, output_tokens: 240, total_tokens: 360 },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  };
+  const service = {
+    serviceId: "service-1",
+    serviceName: "Hair Removal Underarm",
+    description: "Laser hair removal service.",
+    status: "ACTIVE" as const,
+    price: "100000.00",
+    originalPrice: "100000.00",
+    durationMinutes: 15,
+    sortOrder: 1,
+    updatedAt: null,
+  };
+  const dependencies = {
+    apiKey: "test-key",
+    apiBaseUrl: "https://api.openai.test/v1",
+    model: "gpt-5.6-sol",
+    reasoningEffort: "medium" as const,
+    timeoutMs: 1_000,
+    maxOutputTokens: 8_000,
+    now: () => new Date("2026-07-21T08:00:00.000Z"),
+    fetchImpl,
+  };
+
+  const started = await startConsultantKnowledgeSuggestion({
+    service,
+    actorId: "admin-user-1",
+  }, dependencies);
+  assert.equal(started.status, "in_progress");
+  if (started.status === "completed") {
+    assert.fail("Expected a background job.");
+  }
+  assert.equal(requests[0]?.body?.background, true);
+  assert.equal(requests[0]?.body?.store, false);
+  assert.equal(started.job.responseId, "resp_background_1");
+  assert.equal(
+    started.job.jobToken,
+    consultantSuggestionJobToken({
+      apiKey: "test-key",
+      actorId: "admin-user-1",
+      serviceId: "service-1",
+      responseId: "resp_background_1",
+    }),
+  );
+
+  const completed = await pollConsultantKnowledgeSuggestion({
+    serviceId: "service-1",
+    responseId: started.job.responseId,
+    jobToken: started.job.jobToken,
+    actorId: "admin-user-1",
+  }, dependencies);
+  assert.equal(requests[1]?.url, "https://api.openai.test/v1/responses/resp_background_1");
+  assert.equal(requests[1]?.method, "GET");
+  assert.equal(requests[1]?.body, null);
+  assert.equal(completed.status, "completed");
+  if (completed.status !== "completed") {
+    assert.fail("Expected a completed suggestion.");
+  }
+  assert.equal(completed.suggestion.content.en.overview, content.en.overview);
+  assert.equal(completed.suggestion.generation.usage.totalTokens, 360);
+
+  await assert.rejects(
+    () => pollConsultantKnowledgeSuggestion({
+      serviceId: "service-1",
+      responseId: started.job.responseId,
+      jobToken: `${started.job.jobToken}invalid`,
+      actorId: "admin-user-1",
+    }, dependencies),
+    ConsultantKnowledgeSuggestionUnavailableError,
+  );
+  assert.equal(requests.length, 2);
 });
 
 test("GPT-5.6 suggestion prompt enforces review and safety boundaries", () => {

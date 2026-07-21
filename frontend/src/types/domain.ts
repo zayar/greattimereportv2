@@ -1369,6 +1369,22 @@ export interface ConsultantKnowledgeSuggestion {
   };
 }
 
+export interface ConsultantKnowledgeSuggestionJob {
+  responseId: string;
+  jobToken: string;
+  model: string;
+}
+
+export type ConsultantKnowledgeSuggestionProgress =
+  | {
+      status: "queued" | "in_progress";
+      job: ConsultantKnowledgeSuggestionJob;
+    }
+  | {
+      status: "completed";
+      suggestion: ConsultantKnowledgeSuggestion;
+    };
+
 export interface ConsultantServiceKnowledge {
   id: string;
   clinicId: string;

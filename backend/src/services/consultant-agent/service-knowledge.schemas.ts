@@ -73,6 +73,17 @@ export const suggestConsultantKnowledgeSchema = z.object({
   currentContent: consultantKnowledgeContentSchema.optional(),
 });
 
+export const consultantKnowledgeSuggestionPollSchema = z.object({
+  clinicId: z.string().min(1),
+  clinicCode: z.string().min(1).optional(),
+  jobToken: z.string().min(32).max(256),
+});
+
+export const consultantKnowledgeSuggestionJobParamsSchema = z.object({
+  serviceId: z.string().min(1).max(160),
+  responseId: z.string().regex(/^resp_[A-Za-z0-9_-]+$/).max(200),
+});
+
 export const consultantKnowledgeSuggestionSchema = z.object({
   content: consultantKnowledgeContentSchema,
   confidence: z.enum(["low", "medium", "high"]),
