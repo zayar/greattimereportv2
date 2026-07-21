@@ -253,6 +253,99 @@
   font-weight: 800;
 }
 
+.consultant-ai-draft-action {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px 12px;
+  margin-top: 14px;
+}
+
+.consultant-ai-draft-action small {
+  max-width: 460px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.consultant-ai-review {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(37, 99, 168, 0.2);
+  border-radius: var(--radius-md);
+  background: var(--info-soft);
+  padding: 13px 14px;
+}
+
+.consultant-ai-review header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.consultant-ai-review header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.consultant-ai-review header span {
+  color: var(--info);
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.consultant-ai-review header strong,
+.consultant-ai-review__groups strong {
+  color: var(--text-primary);
+}
+
+.consultant-ai-review header em {
+  border-radius: 999px;
+  background: rgba(37, 99, 168, 0.12);
+  color: var(--info);
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 850;
+  text-transform: capitalize;
+}
+
+.consultant-ai-review header em[data-confidence="low"] {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.consultant-ai-review p {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.consultant-ai-review__groups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.consultant-ai-review__groups > div {
+  border: 1px solid rgba(37, 99, 168, 0.12);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.62);
+  padding: 9px 10px;
+}
+
+.consultant-ai-review__groups ul {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
 .consultant-language-tabs {
   display: inline-flex;
   justify-self: start;
@@ -362,7 +455,8 @@
   }
 
   .consultant-knowledge-summary,
-  .consultant-knowledge-fields {
+  .consultant-knowledge-fields,
+  .consultant-ai-review__groups {
     grid-template-columns: minmax(0, 1fr);
   }
 

@@ -26,6 +26,7 @@ import type {
   AiAgentMonitoringRunsResponse,
   AiAgentMonitoringSummary,
   ConsultantKnowledgeContent,
+  ConsultantKnowledgeSuggestion,
   ConsultantCatalogService,
   ConsultantServiceKnowledge,
   ConsultantServiceKnowledgeListResponse,
@@ -229,6 +230,24 @@ export async function saveConsultantServiceKnowledgeDraft(params: {
     clinicCode: params.clinicCode,
     content: params.content,
     expectedVersion: params.expectedVersion ?? null,
+  });
+
+  return response.data.data;
+}
+
+export async function generateConsultantServiceKnowledgeDraft(params: {
+  clinicId: string;
+  clinicCode: string;
+  serviceId: string;
+  currentContent: ConsultantKnowledgeContent;
+}) {
+  const response = await apiClient.post<{
+    success: true;
+    data: { service: ConsultantCatalogService; suggestion: ConsultantKnowledgeSuggestion };
+  }>(`/ai/consultant/knowledge/${encodeURIComponent(params.serviceId)}/suggest`, {
+    clinicId: params.clinicId,
+    clinicCode: params.clinicCode,
+    currentContent: params.currentContent,
   });
 
   return response.data.data;

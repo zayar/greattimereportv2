@@ -13,6 +13,12 @@ const { __test: catalogTest } = await import("../src/services/consultant-agent/s
 const { emptyConsultantKnowledgeContent, isConsultantKnowledgePublishable } = await import(
   "../src/services/consultant-agent/service-knowledge.schemas.js"
 );
+const {
+  ConsultantKnowledgeSuggestionUnavailableError,
+  __test: suggestionTest,
+  consultantSafetyIdentifier,
+  generateConsultantKnowledgeSuggestion,
+} = await import("../src/services/consultant-agent/service-knowledge-suggestion.service.js");
 
 function publishedDrySkinKnowledge(): ConsultantServiceKnowledge {
   const content = emptyConsultantKnowledgeContent();
@@ -119,4 +125,106 @@ test("API Core catalog query is fixed, scoped, and read-only", () => {
   assert.match(catalogTest.CONSULTANT_SERVICE_CATALOG_QUERY, /clinic_id:\s*\{\s*equals:\s*\$clinicId/);
   assert.match(catalogTest.CONSULTANT_SERVICE_CATALOG_QUERY, /status:\s*\{\s*equals:\s*ACTIVE/);
   assert.doesNotMatch(catalogTest.CONSULTANT_SERVICE_CATALOG_QUERY, /\bmutation\b/i);
+});
+
+test("GPT-5.6 suggestion request is stateless, structured, and excludes live price", async () => {
+  const content = emptyConsultantKnowledgeContent();
+  content.en.overview = "A cautious staff-review draft.";
+  content.my.overview = "ဝန်ထမ်းများ ပြန်လည်စစ်ဆေးရန် မူကြမ်း။";
+  const suggestion = {
+    content,
+    confidence: "low" as const,
+    warnings: ["Confirm the treatment protocol with trained clinic staff."],
+    missingInformation: ["Clinic-approved contraindications were not supplied."],
+    reviewNotes: ["Review both languages before publishing."],
+  };
+  let capturedUrl = "";
+  let capturedBody: Record<string, unknown> = {};
+  let capturedAuthorization = "";
+
+  const result = await generateConsultantKnowledgeSuggestion(
+    {
+      service: {
+        serviceId: "service-1",
+        serviceName: "Hair Removal Underarm",
+        description: "Laser hair removal service.",
+        status: "ACTIVE",
+        price: "100000.00",
+        originalPrice: "100000.00",
+        durationMinutes: 15,
+        sortOrder: 1,
+        updatedAt: null,
+      },
+      currentContent: emptyConsultantKnowledgeContent(),
+      actorId: "admin-user-1",
+    },
+    {
+      apiKey: "test-key",
+      apiBaseUrl: "https://api.openai.test/v1",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      timeoutMs: 1_000,
+      maxOutputTokens: 8_000,
+      now: () => new Date("2026-07-21T08:00:00.000Z"),
+      fetchImpl: async (input, init) => {
+        capturedUrl = String(input);
+        capturedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        capturedAuthorization = new Headers(init?.headers).get("Authorization") ?? "";
+        return new Response(JSON.stringify({
+          id: "resp-test",
+          model: "gpt-5.6-sol",
+          status: "completed",
+          output: [{
+            type: "message",
+            content: [{ type: "output_text", text: JSON.stringify(suggestion) }],
+          }],
+          usage: { input_tokens: 100, output_tokens: 200, total_tokens: 300 },
+        }), { status: 200, headers: { "Content-Type": "application/json" } });
+      },
+    },
+  );
+
+  assert.equal(capturedUrl, "https://api.openai.test/v1/responses");
+  assert.equal(capturedAuthorization, "Bearer test-key");
+  assert.equal(capturedBody.model, "gpt-5.6-sol");
+  assert.equal(capturedBody.store, false);
+  assert.deepEqual(capturedBody.reasoning, { effort: "medium" });
+  assert.equal((capturedBody.text as { format: { strict: boolean } }).format.strict, true);
+  assert.notEqual(capturedBody.safety_identifier, "admin-user-1");
+  const modelInput = JSON.parse(String(capturedBody.input)) as { service: Record<string, unknown> };
+  assert.equal(modelInput.service.name, "Hair Removal Underarm");
+  assert.equal("price" in modelInput.service, false);
+  assert.equal(result.confidence, "low");
+  assert.equal(result.generation.responseId, "resp-test");
+  assert.equal(result.generation.usage.totalTokens, 300);
+});
+
+test("GPT-5.6 suggestion prompt enforces review and safety boundaries", () => {
+  assert.match(suggestionTest.CONSULTANT_KNOWLEDGE_INSTRUCTIONS, /only clinic-supplied context/i);
+  assert.match(suggestionTest.CONSULTANT_KNOWLEDGE_INSTRUCTIONS, /Never diagnose/i);
+  assert.match(suggestionTest.CONSULTANT_KNOWLEDGE_INSTRUCTIONS, /never imply.*clinically approved/i);
+  assert.match(consultantSafetyIdentifier("admin-user-1"), /^gtv2_[a-f0-9]{32}$/);
+});
+
+test("GPT-5.6 suggestion fails safely when the API key is unavailable", async () => {
+  await assert.rejects(
+    () => generateConsultantKnowledgeSuggestion(
+      {
+        service: {
+          serviceId: "service-1",
+          serviceName: "Test service",
+          description: null,
+          status: "ACTIVE",
+          price: "0.00",
+          originalPrice: "0.00",
+          durationMinutes: 0,
+          sortOrder: 0,
+          updatedAt: null,
+        },
+        actorId: "admin-user-1",
+      },
+      { apiKey: "" },
+    ),
+    ConsultantKnowledgeSuggestionUnavailableError,
+  );
 });

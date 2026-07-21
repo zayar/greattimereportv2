@@ -69,6 +69,7 @@ import {
   consultantKnowledgeServiceParamsSchema,
   publishConsultantKnowledgeSchema,
   saveConsultantKnowledgeDraftSchema,
+  suggestConsultantKnowledgeSchema,
 } from "../services/consultant-agent/service-knowledge.schemas.js";
 import {
   ConsultantKnowledgeVersionConflictError,
@@ -80,6 +81,10 @@ import {
 } from "../services/consultant-agent/service-knowledge.repository.js";
 import { getConsultantServiceCatalog } from "../services/consultant-agent/service-catalog.service.js";
 import { requireQueenConsultantClinic } from "../services/consultant-agent/consultant-access.js";
+import {
+  ConsultantKnowledgeSuggestionUnavailableError,
+  generateConsultantKnowledgeSuggestion,
+} from "../services/consultant-agent/service-knowledge-suggestion.service.js";
 
 const router = Router();
 
@@ -357,6 +362,46 @@ router.get(
     }
 
     res.json({ success: true, data: { service, knowledge } });
+  }),
+);
+
+router.post(
+  "/consultant/knowledge/:serviceId/suggest",
+  requireClinicAccess("body", "clinicId"),
+  asyncHandler(async (req, res) => {
+    requireAiControlPanelAdmin(req);
+    const params = suggestConsultantKnowledgeSchema.parse(req.body);
+    const path = consultantKnowledgeServiceParamsSchema.parse(req.params);
+    await requireGtGrowthAi(params.clinicId);
+    const clinic = await resolveAgentClinicContext({
+      user: req.user,
+      clinicId: params.clinicId,
+      clinicCode: params.clinicCode,
+      authorizationHeader: req.headers.authorization,
+    });
+    requireQueenConsultantClinic(clinic);
+    const catalog = await getConsultantServiceCatalog({
+      clinic,
+      authorizationHeader: req.headers.authorization,
+    });
+    const service = catalog.find((item) => item.serviceId === path.serviceId);
+    if (!service) {
+      throw new HttpError(404, "The active service was not found in GT API Core.");
+    }
+
+    try {
+      const suggestion = await generateConsultantKnowledgeSuggestion({
+        service,
+        currentContent: params.currentContent,
+        actorId: req.user?.userId ?? req.user?.uid ?? "unknown",
+      });
+      res.json({ success: true, data: { service, suggestion } });
+    } catch (error) {
+      if (error instanceof ConsultantKnowledgeSuggestionUnavailableError) {
+        throw new HttpError(503, error.message);
+      }
+      throw error;
+    }
   }),
 );
 

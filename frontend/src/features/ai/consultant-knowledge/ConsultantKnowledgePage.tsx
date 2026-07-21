@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import {
   fetchConsultantServiceKnowledge,
   fetchConsultantServices,
+  generateConsultantServiceKnowledgeDraft,
   publishConsultantServiceKnowledge,
   saveConsultantServiceKnowledgeDraft,
 } from "../../../api/ai";
@@ -11,6 +12,7 @@ import { EmptyState, ErrorState } from "../../../components/StatusViews";
 import type {
   ConsultantKnowledgeContent,
   ConsultantKnowledgeLocale,
+  ConsultantKnowledgeSuggestion,
   ConsultantServiceKnowledge,
   ConsultantServiceKnowledgeListResponse,
   ConsultantServiceKnowledgeRow,
@@ -95,6 +97,13 @@ function knowledgeStatus(row: ConsultantServiceKnowledgeRow) {
   return row.knowledgeStatus === "published" ? "Published" : row.knowledgeStatus;
 }
 
+function hasKnowledgeContent(content: ConsultantKnowledgeContent) {
+  return Object.values(content).some((locale) =>
+    Boolean(locale.overview.trim()) ||
+    Object.entries(locale).some(([key, value]) => key !== "overview" && Array.isArray(value) && value.length > 0),
+  );
+}
+
 export function ConsultantKnowledgePage() {
   const { currentClinic, loading: accessLoading, error: accessError } = useAccess();
   const { gtUser } = useSession();
@@ -106,7 +115,9 @@ export function ConsultantKnowledgePage() {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [aiSuggestion, setAiSuggestion] = useState<ConsultantKnowledgeSuggestion | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -137,6 +148,7 @@ export function ConsultantKnowledgePage() {
     setKnowledge(null);
     setContent(emptyContent());
     setDirty(false);
+    setAiSuggestion(null);
     setNotice(null);
     setError(null);
 
@@ -169,6 +181,7 @@ export function ConsultantKnowledgePage() {
         setKnowledge(data.knowledge);
         setContent(data.knowledge?.content ?? emptyContent());
         setDirty(false);
+        setAiSuggestion(null);
       })
       .catch((loadError) => active && setError(errorMessage(loadError)))
       .finally(() => active && setLoading(false));
@@ -220,6 +233,42 @@ export function ConsultantKnowledgePage() {
       setError(errorMessage(saveError));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const generateAiDraft = async () => {
+    if (!currentClinic || !selectedServiceId || !selectedService) {
+      return;
+    }
+
+    if (
+      hasKnowledgeContent(content) &&
+      !window.confirm(
+        "Generate a new AI-assisted draft using the current form as context? Review every field before saving because the form content will be replaced.",
+      )
+    ) {
+      return;
+    }
+
+    setGenerating(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const data = await generateConsultantServiceKnowledgeDraft({
+        clinicId: currentClinic.id,
+        clinicCode: currentClinic.code,
+        serviceId: selectedServiceId,
+        currentContent: content,
+      });
+      setContent(data.suggestion.content);
+      setAiSuggestion(data.suggestion);
+      setLanguage("en");
+      setDirty(true);
+      setNotice("AI-assisted draft generated. It has not been saved or published; review every field first.");
+    } catch (suggestionError) {
+      setError(errorMessage(suggestionError));
+    } finally {
+      setGenerating(false);
     }
   };
 
@@ -301,6 +350,7 @@ export function ConsultantKnowledgePage() {
                   if (dirty && !window.confirm("Discard unsaved knowledge changes?")) {
                     return;
                   }
+                  setAiSuggestion(null);
                   setSelectedServiceId(service.serviceId);
                 }}
               >
@@ -321,6 +371,17 @@ export function ConsultantKnowledgePage() {
                   <span>API Core service</span>
                   <h2>{selectedService.serviceName}</h2>
                   <p>{selectedService.description || "No API Core service description."}</p>
+                  <div className="consultant-ai-draft-action">
+                    <button
+                      type="button"
+                      className="button"
+                      onClick={() => void generateAiDraft()}
+                      disabled={generating || saving || loading}
+                    >
+                      {generating ? "Generating with GPT-5.6..." : "✦ Generate AI draft"}
+                    </button>
+                    <small>Uses GPT-5.6 Sol. Suggestions stay editable and are never published automatically.</small>
+                  </div>
                 </div>
                 <dl>
                   <div><dt>Current price</dt><dd>{formatPrice(selectedService.price)}</dd></div>
@@ -329,6 +390,30 @@ export function ConsultantKnowledgePage() {
                   <div><dt>Published</dt><dd>{knowledge?.publishedVersion ? `v${knowledge.publishedVersion}` : "No"}</dd></div>
                 </dl>
               </div>
+
+              {aiSuggestion ? (
+                <section className="consultant-ai-review" aria-label="AI draft review notes">
+                  <header>
+                    <div>
+                      <span>AI-assisted draft</span>
+                      <strong>{aiSuggestion.generation.model}</strong>
+                    </div>
+                    <em data-confidence={aiSuggestion.confidence}>{aiSuggestion.confidence} confidence</em>
+                  </header>
+                  <p>Generated content is not clinic-approved. Confirm safety guidance, contraindications and service-specific claims before saving.</p>
+                  <div className="consultant-ai-review__groups">
+                    {aiSuggestion.warnings.length > 0 ? (
+                      <div><strong>Warnings</strong><ul>{aiSuggestion.warnings.map((item, index) => <li key={`warning-${index}-${item}`}>{item}</li>)}</ul></div>
+                    ) : null}
+                    {aiSuggestion.missingInformation.length > 0 ? (
+                      <div><strong>Missing information</strong><ul>{aiSuggestion.missingInformation.map((item, index) => <li key={`missing-${index}-${item}`}>{item}</li>)}</ul></div>
+                    ) : null}
+                    {aiSuggestion.reviewNotes.length > 0 ? (
+                      <div><strong>Review notes</strong><ul>{aiSuggestion.reviewNotes.map((item, index) => <li key={`review-${index}-${item}`}>{item}</li>)}</ul></div>
+                    ) : null}
+                  </div>
+                </section>
+              ) : null}
 
               <div className="consultant-language-tabs" role="tablist" aria-label="Knowledge language">
                 <button type="button" className={language === "en" ? "active" : ""} onClick={() => setLanguage("en")}>English</button>
@@ -362,10 +447,10 @@ export function ConsultantKnowledgePage() {
                 <p>
                   {dirty ? "Unsaved changes" : knowledge?.publishedVersion === knowledge?.version ? "Published version is current" : "Draft is not published"}
                 </p>
-                <button type="button" className="button button--secondary" onClick={() => void saveDraft()} disabled={saving || !dirty}>
+                <button type="button" className="button button--secondary" onClick={() => void saveDraft()} disabled={saving || generating || !dirty}>
                   {saving ? "Saving..." : "Save draft"}
                 </button>
-                <button type="button" className="button" onClick={() => void publish()} disabled={saving || dirty || !knowledge || knowledge.publishedVersion === knowledge.version}>
+                <button type="button" className="button" onClick={() => void publish()} disabled={saving || generating || dirty || !knowledge || knowledge.publishedVersion === knowledge.version}>
                   Publish for Consultant
                 </button>
               </footer>
