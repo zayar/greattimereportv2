@@ -234,6 +234,20 @@ function followUpsForAgent(
     ];
   }
 
+  if (plan.resolvedAgent === "consultant") {
+    return plan.intent === "consultant_trending_services"
+      ? [
+          "Which of these services may suit dry or sensitive skin?",
+          "What should a customer know before the first service?",
+          "Show the current price and duration of the first service.",
+        ]
+      : [
+          "What questions should I answer before choosing a service?",
+          "Which options have the least downtime?",
+          "What should I do before the first service?",
+        ];
+  }
+
   return followUpsForAppointment(plan, results);
 }
 

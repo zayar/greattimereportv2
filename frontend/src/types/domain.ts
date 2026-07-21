@@ -1328,8 +1328,80 @@ export interface CustomerRelationshipFollowUpMessage {
   usedFallback: boolean;
 }
 
-export type GreatTimeAgentId = "finance" | "customer_relationship" | "business" | "appointment";
+export type GreatTimeAgentId = "finance" | "customer_relationship" | "business" | "appointment" | "consultant";
 export type GreatTimeRequestedAgentId = GreatTimeAgentId | "auto";
+
+export interface ConsultantKnowledgeLocale {
+  overview: string;
+  serviceAliases: string[];
+  concerns: string[];
+  suitableFor: string[];
+  notSuitableFor: string[];
+  benefits: string[];
+  limitations: string[];
+  preparation: string[];
+  aftercare: string[];
+  expectedResults: string[];
+  consultationQuestions: string[];
+  escalationRules: string[];
+}
+
+export interface ConsultantKnowledgeContent {
+  en: ConsultantKnowledgeLocale;
+  my: ConsultantKnowledgeLocale;
+}
+
+export interface ConsultantServiceKnowledge {
+  id: string;
+  clinicId: string;
+  clinicCode: string;
+  serviceId: string;
+  serviceName: string;
+  content: ConsultantKnowledgeContent;
+  publishedContent: ConsultantKnowledgeContent | null;
+  status: "draft" | "published" | "archived";
+  version: number;
+  publishedVersion: number | null;
+  createdAt: string;
+  createdBy: string;
+  createdByEmail: string | null;
+  updatedAt: string;
+  updatedBy: string;
+  updatedByEmail: string | null;
+  publishedAt: string | null;
+  publishedBy: string | null;
+  publishedByEmail: string | null;
+}
+
+export interface ConsultantCatalogService {
+  serviceId: string;
+  serviceName: string;
+  description: string | null;
+  status: "ACTIVE";
+  price: string;
+  originalPrice: string;
+  durationMinutes: number;
+  sortOrder: number;
+  updatedAt: string | null;
+}
+
+export interface ConsultantServiceKnowledgeRow extends ConsultantCatalogService {
+  knowledgeStatus: "missing" | "draft" | "published" | "archived";
+  knowledgeVersion: number | null;
+  publishedVersion: number | null;
+  hasUnpublishedChanges: boolean;
+  knowledgeUpdatedAt: string | null;
+}
+
+export interface ConsultantServiceKnowledgeListResponse {
+  clinic: { clinicId: string; clinicCode: string };
+  rows: ConsultantServiceKnowledgeRow[];
+  summary: {
+    activeServiceCount: number;
+    publishedKnowledgeCount: number;
+    draftKnowledgeCount: number;
+  };
+}
 
 export type AgentDataStatus =
   | "ok"

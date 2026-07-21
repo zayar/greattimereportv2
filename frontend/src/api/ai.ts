@@ -25,6 +25,10 @@ import type {
   AiAgentMonitoringRunDetail,
   AiAgentMonitoringRunsResponse,
   AiAgentMonitoringSummary,
+  ConsultantKnowledgeContent,
+  ConsultantCatalogService,
+  ConsultantServiceKnowledge,
+  ConsultantServiceKnowledgeListResponse,
 } from "../types/domain";
 
 type BaseAiRequest = {
@@ -182,6 +186,64 @@ export async function askGreatTimeAgentHub(params: GreatTimeAgentChatRequest) {
     "/ai/agent/chat",
     params,
   );
+
+  return response.data.data;
+}
+
+export async function fetchConsultantServices(params: { clinicId: string; clinicCode: string }) {
+  const response = await apiClient.get<{ success: true; data: ConsultantServiceKnowledgeListResponse }>(
+    "/ai/consultant/services",
+    { params },
+  );
+
+  return response.data.data;
+}
+
+export async function fetchConsultantServiceKnowledge(params: {
+  clinicId: string;
+  clinicCode: string;
+  serviceId: string;
+}) {
+  const response = await apiClient.get<{
+    success: true;
+    data: { service: ConsultantCatalogService; knowledge: ConsultantServiceKnowledge | null };
+  }>(`/ai/consultant/knowledge/${encodeURIComponent(params.serviceId)}`, {
+    params: { clinicId: params.clinicId, clinicCode: params.clinicCode },
+  });
+
+  return response.data.data;
+}
+
+export async function saveConsultantServiceKnowledgeDraft(params: {
+  clinicId: string;
+  clinicCode: string;
+  serviceId: string;
+  content: ConsultantKnowledgeContent;
+  expectedVersion?: number | null;
+}) {
+  const response = await apiClient.put<{
+    success: true;
+    data: { service: ConsultantCatalogService; knowledge: ConsultantServiceKnowledge };
+  }>(`/ai/consultant/knowledge/${encodeURIComponent(params.serviceId)}`, {
+    clinicId: params.clinicId,
+    clinicCode: params.clinicCode,
+    content: params.content,
+    expectedVersion: params.expectedVersion ?? null,
+  });
+
+  return response.data.data;
+}
+
+export async function publishConsultantServiceKnowledge(params: {
+  clinicId: string;
+  clinicCode: string;
+  serviceId: string;
+  expectedVersion: number;
+}) {
+  const response = await apiClient.post<{
+    success: true;
+    data: { knowledge: ConsultantServiceKnowledge };
+  }>(`/ai/consultant/knowledge/${encodeURIComponent(params.serviceId)}/publish`, params);
 
   return response.data.data;
 }
