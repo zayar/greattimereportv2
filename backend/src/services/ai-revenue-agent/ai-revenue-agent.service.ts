@@ -39,6 +39,7 @@ import {
 } from "./appointment-reminder-template.service.js";
 import { buildAiRevenueMessageDraft } from "./message-template.service.js";
 import { generateAiRevenueOpportunities } from "./opportunity-generator.service.js";
+import { AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB } from "./generation.constants.js";
 import {
   recordManualAiRevenue,
   syncAiRevenueAttribution,
@@ -1114,6 +1115,223 @@ export async function generateAiRevenueActions(input: {
     sourceStatus: generated.sourceStatus,
     summary,
   };
+}
+
+function timestampMilliseconds(value?: string | null) {
+  if (!value) {
+    return 0;
+  }
+
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+export function shouldUseAiRevenueRunSummary(input: {
+  clinicRun: Pick<repository.AiRevenueClinicRunRecord, "status" | "startedAt" | "completedAt"> | null;
+  runSummary: Pick<repository.AiRevenueRunSummaryRecord, "updatedAt"> | null;
+}) {
+  if (!input.runSummary) {
+    return false;
+  }
+
+  if (!input.clinicRun || input.clinicRun.status === "completed") {
+    return true;
+  }
+
+  const clinicRunTimestamp = timestampMilliseconds(
+    input.clinicRun.completedAt ?? input.clinicRun.startedAt,
+  );
+  return timestampMilliseconds(input.runSummary.updatedAt) >= clinicRunTimestamp;
+}
+
+async function completedGenerationResult(input: {
+  clinicId: string;
+  dateKey: string;
+  runSummary: repository.AiRevenueRunSummaryRecord;
+  clinicRun?: repository.AiRevenueClinicRunRecord | null;
+}) {
+  const [actions, summary] = await Promise.all([
+    repository.listActions({
+      clinicId: input.clinicId,
+      dateKey: input.dateKey,
+      limit: 500,
+      includeResolved: true,
+    }),
+    repository.getSummary({
+      clinicId: input.clinicId,
+      startDateKey: input.dateKey,
+      endDateKey: input.dateKey,
+    }),
+  ]);
+
+  return {
+    dateKey: input.dateKey,
+    generatedCount: input.runSummary.generatedCount,
+    skippedExistingCount: input.runSummary.skippedExistingCount,
+    refreshedExistingCount: input.runSummary.refreshedExistingCount,
+    suppressedSkippedCount: input.clinicRun?.suppressedSkippedCount ?? 0,
+    actions,
+    sourceStatus: input.runSummary.sourceStatus,
+    summary,
+    generationStatus: "completed" as const,
+    alreadyCompleted: true,
+  };
+}
+
+export async function getAiRevenueGenerationStatus(input: {
+  clinicId: string;
+  dateKey: string;
+}) {
+  const [clinicRun, runSummary] = await Promise.all([
+    repository.getAiRevenueClinicRun({
+      jobName: AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB,
+      clinicId: input.clinicId,
+      dateKey: input.dateKey,
+    }),
+    repository.getAiRevenueRunSummary(input),
+  ]);
+  if (runSummary && shouldUseAiRevenueRunSummary({ clinicRun, runSummary })) {
+    return {
+      status: "completed" as const,
+      dateKey: input.dateKey,
+      startedAt: clinicRun?.startedAt ?? runSummary.createdAt,
+      completedAt: runSummary.updatedAt,
+      errorMessage: null,
+      generatedCount: runSummary.generatedCount,
+      skippedExistingCount: runSummary.skippedExistingCount,
+      refreshedExistingCount: runSummary.refreshedExistingCount,
+      actionCount: runSummary.actionCount,
+      sourceStatus: runSummary.sourceStatus,
+    };
+  }
+
+  if (!clinicRun) {
+    return {
+      status: "not_started" as const,
+      dateKey: input.dateKey,
+      startedAt: null,
+      completedAt: null,
+      errorMessage: null,
+      generatedCount: 0,
+      skippedExistingCount: 0,
+      refreshedExistingCount: 0,
+      actionCount: 0,
+      sourceStatus: {},
+    };
+  }
+
+  return {
+    status: clinicRun.status,
+    dateKey: input.dateKey,
+    startedAt: clinicRun.startedAt,
+    completedAt: clinicRun.completedAt,
+    errorMessage: clinicRun.errorMessage,
+    generatedCount: clinicRun.createdCount,
+    skippedExistingCount: clinicRun.duplicateSkippedCount,
+    refreshedExistingCount: 0,
+    actionCount: 0,
+    sourceStatus: {},
+  };
+}
+
+export async function generateAiRevenueActionsOnce(input: {
+  clinicId: string;
+  clinicCode: string;
+  dateKey?: string;
+  forceRefresh?: boolean;
+  authorizationHeader?: string;
+}) {
+  const dateKey = input.dateKey ?? new Date().toISOString().slice(0, 10);
+  const [settings, existingRunSummary, existingClinicRun] = await Promise.all([
+    repository.getSettings(input.clinicId),
+    repository.getAiRevenueRunSummary({ clinicId: input.clinicId, dateKey }),
+    repository.getAiRevenueClinicRun({
+      jobName: AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB,
+      clinicId: input.clinicId,
+      dateKey,
+    }),
+  ]);
+  if (
+    existingRunSummary &&
+    shouldUseAiRevenueRunSummary({
+      clinicRun: existingClinicRun,
+      runSummary: existingRunSummary,
+    })
+  ) {
+    return completedGenerationResult({
+      clinicId: input.clinicId,
+      dateKey,
+      runSummary: existingRunSummary,
+      clinicRun: existingClinicRun,
+    });
+  }
+
+  const timezone = settings.timezone || "Asia/Yangon";
+  const lock = await repository.acquireAiRevenueClinicRunLock({
+    jobName: AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB,
+    clinicId: input.clinicId,
+    clinicCode: input.clinicCode,
+    clinicName: settings.clinicName,
+    dateKey,
+    timezone,
+  });
+
+  if (!lock.acquired) {
+    if (lock.reason === "completed") {
+      const runSummary = await repository.getAiRevenueRunSummary({
+        clinicId: input.clinicId,
+        dateKey,
+      });
+      if (runSummary) {
+        return completedGenerationResult({
+          clinicId: input.clinicId,
+          dateKey,
+          runSummary,
+          clinicRun: lock.record,
+        });
+      }
+    }
+
+    throw new HttpError(
+      409,
+      "AI Revenue opportunity generation is already running for this clinic and date.",
+      { status: "running", dateKey },
+    );
+  }
+
+  try {
+    const result = await generateAiRevenueActions(input);
+    await repository.completeAiRevenueClinicRun({
+      jobName: AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB,
+      clinicId: input.clinicId,
+      clinicCode: input.clinicCode,
+      clinicName: settings.clinicName,
+      dateKey,
+      timezone,
+      status: "completed",
+      createdCount: result.generatedCount,
+      duplicateSkippedCount: result.skippedExistingCount,
+      suppressedSkippedCount: result.suppressedSkippedCount,
+    });
+
+    return {
+      ...result,
+      generationStatus: "completed" as const,
+      alreadyCompleted: false,
+    };
+  } catch (error) {
+    await repository.completeAiRevenueClinicRun({
+      jobName: AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB,
+      clinicId: input.clinicId,
+      clinicCode: input.clinicCode,
+      clinicName: settings.clinicName,
+      dateKey,
+      timezone,
+      status: "failed",
+      error,
+    });
+    throw error;
+  }
 }
 
 export async function updateAiRevenueStatus(input: {

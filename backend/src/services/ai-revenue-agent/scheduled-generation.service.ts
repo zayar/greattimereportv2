@@ -5,8 +5,9 @@ import { listAgentLearningSchedules } from "../agent-hub/learning.repository.js"
 import { lookupAgentClinicCodes } from "../agent-hub/clinic-context.service.js";
 import { generateAiRevenueActions } from "./ai-revenue-agent.service.js";
 import * as repository from "./ai-revenue-agent.repository.js";
+import { AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB } from "./generation.constants.js";
 
-export const AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB = "ai_revenue_generate_today_opportunities" as const;
+export { AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB } from "./generation.constants.js";
 
 export type AiRevenueScheduledGenerationSummary = repository.AiRevenueBatchRunSummary & {
   jobName: typeof AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB;
@@ -143,9 +144,80 @@ function logScheduledGeneration(event: string, payload: Record<string, unknown>)
   console.info(`[ai-revenue-scheduler] ${event}`, payload);
 }
 
-async function resolveClinicCodes(
+const CLINIC_CODE_LOOKUP_MAX_ATTEMPTS = 3;
+const CLINIC_CODE_LOOKUP_RETRY_DELAY_MS = 500;
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown error";
+}
+
+function delay(milliseconds: number) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function lookupClinicCodesWithRetry(
+  clinicIds: string[],
+  lookup: (ids: string[]) => Promise<Record<string, string>> = lookupAgentClinicCodes,
+  wait: (milliseconds: number) => Promise<unknown> = delay,
+) {
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= CLINIC_CODE_LOOKUP_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await lookup(clinicIds);
+    } catch (error) {
+      lastError = error;
+      logScheduledGeneration("clinic_code_lookup_failed", {
+        clinicIds,
+        attempt,
+        maxAttempts: CLINIC_CODE_LOOKUP_MAX_ATTEMPTS,
+        error: errorMessage(error),
+      });
+
+      if (attempt < CLINIC_CODE_LOOKUP_MAX_ATTEMPTS) {
+        await wait(CLINIC_CODE_LOOKUP_RETRY_DELAY_MS * 2 ** (attempt - 1));
+      }
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error("Unable to resolve clinic codes from APICORE.");
+}
+
+async function persistResolvedClinicCode(target: ClinicGenerationTarget) {
+  if (!target.resolvedClinicCode || target.clinicCode?.trim() === target.resolvedClinicCode) {
+    return;
+  }
+
+  try {
+    await repository.saveSettings({
+      clinicId: target.clinicId,
+      patch: {
+        clinicCode: target.resolvedClinicCode,
+        clinicName: target.clinicName,
+      },
+      updatedBy: {
+        userId: AI_REVENUE_GENERATE_TODAY_OPPORTUNITIES_JOB,
+        email: null,
+        name: "AI Revenue Scheduler",
+      },
+    });
+  } catch (error) {
+    console.warn("[ai-revenue-scheduler] clinic_code_persistence_failed", {
+      clinicId: target.clinicId,
+      error: errorMessage(error),
+    });
+  }
+}
+
+export async function resolveAiRevenueClinicCodes(
   settings: AiRevenueSettings[],
   fallbackClinicCodesById: Record<string, string> = {},
+  dependencies?: {
+    listSchedules?: typeof listAgentLearningSchedules;
+    lookupClinicCodes?: typeof lookupAgentClinicCodes;
+    wait?: (milliseconds: number) => Promise<unknown>;
+    persistResolvedCode?: (target: ClinicGenerationTarget) => Promise<unknown>;
+  },
 ): Promise<ClinicGenerationTarget[]> {
   if (settings.length === 0) {
     return [];
@@ -157,36 +229,63 @@ async function resolveClinicCodes(
       .map(([clinicId, clinicCode]) => [clinicId, clinicCode.trim()] as const)
       .filter(([, clinicCode]) => Boolean(clinicCode)),
   );
+  settings.forEach((item) => {
+    const clinicCode = item.clinicCode?.trim();
+    if (clinicCode) {
+      clinicCodeById.set(item.clinicId, clinicCode);
+    }
+  });
 
   try {
-    const schedules = await listAgentLearningSchedules({ clinicIds, limit: Math.max(1, clinicIds.length) });
+    const schedules = await (dependencies?.listSchedules ?? listAgentLearningSchedules)({
+      clinicIds,
+      limit: Math.max(1, clinicIds.length),
+    });
     schedules.forEach((schedule) => {
       if (!clinicCodeById.has(schedule.clinicId)) {
         clinicCodeById.set(schedule.clinicId, schedule.clinicCode);
       }
     });
-  } catch {
-    // Settings-provided clinic codes remain valid when Agent Learning schedules are unavailable.
+  } catch (error) {
+    console.warn("[ai-revenue-scheduler] learning_schedule_lookup_failed", {
+      clinicIds,
+      error: errorMessage(error),
+    });
   }
 
   const missingClinicIds = clinicIds.filter((clinicId) => !clinicCodeById.has(clinicId));
   if (missingClinicIds.length > 0) {
     try {
-      const apicoreCodes = await lookupAgentClinicCodes(missingClinicIds);
+      const apicoreCodes = await lookupClinicCodesWithRetry(
+        missingClinicIds,
+        dependencies?.lookupClinicCodes ?? lookupAgentClinicCodes,
+        dependencies?.wait ?? delay,
+      );
       Object.entries(apicoreCodes).forEach(([clinicId, clinicCode]) => {
         if (!clinicCodeById.has(clinicId)) {
           clinicCodeById.set(clinicId, clinicCode);
         }
       });
-    } catch {
-      // A Telegram-scoped fallback clinic code or stored settings code may still be usable.
+    } catch (error) {
+      console.warn("[ai-revenue-scheduler] clinic_code_resolution_exhausted", {
+        clinicIds: missingClinicIds,
+        error: errorMessage(error),
+      });
     }
   }
 
-  return settings.map((item) => ({
+  const targets = settings.map((item) => ({
     ...item,
     resolvedClinicCode: item.clinicCode?.trim() || clinicCodeById.get(item.clinicId) || null,
   }));
+
+  await Promise.all(
+    targets.map((target) =>
+      (dependencies?.persistResolvedCode ?? persistResolvedClinicCode)(target),
+    ),
+  );
+
+  return targets;
 }
 
 export async function runScheduledAiRevenueGeneration(params?: {
@@ -208,7 +307,15 @@ export async function runScheduledAiRevenueGeneration(params?: {
   const dueSettings = params?.dateKey
     ? allSettings
     : allSettings.filter((settings) => isAiRevenueAutoGenerateDue({ settings, now }));
-  const targets = await resolveClinicCodes(dueSettings, params?.clinicCodesById);
+  const targets = await resolveAiRevenueClinicCodes(
+    dueSettings,
+    params?.clinicCodesById,
+    params?.dryRun
+      ? {
+          persistResolvedCode: async () => undefined,
+        }
+      : undefined,
+  );
   const skippedReason = zeroDueReason({
     totalAutoEnabledClinics: allSettings.length,
     dueClinics: targets.length,

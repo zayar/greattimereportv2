@@ -905,6 +905,19 @@ export interface AiRevenueSettings {
   updatedBy: AiRevenueActor | null;
 }
 
+export interface AiRevenueGenerationStatus {
+  status: "not_started" | "running" | "completed" | "skipped" | "failed";
+  dateKey: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  errorMessage: string | null;
+  generatedCount: number;
+  skippedExistingCount: number;
+  refreshedExistingCount: number;
+  actionCount: number;
+  sourceStatus: Record<string, string>;
+}
+
 export interface AiRevenueSummary {
   totalActions: number;
   opportunitiesFound: number;

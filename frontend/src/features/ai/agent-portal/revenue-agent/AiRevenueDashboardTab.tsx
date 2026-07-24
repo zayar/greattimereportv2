@@ -1,9 +1,14 @@
 import { EmptyState } from "../../../../components/StatusViews";
-import type { AiRevenueAction, AiRevenueSummary } from "../../../../types/domain";
+import type {
+  AiRevenueAction,
+  AiRevenueGenerationStatus,
+  AiRevenueSummary,
+} from "../../../../types/domain";
 
 type Props = {
   summary: AiRevenueSummary | null;
   actions: AiRevenueAction[];
+  generationStatus: AiRevenueGenerationStatus | null;
   loading: boolean;
   generating: boolean;
   onGenerateToday: () => void;
@@ -122,6 +127,7 @@ function revenueLabel(action: AiRevenueAction) {
 export function AiRevenueDashboardTab({
   summary,
   actions,
+  generationStatus,
   loading,
   generating,
   onGenerateToday,
@@ -129,6 +135,34 @@ export function AiRevenueDashboardTab({
   onOpenAction,
 }: Props) {
   const empty = !summary || summary.opportunitiesFound === 0;
+  const rejectedSources = Object.entries(generationStatus?.sourceStatus ?? {})
+    .filter(([source, status]) => source !== "packageFallback" && status === "rejected")
+    .map(([source]) => source.replace(/([A-Z])/g, " $1").toLowerCase());
+  const emptyState =
+    generationStatus?.status === "running"
+      ? {
+          label: "Generating AI Revenue opportunities",
+          detail: "Source checks are still running. You can safely reload or leave this page; progress is saved.",
+        }
+      : generationStatus?.status === "failed"
+        ? {
+            label: "Opportunity generation failed",
+            detail: generationStatus.errorMessage || "The source checks did not complete. Retry generation or contact support.",
+          }
+        : generationStatus?.status === "completed"
+          ? generationStatus.actionCount > 0
+            ? {
+                label: "No opportunities match this view",
+                detail: "Generation completed and found opportunities, but none match the current dashboard filters.",
+              }
+            : {
+                label: "No opportunities matched today",
+                detail: "Generation completed successfully, but no customers met the current opportunity rules for this date.",
+              }
+          : {
+              label: "No AI Revenue activity yet",
+              detail: "Generate today's opportunities from package balances, customer patterns, and appointment signals.",
+            };
   const topActions = actions.slice(0, 3);
   const messagesSent = summary?.messagesSent ?? 0;
   const appointmentsCreated = summary?.appointmentsCreated ?? 0;
@@ -255,10 +289,22 @@ export function AiRevenueDashboardTab({
         </button>
       </div>
 
+      {generationStatus?.status === "running" ? (
+        <div className="inline-note inline-note--loading">
+          Generation is running in the background. This dashboard refreshes every five seconds and is safe to reload.
+        </div>
+      ) : null}
+
+      {generationStatus?.status === "completed" && rejectedSources.length > 0 ? (
+        <div className="inline-note">
+          Generation completed with partial source coverage. Unavailable: {rejectedSources.join(", ")}.
+        </div>
+      ) : null}
+
       {empty ? (
         <EmptyState
-          label="No AI Revenue activity yet"
-          detail="Generate today's opportunities from package balances, customer patterns, and appointment signals."
+          label={emptyState.label}
+          detail={emptyState.detail}
         />
       ) : null}
 

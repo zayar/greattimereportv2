@@ -17,6 +17,7 @@ import type {
   AiRevenueFollowUpChannel,
   AiRevenueFollowUpResult,
   AiRevenueFollowUpScheduleOption,
+  AiRevenueGenerationStatus,
   AiRevenueMessageEvent,
   AiRevenueOutcomeLink,
   AiRevenueOutcomeType,
@@ -90,9 +91,23 @@ export async function generateAiRevenueActions(payload: AiRevenueGeneratePayload
     actions: AiRevenueAction[];
     sourceStatus: Record<string, string>;
     summary: AiRevenueSummary;
+    generationStatus: "completed";
+    alreadyCompleted: boolean;
   }>>("/ai-revenue-agent/generate", payload);
 
   return response.data.data;
+}
+
+export async function getAiRevenueGenerationStatus(params: {
+  clinicId: string;
+  dateKey: string;
+}) {
+  const response = await apiClient.get<ApiEnvelope<{ generation: AiRevenueGenerationStatus }>>(
+    "/ai-revenue-agent/generation-status",
+    { params },
+  );
+
+  return response.data.data.generation;
 }
 
 export async function getAiRevenueSummary(params: AiRevenueSummaryQuery) {

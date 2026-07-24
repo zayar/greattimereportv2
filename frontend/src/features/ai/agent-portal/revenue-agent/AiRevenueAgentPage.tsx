@@ -14,6 +14,7 @@ import {
   getAiRevenueAuditLogs,
   getAiRevenueActions,
   getAiRevenueFollowUpAttempts,
+  getAiRevenueGenerationStatus,
   getAiRevenueOutcomeLinks,
   getAiRevenueSummary,
   markAiRevenueMessageSent,
@@ -30,6 +31,7 @@ import type {
   AiRevenueContactAttempt,
   AiRevenueContactChannel,
   AiRevenueContactResult,
+  AiRevenueGenerationStatus,
   AiRevenueOutcomeLink,
   AiRevenueOutcomeType,
   AiRevenueServiceUsageSnapshot,
@@ -1046,6 +1048,7 @@ export function AiRevenueAgentPage() {
   const [actions, setActions] = useState<AiRevenueAction[]>([]);
   const [followUpActions, setFollowUpActions] = useState<AiRevenueAction[]>([]);
   const [summary, setSummary] = useState<AiRevenueSummary | null>(null);
+  const [generationStatus, setGenerationStatus] = useState<AiRevenueGenerationStatus | null>(null);
   const [selectedAction, setSelectedAction] = useState<AiRevenueAction | null>(null);
   const [busyAction, setBusyAction] = useState<"load" | "generate" | null>("load");
   const [draftingActionId, setDraftingActionId] = useState<string | null>(null);
@@ -1058,6 +1061,7 @@ export function AiRevenueAgentPage() {
         setActions([]);
         setFollowUpActions([]);
         setSummary(null);
+        setGenerationStatus(null);
         setBusyAction(null);
         return;
       }
@@ -1069,7 +1073,7 @@ export function AiRevenueAgentPage() {
       setErrorMessage(null);
 
       try {
-        const [actionResponse, followUpResponse, summaryResponse] = await Promise.all([
+        const [actionResponse, followUpResponse, summaryResponse, generationResponse] = await Promise.all([
           getAiRevenueActions(buildActionParams(clinic.id, nextFilters)),
           getAiRevenueActions({
             clinicId: clinic.id,
@@ -1077,10 +1081,15 @@ export function AiRevenueAgentPage() {
             includeResolved: true,
           }),
           getAiRevenueSummary(buildSummaryParams(clinic.id, nextFilters)),
+          getAiRevenueGenerationStatus({
+            clinicId: clinic.id,
+            dateKey: nextFilters.dateKey,
+          }),
         ]);
         setActions(actionResponse.actions);
         setFollowUpActions(followUpResponse.actions);
         setSummary(summaryResponse);
+        setGenerationStatus(generationResponse);
       } catch (error) {
         setErrorMessage(getApiErrorMessage(error, "AI Revenue Agent data could not be loaded."));
       } finally {
@@ -1094,6 +1103,18 @@ export function AiRevenueAgentPage() {
     void loadData(true);
   }, [loadData]);
 
+  useEffect(() => {
+    if (generationStatus?.status !== "running") {
+      return;
+    }
+
+    const pollId = window.setInterval(() => {
+      void loadData(false);
+    }, 5_000);
+
+    return () => window.clearInterval(pollId);
+  }, [generationStatus?.status, loadData]);
+
   async function handleGenerateToday() {
     if (!clinic) {
       return;
@@ -1106,6 +1127,18 @@ export function AiRevenueAgentPage() {
 
     setFilters(nextFilters);
     setBusyAction("generate");
+    setGenerationStatus({
+      status: "running",
+      dateKey: nextFilters.dateKey,
+      startedAt: new Date().toISOString(),
+      completedAt: null,
+      errorMessage: null,
+      generatedCount: 0,
+      skippedExistingCount: 0,
+      refreshedExistingCount: 0,
+      actionCount: 0,
+      sourceStatus: {},
+    });
     setNotice(null);
     setErrorMessage(null);
 
@@ -1117,11 +1150,20 @@ export function AiRevenueAgentPage() {
         forceRefresh: false,
       });
       setNotice(
-        `Generated ${result.generatedCount.toLocaleString("en-US")} action(s), refreshed ${result.refreshedExistingCount.toLocaleString("en-US")} existing action(s), ${result.skippedExistingCount.toLocaleString("en-US")} already up to date.`,
+        result.alreadyCompleted
+          ? `Today's generation was already completed: ${result.generatedCount.toLocaleString("en-US")} created and ${result.refreshedExistingCount.toLocaleString("en-US")} refreshed.`
+          : `Generated ${result.generatedCount.toLocaleString("en-US")} action(s), refreshed ${result.refreshedExistingCount.toLocaleString("en-US")} existing action(s), ${result.skippedExistingCount.toLocaleString("en-US")} already up to date.`,
       );
       await loadData(false, nextFilters);
     } catch (error) {
-      setErrorMessage(getApiErrorMessage(error, "AI Revenue opportunities could not be generated."));
+      if (isAxiosError(error) && error.response?.status === 409) {
+        setNotice("Opportunity generation is already running. This page will keep updating automatically.");
+        await loadData(false, nextFilters);
+      } else {
+        const message = getApiErrorMessage(error, "AI Revenue opportunities could not be generated.");
+        await loadData(false, nextFilters);
+        setErrorMessage(message);
+      }
     } finally {
       setBusyAction(null);
     }
@@ -1381,8 +1423,9 @@ export function AiRevenueAgentPage() {
         <AiRevenueDashboardTab
           summary={summary}
           actions={actions}
+          generationStatus={generationStatus}
           loading={busyAction === "load"}
-          generating={busyAction === "generate"}
+          generating={busyAction === "generate" || generationStatus?.status === "running"}
           onGenerateToday={() => void handleGenerateToday()}
           onRefresh={() => void loadData(true)}
           onOpenAction={setSelectedAction}

@@ -11,7 +11,11 @@ import type {
   AiRevenueServiceUsageSnapshot,
 } from "../../types/ai-revenue-agent.js";
 import { calculateCustomerRiskSignals } from "../ai/customer-risk.service.js";
-import { getCustomerPortalBirthdayCustomers, getCustomerPortalList, getCustomerPortalPackages } from "../reports/customer-portal.service.js";
+import {
+  getCustomerPortalBirthdayCustomers,
+  getCustomerPortalList,
+  getCustomerPortalPackageBalancesBulk,
+} from "../reports/customer-portal.service.js";
 import { getPackagePortalReport } from "../reports/package-portal.service.js";
 import { getTodayAppointmentsForClinic } from "../telegram/report.service.js";
 import { fetchApicoreBookingDetails, type ApicoreBookingDetailsRow } from "../apicore.service.js";
@@ -82,7 +86,6 @@ const CANCELLED_APPOINTMENT_STATUSES = new Set(["MEMBER_CANCEL", "MERCHANT_CANCE
 const NO_SHOW_APPOINTMENT_STATUSES = new Set(["NO_SHOW", "NOSHOW"]);
 const APPOINTMENT_HISTORY_PAGE_SIZE = 200;
 const APPOINTMENT_HISTORY_MAX_ROWS = 1000;
-const CUSTOMER_PACKAGE_LOOKUP_CONCURRENCY = 6;
 const CUSTOMER_FOCUS_LIMIT = 100;
 
 function nowIso() {
@@ -428,26 +431,6 @@ function mergePackageRows(rows: PackageFollowUpRow[]) {
   return [...byKey.values()];
 }
 
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  concurrency: number,
-  mapper: (item: T, index: number) => Promise<R>,
-) {
-  const results: R[] = new Array(items.length);
-  let nextIndex = 0;
-
-  async function worker() {
-    while (nextIndex < items.length) {
-      const currentIndex = nextIndex;
-      nextIndex += 1;
-      results[currentIndex] = await mapper(items[currentIndex], currentIndex);
-    }
-  }
-
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
-  return results;
-}
-
 async function fetchCustomerPackageFallbackRows(input: {
   clinicCode: string;
   dateKey: string;
@@ -483,45 +466,40 @@ async function fetchCustomerPackageFallbackRows(input: {
     candidatesByKey.set(customer.customerKey || customer.memberId || normalizePhone(customer.phoneNumber) || normalizeNameKey(customer.customerName), row);
   }
 
-  const candidates = [...candidatesByKey.values()];
-
-  const nestedRows = await mapWithConcurrency(candidates, CUSTOMER_PACKAGE_LOOKUP_CONCURRENCY, async (row) => {
-    try {
-      const result = await getCustomerPortalPackages({
-        clinicCode: input.clinicCode,
-        fromDate: addDays(input.dateKey, -730),
-        toDate: input.dateKey,
-        customerName: row.customerName,
-        customerPhone: row.phoneNumber,
-        memberId: row.memberId,
-      });
-
-      return result.packages
-        .filter((entry) => entry.remainingCount > 0)
-        .map<PackageFollowUpRow>((entry) => ({
-          id: `customer_package:${customerKey({ memberId: row.memberId, phone: row.phoneNumber, customerName: row.customerName })}:${entry.id}`,
-          packageId: entry.id,
-          customerName: row.customerName,
-          customerPhone: row.phoneNumber,
-          memberId: row.memberId,
-          packageName: entry.packageName || entry.serviceName || "Package balance",
-          serviceNames: entry.serviceName ? [entry.serviceName] : [],
-          purchasedUnits: entry.packageTotal,
-          usedUnits: entry.usedCount,
-          remainingUnits: entry.remainingCount,
-          lastVisitDate: entry.latestUsageDate,
-          daysSinceLastVisit: daysBetweenDateKeys(input.dateKey, entry.latestUsageDate),
-          daysSinceActivity: daysBetweenDateKeys(input.dateKey, entry.latestUsageDate),
-          needsFollowUp: true,
-          latestTherapist: entry.latestTherapist,
-          sourcePriority: 2,
-        }));
-    } catch {
-      return [];
-    }
+  const candidates = [...candidatesByKey.values()].slice(0, CUSTOMER_FOCUS_LIMIT);
+  const rows = await getCustomerPortalPackageBalancesBulk({
+    clinicCode: input.clinicCode,
+    fromDate: addDays(input.dateKey, -730),
+    toDate: input.dateKey,
+    customers: candidates.map((row) => ({
+      customerName: row.customerName,
+      customerPhone: row.phoneNumber,
+      memberId: row.memberId,
+    })),
   });
 
-  return nestedRows.flat();
+  return rows.map<PackageFollowUpRow>((entry, index) => ({
+    id: `customer_package:${customerKey({
+      memberId: entry.memberId,
+      phone: entry.phoneNumber,
+      customerName: entry.customerName,
+    })}:${entry.serviceName}:${index}`,
+    packageId: `${entry.serviceName}:${entry.servicePackageName ?? "single"}`,
+    customerName: entry.customerName,
+    customerPhone: entry.phoneNumber,
+    memberId: entry.memberId,
+    packageName: entry.servicePackageName || entry.serviceName || "Package balance",
+    serviceNames: entry.serviceName ? [entry.serviceName] : [],
+    purchasedUnits: entry.packageTotal,
+    usedUnits: entry.usedCount,
+    remainingUnits: entry.remainingCount,
+    lastVisitDate: entry.latestUsageDate,
+    daysSinceLastVisit: daysBetweenDateKeys(input.dateKey, entry.latestUsageDate),
+    daysSinceActivity: daysBetweenDateKeys(input.dateKey, entry.latestUsageDate),
+    needsFollowUp: true,
+    latestTherapist: entry.latestTherapist,
+    sourcePriority: 2,
+  }));
 }
 
 async function fetchAppointmentHistory(input: {
@@ -1425,6 +1403,19 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
       }),
     ]);
 
+  const primaryResults = [
+    packageResult,
+    customerResult,
+    vipResult,
+    todayAppointmentsResult,
+    tomorrowAppointmentsResult,
+    appointmentHistoryResult,
+    birthdayResult,
+  ];
+  if (primaryResults.every((result) => result.status === "rejected")) {
+    throw new Error("All AI Revenue opportunity data sources failed.");
+  }
+
   const customerRows = customerResult.status === "fulfilled" ? customerResult.value.rows : [];
   const vipRows = vipResult.status === "fulfilled" ? vipResult.value.rows : [];
   const todayRows = todayAppointmentsResult.status === "fulfilled" ? todayAppointmentsResult.value.rows : [];
@@ -1432,20 +1423,24 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
   const appointmentHistoryRows = appointmentHistoryResult.status === "fulfilled" ? appointmentHistoryResult.value : [];
   const birthdayRows = birthdayResult.status === "fulfilled" ? birthdayResult.value.rows : [];
   const packagePortalRows = packageResult.status === "fulfilled" ? packageResult.value.followUpRows : [];
-  const packageCustomerLookupRows = packagePortalRows.map((row) => ({
-    customerName: row.customerName,
-    phoneNumber: row.customerPhone,
-    memberId: row.memberId,
-    remainingSessions: row.remainingUnits,
-  }));
-  const customerPackageRows =
-    customerRows.length > 0 || packageCustomerLookupRows.length > 0
-      ? await fetchCustomerPackageFallbackRows({
-          clinicCode: input.clinicCode,
-          dateKey: input.dateKey,
-          rows: [...customerRows, ...packageCustomerLookupRows],
-        })
-      : [];
+  let packageFallbackStatus: "not_needed" | "fulfilled" | "rejected" = "not_needed";
+  let customerPackageRows: PackageFollowUpRow[] = [];
+  if (packageResult.status === "rejected" && customerRows.length > 0) {
+    try {
+      customerPackageRows = await fetchCustomerPackageFallbackRows({
+        clinicCode: input.clinicCode,
+        dateKey: input.dateKey,
+        rows: customerRows,
+      });
+      packageFallbackStatus = "fulfilled";
+    } catch (error) {
+      packageFallbackStatus = "rejected";
+      console.warn("[ai-revenue] bulk package fallback failed", {
+        clinicId: input.clinicId,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
   const packageRows = mergePackageRows([...packagePortalRows, ...customerPackageRows]);
 
   const highRiskCustomers = buildHighRiskAppointmentCustomerSet(appointmentHistoryRows);
@@ -1605,6 +1600,8 @@ export async function generateAiRevenueOpportunities(input: GenerateInput) {
       todayAppointments: todayAppointmentsResult.status,
       tomorrowAppointments: tomorrowAppointmentsResult.status,
       appointmentHistory: appointmentHistoryResult.status,
+      birthdayCustomers: birthdayResult.status,
+      packageFallback: packageFallbackStatus,
     },
   };
 }

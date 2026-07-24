@@ -185,9 +185,23 @@ router.post(
 
     const summary = await runScheduledAiRevenueGeneration();
 
+    const statusCode = scheduledAiRevenueGenerationHttpStatus(summary);
+    if (statusCode !== 200) {
+      res.status(statusCode).json({
+        success: false,
+        data: summary,
+        error: `${summary.failedClinics} clinic generation run(s) failed.`,
+      });
+      return;
+    }
+
     res.json({ success: true, data: summary });
   }),
 );
+
+export function scheduledAiRevenueGenerationHttpStatus(summary: { failedClinics: number }) {
+  return summary.failedClinics > 0 ? 503 : 200;
+}
 
 router.use(verifyFirebaseToken);
 

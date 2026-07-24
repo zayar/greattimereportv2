@@ -2543,6 +2543,119 @@ export async function getCustomerPortalPackages(params: DetailBaseParams) {
   };
 }
 
+export type CustomerPortalPackageBalanceRow = {
+  customerName: string;
+  phoneNumber: string;
+  memberId: string;
+  serviceName: string;
+  servicePackageName: string | null;
+  serviceCategory: string;
+  packageTotal: number;
+  usedCount: number;
+  remainingCount: number;
+  latestUsageDate: string;
+  latestTherapist: string;
+};
+
+export async function getCustomerPortalPackageBalancesBulk(params: {
+  clinicCode: string;
+  fromDate: string;
+  toDate: string;
+  customers: CustomerIdentity[];
+  limit?: number;
+}) {
+  if (params.customers.length === 0) {
+    return [];
+  }
+
+  const candidateMemberIds = new Set(
+    params.customers.map((customer) => (customer.memberId ?? "").trim().toLowerCase()).filter(Boolean),
+  );
+  const candidatePhones = new Set(
+    params.customers.map((customer) => normalizePhoneDigits(customer.customerPhone)).filter(Boolean),
+  );
+  const candidateNames = new Set(
+    params.customers.map((customer) => normalizeNameKey(customer.customerName)).filter(Boolean),
+  );
+  const limit = Math.min(Math.max(params.limit ?? 5_000, 1), 10_000);
+  const rows = await runAnalyticsQuery<{
+    customerName: string;
+    phoneNumber: string;
+    memberId: string;
+    serviceName: string;
+    servicePackageName: string | null;
+    serviceCategory: string;
+    packageTotal: number;
+    usedCount: number;
+    remainingCount: number;
+    latestUsageDate: string;
+    latestTherapist: string;
+  }>(
+    `
+      SELECT
+        COALESCE(CustomerName, '') AS customerName,
+        COALESCE(CustomerPhoneNumber, '') AS phoneNumber,
+        MAX(COALESCE(CAST(CustomerID AS STRING), '')) AS memberId,
+        COALESCE(ServiceName, '') AS serviceName,
+        CAST(NULL AS STRING) AS servicePackageName,
+        ${buildServiceCategoryExpression("ServiceName", "CAST(NULL AS STRING)")} AS serviceCategory,
+        MAX(CAST(COALESCE(PackageCount, 0) AS INT64)) AS packageTotal,
+        GREATEST(
+          MAX(CAST(COALESCE(PackageCount, 0) AS INT64)) - MAX(CAST(COALESCE(RemainingPackageCount, 0) AS INT64)),
+          0
+        ) AS usedCount,
+        GREATEST(MAX(CAST(COALESCE(RemainingPackageCount, 0) AS INT64)), 0) AS remainingCount,
+        FORMAT_DATE('%Y-%m-%d', MAX(DATE(CheckInTime))) AS latestUsageDate,
+        ARRAY_AGG(COALESCE(PractitionerName, 'Unknown') ORDER BY CheckInTime DESC LIMIT 1)[SAFE_OFFSET(0)] AS latestTherapist
+      FROM ${analyticsTables.mainDataView}
+      WHERE LOWER(ClinicCode) = LOWER(@clinicCode)
+        AND CustomerName IS NOT NULL
+        AND CustomerPhoneNumber IS NOT NULL
+        AND CheckInTime IS NOT NULL
+        AND DATE(CheckInTime) BETWEEN DATE(@fromDate) AND DATE(@toDate)
+        AND (
+          CAST(COALESCE(PackageCount, 0) AS INT64) > 0
+          OR CAST(COALESCE(RemainingPackageCount, 0) AS INT64) > 0
+        )
+      GROUP BY customerName, phoneNumber, serviceName, serviceCategory
+      HAVING remainingCount > 0
+      ORDER BY remainingCount DESC, latestUsageDate DESC, customerName ASC
+      LIMIT @limit
+    `,
+    {
+      clinicCode: params.clinicCode,
+      fromDate: params.fromDate,
+      toDate: params.toDate,
+      limit,
+    },
+  );
+
+  return rows
+    .filter((row) => {
+      const memberId = parseText(row.memberId).trim().toLowerCase();
+      const phone = normalizePhoneDigits(parseText(row.phoneNumber));
+      const name = normalizeNameKey(parseText(row.customerName));
+      return (
+        (memberId && candidateMemberIds.has(memberId)) ||
+        (phone && candidatePhones.has(phone)) ||
+        (name && candidateNames.has(name))
+      );
+    })
+    .map<CustomerPortalPackageBalanceRow>((row) => ({
+      customerName: parseText(row.customerName),
+      phoneNumber: parseText(row.phoneNumber),
+      memberId: parseText(row.memberId),
+      serviceName: parseText(row.serviceName),
+      servicePackageName: row.servicePackageName ? parseText(row.servicePackageName) : null,
+      serviceCategory: parseText(row.serviceCategory),
+      packageTotal: parseNumber(row.packageTotal),
+      usedCount: parseNumber(row.usedCount),
+      remainingCount: parseNumber(row.remainingCount),
+      latestUsageDate: parseText(row.latestUsageDate),
+      latestTherapist: parseText(row.latestTherapist),
+    }));
+}
+
 export async function getCustomerPortalBookings(params: DetailBaseParams & {
   search: string;
   page: number;

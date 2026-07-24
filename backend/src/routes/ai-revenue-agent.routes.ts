@@ -23,9 +23,10 @@ import {
 import {
   createAiRevenueOutcomeLink,
   createAiRevenueMessageEvent,
-  generateAiRevenueActions,
+  generateAiRevenueActionsOnce,
   generateAiRevenueMessage,
   getAiRevenueAction,
+  getAiRevenueGenerationStatus,
   getActorFromUser,
   getAiRevenueSettings,
   getAiRevenueSummary,
@@ -93,6 +94,11 @@ const generateSchema = z.object({
   clinicCode: z.string().min(1),
   dateKey: dateKeySchema.optional(),
   forceRefresh: z.boolean().optional(),
+});
+
+const generationStatusQuerySchema = z.object({
+  clinicId: z.string().min(1),
+  dateKey: dateKeySchema,
 });
 
 const generateMessageSchema = z.object({
@@ -412,7 +418,7 @@ router.post(
   requireClinicAccess("body", "clinicId"),
   asyncHandler(async (req, res) => {
     const params = generateSchema.parse(req.body);
-    const data = await generateAiRevenueActions({
+    const data = await generateAiRevenueActionsOnce({
       clinicId: params.clinicId,
       clinicCode: params.clinicCode,
       dateKey: params.dateKey,
@@ -421,6 +427,17 @@ router.post(
     });
 
     res.json({ success: true, data });
+  }),
+);
+
+router.get(
+  "/generation-status",
+  requireClinicAccess("query", "clinicId"),
+  asyncHandler(async (req, res) => {
+    const params = generationStatusQuerySchema.parse(req.query);
+    const generation = await getAiRevenueGenerationStatus(params);
+
+    res.json({ success: true, data: { generation } });
   }),
 );
 
