@@ -19,13 +19,12 @@ import {
 import type { TodayAppointmentReportItem, TodayAppointmentReportSummary } from "./types.js";
 
 const PAGE_SIZE = 200;
-const APPOINTMENT_PREVIEW_LIMIT = 12;
-const THERAPIST_PREVIEW_LIMIT = 5;
 const SERVICE_PREVIEW_LIMIT = 5;
 const BUSY_HOUR_PREVIEW_LIMIT = 5;
 const UNDERUTILIZED_HOUR_PREVIEW_LIMIT = 5;
 const REBOOKING_LOOKAHEAD_DAYS = 60;
 const SAME_WEEKDAY_BENCHMARK_WEEKS = 4;
+const TELEGRAM_MESSAGE_CHUNK_LIMIT = 3900;
 
 const CANCELLED_STATUSES = new Set(["MERCHANT_CANCEL", "MEMBER_CANCEL", "CANCEL"]);
 const COMPLETED_STATUSES = new Set(["CHECKOUT", "CHECKED_OUT"]);
@@ -202,7 +201,6 @@ export function summarizeTopServices(rows: ApicoreBookingDetailsRow[]) {
 
 export function summarizeTherapistLoad(rows: ApicoreBookingDetailsRow[]) {
   return summarizeByKey(rows, (row) => row.PractitionerName)
-    .slice(0, THERAPIST_PREVIEW_LIMIT)
     .map(({ label, count }) => ({
       therapistName: label,
       count,
@@ -288,7 +286,7 @@ export function summarizeAppointmentHourLoad(rows: ApicoreBookingDetailsRow[], t
 }
 
 function mapAppointments(rows: ApicoreBookingDetailsRow[], timezone: string): TodayAppointmentReportItem[] {
-  return rows.slice(0, APPOINTMENT_PREVIEW_LIMIT).map((row) => ({
+  return rows.map((row) => ({
     time: formatDisplayTimeInTimeZone(new Date(row.FromTime), timezone),
     customerName: row.MemberName?.trim() || "Unknown customer",
     serviceName: row.ServiceName?.trim() || "Unknown service",
@@ -526,11 +524,6 @@ export function formatTodayAppointmentTelegramMessage(report: TodayAppointmentRe
     });
   }
 
-  const remainingAppointments = report.totalAppointments - report.appointments.length;
-  if (remainingAppointments > 0) {
-    lines.push(`+${remainingAppointments} more appointments`);
-  }
-
   if (report.therapistLoad.length > 0) {
     lines.push("", "👩‍⚕️ Therapist load");
     report.therapistLoad.forEach((entry) => {
@@ -553,6 +546,31 @@ export function formatTodayAppointmentTelegramMessage(report: TodayAppointmentRe
   return lines.join("\n");
 }
 
+function splitTelegramMessage(text: string) {
+  if (text.length <= TELEGRAM_MESSAGE_CHUNK_LIMIT) {
+    return [text];
+  }
+
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > TELEGRAM_MESSAGE_CHUNK_LIMIT) {
+    const preferredSplitIndex = remaining.lastIndexOf("\n", TELEGRAM_MESSAGE_CHUNK_LIMIT);
+    const splitIndex = preferredSplitIndex > 0 ? preferredSplitIndex : TELEGRAM_MESSAGE_CHUNK_LIMIT;
+    chunks.push(remaining.slice(0, splitIndex));
+    remaining = remaining.slice(splitIndex);
+    if (remaining.startsWith("\n")) {
+      remaining = remaining.slice(1);
+    }
+  }
+
+  if (remaining) {
+    chunks.push(remaining);
+  }
+
+  return chunks;
+}
+
 export async function sendTodayAppointmentReport(input: {
   chatId: string;
   clinicId?: string;
@@ -565,7 +583,11 @@ export async function sendTodayAppointmentReport(input: {
 }) {
   const report = await buildTodayAppointmentReport(input);
   const message = formatTodayAppointmentTelegramMessage(report);
-  await sendTelegramMessage(input.chatId, message);
+  const chunks = splitTelegramMessage(message);
+
+  for (const chunk of chunks) {
+    await sendTelegramMessage(input.chatId, chunk);
+  }
 
   return {
     sentAt: new Date().toISOString(),
@@ -573,3 +595,8 @@ export async function sendTodayAppointmentReport(input: {
     message,
   };
 }
+
+export const __test = {
+  mapAppointments,
+  splitTelegramMessage,
+};
